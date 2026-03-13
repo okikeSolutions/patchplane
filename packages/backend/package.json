@@ -1,0 +1,23 @@
+{
+  "name": "@patchplane/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "typecheck:convex": "tsc --project tsconfig.convex.json --noEmit",
+    "lint": "oxlint convex src",
+    "format": "oxfmt convex src"
+  },
+  "dependencies": {
+    "@patchplane/domain": "workspace:*",
+    "convex": "latest",
+    "effect": "latest"
+  },
+  "devDependencies": {
+    "@patchplane/typescript-config": "workspace:*",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}

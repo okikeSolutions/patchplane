@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 80,
+  "ignorePatterns": [
+    "apps/client/dist/**",
+    "apps/client/.output/**",
+    "apps/client/.tanstack/**",
+    "apps/client/node_modules/**",
+    "packages/backend/convex/_generated/**",
+    "**/node_modules/**"
+  ]
+}

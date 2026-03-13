@@ -1,0 +1,21 @@
+{
+  "name": "@patchplane/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "lint": "oxlint src",
+    "format": "oxfmt src"
+  },
+  "dependencies": {
+    "effect": "latest"
+  },
+  "devDependencies": {
+    "@patchplane/typescript-config": "workspace:*",
+    "typescript": "^5.9.3"
+  }
+}

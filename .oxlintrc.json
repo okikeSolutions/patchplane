@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "plugins": ["typescript", "react", "unicorn", "import", "jsx-a11y", "oxc"],
+  "rules": {
+    "react/react-in-jsx-scope": "off"
+  },
+  "ignorePatterns": [
+    "apps/client/dist/**",
+    "apps/client/.output/**",
+    "apps/client/.tanstack/**",
+    "apps/client/node_modules/**",
+    "packages/backend/convex/_generated/**",
+    "**/node_modules/**"
+  ]
+}
