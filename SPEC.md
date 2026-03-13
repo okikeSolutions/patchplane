@@ -688,30 +688,43 @@ The MVP is suitable for **single-team internal usage first**. It is **not yet su
 
 ## 13. Build-Ready Implementation Blueprint
 
-### 13.1 Recommended repo structure
+### 13.1 Current repo structure
 
 ```text
 /apps
-  /web                 -> TanStack Start dashboard
-  /desktop             -> Electrobun command center
+  /client              -> single TanStack Start app for landing, product shell, and architecture pages
+    /src
+      /components      -> app chrome, theme controls, and local UI primitives
+      /lib             -> client-side helpers
+      /platform        -> browser-first desktop bridge boundary
+      /routes          -> file-based routes for `/`, `/app`, and `/about`
+    /public            -> static assets
 /packages
   /backend
-   /convex
-      /schema.ts
-      /auth.ts
-      /queries
-      /mutations
-      /workflows
-  /domain              -> Effect schemas, domain types, core contracts
-  /config              -> typed config profiles and loaders
-  /runtime-adapters
-    /pi                -> Pi RuntimeAdapter implementation
-  /execution
-    /daytona           -> sandbox execution adapter
-  /policy-engine       -> review aggregation and merge policy evaluation
-  /graph               -> provenance graph builders and projections
-  /ui                  -> shared UI components if needed
+    /convex
+      /schema.ts       -> current Convex tables for prompt requests, runtime events, and review runs
+      /requests.ts     -> prompt request create/list surfaces
+    /src
+      /config          -> typed backend configuration schema and live layer
+      /graph           -> lineage projection helpers
+      /policy          -> review evaluation logic
+      /runtime         -> runtime adapter contract
+      /sandbox         -> sandbox adapter contract
+      /errors.ts       -> typed execution and review failures
+  /domain              -> shared Effect schemas, status labels, event types, review models, and product capability copy
+  /typescript-config   -> shared TypeScript baseline package
+/README.md             -> workspace overview and local commands
+/SPEC.md               -> product and implementation spec
+/package.json          -> Bun workspace scripts
 ```
+
+### 13.1.1 Structure notes
+
+- The repo currently has one app, `apps/client`; there is no separate `/web` and `/desktop` split yet.
+- The future desktop shell is only represented by a thin `DesktopBridge` interface in `apps/client/src/platform/bridge.ts`.
+- Runtime, sandbox, policy, and graph concerns already exist, but they are internal modules under `packages/backend/src` rather than separate workspace packages.
+- Shared UI is local to `apps/client` today; there is no top-level `/ui` package yet.
+- Auth, workflow orchestration, and concrete Daytona or Pi Mono implementations are not present in the repo structure yet.
 
 ### 13.2 Core interface boundaries
 
