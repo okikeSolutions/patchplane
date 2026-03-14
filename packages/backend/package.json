@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "convex dev",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "typecheck:convex": "tsc --project tsconfig.convex.json --noEmit",
     "lint": "oxlint convex src",
     "format": "oxfmt convex src"
   },
   "dependencies": {
+    "@convex-dev/workos-authkit": "^0.1.6",
     "@patchplane/domain": "workspace:*",
     "convex": "latest",
     "effect": "latest"

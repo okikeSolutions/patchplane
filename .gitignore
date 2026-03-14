@@ -144,6 +144,3 @@ apps/client/.nitro
 apps/client/.vinxi
 apps/client/.output
 apps/client/dist
-
-# Convex
-packages/backend/convex/_generated
