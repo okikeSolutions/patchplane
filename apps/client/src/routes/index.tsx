@@ -54,7 +54,7 @@ function LandingPage() {
             </Badge>
             <p className="hero-brand">PatchPlane</p>
             <h1 className="display-title">
-              Keep every prompt request in one line of sight.
+              One control plane for every prompt request.
             </h1>
             <p className="hero-lede">
               PatchPlane gives teams one operational surface for coordinated AI

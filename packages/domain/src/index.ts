@@ -20,18 +20,42 @@ export const statusLabels: Record<WorkflowStatus, string> = {
 
 export const PromptRequestSchema = Schema.Struct({
   id: Schema.String,
+  projectId: Schema.String,
+  executionTargetId: Schema.String,
+  policyBundleId: Schema.String,
+  createdByUserId: Schema.String,
   prompt: Schema.String,
-  repo: Schema.String,
+  scope: Schema.Struct({
+    repoUrl: Schema.String,
+    baseBranch: Schema.String,
+    targetBranch: Schema.String,
+    includePaths: Schema.Array(Schema.String),
+    excludePaths: Schema.Array(Schema.String),
+    intent: Schema.String,
+  }),
   status: Schema.Literal(...workflowStatuses),
   createdAt: Schema.Number,
+  updatedAt: Schema.Number,
 })
 
 export interface PromptRequest {
   id: string
+  projectId: string
+  executionTargetId: string
+  policyBundleId: string
+  createdByUserId: string
   prompt: string
-  repo: string
+  scope: {
+    repoUrl: string
+    baseBranch: string
+    targetBranch: string
+    includePaths: string[]
+    excludePaths: string[]
+    intent: string
+  }
   status: WorkflowStatus
   createdAt: number
+  updatedAt: number
 }
 
 export const RuntimeEventSchema = Schema.Struct({

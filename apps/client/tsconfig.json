@@ -4,10 +4,10 @@
     "target": "ES2022",
     "module": "ESNext",
     "jsx": "react-jsx",
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@components/*": ["./src/components/*"],
+      "@patchplane/backend/*": ["../../packages/backend/*"],
       "@patchplane/domain": ["../../packages/domain/src/index.ts"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

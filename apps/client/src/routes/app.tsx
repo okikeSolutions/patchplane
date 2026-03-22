@@ -1,7 +1,16 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { useAuth } from '@workos-inc/authkit-react'
+import { api } from '@patchplane/backend/convex/_generated/api'
 import { statusLabels, type WorkflowStatus } from '@patchplane/domain'
+import {
+  Authenticated,
+  AuthLoading,
+  Unauthenticated,
+  useQuery,
+} from 'convex/react'
+import { makeFunctionReference } from 'convex/server'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const timelineStatuses: WorkflowStatus[] = ['queued', 'running', 'reviewed']
@@ -24,11 +33,25 @@ const workspacePanels = [
   },
 ] as const
 
+interface ViewerIdentity {
+  subject: string
+  name: string
+  email?: string
+}
+
+const viewerQuery = makeFunctionReference<
+  'query',
+  Record<string, never>,
+  ViewerIdentity
+>('viewer:current')
+
 export const Route = createFileRoute('/app')({
   component: AppShellPage,
 })
 
 function AppShellPage() {
+  const { user, signIn, signOut } = useAuth()
+
   return (
     <main className="page-wrap product-page">
       <section className="product-header reveal-up">
@@ -52,6 +75,68 @@ function AppShellPage() {
         >
           Architecture notes
         </Link>
+      </section>
+
+      <section className="product-grid">
+        <div className="product-panel reveal-up">
+          <div className="product-panel__header">
+            <Badge variant="outline" className="section-badge">
+              Authentication
+            </Badge>
+            <h2>WorkOS AuthKit + Convex</h2>
+          </div>
+          <p className="product-note">
+            Convex auth state now gates the operational surface, and the browser
+            can use authenticated queries once the backend validates the WorkOS
+            token.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              onClick={() => {
+                if (user) {
+                  void signOut()
+                  return
+                }
+
+                void signIn()
+              }}
+            >
+              {user ? 'Sign out' : 'Sign in'}
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {user
+                ? `Signed in as ${user.firstName ?? user.email ?? 'operator'}`
+                : 'Sign in to access authenticated Convex data.'}
+            </span>
+          </div>
+        </div>
+
+        <div
+          className="product-panel reveal-up"
+          style={{ animationDelay: '120ms' }}
+        >
+          <div className="product-panel__header">
+            <Badge variant="outline" className="section-badge">
+              Auth state
+            </Badge>
+            <h2>Protected data surface</h2>
+          </div>
+          <AuthLoading>
+            <p className="product-note">
+              Checking Convex authentication and exchanging the WorkOS token.
+            </p>
+          </AuthLoading>
+          <Authenticated>
+            <AuthenticatedContent />
+          </Authenticated>
+          <Unauthenticated>
+            <p className="product-note">
+              The command center stays readable while signed out, but protected
+              data stays behind Convex auth.
+            </p>
+          </Unauthenticated>
+        </div>
       </section>
 
       <section className="status-strip">
@@ -124,5 +209,29 @@ function AppShellPage() {
         ))}
       </section>
     </main>
+  )
+}
+
+function AuthenticatedContent() {
+  const viewer = useQuery(viewerQuery, {})
+  const requests = useQuery(api.requests.list)
+
+  if (!viewer || !requests) {
+    return <p className="product-note">Loading authenticated data.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="product-note">
+        Welcome {viewer.name}. Convex validated your WorkOS token before loading
+        this data.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Viewer subject: <code>{viewer.subject}</code>
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Visible prompt requests: <code>{requests.length}</code>
+      </p>
+    </div>
   )
 }

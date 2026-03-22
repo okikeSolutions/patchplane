@@ -11,6 +11,7 @@
 import type * as auth from "../auth.js";
 import type * as http from "../http.js";
 import type * as requests from "../requests.js";
+import type * as viewer from "../viewer.js";
 
 import type {
   ApiFromModules,
@@ -22,6 +23,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   http: typeof http;
   requests: typeof requests;
+  viewer: typeof viewer;
 }>;
 
 /**
