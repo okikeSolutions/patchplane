@@ -13,7 +13,8 @@
     "@convex-dev/workos-authkit": "^0.1.6",
     "@patchplane/domain": "workspace:*",
     "convex": "latest",
-    "effect": "latest"
+    "effect": "3.21.0",
+    "octokit": "^5.0.3"
   },
   "devDependencies": {
     "@patchplane/typescript-config": "workspace:*",

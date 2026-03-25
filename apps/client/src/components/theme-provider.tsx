@@ -61,12 +61,12 @@ export function ThemeProvider({
 
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
+    setTheme: (nextTheme: Theme) => {
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(storageKey, theme)
+        window.localStorage.setItem(storageKey, nextTheme)
       }
 
-      setTheme(theme)
+      setTheme(nextTheme)
     },
   }
 

@@ -9,6 +9,7 @@
     "dev:client": "bun run --cwd apps/client dev",
     "dev:backend": "bun run --cwd packages/backend dev",
     "build:client": "bun run --cwd apps/client build",
+    "test:domain": "bun run --cwd packages/domain test",
     "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
@@ -18,7 +19,7 @@
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "effect": "latest"
+    "effect": "3.21.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

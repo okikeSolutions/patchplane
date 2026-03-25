@@ -1,11 +1,11 @@
 {
   "extends": "@patchplane/typescript-config/base.json",
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "declaration": true,
     "emitDeclarationOnly": true,
-    "types": []
+    "types": ["bun"]
   }
 }
