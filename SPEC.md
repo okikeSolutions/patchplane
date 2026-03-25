@@ -806,7 +806,8 @@ The MVP is suitable for **single-team internal usage first**. It is **not yet su
 - The future desktop shell is only represented by a thin `DesktopBridge` interface in `apps/client/src/platform/bridge.ts`.
 - Runtime, sandbox, policy, and graph concerns already exist, but they are internal modules under `packages/backend/src` rather than separate workspace packages.
 - Shared UI is local to `apps/client` today; there is no top-level `/ui` package yet.
-- GitHub App integration, workflow orchestration, and concrete Daytona or Pi Mono implementations are not present in the repo structure yet.
+- GitHub App integration, verified webhook intake, Convex-backed workflow orchestration boundaries, and shared Effect service tags are present in the repo today.
+- Concrete Daytona execution and Pi Mono runtime adapters are not present in the repo yet.
 
 ### 13.2 Core interface boundaries
 
@@ -846,11 +847,14 @@ Use `effect/Schema` or equivalent typed Effect modules for:
 
 Use Effect services for:
 
+- GitHub App auth, webhook delivery access, and publication boundaries,
 - Daytona client access,
 - Pi runtime process/session control,
 - policy evaluation side effects,
 - structured logging and telemetry,
 - cancellation and timeout coordination.
+
+Prefer `Context.Tag` plus `Layer` for long-lived service dependencies, and use `Effect.gen(...)` for multi-step orchestration flows where sequential control flow improves readability.
 
 ### 13.5 Implementation summary
 
@@ -883,19 +887,19 @@ The MVP is successful when all of the following are true:
 
 ## 15. Risks and Mitigations
 
-| Risk                                                                                   | Likelihood | Impact | Mitigation                                                                                  |
-| -------------------------------------------------------------------------------------- | ---------: | -----: | ------------------------------------------------------------------------------------------- |
+| Risk                                                                                        | Likelihood | Impact | Mitigation                                                                                  |
+| ------------------------------------------------------------------------------------------- | ---------: | -----: | ------------------------------------------------------------------------------------------- |
 | GitHub App installation, webhook, and repo-authority flows prove more complex than expected |     Medium |   High | Start with one repo, one installation, one event source, and one outbound publication path  |
-| Daytona integration becomes the main engineering sink                                  |     Medium |   High | Start with a narrow runtime profile and one language target                                 |
-| Pi runtime integration leaks too much runtime-specific behavior into the product model |     Medium |   High | Enforce a strict runtime adapter contract and normalize events early                        |
-| TanStack Start RC issues affect delivery                                               |     Medium | Medium | Keep architecture modular and maintain an escape hatch to a more mature React SSR stack     |
-| Realtime graph UI becomes noisy or unreadable                                          |     Medium | Medium | Separate operational timeline view from graph lineage view                                  |
-| Convex limits are hit under fan-out workflows                                          |     Medium | Medium | Keep heavy compute in sandboxes and keep Convex as the control plane                        |
-| Desktop shell adds maintenance overhead                                                |     Medium | Medium | Keep desktop features minimal in v0.1                                                       |
-| Teams reject “Git-free” positioning                                                    |     Medium | Medium | Reframe as “agent-native collaboration layer” and provide export or snapshot bridges        |
-| Configuration model becomes too complex too early                                      |     Medium | Medium | Start with typed minimal profiles and add hierarchy only when needed                        |
-| Effect adoption slows delivery or fragments style                                      |     Medium | Medium | Constrain Effect to the control-plane core and document where plain TypeScript is preferred |
-| Security assumptions are misunderstood                                                 |     Medium |   High | Publish explicit trust-boundary and secret-handling rules                                   |
+| Daytona integration becomes the main engineering sink                                       |     Medium |   High | Start with a narrow runtime profile and one language target                                 |
+| Pi runtime integration leaks too much runtime-specific behavior into the product model      |     Medium |   High | Enforce a strict runtime adapter contract and normalize events early                        |
+| TanStack Start RC issues affect delivery                                                    |     Medium | Medium | Keep architecture modular and maintain an escape hatch to a more mature React SSR stack     |
+| Realtime graph UI becomes noisy or unreadable                                               |     Medium | Medium | Separate operational timeline view from graph lineage view                                  |
+| Convex limits are hit under fan-out workflows                                               |     Medium | Medium | Keep heavy compute in sandboxes and keep Convex as the control plane                        |
+| Desktop shell adds maintenance overhead                                                     |     Medium | Medium | Keep desktop features minimal in v0.1                                                       |
+| Teams reject “Git-free” positioning                                                         |     Medium | Medium | Reframe as “agent-native collaboration layer” and provide export or snapshot bridges        |
+| Configuration model becomes too complex too early                                           |     Medium | Medium | Start with typed minimal profiles and add hierarchy only when needed                        |
+| Effect adoption slows delivery or fragments style                                           |     Medium | Medium | Constrain Effect to the control-plane core and document where plain TypeScript is preferred |
+| Security assumptions are misunderstood                                                      |     Medium |   High | Publish explicit trust-boundary and secret-handling rules                                   |
 
 ---
 
@@ -905,12 +909,12 @@ Detailed task tracking lives in [ROADMAP.md](./ROADMAP.md).
 
 The stable phase model is:
 
-| Phase | Goal |
-| ----- | ---- |
-| Phase 0 — Technical validation | Prove the shared contract model, repo authority model, and sandbox-plus-runtime path against one repository. |
-| Phase 1 — MVP loop | Close the operator loop from request intake to review to GitHub publication. |
-| Phase 2 — Product differentiation | Add product leverage only after the MVP loop and section 14 success criteria are complete. |
-| Phase 3 — Advanced autonomy | Treat autonomy-heavy work as explicitly post-MVP. |
+| Phase                             | Goal                                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Phase 0 — Technical validation    | Prove the shared contract model, repo authority model, and sandbox-plus-runtime path against one repository. |
+| Phase 1 — MVP loop                | Close the operator loop from request intake to review to GitHub publication.                                 |
+| Phase 2 — Product differentiation | Add product leverage only after the MVP loop and section 14 success criteria are complete.                   |
+| Phase 3 — Advanced autonomy       | Treat autonomy-heavy work as explicitly post-MVP.                                                            |
 
 ---
 
