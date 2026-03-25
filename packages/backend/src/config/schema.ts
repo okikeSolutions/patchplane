@@ -1,6 +1,14 @@
 import { Context, Effect, Layer, Schema } from 'effect'
 
 export const BackendConfigSchema = Schema.Struct({
+  github: Schema.Struct({
+    appId: Schema.Number,
+    privateKey: Schema.String,
+    webhookSecret: Schema.String,
+    defaultExecutionTargetId: Schema.String,
+    defaultPolicyBundleId: Schema.String,
+    baseUrl: Schema.optional(Schema.String),
+  }),
   runtime: Schema.Struct({
     provider: Schema.Literal('pi-mono'),
   }),
@@ -14,19 +22,7 @@ export const BackendConfigSchema = Schema.Struct({
   }),
 })
 
-export interface BackendConfigShape {
-  readonly runtime: {
-    readonly provider: 'pi-mono'
-  }
-  readonly sandbox: {
-    readonly provider: 'daytona'
-    readonly timeoutMs: number
-  }
-  readonly policy: {
-    readonly requiredReviewers: ReadonlyArray<string>
-    readonly minimumScore: number
-  }
-}
+export type BackendConfigShape = Schema.Schema.Type<typeof BackendConfigSchema>
 
 export class BackendConfig extends Context.Tag(
   '@patchplane/backend/BackendConfig',
@@ -35,6 +31,22 @@ export class BackendConfig extends Context.Tag(
 const decodeBackendConfig = Schema.decodeUnknownSync(BackendConfigSchema)
 
 const rawConfig = {
+  github: {
+    appId: Number(process.env.GITHUB_APP_ID ?? 0),
+    privateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? '').replace(
+      /\\n/g,
+      '\n',
+    ),
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? '',
+    defaultExecutionTargetId:
+      process.env.PATCHPLANE_GITHUB_EXECUTION_TARGET_ID ??
+      'github.issue_comment',
+    defaultPolicyBundleId:
+      process.env.PATCHPLANE_GITHUB_POLICY_BUNDLE_ID ?? 'default',
+    ...(process.env.GITHUB_API_BASE_URL
+      ? { baseUrl: process.env.GITHUB_API_BASE_URL }
+      : {}),
+  },
   runtime: {
     provider: 'pi-mono' as const,
   },

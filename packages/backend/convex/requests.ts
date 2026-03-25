@@ -1,22 +1,11 @@
 import { mutation, query } from './_generated/server'
 import { v } from 'convex/values'
-
-const workflowStatus = v.union(
-  v.literal('queued'),
-  v.literal('running'),
-  v.literal('reviewed'),
-  v.literal('completed'),
-  v.literal('failed'),
-)
-
-const promptScope = v.object({
-  repoUrl: v.string(),
-  baseBranch: v.string(),
-  targetBranch: v.string(),
-  includePaths: v.array(v.string()),
-  excludePaths: v.array(v.string()),
-  intent: v.string(),
-})
+import {
+  decodePromptRequest,
+  promptRequestSourceValidator,
+  promptScopeValidator,
+  workflowStatusValidator,
+} from './contracts'
 
 export const create = mutation({
   args: {
@@ -25,7 +14,7 @@ export const create = mutation({
     policyBundleId: v.string(),
     createdByUserId: v.string(),
     prompt: v.string(),
-    scope: promptScope,
+    scope: promptScopeValidator,
   },
   returns: v.id('promptRequests'),
   handler: async (ctx, args) => {
@@ -38,6 +27,7 @@ export const create = mutation({
       createdByUserId: args.createdByUserId,
       prompt: args.prompt,
       scope: args.scope,
+      source: { kind: 'manual' },
       status: 'queued',
       createdAt: now,
       updatedAt: now,
@@ -49,24 +39,49 @@ export const list = query({
   args: {},
   returns: v.array(
     v.object({
-      _id: v.id('promptRequests'),
-      _creationTime: v.number(),
+      id: v.string(),
       projectId: v.string(),
       executionTargetId: v.string(),
       policyBundleId: v.string(),
       createdByUserId: v.string(),
       prompt: v.string(),
-      scope: promptScope,
-      status: workflowStatus,
+      scope: promptScopeValidator,
+      source: promptRequestSourceValidator,
+      status: workflowStatusValidator,
       createdAt: v.number(),
       updatedAt: v.number(),
     }),
   ),
   handler: async (ctx) => {
-    return await ctx.db
+    const requests = await ctx.db
       .query('promptRequests')
       .withIndex('by_created_at')
       .order('desc')
       .collect()
+
+    return requests.map((request) => {
+      const decoded = decodePromptRequest({
+        id: String(request._id),
+        projectId: request.projectId,
+        executionTargetId: request.executionTargetId,
+        policyBundleId: request.policyBundleId,
+        createdByUserId: request.createdByUserId,
+        prompt: request.prompt,
+        scope: request.scope,
+        source: request.source,
+        status: request.status,
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+      })
+
+      return {
+        ...decoded,
+        scope: {
+          ...decoded.scope,
+          includePaths: [...decoded.scope.includePaths],
+          excludePaths: [...decoded.scope.excludePaths],
+        },
+      }
+    })
   },
 })
