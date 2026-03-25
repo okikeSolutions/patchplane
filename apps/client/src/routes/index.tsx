@@ -1,66 +1,76 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { ArrowRight, Orbit, ShieldCheck, Workflow } from 'lucide-react'
-import { coreCapabilities } from '@patchplane/domain'
+import * as m from '@/paraglide/messages'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-const workflowMoments = [
-  {
-    label: 'Request intake',
-    title: 'Capture the change once, with scope and policy intact.',
-    summary:
-      'Every run, review, and follow-up decision stays attached to the original request instead of leaking across chats, tabs, and CI logs.',
-  },
-  {
-    label: 'Runtime feed',
-    title: 'Project tool calls and runtime events into one operational thread.',
-    summary:
-      'Normalize agent events into a timeline operators can scan without caring which runtime or sandbox produced them.',
-  },
-  {
-    label: 'Review gate',
-    title: 'Hold review output in the same surface before merge moves forward.',
-    summary:
-      'Typed review signals stay visible next to the run itself, so merge and rollback decisions do not depend on memory.',
-  },
-] as const
-
-const heroSignals = [
-  {
-    title: 'Request registered',
-    detail: 'repo, prompt, policy, and ownership attached before execution',
-  },
-  {
-    title: 'Runtime session started',
-    detail: 'tool calls normalized into one event feed for every operator',
-  },
-  {
-    title: 'Review returned',
-    detail: 'pass/fail signals and decision lineage stay on the same thread',
-  },
-] as const
-
 export const Route = createFileRoute('/')({ component: LandingPage })
 
 function LandingPage() {
+  const heroSignals = [
+    {
+      title: m.landing_signal_1_title(),
+      detail: m.landing_signal_1_detail(),
+    },
+    {
+      title: m.landing_signal_2_title(),
+      detail: m.landing_signal_2_detail(),
+    },
+    {
+      title: m.landing_signal_3_title(),
+      detail: m.landing_signal_3_detail(),
+    },
+  ] as const
+
+  const workflowMoments = [
+    {
+      label: m.landing_workflow_1_label(),
+      title: m.landing_workflow_1_title(),
+      summary: m.landing_workflow_1_summary(),
+    },
+    {
+      label: m.landing_workflow_2_label(),
+      title: m.landing_workflow_2_title(),
+      summary: m.landing_workflow_2_summary(),
+    },
+    {
+      label: m.landing_workflow_3_label(),
+      title: m.landing_workflow_3_title(),
+      summary: m.landing_workflow_3_summary(),
+    },
+  ] as const
+
+  const proofItems = [
+    {
+      title: m.landing_proof_1_title(),
+      summary: m.landing_proof_1_summary(),
+    },
+    {
+      title: m.landing_proof_2_title(),
+      summary: m.landing_proof_2_summary(),
+    },
+    {
+      title: m.landing_proof_3_title(),
+      summary: m.landing_proof_3_summary(),
+    },
+    {
+      title: m.landing_proof_4_title(),
+      summary: m.landing_proof_4_summary(),
+    },
+  ] as const
+
   return (
     <main className="landing-page">
       <section className="landing-hero">
         <div className="page-wrap landing-hero__inner">
           <div className="reveal-up landing-copy">
             <Badge variant="outline" className="section-badge">
-              AI change control plane
+              {m.landing_badge()}
             </Badge>
             <p className="hero-brand">PatchPlane</p>
-            <h1 className="display-title">
-              One control plane for every prompt request.
-            </h1>
-            <p className="hero-lede">
-              PatchPlane gives teams one operational surface for coordinated AI
-              change work, from intake through execution and review, across the
-              browser today and a desktop shell later.
-            </p>
+            <h1 className="display-title">{m.landing_title()}</h1>
+            <p className="hero-lede">{m.landing_lede()}</p>
             <div className="hero-actions">
               <Link
                 to="/app"
@@ -69,7 +79,7 @@ function LandingPage() {
                   'landing-button landing-button--primary',
                 )}
               >
-                Open Product Shell
+                {m.landing_open_shell()}
                 <ArrowRight />
               </Link>
               <Link
@@ -79,7 +89,7 @@ function LandingPage() {
                   'landing-button landing-button--secondary',
                 )}
               >
-                Read Architecture
+                {m.landing_read_architecture()}
               </Link>
             </div>
             <dl
@@ -87,18 +97,16 @@ function LandingPage() {
               style={{ animationDelay: '120ms' }}
             >
               <div>
-                <dt>Shared surface</dt>
-                <dd>Browser now, desktop wrapper later.</dd>
+                <dt>{m.landing_facts_shared_surface_title()}</dt>
+                <dd>{m.landing_facts_shared_surface_detail()}</dd>
               </div>
               <div>
-                <dt>Single thread</dt>
-                <dd>Requests, runs, reviews, and decisions stay connected.</dd>
+                <dt>{m.landing_facts_single_thread_title()}</dt>
+                <dd>{m.landing_facts_single_thread_detail()}</dd>
               </div>
               <div>
-                <dt>Operator readable</dt>
-                <dd>
-                  Runtime events become one timeline instead of scattered logs.
-                </dd>
+                <dt>{m.landing_facts_operator_readable_title()}</dt>
+                <dd>{m.landing_facts_operator_readable_detail()}</dd>
               </div>
             </dl>
           </div>
@@ -112,12 +120,9 @@ function LandingPage() {
               <div className="signal-stack">
                 <div className="signal-stack__intro">
                   <span className="signal-stack__kicker">
-                    Operational thread
+                    {m.landing_signal_intro_kicker()}
                   </span>
-                  <p>
-                    One request record expands into runtime activity, review,
-                    and merge readiness without losing lineage.
-                  </p>
+                  <p>{m.landing_signal_intro_body()}</p>
                 </div>
                 <div className="signal-list">
                   {heroSignals.map((signal, index) => (
@@ -136,9 +141,7 @@ function LandingPage() {
                 </div>
                 <div className="signal-stack__footer">
                   <Workflow />
-                  <span>
-                    Requests, runs, reviews, and decisions share one view.
-                  </span>
+                  <span>{m.landing_signal_footer()}</span>
                 </div>
               </div>
             </div>
@@ -149,14 +152,10 @@ function LandingPage() {
       <section className="page-wrap landing-section">
         <div className="section-heading">
           <Badge variant="outline" className="section-badge">
-            Workflow
+            {m.landing_workflow_badge()}
           </Badge>
-          <h2>One page should explain the operating model in seconds.</h2>
-          <p>
-            PatchPlane is strongest when the path from request to decision feels
-            obvious. The landing page should show that path, not the scaffolding
-            under it.
-          </p>
+          <h2>{m.landing_workflow_title()}</h2>
+          <p>{m.landing_workflow_intro()}</p>
         </div>
         <div className="workflow-grid">
           {workflowMoments.map((moment, index) => (
@@ -176,27 +175,21 @@ function LandingPage() {
       <section className="page-wrap landing-section landing-section--split">
         <div className="section-heading">
           <Badge variant="outline" className="section-badge">
-            Proof
+            {m.landing_proof_badge()}
           </Badge>
-          <h2>
-            Core capabilities should read like product mechanics, not filler.
-          </h2>
-          <p>
-            These are the pieces worth proving early because they define whether
-            PatchPlane becomes a usable control plane or just another thin
-            shell.
-          </p>
+          <h2>{m.landing_proof_title()}</h2>
+          <p>{m.landing_proof_intro()}</p>
         </div>
         <div className="proof-list">
-          {coreCapabilities.map((capability, index) => (
+          {proofItems.map((capability, index) => (
             <article
-              key={capability.name}
+              key={capability.title}
               className="proof-item reveal-up"
               style={{ animationDelay: `${index * 90 + 120}ms` }}
             >
               <div className="proof-item__index">0{index + 1}</div>
               <div>
-                <h3>{capability.name}</h3>
+                <h3>{capability.title}</h3>
                 <p>{capability.summary}</p>
               </div>
             </article>
@@ -208,26 +201,19 @@ function LandingPage() {
         <div className="story-panel reveal-up">
           <div className="story-panel__copy">
             <Badge variant="outline" className="section-badge">
-              Platform shape
+              {m.landing_platform_badge()}
             </Badge>
-            <h2>
-              Build one shared control surface before the shells multiply.
-            </h2>
-            <p>
-              The browser route at <code>/app</code> and the future desktop
-              shell should share the same product language, event model, and
-              review flow. The shell can change later. The operational surface
-              should not.
-            </p>
+            <h2>{m.landing_platform_title()}</h2>
+            <p>{m.landing_platform_intro()}</p>
           </div>
           <div className="story-panel__signals">
             <div>
               <Orbit />
-              <span>Shared browser and desktop surface</span>
+              <span>{m.landing_story_signal_shared_surface()}</span>
             </div>
             <div>
               <ShieldCheck />
-              <span>Explicit runtime and sandbox boundaries</span>
+              <span>{m.landing_story_signal_runtime_boundaries()}</span>
             </div>
           </div>
         </div>
@@ -237,16 +223,10 @@ function LandingPage() {
         <div className="page-wrap landing-cta__inner reveal-up">
           <div>
             <Badge variant="outline" className="section-badge">
-              Start here
+              {m.landing_cta_badge()}
             </Badge>
-            <h2>
-              Open the product shell, then inspect the architecture notes.
-            </h2>
-            <p>
-              The shell should feel operational. The notes should explain why
-              the workspace stays small until the first real execution loop
-              works.
-            </p>
+            <h2>{m.landing_cta_title()}</h2>
+            <p>{m.landing_cta_body()}</p>
           </div>
           <div className="landing-cta__actions">
             <Link
@@ -256,7 +236,7 @@ function LandingPage() {
                 'landing-button landing-button--primary',
               )}
             >
-              Launch Product Shell
+              {m.landing_cta_primary()}
             </Link>
             <Link
               to="/about"
@@ -265,7 +245,7 @@ function LandingPage() {
                 'landing-button landing-button--secondary',
               )}
             >
-              View Architecture Notes
+              {m.landing_cta_secondary()}
             </Link>
           </div>
         </div>

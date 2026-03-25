@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import * as m from '@/paraglide/messages'
 
 export default function Footer() {
   const year = new Date().getFullYear()
@@ -8,17 +9,14 @@ export default function Footer() {
       <div className="page-wrap site-footer__inner">
         <div className="site-footer__copy">
           <p className="site-footer__brand">PatchPlane</p>
-          <p>
-            Coordinate requests, runtime events, reviews, and merge decisions in
-            one operational thread.
-          </p>
+          <p>{m.footer_description()}</p>
         </div>
 
         <div className="site-footer__meta">
           <div className="site-footer__links">
-            <Link to="/">Landing</Link>
-            <Link to="/app">Product</Link>
-            <Link to="/about">Architecture</Link>
+            <Link to="/">{m.header_nav_landing()}</Link>
+            <Link to="/app">{m.header_nav_product()}</Link>
+            <Link to="/about">{m.header_nav_architecture()}</Link>
             <a
               href="https://github.com/okikeSolutions/patchplane"
               target="_blank"

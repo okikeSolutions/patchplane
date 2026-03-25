@@ -1,5 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { Github } from 'lucide-react'
+import * as m from '@/paraglide/messages'
 import { buttonVariants } from '@/components/ui/button'
 import {
   NavigationMenu,
@@ -7,6 +8,7 @@ import {
   NavigationMenuLink,
   NavigationMenuList,
 } from '@/components/ui/navigation-menu'
+import LocaleSwitcher from './locale-switcher'
 import { ModeToggle } from './mode-toggle'
 
 export default function Header() {
@@ -22,7 +24,7 @@ export default function Header() {
             <span className="brand-link__pip" />
             <span className="brand-link__wordmark">PatchPlane</span>
           </Link>
-          <p className="brand-lockup__tag">AI change control plane</p>
+          <p className="brand-lockup__tag">{m.header_tagline()}</p>
         </div>
 
         <div className="site-nav__controls">
@@ -34,7 +36,7 @@ export default function Header() {
                   active={pathname === '/'}
                   className="rounded-full px-3"
                 >
-                  Landing
+                  {m.header_nav_landing()}
                 </NavigationMenuLink>
               </NavigationMenuItem>
               <NavigationMenuItem>
@@ -43,7 +45,7 @@ export default function Header() {
                   active={pathname.startsWith('/app')}
                   className="rounded-full px-3"
                 >
-                  Product
+                  {m.header_nav_product()}
                 </NavigationMenuLink>
               </NavigationMenuItem>
               <NavigationMenuItem>
@@ -52,11 +54,13 @@ export default function Header() {
                   active={pathname.startsWith('/about')}
                   className="rounded-full px-3"
                 >
-                  Architecture
+                  {m.header_nav_architecture()}
                 </NavigationMenuLink>
               </NavigationMenuItem>
             </NavigationMenuList>
           </NavigationMenu>
+
+          <LocaleSwitcher />
 
           <a
             href="https://github.com/okikeSolutions/patchplane"
@@ -68,7 +72,7 @@ export default function Header() {
               className: 'site-nav__icon text-muted-foreground',
             })}
           >
-            <span className="sr-only">Open the repository</span>
+            <span className="sr-only">{m.header_repository()}</span>
             <Github />
           </a>
 

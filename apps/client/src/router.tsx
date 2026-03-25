@@ -4,6 +4,7 @@ import { routerWithQueryClient } from '@tanstack/react-router-with-query'
 import { ConvexQueryClient } from '@convex-dev/react-query'
 import { ConvexProviderWithAuthKit } from '@convex-dev/workos'
 import { AuthKitProvider, useAuth } from '@workos-inc/authkit-react'
+import { deLocalizeUrl, localizeUrl } from './paraglide/runtime'
 import { routeTree } from './routeTree.gen'
 
 export function getRouter() {
@@ -39,6 +40,10 @@ export function getRouter() {
       defaultPreload: 'intent',
       context: { queryClient },
       scrollRestoration: true,
+      rewrite: {
+        input: ({ url }) => deLocalizeUrl(url),
+        output: ({ url }) => localizeUrl(url),
+      },
       Wrap: ({ children }) => (
         <AuthKitProvider
           clientId={WORKOS_CLIENT_ID}

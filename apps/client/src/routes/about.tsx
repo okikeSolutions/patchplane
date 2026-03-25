@@ -1,38 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
+import * as m from '@/paraglide/messages'
 import { Badge } from '@/components/ui/badge'
-
-const architecturePrinciples = [
-  {
-    title: 'Shared UI first',
-    detail:
-      'One TanStack Start app owns both the landing page and the browser product shell so the product language stays consistent while the loop is still forming.',
-  },
-  {
-    title: 'Backend owns runtime boundaries',
-    detail:
-      '`packages/backend` keeps Convex, runtime contracts, and sandbox boundaries together until the first execution path is real enough to justify extraction.',
-  },
-  {
-    title: 'Extract with evidence',
-    detail:
-      'Runtime adapters, policy packages, and desktop-specific bridges should split only after request coordination, runtime normalization, and review orchestration are exercised end to end.',
-  },
-] as const
-
-const packageMap = [
-  {
-    name: 'apps/client',
-    role: 'Landing page, browser product shell, and shared visual language.',
-  },
-  {
-    name: 'packages/backend',
-    role: 'Convex backend root plus runtime, sandbox, and policy boundaries.',
-  },
-  {
-    name: 'packages/domain',
-    role: 'Shared types, schemas, workflow statuses, and capability language.',
-  },
-] as const
 
 const bootstrapSteps = [
   'bun install',
@@ -45,32 +13,53 @@ export const Route = createFileRoute('/about')({
 })
 
 function AboutPage() {
+  const architecturePrinciples = [
+    {
+      title: m.about_principle_1_title(),
+      detail: m.about_principle_1_detail(),
+    },
+    {
+      title: m.about_principle_2_title(),
+      detail: m.about_principle_2_detail(),
+    },
+    {
+      title: m.about_principle_3_title(),
+      detail: m.about_principle_3_detail(),
+    },
+  ] as const
+
+  const packageMap = [
+    {
+      name: m.about_package_1_name(),
+      role: m.about_package_1_role(),
+    },
+    {
+      name: m.about_package_2_name(),
+      role: m.about_package_2_role(),
+    },
+    {
+      name: m.about_package_3_name(),
+      role: m.about_package_3_role(),
+    },
+  ] as const
+
   return (
     <main className="page-wrap info-page">
       <section className="info-hero reveal-up">
         <Badge variant="outline" className="section-badge">
-          Architecture notes
+          {m.about_hero_badge()}
         </Badge>
-        <h1 className="display-title">
-          Keep the workspace small until the execution loop is proven.
-        </h1>
-        <p className="info-hero__lede">
-          PatchPlane should earn its package boundaries by proving one real
-          flow: request intake, runtime activity, review output, and a visible
-          decision trail.
-        </p>
+        <h1 className="display-title">{m.about_hero_title()}</h1>
+        <p className="info-hero__lede">{m.about_hero_lede()}</p>
       </section>
 
       <section className="info-section">
         <div className="section-heading">
           <Badge variant="outline" className="section-badge">
-            Principles
+            {m.about_principles_badge()}
           </Badge>
-          <h2>Architecture notes belong here, not on the landing page.</h2>
-          <p>
-            These principles explain why the current workspace stays compact and
-            where future extraction pressure should come from.
-          </p>
+          <h2>{m.about_principles_title()}</h2>
+          <p>{m.about_principles_intro()}</p>
         </div>
         <div className="info-grid">
           {architecturePrinciples.map((principle, index) => (
@@ -89,13 +78,10 @@ function AboutPage() {
       <section className="info-section info-section--split">
         <div className="section-heading">
           <Badge variant="outline" className="section-badge">
-            Package map
+            {m.about_package_map_badge()}
           </Badge>
-          <h2>Each package has one clear job today.</h2>
-          <p>
-            That keeps the codebase small enough to move quickly without hiding
-            runtime decisions in too many layers.
-          </p>
+          <h2>{m.about_package_map_title()}</h2>
+          <p>{m.about_package_map_intro()}</p>
         </div>
         <div className="info-list">
           {packageMap.map((entry, index) => (
@@ -114,19 +100,14 @@ function AboutPage() {
       <section className="info-section info-section--aside">
         <div className="section-heading">
           <Badge variant="outline" className="section-badge">
-            Bootstrap
+            {m.about_bootstrap_badge()}
           </Badge>
-          <h2>
-            Local commands and near-term implementation work stay operational.
-          </h2>
-          <p>
-            This is the place for setup notes, current constraints, and the next
-            slice of work that should turn the shell into a real control plane.
-          </p>
+          <h2>{m.about_bootstrap_title()}</h2>
+          <p>{m.about_bootstrap_intro()}</p>
         </div>
         <div className="aside-grid">
           <article className="command-block reveal-up">
-            <h3>Workspace commands</h3>
+            <h3>{m.about_bootstrap_commands_title()}</h3>
             <ol>
               {bootstrapSteps.map((step) => (
                 <li key={step}>
@@ -139,12 +120,8 @@ function AboutPage() {
             className="command-block reveal-up"
             style={{ animationDelay: '120ms' }}
           >
-            <h3>Next build slice</h3>
-            <p>
-              Wire one request mutation, one fake run action, and one event feed
-              from Convex before introducing more runtimes, shells, or packaging
-              layers.
-            </p>
+            <h3>{m.about_next_slice_title()}</h3>
+            <p>{m.about_next_slice_body()}</p>
           </article>
         </div>
       </section>

@@ -1,7 +1,7 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@workos-inc/authkit-react'
 import { api } from '@patchplane/backend/convex/_generated/api'
-import { statusLabels, type WorkflowStatus } from '@patchplane/domain'
+import { type WorkflowStatus } from '@patchplane/domain'
 import {
   Authenticated,
   AuthLoading,
@@ -9,29 +9,17 @@ import {
   useQuery,
 } from 'convex/react'
 import { makeFunctionReference } from 'convex/server'
+import * as m from '@/paraglide/messages'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-const timelineStatuses: WorkflowStatus[] = ['queued', 'running', 'reviewed']
-
-const workspacePanels = [
-  {
-    title: 'Request coordination',
-    detail:
-      'Prompt intake, repo scope, and policy context should all resolve into one request record before execution begins.',
-  },
-  {
-    title: 'Runtime feed',
-    detail:
-      'Normalized events should make tool calls, artifacts, and failures readable without opening runtime-specific consoles.',
-  },
-  {
-    title: 'Review decision',
-    detail:
-      'Review output should sit beside the run so the operator can make merge or rollback calls from the same surface.',
-  },
-] as const
+const timelineStatuses = [
+  'queued',
+  'running',
+  'reviewed',
+] as const satisfies ReadonlyArray<WorkflowStatus>
+type TimelineStatus = (typeof timelineStatuses)[number]
 
 interface ViewerIdentity {
   subject: string
@@ -49,22 +37,54 @@ export const Route = createFileRoute('/app')({
   component: AppShellPage,
 })
 
+function getStatusLabel(status: TimelineStatus) {
+  switch (status) {
+    case 'queued':
+      return m.app_status_queued_label()
+    case 'running':
+      return m.app_status_running_label()
+    case 'reviewed':
+      return m.app_status_reviewed_label()
+  }
+}
+
+function getStatusDetail(status: TimelineStatus) {
+  switch (status) {
+    case 'queued':
+      return m.app_status_queued_detail()
+    case 'running':
+      return m.app_status_running_detail()
+    case 'reviewed':
+      return m.app_status_reviewed_detail()
+  }
+}
+
 function AppShellPage() {
   const { user, signIn, signOut } = useAuth()
+  const workspacePanels = [
+    {
+      title: m.app_panel_1_title(),
+      detail: m.app_panel_1_detail(),
+    },
+    {
+      title: m.app_panel_2_title(),
+      detail: m.app_panel_2_detail(),
+    },
+    {
+      title: m.app_panel_3_title(),
+      detail: m.app_panel_3_detail(),
+    },
+  ] as const
 
   return (
     <main className="page-wrap product-page">
       <section className="product-header reveal-up">
         <div>
           <Badge variant="outline" className="section-badge">
-            Product shell
+            {m.app_hero_badge()}
           </Badge>
-          <h1>PatchPlane command center</h1>
-          <p>
-            This route is the working surface for coordinated change requests.
-            Keep it operational, thin, and ready to survive both browser and
-            desktop shells.
-          </p>
+          <h1>{m.app_hero_title()}</h1>
+          <p>{m.app_hero_intro()}</p>
         </div>
         <Link
           to="/about"
@@ -73,7 +93,7 @@ function AppShellPage() {
             'landing-button landing-button--secondary',
           )}
         >
-          Architecture notes
+          {m.app_hero_architecture_link()}
         </Link>
       </section>
 
@@ -81,15 +101,11 @@ function AppShellPage() {
         <div className="product-panel reveal-up">
           <div className="product-panel__header">
             <Badge variant="outline" className="section-badge">
-              Authentication
+              {m.app_auth_badge()}
             </Badge>
-            <h2>WorkOS AuthKit + Convex</h2>
+            <h2>{m.app_auth_title()}</h2>
           </div>
-          <p className="product-note">
-            Convex auth state now gates the operational surface, and the browser
-            can use authenticated queries once the backend validates the WorkOS
-            token.
-          </p>
+          <p className="product-note">{m.app_auth_intro()}</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button
               type="button"
@@ -102,12 +118,15 @@ function AppShellPage() {
                 void signIn()
               }}
             >
-              {user ? 'Sign out' : 'Sign in'}
+              {user ? m.app_sign_out() : m.app_sign_in()}
             </Button>
             <span className="text-sm text-muted-foreground">
               {user
-                ? `Signed in as ${user.firstName ?? user.email ?? 'operator'}`
-                : 'Sign in to access authenticated Convex data.'}
+                ? m.app_signed_in_as({
+                    name:
+                      user.firstName ?? user.email ?? m.app_operator_fallback(),
+                  })
+                : m.app_sign_in_prompt()}
             </span>
           </div>
         </div>
@@ -118,23 +137,18 @@ function AppShellPage() {
         >
           <div className="product-panel__header">
             <Badge variant="outline" className="section-badge">
-              Auth state
+              {m.app_auth_state_badge()}
             </Badge>
-            <h2>Protected data surface</h2>
+            <h2>{m.app_auth_state_title()}</h2>
           </div>
           <AuthLoading>
-            <p className="product-note">
-              Checking Convex authentication and exchanging the WorkOS token.
-            </p>
+            <p className="product-note">{m.app_auth_loading()}</p>
           </AuthLoading>
           <Authenticated>
             <AuthenticatedContent />
           </Authenticated>
           <Unauthenticated>
-            <p className="product-note">
-              The command center stays readable while signed out, but protected
-              data stays behind Convex auth.
-            </p>
+            <p className="product-note">{m.app_unauthenticated()}</p>
           </Unauthenticated>
         </div>
       </section>
@@ -146,15 +160,8 @@ function AppShellPage() {
             className="status-chip reveal-up"
             style={{ animationDelay: `${index * 80 + 100}ms` }}
           >
-            <span className="status-chip__label">{statusLabels[status]}</span>
-            <p>
-              {status === 'queued' &&
-                'Request is recorded, scoped, and waiting for execution.'}
-              {status === 'running' &&
-                'Tool calls and artifacts are arriving in the shared event feed.'}
-              {status === 'reviewed' &&
-                'Review output is attached and ready to inform the decision.'}
-            </p>
+            <span className="status-chip__label">{getStatusLabel(status)}</span>
+            <p>{getStatusDetail(status)}</p>
           </article>
         ))}
       </section>
@@ -163,19 +170,15 @@ function AppShellPage() {
         <div className="product-panel reveal-up">
           <div className="product-panel__header">
             <Badge variant="outline" className="section-badge">
-              Workflow surface
+              {m.app_workflow_badge()}
             </Badge>
-            <h2>Selected workflow statuses</h2>
+            <h2>{m.app_workflow_title()}</h2>
           </div>
           <ol className="timeline-list">
             {timelineStatuses.map((status) => (
               <li key={status}>
-                <span>{statusLabels[status]}</span>
-                <p>
-                  Each status belongs in the shared domain package and should
-                  receive Convex-backed transitions before new product chrome is
-                  added.
-                </p>
+                <span>{getStatusLabel(status)}</span>
+                <p>{m.app_workflow_status_detail()}</p>
               </li>
             ))}
           </ol>
@@ -187,15 +190,11 @@ function AppShellPage() {
         >
           <div className="product-panel__header">
             <Badge variant="outline" className="section-badge">
-              Implementation focus
+              {m.app_focus_badge()}
             </Badge>
-            <h2>Next build slice</h2>
+            <h2>{m.app_focus_title()}</h2>
           </div>
-          <p className="product-note">
-            Wire one request mutation, one fake run action, and one event feed
-            before introducing heavier integrations. Product credibility comes
-            from a readable loop, not from more shells.
-          </p>
+          <p className="product-note">{m.app_focus_intro()}</p>
         </div>
       </section>
 
@@ -220,20 +219,19 @@ function AuthenticatedContent() {
   const requests = useQuery(api.requests.list)
 
   if (!viewer || !requests) {
-    return <p className="product-note">Loading authenticated data.</p>
+    return <p className="product-note">{m.app_authenticated_loading()}</p>
   }
 
   return (
     <div className="space-y-3">
       <p className="product-note">
-        Welcome {viewer.name}. Convex validated your WorkOS token before loading
-        this data.
+        {m.app_authenticated_welcome({ name: viewer.name })}
       </p>
       <p className="text-sm text-muted-foreground">
-        Viewer subject: <code>{viewer.subject}</code>
+        {m.app_viewer_subject()} <code>{viewer.subject}</code>
       </p>
       <p className="text-sm text-muted-foreground">
-        Visible prompt requests: <code>{requests.length}</code>
+        {m.app_visible_requests()} <code>{requests.length}</code>
       </p>
     </div>
   )

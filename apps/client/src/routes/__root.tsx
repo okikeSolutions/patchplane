@@ -3,6 +3,8 @@ import { createRootRouteWithContext } from '@tanstack/react-router'
 import { HeadContent, Scripts } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import * as m from '@/paraglide/messages'
+import { getLocale } from '@/paraglide/runtime'
 import Footer from '@/components/footer'
 import Header from '@/components/header'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -21,12 +23,11 @@ export const Route = createRootRouteWithContext<{
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'PatchPlane',
+        title: m.meta_title(),
       },
       {
         name: 'description',
-        content:
-          'PatchPlane is an AI change control plane for coordinating requests, runs, reviews, and merge decisions.',
+        content: m.meta_description(),
       },
     ],
     links: [
@@ -41,7 +42,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang={getLocale()}>
       <head>
         <HeadContent />
       </head>

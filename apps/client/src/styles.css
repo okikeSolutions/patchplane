@@ -312,6 +312,27 @@
   gap: 0.25rem;
 }
 
+.locale-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.03);
+}
+
+.locale-switcher__link {
+  min-width: 2.4rem;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+}
+
+.locale-switcher__link--active {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--foreground);
+}
+
 .site-nav__icon {
   border: 1px solid rgb(255 255 255 / 0.08);
   background: rgb(255 255 255 / 0.03);
