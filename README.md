@@ -2,6 +2,11 @@
 
 AI change control plane for coordinating agents and humans around shared software changes.
 
+Core docs:
+
+- [SPEC.md](./SPEC.md): stable product thesis, architecture, and MVP success criteria
+- [ROADMAP.md](./ROADMAP.md): open, active, and completed delivery work
+
 ## Workspace
 
 This repository is scaffolded as a Bun monorepo with a deliberately small initial footprint:

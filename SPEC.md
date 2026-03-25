@@ -1,8 +1,19 @@
 # SPEC.md – PatchPlane – AI Change Control Plane
 
-**Version:** 1.6  
+**Version:** 1.8  
 **Date:** March 25, 2026  
-**Status:** Updated MVP proposal centered on a PatchPlane-primary, GitHub-compatible Daytona + Pi Mono end-to-end slice
+**Status:** Stable MVP proposal with execution tracking delegated to [ROADMAP.md](./ROADMAP.md)
+
+---
+
+## 0. Execution Tracking
+
+`SPEC.md` is the stable reference for product thesis, architecture, scope, and success criteria.
+
+Day-to-day execution tracking now lives in [ROADMAP.md](./ROADMAP.md).
+
+- update [ROADMAP.md](./ROADMAP.md) when task status, evidence, or execution order changes,
+- update `SPEC.md` only when product scope, architecture, or MVP success criteria change.
 
 ---
 
@@ -841,19 +852,17 @@ Use Effect services for:
 - structured logging and telemetry,
 - cancellation and timeout coordination.
 
-### 13.5 First implementation order
+### 13.5 Implementation summary
 
-Build in this order:
+The canonical execution tracker lives in [ROADMAP.md](./ROADMAP.md).
 
-1. shared domain schemas and config validation,
-2. WorkOS auth plus GitHub App installation and webhook wiring,
-3. Convex schema for repositories, webhook deliveries, prompt requests, workflow runs, and runtime sessions,
-4. Daytona execution adapter,
-5. `PiRuntimeAdapter`,
-6. normalized runtime event ingestion,
-7. GitHub feedback publication for comments, checks, and PR or draft PR updates,
-8. one reviewer pipeline,
-9. dashboard visibility for live runs, approvals, and decisions.
+The stable build sequence remains:
+
+1. promote shared contracts and remove backend-only contract duplication,
+2. finish repository authority and durable lifecycle state,
+3. prove the Daytona plus Pi runtime path,
+4. close the loop on runtime ingestion, review, and GitHub publication, and
+5. expose live operator visibility in the dashboard.
 
 ## 14. Success Criteria for MVP
 
@@ -892,47 +901,16 @@ The MVP is successful when all of the following are true:
 
 ## 16. Roadmap Recommendation
 
-### Phase 0 — Technical validation
+Detailed task tracking lives in [ROADMAP.md](./ROADMAP.md).
 
-- shared TypeScript domain package and Effect schemas
-- Convex schema and realtime event model
-- WorkOS authentication integration
-- GitHub App installation and verified webhook proof of concept
-- Daytona sandbox execution proof of concept
-- PatchPlane runtime adapter contract
-- Pi Mono proof of execution inside a Daytona sandbox
-- one workflow that executes one sandbox job against one GitHub-connected repo and returns one review result
-- GitHub comment, check, or PR publication proof of concept
-- typed config schema for runtime, sandbox, policy, and repository defaults
+The stable phase model is:
 
-### Phase 1 — MVP loop
-
-- prompt request UI plus GitHub-triggered intake
-- workflow fan-out to generation plus reviewers
-- runtime event normalization and timeline view
-- GitHub feedback publication and operator approvals
-- weighted policy evaluation
-- thin desktop monitoring shell if needed
-
-### Phase 2 — Product differentiation
-
-- PatchPlane-primary request creation and supervision UX
-- richer graph analytics
-- policy templates
-- reviewer marketplaces or pluggable adapters
-- direct merge promotion and rollback after PR-first loop is proven
-- git export or repo bridges
-- second runtime adapter to validate portability
-- experimental conflict assistance and narrower semantic resolution
-
-### Phase 3 — Advanced autonomy
-
-- stepwise internalization of patch lineage and rollback beyond GitHub-only workflows
-- background improvement loops
-- contribution memory and replay
-- evolutionary prompt tuning
-- broader agent-to-agent interoperability
-- adaptive runtime routing across execution profiles
+| Phase | Goal |
+| ----- | ---- |
+| Phase 0 — Technical validation | Prove the shared contract model, repo authority model, and sandbox-plus-runtime path against one repository. |
+| Phase 1 — MVP loop | Close the operator loop from request intake to review to GitHub publication. |
+| Phase 2 — Product differentiation | Add product leverage only after the MVP loop and section 14 success criteria are complete. |
+| Phase 3 — Advanced autonomy | Treat autonomy-heavy work as explicitly post-MVP. |
 
 ---
 
