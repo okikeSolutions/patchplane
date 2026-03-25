@@ -82,7 +82,10 @@ function LandingPage() {
                 Read Architecture
               </Link>
             </div>
-            <dl className="hero-facts reveal-up" style={{ animationDelay: '120ms' }}>
+            <dl
+              className="hero-facts reveal-up"
+              style={{ animationDelay: '120ms' }}
+            >
               <div>
                 <dt>Shared surface</dt>
                 <dd>Browser now, desktop wrapper later.</dd>
@@ -93,20 +96,27 @@ function LandingPage() {
               </div>
               <div>
                 <dt>Operator readable</dt>
-                <dd>Runtime events become one timeline instead of scattered logs.</dd>
+                <dd>
+                  Runtime events become one timeline instead of scattered logs.
+                </dd>
               </div>
             </dl>
           </div>
 
-          <div className="hero-visual reveal-up" style={{ animationDelay: '180ms' }}>
+          <div
+            className="hero-visual reveal-up"
+            style={{ animationDelay: '180ms' }}
+          >
             <div className="hero-visual__halo" />
             <div className="hero-visual__frame">
               <div className="signal-stack">
                 <div className="signal-stack__intro">
-                  <span className="signal-stack__kicker">Operational thread</span>
+                  <span className="signal-stack__kicker">
+                    Operational thread
+                  </span>
                   <p>
-                    One request record expands into runtime activity, review, and
-                    merge readiness without losing lineage.
+                    One request record expands into runtime activity, review,
+                    and merge readiness without losing lineage.
                   </p>
                 </div>
                 <div className="signal-list">
@@ -126,7 +136,9 @@ function LandingPage() {
                 </div>
                 <div className="signal-stack__footer">
                   <Workflow />
-                  <span>Requests, runs, reviews, and decisions share one view.</span>
+                  <span>
+                    Requests, runs, reviews, and decisions share one view.
+                  </span>
                 </div>
               </div>
             </div>
@@ -166,10 +178,13 @@ function LandingPage() {
           <Badge variant="outline" className="section-badge">
             Proof
           </Badge>
-          <h2>Core capabilities should read like product mechanics, not filler.</h2>
+          <h2>
+            Core capabilities should read like product mechanics, not filler.
+          </h2>
           <p>
             These are the pieces worth proving early because they define whether
-            PatchPlane becomes a usable control plane or just another thin shell.
+            PatchPlane becomes a usable control plane or just another thin
+            shell.
           </p>
         </div>
         <div className="proof-list">
@@ -195,12 +210,14 @@ function LandingPage() {
             <Badge variant="outline" className="section-badge">
               Platform shape
             </Badge>
-            <h2>Build one shared control surface before the shells multiply.</h2>
+            <h2>
+              Build one shared control surface before the shells multiply.
+            </h2>
             <p>
-              The browser route at <code>/app</code> and the future desktop shell
-              should share the same product language, event model, and review
-              flow. The shell can change later. The operational surface should
-              not.
+              The browser route at <code>/app</code> and the future desktop
+              shell should share the same product language, event model, and
+              review flow. The shell can change later. The operational surface
+              should not.
             </p>
           </div>
           <div className="story-panel__signals">
@@ -222,10 +239,13 @@ function LandingPage() {
             <Badge variant="outline" className="section-badge">
               Start here
             </Badge>
-            <h2>Open the product shell, then inspect the architecture notes.</h2>
+            <h2>
+              Open the product shell, then inspect the architecture notes.
+            </h2>
             <p>
-              The shell should feel operational. The notes should explain why the
-              workspace stays small until the first real execution loop works.
+              The shell should feel operational. The notes should explain why
+              the workspace stays small until the first real execution loop
+              works.
             </p>
           </div>
           <div className="landing-cta__actions">

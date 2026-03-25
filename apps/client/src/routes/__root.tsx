@@ -1,5 +1,5 @@
-import { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext } from "@tanstack/react-router";
+import { QueryClient } from '@tanstack/react-query'
+import { createRootRouteWithContext } from '@tanstack/react-router'
 import { HeadContent, Scripts } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
@@ -9,7 +9,7 @@ import { ThemeProvider } from '@/components/theme-provider'
 import appCss from '../styles.css?url'
 
 export const Route = createRootRouteWithContext<{
-  queryClient: QueryClient;
+  queryClient: QueryClient
 }>()({
   head: () => ({
     meta: [

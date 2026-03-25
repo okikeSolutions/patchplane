@@ -55,9 +55,9 @@ function AboutPage() {
           Keep the workspace small until the execution loop is proven.
         </h1>
         <p className="info-hero__lede">
-          PatchPlane should earn its package boundaries by proving one real flow:
-          request intake, runtime activity, review output, and a visible decision
-          trail.
+          PatchPlane should earn its package boundaries by proving one real
+          flow: request intake, runtime activity, review output, and a visible
+          decision trail.
         </p>
       </section>
 
@@ -116,7 +116,9 @@ function AboutPage() {
           <Badge variant="outline" className="section-badge">
             Bootstrap
           </Badge>
-          <h2>Local commands and near-term implementation work stay operational.</h2>
+          <h2>
+            Local commands and near-term implementation work stay operational.
+          </h2>
           <p>
             This is the place for setup notes, current constraints, and the next
             slice of work that should turn the shell into a real control plane.
@@ -133,7 +135,10 @@ function AboutPage() {
               ))}
             </ol>
           </article>
-          <article className="command-block reveal-up" style={{ animationDelay: '120ms' }}>
+          <article
+            className="command-block reveal-up"
+            style={{ animationDelay: '120ms' }}
+          >
             <h3>Next build slice</h3>
             <p>
               Wire one request mutation, one fake run action, and one event feed

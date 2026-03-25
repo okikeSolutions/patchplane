@@ -181,7 +181,10 @@ function AppShellPage() {
           </ol>
         </div>
 
-        <div className="product-panel reveal-up" style={{ animationDelay: '120ms' }}>
+        <div
+          className="product-panel reveal-up"
+          style={{ animationDelay: '120ms' }}
+        >
           <div className="product-panel__header">
             <Badge variant="outline" className="section-badge">
               Implementation focus
