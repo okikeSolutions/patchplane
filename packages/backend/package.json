@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "convex dev",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "lint": "oxlint convex src",
+    "lint": "oxlint convex src && bun run lint:convex",
+    "lint:convex": "eslint convex --max-warnings=0",
+    "lint:convex:fix": "eslint convex --max-warnings=0 --fix",
     "format": "oxfmt convex src"
   },
   "dependencies": {
+    "@daytonaio/sdk": "^0.155.0",
     "@convex-dev/workos-authkit": "^0.1.6",
     "@patchplane/domain": "workspace:*",
     "convex": "latest",
@@ -17,8 +20,13 @@
     "octokit": "^5.0.3"
   },
   "devDependencies": {
+    "@convex-dev/eslint-plugin": "^1.2.1",
+    "@eslint/js": "^9.39.0",
     "@patchplane/typescript-config": "workspace:*",
     "@types/node": "^25.5.0",
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.0",
+    "eslint-plugin-oxlint": "^1.57.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.2"
   }
 }

@@ -9,9 +9,16 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as contracts from "../contracts.js";
+import type * as crons from "../crons.js";
+import type * as github from "../github.js";
+import type * as githubHttp from "../githubHttp.js";
+import type * as githubWorker from "../githubWorker.js";
 import type * as http from "../http.js";
 import type * as requests from "../requests.js";
 import type * as viewer from "../viewer.js";
+import type * as workflowWorker from "../workflowWorker.js";
+import type * as workflows from "../workflows.js";
 
 import type {
   ApiFromModules,
@@ -21,9 +28,16 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  contracts: typeof contracts;
+  crons: typeof crons;
+  github: typeof github;
+  githubHttp: typeof githubHttp;
+  githubWorker: typeof githubWorker;
   http: typeof http;
   requests: typeof requests;
   viewer: typeof viewer;
+  workflowWorker: typeof workflowWorker;
+  workflows: typeof workflows;
 }>;
 
 /**

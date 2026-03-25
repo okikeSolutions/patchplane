@@ -52,6 +52,7 @@ export default defineSchema({
   runtimeEvents: defineTable(runtimeEventValidator)
     .index('by_request', ['requestId'])
     .index('by_workflow_run_id', ['workflowRunId'])
+    .index('by_workflow_run_id_created_at', ['workflowRunId', 'createdAt'])
     .index('by_runtime_session_id', ['runtimeSessionId']),
   reviewRuns: defineTable(reviewRunValidator).index('by_request', [
     'requestId',

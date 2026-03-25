@@ -1,8 +1,5 @@
-'use node'
-
 import { httpAction } from './_generated/server'
-import { anyApi } from 'convex/server'
-import { createGitHubApp } from '../src/github/octokit'
+import { internal } from './_generated/api'
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -33,26 +30,6 @@ function parseJsonRecord(payload: string) {
   }
 }
 
-function readErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : 'Unknown GitHub webhook failure.'
-}
-
-function createGitHubAppFromEnv() {
-  return createGitHubApp({
-    appId: Number(process.env.GITHUB_APP_ID ?? 0),
-    privateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? '').replace(
-      /\\n/g,
-      '\n',
-    ),
-    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? '',
-    ...(process.env.GITHUB_API_BASE_URL
-      ? { baseUrl: process.env.GITHUB_API_BASE_URL }
-      : {}),
-  })
-}
-
 export const githubInstallationCallbackHandler = httpAction(
   async (ctx, request) => {
     const url = new URL(request.url)
@@ -68,7 +45,7 @@ export const githubInstallationCallbackHandler = httpAction(
       )
     }
 
-    await ctx.runMutation(anyApi.github.recordInstallationCallback, {
+    await ctx.runMutation(internal.github.recordInstallationCallback, {
       externalInstallationId: installationId,
       setupAction: url.searchParams.get('setup_action') ?? undefined,
       setupState: url.searchParams.get('state') ?? undefined,
@@ -76,7 +53,7 @@ export const githubInstallationCallbackHandler = httpAction(
 
     await ctx.scheduler.runAfter(
       0,
-      anyApi.githubWorker.syncInstallationFromCallback,
+      internal.githubWorker.syncInstallationFromCallback,
       {
         externalInstallationId: installationId,
       },
@@ -113,7 +90,7 @@ export const githubWebhookHandler = httpAction(async (ctx, request) => {
   const parsedPayload = parseJsonRecord(payload)
 
   const recordResult = await ctx.runMutation(
-    anyApi.github.recordWebhookDelivery,
+    internal.github.recordWebhookDelivery,
     {
       deliveryId,
       event,
@@ -145,40 +122,35 @@ export const githubWebhookHandler = httpAction(async (ctx, request) => {
     })
   }
 
-  const app = createGitHubAppFromEnv()
-  let shouldQueue = false
-  app.webhooks.on('issue_comment.created', async () => {
-    shouldQueue = true
-  })
-
-  try {
-    await app.webhooks.verifyAndReceive({
-      id: deliveryId,
-      name: event,
+  const verification = await ctx.runAction(
+    internal.githubWorker.verifyWebhookDelivery,
+    {
+      deliveryId,
+      event,
       payload,
-      signature: signature256 ?? '',
-    })
-  } catch (error) {
-    const errorMessage = readErrorMessage(error)
+      signature256: signature256 ?? '',
+    },
+  )
 
-    await ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
+  if (!verification.valid) {
+    await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
       deliveryRecordId: recordResult.deliveryRecordId,
       status: 'failed',
       commandEmitted: false,
-      errorMessage,
+      errorMessage: verification.errorMessage,
     })
 
     return jsonResponse(
       {
         ok: false,
-        error: errorMessage,
+        error: verification.errorMessage,
       },
       401,
     )
   }
 
-  if (!shouldQueue) {
-    await ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
+  if (!verification.shouldQueue) {
+    await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
       deliveryRecordId: recordResult.deliveryRecordId,
       status: 'ignored',
       commandEmitted: false,
@@ -194,18 +166,21 @@ export const githubWebhookHandler = httpAction(async (ctx, request) => {
   try {
     await ctx.scheduler.runAfter(
       0,
-      anyApi.githubWorker.processWebhookDelivery,
+      internal.githubWorker.processWebhookDelivery,
       {
         deliveryRecordId: recordResult.deliveryRecordId,
       },
     )
-    await ctx.runMutation(anyApi.github.queueWebhookDelivery, {
+    await ctx.runMutation(internal.github.queueWebhookDelivery, {
       deliveryRecordId: recordResult.deliveryRecordId,
     })
   } catch (error) {
-    const errorMessage = readErrorMessage(error)
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : 'Unknown GitHub webhook failure.'
 
-    await ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
+    await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
       deliveryRecordId: recordResult.deliveryRecordId,
       status: 'failed',
       commandEmitted: false,

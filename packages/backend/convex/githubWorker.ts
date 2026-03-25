@@ -1,20 +1,69 @@
 'use node'
 
 import { Duration, Effect, Schedule } from 'effect'
-import { internalAction } from './_generated/server'
-import { anyApi } from 'convex/server'
+import { internal } from './_generated/api'
+import type { Id } from './_generated/dataModel'
+import { internalAction, type ActionCtx } from './_generated/server'
 import { v } from 'convex/values'
+import type {
+  GitHubAppAuth,
+  GitHubWebhookDeliveryClient,
+  GitHubWebhookEnvelope,
+  GitHubWebhookIngestor,
+  PatchPlaneCommand,
+} from '@patchplane/domain'
 import {
   GitHubAppAuthService,
   GitHubWebhookDeliveryClientService,
   GitHubWebhookIngestorService,
 } from '@patchplane/domain'
 import { processPatchPlaneCommandsWithQueue } from '../src/github/commandQueue'
+import { createGitHubApp } from '../src/github/octokit'
 import { GitHubBoundaryLive } from '../src/github/layers'
-import type { GitHubWebhookEnvelope } from '@patchplane/domain'
 
 const webhookReconciliationKey = 'app_webhook_redelivery'
 const initialWebhookReconciliationLookbackMs = 7 * 24 * 60 * 60 * 1000
+
+type GitHubWorkerResult = {
+  readonly status: string
+  readonly commandCount: number
+}
+
+type ReconciliationResult = {
+  readonly status: string
+  readonly scannedDeliveries: number
+  readonly redeliveredDeliveries: number
+}
+
+type ConvexPromptRequestCommand = Omit<PatchPlaneCommand, 'scope'> & {
+  scope: {
+    repoUrl: string
+    baseBranch: string
+    targetBranch: string
+    includePaths: string[]
+    excludePaths: string[]
+    intent: string
+  }
+}
+
+interface DeliveryForProcessing {
+  readonly deliveryId: string
+  readonly event: string
+  readonly action?: string
+  readonly externalInstallationId?: number
+  readonly externalRepositoryId?: number
+  readonly repositoryFullName?: string
+  readonly repositoryNodeId?: string
+  readonly status: string
+  readonly signatureVerified: boolean
+  readonly commandEmitted: boolean
+  readonly payload: string
+  readonly promptRequestId?: string
+  readonly workflowRunId?: string
+  readonly receivedAt: number
+  readonly processedAt?: number
+  readonly errorMessage?: string
+}
 
 function readErrorMessage(error: unknown) {
   return error instanceof Error
@@ -22,13 +71,37 @@ function readErrorMessage(error: unknown) {
     : 'Unknown GitHub worker failure.'
 }
 
-function runGitHubBoundary<A, E>(effect: Effect.Effect<A, E, any>) {
-  return Effect.runPromise(Effect.provide(effect, GitHubBoundaryLive))
+function createGitHubAppFromEnv() {
+  return createGitHubApp({
+    appId: Number(process.env.GITHUB_APP_ID ?? 0),
+    privateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? '').replace(
+      /\\n/g,
+      '\n',
+    ),
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? '',
+    ...(process.env.GITHUB_API_BASE_URL
+      ? { baseUrl: process.env.GITHUB_API_BASE_URL }
+      : {}),
+  })
 }
 
-function withGitHubRetry<A, E>(
-  effect: Effect.Effect<A, E, never>,
-): Effect.Effect<A, E, never> {
+function runGitHubBoundary<A>(effect: Effect.Effect<A, unknown, never>) {
+  return Effect.runPromise(effect)
+}
+
+function provideGitHubBoundary<A>(
+  effect: Effect.Effect<A, unknown, unknown>,
+): Effect.Effect<A, unknown, never> {
+  return Effect.provide(effect, GitHubBoundaryLive) as Effect.Effect<
+    A,
+    unknown,
+    never
+  >
+}
+
+function withGitHubRetry<A>(
+  effect: Effect.Effect<A, unknown, never>,
+): Effect.Effect<A, unknown, never> {
   return Effect.retry(
     effect,
     Schedule.intersect(
@@ -38,17 +111,35 @@ function withGitHubRetry<A, E>(
   )
 }
 
-function toWebhookEnvelope(delivery: {
-  readonly deliveryId: string
-  readonly event: string
-  readonly action?: string
-  readonly externalInstallationId?: number
-  readonly externalRepositoryId?: number
-  readonly repositoryFullName?: string
-  readonly repositoryNodeId?: string
-  readonly payload: string
-  readonly receivedAt: number
-}): GitHubWebhookEnvelope {
+async function resolveGitHubAppAuth(): Promise<GitHubAppAuth> {
+  return runGitHubBoundary(
+    provideGitHubBoundary(
+      Effect.flatMap(GitHubAppAuthService, (auth) => Effect.succeed(auth)),
+    ),
+  )
+}
+
+async function resolveWebhookIngestor(): Promise<GitHubWebhookIngestor> {
+  return runGitHubBoundary(
+    provideGitHubBoundary(
+      Effect.flatMap(GitHubWebhookIngestorService, (ingestor) =>
+        Effect.succeed(ingestor),
+      ),
+    ),
+  )
+}
+
+async function resolveWebhookDeliveryClient(): Promise<GitHubWebhookDeliveryClient> {
+  return runGitHubBoundary(
+    provideGitHubBoundary(
+      Effect.flatMap(GitHubWebhookDeliveryClientService, (client) =>
+        Effect.succeed(client),
+      ),
+    ),
+  )
+}
+
+function toWebhookEnvelope(delivery: DeliveryForProcessing): GitHubWebhookEnvelope {
   return {
     deliveryId: delivery.deliveryId,
     event: delivery.event,
@@ -62,160 +153,270 @@ function toWebhookEnvelope(delivery: {
   }
 }
 
-function syncInstallationFromCallbackProgram(
-  ctx: Parameters<typeof syncInstallationFromCallback.handler>[0],
-  externalInstallationId: number,
-) {
-  return Effect.gen(function* () {
-    const auth = yield* GitHubAppAuthService
-    const scope = yield* auth.resolveInstallationScope(externalInstallationId)
-
-    const githubInstallationId = yield* Effect.promise(() =>
-      ctx.runMutation(anyApi.github.upsertInstallationScope, {
-        externalInstallationId: scope.externalInstallationId,
-        accountLogin: scope.accountLogin,
-        accountType: scope.accountType,
-        targetType: scope.targetType,
-        repositorySelection: scope.repositorySelection,
-        permissions: scope.permissions,
-        installedByUserId: undefined,
-        syncedAt: scope.syncedAt,
-      }),
-    )
-
-    yield* Effect.promise(() =>
-      ctx.runMutation(anyApi.github.upsertRepositoryConnections, {
-        githubInstallationId,
-        repositories: scope.repositories.map((repository) => ({
-          externalRepositoryId: repository.externalRepositoryId,
-          externalNodeId: repository.externalNodeId,
-          fullName: repository.fullName,
-          owner: repository.owner,
-          name: repository.name,
-          defaultBranch: repository.defaultBranch,
-          isPrivate: repository.isPrivate,
-          isArchived: repository.isArchived,
-          isDisabled: repository.isDisabled,
-        })),
-        syncedAt: scope.syncedAt,
-      }),
-    )
-
-    return {
-      githubInstallationId: String(githubInstallationId),
-      repositoryCount: scope.repositories.length,
-    }
-  })
+function toConvexPromptRequestCommand(
+  command: PatchPlaneCommand,
+): ConvexPromptRequestCommand {
+  return {
+    ...command,
+    scope: {
+      ...command.scope,
+      includePaths: [...command.scope.includePaths],
+      excludePaths: [...command.scope.excludePaths],
+    },
+  }
 }
 
-function processWebhookDeliveryProgram(
-  ctx: Parameters<typeof processWebhookDelivery.handler>[0],
-  args: { readonly deliveryRecordId: string },
-  delivery: NonNullable<
-    Awaited<ReturnType<Parameters<typeof processWebhookDelivery.handler>[0]['runQuery']>>
-  >,
+async function createPromptRequestsFromCommands(
+  ctx: ActionCtx,
+  deliveryRecordId: Id<'webhookDeliveries'>,
+  commands: ReadonlyArray<PatchPlaneCommand>,
 ) {
-  return Effect.gen(function* () {
-    const ingestor = yield* GitHubWebhookIngestorService
-    const commands = yield* ingestor.ingest(
-      toWebhookEnvelope({
-        deliveryId: delivery.deliveryId,
-        event: delivery.event,
-        action: delivery.action,
-        externalInstallationId: delivery.externalInstallationId,
-        externalRepositoryId: delivery.externalRepositoryId,
-        repositoryFullName: delivery.repositoryFullName,
-        repositoryNodeId: delivery.repositoryNodeId,
-        payload: delivery.payload,
-        receivedAt: delivery.receivedAt,
-      }),
+  await runGitHubBoundary(
+    processPatchPlaneCommandsWithQueue(commands, (command) =>
+      Effect.promise(() =>
+        ctx.runMutation(internal.github.createPromptRequestFromCommand, {
+          deliveryRecordId,
+          command: toConvexPromptRequestCommand(command),
+        }),
+      ),
+    ) as Effect.Effect<void, unknown, never>,
+  )
+}
+
+async function syncInstallationFromCallbackHandler(
+  ctx: ActionCtx,
+  externalInstallationId: number,
+): Promise<{
+  readonly githubInstallationId: string
+  readonly repositoryCount: number
+}> {
+  const auth = await resolveGitHubAppAuth()
+  const scope = await runGitHubBoundary(
+    provideGitHubBoundary(auth.resolveInstallationScope(externalInstallationId)),
+  )
+
+  const githubInstallationId = await ctx.runMutation(
+    internal.github.upsertInstallationScope,
+    {
+      externalInstallationId: scope.externalInstallationId,
+      accountLogin: scope.accountLogin,
+      accountType: scope.accountType,
+      targetType: scope.targetType,
+      repositorySelection: scope.repositorySelection,
+      permissions: scope.permissions,
+      installedByUserId: undefined,
+      syncedAt: scope.syncedAt,
+    },
+  )
+
+  await ctx.runMutation(internal.github.upsertRepositoryConnections, {
+    githubInstallationId,
+    repositories: scope.repositories.map((repository) => ({
+      externalRepositoryId: repository.externalRepositoryId,
+      externalNodeId: repository.externalNodeId,
+      fullName: repository.fullName,
+      owner: repository.owner,
+      name: repository.name,
+      defaultBranch: repository.defaultBranch,
+      isPrivate: repository.isPrivate,
+      isArchived: repository.isArchived,
+      isDisabled: repository.isDisabled,
+    })),
+    syncedAt: scope.syncedAt,
+  })
+
+  return {
+    githubInstallationId: String(githubInstallationId),
+    repositoryCount: scope.repositories.length,
+  }
+}
+
+async function verifyWebhookDeliveryHandler(args: {
+  readonly deliveryId: string
+  readonly event: string
+  readonly payload: string
+  readonly signature256: string
+}): Promise<{
+  readonly valid: boolean
+  readonly shouldQueue: boolean
+  readonly errorMessage?: string
+}> {
+  const app = createGitHubAppFromEnv()
+  let shouldQueue = false
+
+  app.webhooks.on('issue_comment.created', () => {
+    shouldQueue = true
+  })
+
+  try {
+    await app.webhooks.verifyAndReceive({
+      id: args.deliveryId,
+      name: args.event,
+      payload: args.payload,
+      signature: args.signature256,
+    })
+
+    return {
+      valid: true,
+      shouldQueue,
+      errorMessage: undefined,
+    }
+  } catch (error) {
+    return {
+      valid: false,
+      shouldQueue: false,
+      errorMessage: readErrorMessage(error),
+    }
+  }
+}
+
+async function processWebhookDeliveryHandler(
+  ctx: ActionCtx,
+  args: { readonly deliveryRecordId: Id<'webhookDeliveries'> },
+): Promise<GitHubWorkerResult> {
+  const delivery = await ctx.runQuery(internal.github.getWebhookDeliveryForProcessing, {
+    deliveryRecordId: args.deliveryRecordId,
+  })
+
+  if (!delivery) {
+    return {
+      status: 'failed',
+      commandCount: 0,
+    }
+  }
+
+  if (!delivery.signatureVerified) {
+    await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
+      deliveryRecordId: args.deliveryRecordId,
+      status: 'failed',
+      commandEmitted: false,
+      errorMessage:
+        'Webhook delivery was not signature verified before processing.',
+    })
+
+    return {
+      status: 'failed',
+      commandCount: 0,
+    }
+  }
+
+  try {
+    const ingestor = await resolveWebhookIngestor()
+    const commands = await runGitHubBoundary(
+      provideGitHubBoundary(ingestor.ingest(toWebhookEnvelope(delivery))),
     )
 
     if (commands.length === 0) {
-      yield* Effect.promise(() =>
-        ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
-          deliveryRecordId: args.deliveryRecordId as any,
-          status: 'ignored',
-          commandEmitted: false,
-          errorMessage: undefined,
-        }),
-      )
+      await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
+        deliveryRecordId: args.deliveryRecordId,
+        status: 'ignored',
+        commandEmitted: false,
+        errorMessage: undefined,
+      })
 
       return {
         status: 'ignored',
         commandCount: 0,
-      } as const
+      }
     }
 
-    yield* processPatchPlaneCommandsWithQueue(commands, (command) =>
-      Effect.promise(() =>
-        ctx.runMutation(anyApi.github.createPromptRequestFromCommand, {
-          deliveryRecordId: args.deliveryRecordId as any,
-          command,
-        }),
-      ),
+    await createPromptRequestsFromCommands(
+      ctx,
+      args.deliveryRecordId,
+      commands,
     )
 
     return {
       status: 'accepted',
       commandCount: commands.length,
-    } as const
-  })
+    }
+  } catch (error) {
+    await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
+      deliveryRecordId: args.deliveryRecordId,
+      status: 'failed',
+      commandEmitted: false,
+      errorMessage: readErrorMessage(error),
+    })
+
+    return {
+      status: 'failed',
+      commandCount: 0,
+    }
+  }
 }
 
-function reconcileWebhookDeliveriesProgram(
-  ctx: Parameters<typeof reconcileWebhookDeliveries.handler>[0],
-  runStartedAt: number,
-  deliveredSince: number,
-) {
-  return Effect.gen(function* () {
-    const webhookDeliveryClient = yield* GitHubWebhookDeliveryClientService
-    const deliveries = yield* withGitHubRetry(
-      webhookDeliveryClient.listDeliveriesSince(deliveredSince),
+async function reconcileWebhookDeliveriesHandler(
+  ctx: ActionCtx,
+): Promise<ReconciliationResult> {
+  const runStartedAt = Date.now()
+  const reconciliation = await ctx.runMutation(
+    internal.github.beginWebhookReconciliationRun,
+    {
+      key: webhookReconciliationKey,
+      startedAt: runStartedAt,
+    },
+  )
+  const deliveredSince =
+    reconciliation.lastSuccessfulRedeliveryStartedAt ??
+    runStartedAt - initialWebhookReconciliationLookbackMs
+
+  try {
+    const deliveryClient = await resolveWebhookDeliveryClient()
+    const deliveries = await runGitHubBoundary(
+      provideGitHubBoundary(
+        withGitHubRetry(deliveryClient.listDeliveriesSince(deliveredSince)),
+      ),
     )
 
     const deliveriesByGuid = new Map<string, typeof deliveries>()
 
     for (const delivery of deliveries) {
-      const existingDeliveries = deliveriesByGuid.get(delivery.guid) ?? []
-      deliveriesByGuid.set(delivery.guid, [...existingDeliveries, delivery])
+      const attempts = deliveriesByGuid.get(delivery.guid) ?? []
+      deliveriesByGuid.set(delivery.guid, [...attempts, delivery])
     }
 
     const redeliveryCandidates = [...deliveriesByGuid.values()]
-      .map((deliveryAttempts) =>
-        deliveryAttempts.toSorted(
+      .map((attempts) =>
+        attempts.toSorted(
           (left, right) =>
             Date.parse(right.deliveredAt) - Date.parse(left.deliveredAt),
         ),
       )
-      .filter(
-        (deliveryAttempts) =>
-          !deliveryAttempts.some((delivery) => delivery.status === 'OK'),
+      .filter((attempts) => !attempts.some((attempt) => attempt.status === 'OK'))
+      .map((attempts) => attempts[0])
+
+    for (const candidate of redeliveryCandidates) {
+      await runGitHubBoundary(
+        provideGitHubBoundary(
+          withGitHubRetry(deliveryClient.redeliverDelivery(candidate.attemptId)),
+        ),
       )
-      .map((deliveryAttempts) => deliveryAttempts[0])
+    }
 
-    yield* Effect.forEach(
-      redeliveryCandidates,
-      (delivery) => withGitHubRetry(
-        webhookDeliveryClient.redeliverDelivery(delivery.attemptId),
-      ),
-      { discard: true },
-    )
-
-    yield* Effect.promise(() =>
-      ctx.runMutation(anyApi.github.completeWebhookReconciliationRun, {
-        key: webhookReconciliationKey,
-        completedAt: Date.now(),
-        lastSuccessfulRedeliveryStartedAt: runStartedAt,
-      }),
-    )
+    await ctx.runMutation(internal.github.completeWebhookReconciliationRun, {
+      key: webhookReconciliationKey,
+      completedAt: Date.now(),
+      lastSuccessfulRedeliveryStartedAt: runStartedAt,
+    })
 
     return {
       status: 'completed',
       scannedDeliveries: deliveries.length,
       redeliveredDeliveries: redeliveryCandidates.length,
-    } as const
-  })
+    }
+  } catch (error) {
+    await ctx.runMutation(internal.github.failWebhookReconciliationRun, {
+      key: webhookReconciliationKey,
+      completedAt: Date.now(),
+      errorMessage: readErrorMessage(error),
+    })
+
+    return {
+      status: 'failed',
+      scannedDeliveries: 0,
+      redeliveredDeliveries: 0,
+    }
+  }
 }
 
 export const syncInstallationFromCallback = internalAction({
@@ -227,9 +428,22 @@ export const syncInstallationFromCallback = internalAction({
     repositoryCount: v.number(),
   }),
   handler: (ctx, args) =>
-    runGitHubBoundary(
-      syncInstallationFromCallbackProgram(ctx, args.externalInstallationId),
-    ),
+    syncInstallationFromCallbackHandler(ctx, args.externalInstallationId),
+})
+
+export const verifyWebhookDelivery = internalAction({
+  args: {
+    deliveryId: v.string(),
+    event: v.string(),
+    payload: v.string(),
+    signature256: v.string(),
+  },
+  returns: v.object({
+    valid: v.boolean(),
+    shouldQueue: v.boolean(),
+    errorMessage: v.optional(v.string()),
+  }),
+  handler: (_ctx, args) => verifyWebhookDeliveryHandler(args),
 })
 
 export const processWebhookDelivery = internalAction({
@@ -240,60 +454,7 @@ export const processWebhookDelivery = internalAction({
     status: v.string(),
     commandCount: v.number(),
   }),
-  handler: async (ctx, args) => {
-    const delivery = await ctx.runQuery(
-      anyApi.github.getWebhookDeliveryForProcessing,
-      {
-        deliveryRecordId: args.deliveryRecordId,
-      },
-    )
-
-    if (!delivery) {
-      return {
-        status: 'failed',
-        commandCount: 0,
-      }
-    }
-
-    if (!delivery.signatureVerified) {
-      await ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
-        deliveryRecordId: args.deliveryRecordId,
-        status: 'failed',
-        commandEmitted: false,
-        errorMessage:
-          'Webhook delivery was not signature verified before processing.',
-      })
-
-      return {
-        status: 'failed',
-        commandCount: 0,
-      }
-    }
-
-    try {
-      return await runGitHubBoundary(
-        processWebhookDeliveryProgram(
-          ctx,
-          { deliveryRecordId: args.deliveryRecordId as any },
-          delivery,
-        ),
-      )
-    } catch (error) {
-      const errorMessage = readErrorMessage(error)
-
-      await ctx.runMutation(anyApi.github.markWebhookDeliveryOutcome, {
-        deliveryRecordId: args.deliveryRecordId,
-        status: 'failed',
-        commandEmitted: false,
-        errorMessage,
-      })
-
-      return {
-        status: 'failed',
-        commandCount: 0,
-      }
-    }
-  },
+  handler: (ctx, args) => processWebhookDeliveryHandler(ctx, args),
 })
 
 export const reconcileWebhookDeliveries = internalAction({
@@ -303,35 +464,5 @@ export const reconcileWebhookDeliveries = internalAction({
     scannedDeliveries: v.number(),
     redeliveredDeliveries: v.number(),
   }),
-  handler: async (ctx) => {
-    const runStartedAt = Date.now()
-    const reconciliation = await ctx.runMutation(
-      anyApi.github.beginWebhookReconciliationRun,
-      {
-        key: webhookReconciliationKey,
-        startedAt: runStartedAt,
-      },
-    )
-    const deliveredSince =
-      reconciliation.lastSuccessfulRedeliveryStartedAt ??
-      runStartedAt - initialWebhookReconciliationLookbackMs
-
-    try {
-      return await runGitHubBoundary(
-        reconcileWebhookDeliveriesProgram(ctx, runStartedAt, deliveredSince),
-      )
-    } catch (error) {
-      await ctx.runMutation(anyApi.github.failWebhookReconciliationRun, {
-        key: webhookReconciliationKey,
-        completedAt: Date.now(),
-        errorMessage: readErrorMessage(error),
-      })
-
-      return {
-        status: 'failed',
-        scannedDeliveries: 0,
-        redeliveredDeliveries: 0,
-      }
-    }
-  },
+  handler: (ctx) => reconcileWebhookDeliveriesHandler(ctx),
 })

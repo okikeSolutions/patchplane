@@ -6,6 +6,8 @@ import {
   GitHubIssueCommentPromptSourceSchema,
   GitHubWebhookReconciliationStateSchema,
   PromptRequestCommandSchema,
+  RuntimeAdapterService,
+  SandboxAdapterService,
 } from '../src/index'
 
 const decodePromptRequestCommand = Schema.decodeUnknownSync(
@@ -136,5 +138,81 @@ describe('domain contracts', () => {
     )
 
     expect(token.token).toBe('installation-token')
+  })
+
+  test('resolves execution services through Effect tags', async () => {
+    const fakeRuntimeAdapter = {
+      name: 'fake-runtime-adapter',
+      createExecutionPlan: () =>
+        Effect.succeed({
+          command: 'echo hello',
+          workingDirectory: 'workspace/run_1',
+          env: {},
+        }),
+      normalizeOutput: () => Effect.succeed([]),
+    }
+    const fakeSandboxAdapter = {
+      name: 'fake-sandbox-adapter',
+      execute: () =>
+        Effect.succeed({
+          externalSessionId: 'sandbox-1:session-1',
+          events: [],
+        }),
+    }
+
+    const program = Effect.gen(function* () {
+      const runtime = yield* RuntimeAdapterService
+      const sandbox = yield* SandboxAdapterService
+      const plan = yield* runtime.createExecutionPlan({
+        promptRequestId: 'request_1',
+        session: {
+          id: 'session_1',
+          workflowRunId: 'run_1',
+          sandboxProvider: 'daytona',
+          runtimeProvider: 'pi-mono',
+          status: 'queued' as const,
+          createdAt: 1_710_000_000_000,
+          updatedAt: 1_710_000_001_000,
+        },
+        prompt: 'Run the test suite',
+        workingDirectory: 'workspace/run_1',
+        env: {},
+      })
+
+      const result = yield* sandbox.execute(
+        {
+          promptRequestId: 'request_1',
+          session: {
+            id: 'session_1',
+            workflowRunId: 'run_1',
+            sandboxProvider: 'daytona',
+            runtimeProvider: 'pi-mono',
+            status: 'queued' as const,
+            createdAt: 1_710_000_000_000,
+            updatedAt: 1_710_000_001_000,
+          },
+          prompt: 'Run the test suite',
+          repoUrl: 'https://github.com/acme/repo.git',
+          baseBranch: 'main',
+          targetBranch: 'patchplane/test',
+          workingDirectory: 'workspace/run_1',
+          env: {},
+        },
+        runtime,
+      )
+
+      return { plan, result }
+    })
+
+    const resolved = await Effect.runPromise(
+      Effect.provideService(
+        Effect.provideService(program, RuntimeAdapterService, fakeRuntimeAdapter),
+        SandboxAdapterService,
+        fakeSandboxAdapter,
+      ),
+    )
+
+    expect(resolved.plan.command).toBe('echo hello')
+    expect(resolved.result.externalSessionId).toBe('sandbox-1:session-1')
   })
 })

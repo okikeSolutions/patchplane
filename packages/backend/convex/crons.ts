@@ -1,11 +1,12 @@
-import { anyApi, cronJobs } from 'convex/server'
+import { cronJobs } from 'convex/server'
+import { internal } from './_generated/api'
 
 const crons = cronJobs()
 
 crons.interval(
   'reconcile github webhook deliveries',
   { minutes: 15 },
-  anyApi.githubWorker.reconcileWebhookDeliveries,
+  internal.githubWorker.reconcileWebhookDeliveries,
   {},
 )
 

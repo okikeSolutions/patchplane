@@ -28,6 +28,13 @@ bun run typecheck:convex
 
 This checks Convex functions after `_generated/server` exists.
 
+```bash
+bun run lint
+```
+
+This runs `oxlint` first, then a focused ESLint pass over `convex/` for the
+Convex-specific rules that Oxlint does not fully cover yet.
+
 ## GitHub App Setup
 
 PatchPlane should keep the GitHub App scoped to the minimum currently implemented slice.

@@ -807,7 +807,7 @@ The MVP is suitable for **single-team internal usage first**. It is **not yet su
 - Runtime, sandbox, policy, and graph concerns already exist, but they are internal modules under `packages/backend/src` rather than separate workspace packages.
 - Shared UI is local to `apps/client` today; there is no top-level `/ui` package yet.
 - GitHub App integration, verified webhook intake, Convex-backed workflow orchestration boundaries, and shared Effect service tags are present in the repo today.
-- Concrete Daytona execution and Pi Mono runtime adapters are not present in the repo yet.
+- Concrete Daytona execution and Pi Mono runtime adapters are present in the repo today behind the shared execution boundary.
 
 ### 13.2 Core interface boundaries
 

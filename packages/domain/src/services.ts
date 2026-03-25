@@ -9,7 +9,13 @@ import type {
   GitHubWebhookEnvelope,
 } from './github'
 import type { PatchPlaneCommand } from './request-intake'
-import type { RuntimeEvent, RuntimeSession } from './runtime'
+import type {
+  RuntimeExecutionOutput,
+  RuntimeExecutionPlan,
+  RuntimeExecutionRequest,
+  SandboxExecutionRequest,
+  SandboxExecutionResult,
+} from './runtime'
 
 export interface BoundaryFailure {
   readonly boundary: string
@@ -61,15 +67,21 @@ export interface GitHubPublisher {
 
 export interface RuntimeAdapter {
   readonly name: string
-  run(session: RuntimeSession): Effect.Effect<RuntimeEvent[], BoundaryFailure>
+  createExecutionPlan(
+    request: RuntimeExecutionRequest,
+  ): Effect.Effect<RuntimeExecutionPlan, BoundaryFailure>
+  normalizeOutput(
+    request: RuntimeExecutionRequest,
+    output: RuntimeExecutionOutput,
+  ): Effect.Effect<SandboxExecutionResult['events'], BoundaryFailure>
 }
 
 export interface SandboxAdapter {
   readonly name: string
   execute(
-    session: RuntimeSession,
+    request: SandboxExecutionRequest,
     runtime: RuntimeAdapter,
-  ): Effect.Effect<ReadonlyArray<RuntimeEvent>, BoundaryFailure>
+  ): Effect.Effect<SandboxExecutionResult, BoundaryFailure>
 }
 
 export class GitHubAppAuthService extends Context.Tag(
@@ -91,3 +103,11 @@ export class GitHubWebhookDeliveryClientService extends Context.Tag(
 export class GitHubPublisherService extends Context.Tag(
   '@patchplane/domain/GitHubPublisherService',
 )<GitHubPublisherService, GitHubPublisher>() {}
+
+export class RuntimeAdapterService extends Context.Tag(
+  '@patchplane/domain/RuntimeAdapterService',
+)<RuntimeAdapterService, RuntimeAdapter>() {}
+
+export class SandboxAdapterService extends Context.Tag(
+  '@patchplane/domain/SandboxAdapterService',
+)<SandboxAdapterService, SandboxAdapter>() {}

@@ -9,22 +9,22 @@ export const authKit = new AuthKit<DataModel>(components.workOSAuthKit, {
 })
 
 export const { authKitEvent } = authKit.events({
-  'user.created': async (_ctx, _event) => {
-    return
+  'user.created': (_ctx, _event) => {
+    return Promise.resolve()
   },
-  'user.updated': async (_ctx, _event) => {
-    return
+  'user.updated': (_ctx, _event) => {
+    return Promise.resolve()
   },
-  'user.deleted': async (_ctx, _event) => {
-    return
+  'user.deleted': (_ctx, _event) => {
+    return Promise.resolve()
   },
 })
 
 export const { authKitAction } = authKit.actions({
-  authentication: async (_ctx, _action, response) => {
-    return response.allow()
+  authentication: (_ctx, _action, response) => {
+    return Promise.resolve(response.allow())
   },
-  userRegistration: async (_ctx, _action, response) => {
-    return response.allow()
+  userRegistration: (_ctx, _action, response) => {
+    return Promise.resolve(response.allow())
   },
 })
