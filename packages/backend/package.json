@@ -7,6 +7,7 @@
     "dev": "convex dev",
     "test": "bun test",
     "typecheck": "tsc --project tsconfig.json --noEmit",
+    "typecheck:convex": "tsc --project convex/tsconfig.json --noEmit",
     "lint": "oxlint convex src && bun run lint:convex",
     "lint:convex": "eslint convex --max-warnings=0",
     "lint:convex:fix": "eslint convex --max-warnings=0 --fix",

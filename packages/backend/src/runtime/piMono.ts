@@ -71,8 +71,10 @@ function toExecutionMessage(event: PiJsonEvent): string | null {
       return event.finalError
         ? `Pi auto-retry ended with error: ${event.finalError}`
         : 'Pi auto-retry ended.'
+    case 'compaction_start':
     case 'auto_compaction_start':
       return `Pi auto-compaction started${event.reason ? `: ${event.reason}` : ''}.`
+    case 'compaction_end':
     case 'auto_compaction_end':
       return event.aborted
         ? 'Pi auto-compaction aborted.'
@@ -101,6 +103,8 @@ function toRuntimeEventType(event: PiJsonEvent): RuntimeEventInput['type'] | nul
       return 'tool.called'
     case 'tool_execution_end':
       return event.isError ? 'turn.failed' : 'artifact.emitted'
+    case 'compaction_start':
+    case 'compaction_end':
     case 'auto_retry_start':
     case 'auto_retry_end':
     case 'auto_compaction_start':
