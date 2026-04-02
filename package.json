@@ -9,6 +9,7 @@
     "dev:client": "bun run --cwd apps/client dev",
     "dev:backend": "bun run --cwd packages/backend dev",
     "build:client": "bun run --cwd apps/client build",
+    "test:backend": "bun run --cwd packages/backend test",
     "test:domain": "bun run --cwd packages/domain test",
     "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck",
     "lint": "oxlint . && bun run --cwd packages/backend lint:convex",

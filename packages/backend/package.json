@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "convex dev",
+    "test": "bun test",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "lint": "oxlint convex src && bun run lint:convex",
     "lint:convex": "eslint convex --max-warnings=0",

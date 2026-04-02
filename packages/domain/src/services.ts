@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Data, Effect } from 'effect'
 import type {
   GitHubInstallation,
   GitHubInstallationScope,
@@ -17,12 +17,12 @@ import type {
   SandboxExecutionResult,
 } from './runtime'
 
-export interface BoundaryFailure {
+export class BoundaryFailure extends Data.TaggedError('BoundaryFailure')<{
   readonly boundary: string
   readonly message: string
   readonly retryable: boolean
   readonly cause?: unknown
-}
+}> {}
 
 export interface GitHubAppAuth {
   readonly name: string

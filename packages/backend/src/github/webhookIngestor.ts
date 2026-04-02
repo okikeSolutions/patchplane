@@ -1,16 +1,14 @@
-import { Effect, Schema } from 'effect'
-import type {
+import { Effect, ParseResult, Schema } from 'effect'
+import {
   BoundaryFailure,
-  GitHubWebhookEnvelope,
-  GitHubWebhookIngestor,
-  PatchPlaneCommand,
-  PromptRequestCommand,
+  type GitHubWebhookEnvelope,
+  type GitHubWebhookIngestor,
+  type PatchPlaneCommand,
+  type PromptRequestCommand,
 } from '@patchplane/domain'
 import { PromptRequestCommandSchema } from '@patchplane/domain'
 
-const decodePromptRequestCommand = Schema.decodeUnknownSync(
-  PromptRequestCommandSchema,
-)
+const decodePromptRequestCommand = Schema.decodeUnknown(PromptRequestCommandSchema)
 
 export interface GitHubCommandDefaults {
   readonly executionTargetId: string
@@ -36,12 +34,22 @@ function createBoundaryFailure(
   message: string,
   cause?: unknown,
 ): BoundaryFailure {
-  return {
+  return new BoundaryFailure({
     boundary: 'github.webhookIngestor',
     message,
     retryable: false,
     cause,
-  }
+  })
+}
+
+function createParseFailure(
+  message: string,
+  cause: ParseResult.ParseError,
+): BoundaryFailure {
+  return createBoundaryFailure(
+    `${message} ${ParseResult.TreeFormatter.formatErrorSync(cause)}`,
+    cause,
+  )
 }
 
 export function extractPatchPlaneCommand(body: string): string | null {
@@ -70,84 +78,88 @@ export class IssueCommentGitHubWebhookIngestor implements GitHubWebhookIngestor 
       return Effect.succeed([])
     }
 
-    return Effect.try({
-      try: () => {
-        const payload = JSON.parse(
-          delivery.payload,
-        ) as GitHubIssueCommentPayload
-        const command = extractPatchPlaneCommand(payload.comment?.body ?? '')
+    const defaults = this.defaults
 
-        if (!command) {
-          return []
-        }
+    return Effect.gen(function* () {
+      const payload = yield* Effect.try({
+        try: () => JSON.parse(delivery.payload) as GitHubIssueCommentPayload,
+        catch: (cause) =>
+          createBoundaryFailure(
+            'Failed to parse GitHub webhook payload JSON.',
+            cause,
+          ),
+      })
+      const command = extractPatchPlaneCommand(payload.comment?.body ?? '')
 
-        const repositoryFullName = payload.repository?.full_name
-        const externalRepositoryId = payload.repository?.id
-        const repositoryNodeId = payload.repository?.node_id
-        const externalInstallationId = payload.installation?.id
-        const issueNumber = payload.issue?.number
-        const commentId = payload.comment?.id
-        const actorLogin = payload.sender?.login
+      if (!command) {
+        return []
+      }
 
-        if (
-          !repositoryFullName ||
-          !externalRepositoryId ||
-          !repositoryNodeId ||
-          !externalInstallationId ||
-          !issueNumber ||
-          !commentId ||
-          !actorLogin
-        ) {
-          throw createBoundaryFailure(
+      const repositoryFullName = payload.repository?.full_name
+      const externalRepositoryId = payload.repository?.id
+      const repositoryNodeId = payload.repository?.node_id
+      const externalInstallationId = payload.installation?.id
+      const issueNumber = payload.issue?.number
+      const commentId = payload.comment?.id
+      const actorLogin = payload.sender?.login
+
+      if (
+        !repositoryFullName ||
+        !externalRepositoryId ||
+        !repositoryNodeId ||
+        !externalInstallationId ||
+        !issueNumber ||
+        !commentId ||
+        !actorLogin
+      ) {
+        return yield* Effect.fail(
+          createBoundaryFailure(
             'Issue comment webhook payload is missing required command fields.',
             payload,
-          )
-        }
+          ),
+        )
+      }
 
-        const promptRequestCommand: PromptRequestCommand =
-          decodePromptRequestCommand({
-            kind: 'prompt_request.create',
-            projectId: repositoryFullName,
-            executionTargetId: this.defaults.executionTargetId,
-            policyBundleId: this.defaults.policyBundleId,
-            createdByUserId: `github:${actorLogin}`,
-            prompt: command,
-            scope: {
-              repoUrl:
-                payload.repository?.clone_url ??
-                `https://github.com/${repositoryFullName}.git`,
-              baseBranch: payload.repository?.default_branch ?? 'main',
-              targetBranch: `patchplane/comment-${commentId}`,
-              includePaths: [],
-              excludePaths: [],
-              intent: 'github.issue_comment',
-            },
-            source: {
-              kind: 'github.issue_comment',
-              deliveryId: delivery.deliveryId,
-              externalInstallationId,
-              externalRepositoryId,
-              externalRepositoryNodeId: repositoryNodeId,
-              repositoryFullName,
-              issueNumber,
-              commentId,
-              actorLogin,
-              command,
-            },
-          })
-
-        return [promptRequestCommand]
-      },
-      catch: (cause) =>
-        typeof cause === 'object' &&
-        cause !== null &&
-        'boundary' in cause &&
-        'message' in cause
-          ? (cause as BoundaryFailure)
-          : createBoundaryFailure(
+      const promptRequestCommand: PromptRequestCommand =
+        yield* decodePromptRequestCommand({
+          kind: 'prompt_request.create',
+          projectId: repositoryFullName,
+          executionTargetId: defaults.executionTargetId,
+          policyBundleId: defaults.policyBundleId,
+          createdByUserId: `github:${actorLogin}`,
+          prompt: command,
+          scope: {
+            repoUrl:
+              payload.repository?.clone_url ??
+              `https://github.com/${repositoryFullName}.git`,
+            baseBranch: payload.repository?.default_branch ?? 'main',
+            targetBranch: `patchplane/comment-${commentId}`,
+            includePaths: [],
+            excludePaths: [],
+            intent: 'github.issue_comment',
+          },
+          source: {
+            kind: 'github.issue_comment',
+            deliveryId: delivery.deliveryId,
+            externalInstallationId,
+            externalRepositoryId,
+            externalRepositoryNodeId: repositoryNodeId,
+            repositoryFullName,
+            issueNumber,
+            commentId,
+            actorLogin,
+            command,
+          },
+        }).pipe(
+          Effect.mapError((cause) =>
+            createParseFailure(
               'Failed to decode GitHub webhook payload into PatchPlane commands.',
               cause,
             ),
+          ),
+        )
+
+      return [promptRequestCommand]
     })
   }
 }

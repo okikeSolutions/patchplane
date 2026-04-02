@@ -1,12 +1,12 @@
 import { Effect } from 'effect'
-import type {
+import {
   BoundaryFailure,
-  RuntimeAdapter,
-  RuntimeEnvironment,
-  RuntimeEventInput,
-  RuntimeExecutionOutput,
-  RuntimeExecutionPlan,
-  RuntimeExecutionRequest,
+  type RuntimeAdapter,
+  type RuntimeEnvironment,
+  type RuntimeEventInput,
+  type RuntimeExecutionOutput,
+  type RuntimeExecutionPlan,
+  type RuntimeExecutionRequest,
 } from '@patchplane/domain'
 
 export interface PiMonoRuntimeOptions {
@@ -37,12 +37,12 @@ interface PiJsonEvent {
 }
 
 function toBoundaryFailure(message: string, cause: unknown): BoundaryFailure {
-  return {
+  return new BoundaryFailure({
     boundary: 'runtime.pi-mono',
     message,
-    retryable: true,
+    retryable: false,
     cause,
-  }
+  })
 }
 
 function toExecutionMessage(event: PiJsonEvent): string | null {

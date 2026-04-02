@@ -19,7 +19,7 @@ import {
 } from './octokit'
 import { IssueCommentGitHubWebhookIngestor } from './webhookIngestor'
 
-class GitHubAppRuntime extends Context.Tag(
+export class GitHubAppRuntime extends Context.Tag(
   '@patchplane/backend/GitHubAppRuntime',
 )<GitHubAppRuntime, App>() {}
 
@@ -91,6 +91,7 @@ const GitHubPublisherLive = Layer.effect(
 ).pipe(Layer.provide(GitHubAppLive))
 
 export const GitHubBoundaryLive = Layer.mergeAll(
+  GitHubAppLive,
   GitHubAppAuthLive,
   GitHubRepositorySyncLive,
   GitHubWebhookIngestorLive,

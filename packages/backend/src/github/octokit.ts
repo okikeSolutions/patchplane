@@ -1,17 +1,17 @@
 import { Effect } from 'effect'
 import { App, Octokit } from 'octokit'
-import type {
+import {
   BoundaryFailure,
-  GitHubAppAuth,
-  GitHubInstallation,
-  GitHubInstallationScope,
-  GitHubInstallationToken,
-  GitHubPublicationCommand,
-  GitHubPublicationReceipt,
-  GitHubPublisher,
-  GitHubRepositoryAccess,
-  GitHubRepositorySync,
-  GitHubWebhookDeliveryAttempt,
+  type GitHubAppAuth,
+  type GitHubInstallation,
+  type GitHubInstallationScope,
+  type GitHubInstallationToken,
+  type GitHubPublicationCommand,
+  type GitHubPublicationReceipt,
+  type GitHubPublisher,
+  type GitHubRepositoryAccess,
+  type GitHubRepositorySync,
+  type GitHubWebhookDeliveryAttempt,
 } from '@patchplane/domain'
 
 export interface GitHubAppOptions {
@@ -26,12 +26,24 @@ function toBoundaryFailure(
   message: string,
   cause: unknown,
 ): BoundaryFailure {
-  return {
+  return new BoundaryFailure({
     boundary,
     message,
-    retryable: true,
+    retryable: isRetryableGitHubCause(cause),
     cause,
+  })
+}
+
+function isRetryableGitHubCause(cause: unknown): boolean {
+  if (typeof cause === 'object' && cause !== null && 'status' in cause) {
+    const status = cause.status
+
+    if (typeof status === 'number') {
+      return status >= 500 || status === 408 || status === 429
+    }
   }
+
+  return true
 }
 
 function normalizeAccountType(type: string | undefined) {

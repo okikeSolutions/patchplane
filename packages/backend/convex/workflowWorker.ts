@@ -5,21 +5,24 @@ import { internal } from './_generated/api'
 import type { Id } from './_generated/dataModel'
 import { internalAction, type ActionCtx } from './_generated/server'
 import { v } from 'convex/values'
-import type {
-  GitHubAppAuth,
-  RuntimeAdapter,
-  RuntimeEventInput,
-  RuntimeSessionStatus,
-  SandboxAdapter,
-  WorkflowRunStatus,
+import {
+  type BoundaryFailure,
+  type RuntimeEventInput,
+  type RuntimeSessionStatus,
+  type WorkflowRunStatus,
 } from '@patchplane/domain'
 import {
   GitHubAppAuthService,
   RuntimeAdapterService,
   SandboxAdapterService,
 } from '@patchplane/domain'
-import type { BackendConfigShape } from '../src/config/schema'
 import { BackendConfig } from '../src/config/schema'
+import { tryConvexPromise } from '../src/effect/convex'
+import {
+  readErrorMessage,
+  type BackendConfigFailure,
+  type ConvexInteropFailure,
+} from '../src/errors'
 import { ExecutionBoundaryLive } from '../src/execution/layers'
 
 type WorkflowExecutionResult = {
@@ -61,46 +64,6 @@ interface WorkflowExecutionInput {
   readonly workflowStatus: WorkflowRunStatus
   readonly sandboxProvider: string
   readonly runtimeProvider: string
-}
-
-interface ExecutionServices {
-  readonly config: BackendConfigShape
-  readonly auth: GitHubAppAuth
-  readonly runtime: RuntimeAdapter
-  readonly sandbox: SandboxAdapter
-}
-
-function readErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : 'Unknown workflow execution failure.'
-}
-
-function provideExecutionBoundary<A>(
-  effect: Effect.Effect<A, unknown, unknown>,
-): Effect.Effect<A, unknown, never> {
-  return Effect.provide(effect, ExecutionBoundaryLive) as Effect.Effect<
-    A,
-    unknown,
-    never
-  >
-}
-
-function runExecutionBoundary<A>(effect: Effect.Effect<A, unknown, never>) {
-  return Effect.runPromise(effect)
-}
-
-async function resolveExecutionServices(): Promise<ExecutionServices> {
-  return runExecutionBoundary(
-    provideExecutionBoundary(
-      Effect.all({
-        config: BackendConfig,
-        auth: GitHubAppAuthService,
-        runtime: RuntimeAdapterService,
-        sandbox: SandboxAdapterService,
-      }),
-    ),
-  )
 }
 
 function readForwardedEnvironment(
@@ -156,158 +119,180 @@ function buildRuntimeEvents(
   ]
 }
 
-async function failWorkflowRun(
+function failWorkflowRun(
   ctx: ActionCtx,
   workflowRunId: Id<'workflowRuns'>,
   runtimeSessionId: Id<'runtimeSessions'>,
   errorMessage: string,
-) {
-  await ctx.runMutation(internal.workflows.failWorkflowRunExecution, {
-    workflowRunId,
-    runtimeSessionId,
-    failedAt: Date.now(),
-    errorMessage,
-  })
+): Effect.Effect<void, ConvexInteropFailure> {
+  return tryConvexPromise('mutation workflows.failWorkflowRunExecution', () =>
+    ctx.runMutation(internal.workflows.failWorkflowRunExecution, {
+      workflowRunId,
+      runtimeSessionId,
+      failedAt: Date.now(),
+      errorMessage,
+    }),
+  ).pipe(Effect.map(() => undefined))
 }
 
-async function executeWorkflowRunHandler(
+function executeWorkflowRunProgram(
   ctx: ActionCtx,
   workflowRunId: Id<'workflowRuns'>,
-): Promise<WorkflowExecutionResult> {
-  const services = await resolveExecutionServices()
-  const claim = await ctx.runMutation(internal.workflows.beginWorkflowRunExecution, {
-    workflowRunId,
-  }) as WorkflowExecutionClaim | null
+): Effect.Effect<
+  WorkflowExecutionResult,
+  BoundaryFailure | BackendConfigFailure | ConvexInteropFailure,
+  | BackendConfig
+  | GitHubAppAuthService
+  | RuntimeAdapterService
+  | SandboxAdapterService
+> {
+  return Effect.gen(function* () {
+    const config = yield* BackendConfig
+    const auth = yield* GitHubAppAuthService
+    const runtime = yield* RuntimeAdapterService
+    const sandbox = yield* SandboxAdapterService
+    const claim = (yield* tryConvexPromise(
+      'mutation workflows.beginWorkflowRunExecution',
+      () =>
+        ctx.runMutation(internal.workflows.beginWorkflowRunExecution, {
+          workflowRunId,
+        }),
+    )) as WorkflowExecutionClaim | null
 
-  if (!claim) {
-    return {
-      status: 'skipped',
-      eventCount: 0,
-    }
-  }
-
-  const input = await ctx.runQuery(internal.workflows.getWorkflowRunExecutionInput, {
-    workflowRunId,
-    runtimeSessionId: claim.runtimeSessionId,
-  }) as WorkflowExecutionInput | null
-
-  if (!input) {
-    await failWorkflowRun(
-      ctx,
-      workflowRunId,
-      claim.runtimeSessionId,
-      'Missing workflow execution input after claiming the run.',
-    )
-
-    return {
-      status: 'failed',
-      eventCount: 0,
-    }
-  }
-
-  try {
-    const gitCredentials = input.githubInstallationExternalId
-      ? await runExecutionBoundary(
-          provideExecutionBoundary(
-            Effect.map(
-              services.auth.getInstallationToken(
-                input.githubInstallationExternalId,
-              ),
-              (token) => ({
-                username: 'x-access-token',
-                password: token.token,
-              }),
-            ),
-          ),
-        )
-      : undefined
-
-    const startedAt = Date.now()
-    const executionResult = await runExecutionBoundary(
-      provideExecutionBoundary(
-        services.sandbox.execute(
-          {
-            promptRequestId: String(claim.promptRequestId),
-            session: {
-              ...input.runtimeSession,
-              id: String(input.runtimeSession.id),
-              workflowRunId: String(input.runtimeSession.workflowRunId),
-            },
-            prompt: input.prompt,
-            repoUrl: input.scope.repoUrl,
-            baseBranch: input.scope.baseBranch,
-            targetBranch: input.scope.targetBranch,
-            workingDirectory: `workspace/${String(workflowRunId)}`,
-            env: readForwardedEnvironment(services.config.runtime.envForwardKeys),
-            gitCredentials,
-          },
-          services.runtime,
-        ),
-      ),
-    )
-
-    await ctx.runMutation(internal.workflows.markWorkflowRunRunning, {
-      workflowRunId,
-      runtimeSessionId: claim.runtimeSessionId,
-      externalSessionId: executionResult.externalSessionId,
-      startedAt,
-    })
-
-    const events = buildRuntimeEvents(
-      claim,
-      workflowRunId,
-      executionResult.externalSessionId,
-      startedAt,
-      executionResult.events,
-    )
-
-    if (events.length > 0) {
-      await ctx.runMutation(internal.workflows.appendRuntimeEvents, {
-        events,
-      })
-    }
-
-    const lastEvent = executionResult.events.at(-1)
-    const failed =
-      lastEvent?.type === 'session.failed' || lastEvent?.type === 'turn.failed'
-
-    if (failed) {
-      await failWorkflowRun(
-        ctx,
-        workflowRunId,
-        claim.runtimeSessionId,
-        lastEvent?.message ?? 'Runtime execution failed.',
-      )
-
+    if (!claim) {
       return {
-        status: 'failed',
-        eventCount: events.length,
+        status: 'skipped',
+        eventCount: 0,
       }
     }
 
-    await ctx.runMutation(internal.workflows.completeWorkflowRunExecution, {
-      workflowRunId,
-      runtimeSessionId: claim.runtimeSessionId,
-      completedAt: Date.now(),
-    })
+    return yield* Effect.gen(function* () {
+      const input = (yield* tryConvexPromise(
+        'query workflows.getWorkflowRunExecutionInput',
+        () =>
+          ctx.runQuery(internal.workflows.getWorkflowRunExecutionInput, {
+            workflowRunId,
+            runtimeSessionId: claim.runtimeSessionId,
+          }),
+      )) as WorkflowExecutionInput | null
 
-    return {
-      status: 'completed',
-      eventCount: events.length,
-    }
-  } catch (error) {
-    await failWorkflowRun(
-      ctx,
-      workflowRunId,
-      claim.runtimeSessionId,
-      readErrorMessage(error),
+      if (!input) {
+        yield* failWorkflowRun(
+          ctx,
+          workflowRunId,
+          claim.runtimeSessionId,
+          'Missing workflow execution input after claiming the run.',
+        )
+
+        return {
+          status: 'failed',
+          eventCount: 0,
+        }
+      }
+
+      const gitCredentials = input.githubInstallationExternalId
+        ? yield* auth.getInstallationToken(input.githubInstallationExternalId).pipe(
+            Effect.map((token) => ({
+              username: 'x-access-token',
+              password: token.token,
+            })),
+          )
+        : undefined
+
+      const startedAt = Date.now()
+      const executionResult = yield* sandbox.execute(
+        {
+          promptRequestId: String(claim.promptRequestId),
+          session: {
+            ...input.runtimeSession,
+            id: String(input.runtimeSession.id),
+            workflowRunId: String(input.runtimeSession.workflowRunId),
+          },
+          prompt: input.prompt,
+          repoUrl: input.scope.repoUrl,
+          baseBranch: input.scope.baseBranch,
+          targetBranch: input.scope.targetBranch,
+          workingDirectory: `workspace/${String(workflowRunId)}`,
+          env: readForwardedEnvironment(config.runtime.envForwardKeys),
+          gitCredentials,
+        },
+        runtime,
+      )
+
+      yield* tryConvexPromise('mutation workflows.markWorkflowRunRunning', () =>
+        ctx.runMutation(internal.workflows.markWorkflowRunRunning, {
+          workflowRunId,
+          runtimeSessionId: claim.runtimeSessionId,
+          externalSessionId: executionResult.externalSessionId,
+          startedAt,
+        }),
+      )
+
+      const events = buildRuntimeEvents(
+        claim,
+        workflowRunId,
+        executionResult.externalSessionId,
+        startedAt,
+        executionResult.events,
+      )
+
+      if (events.length > 0) {
+        yield* tryConvexPromise('mutation workflows.appendRuntimeEvents', () =>
+          ctx.runMutation(internal.workflows.appendRuntimeEvents, {
+            events,
+          }),
+        )
+      }
+
+      const lastEvent = executionResult.events.at(-1)
+      const failed =
+        lastEvent?.type === 'session.failed' ||
+        lastEvent?.type === 'turn.failed'
+
+      if (failed) {
+        yield* failWorkflowRun(
+          ctx,
+          workflowRunId,
+          claim.runtimeSessionId,
+          lastEvent?.message ?? 'Runtime execution failed.',
+        )
+
+        return {
+          status: 'failed',
+          eventCount: events.length,
+        }
+      }
+
+      yield* tryConvexPromise(
+        'mutation workflows.completeWorkflowRunExecution',
+        () =>
+          ctx.runMutation(internal.workflows.completeWorkflowRunExecution, {
+            workflowRunId,
+            runtimeSessionId: claim.runtimeSessionId,
+            completedAt: Date.now(),
+          }),
+      )
+
+      return {
+        status: 'completed',
+        eventCount: events.length,
+      }
+    }).pipe(
+      Effect.catchAll((error) =>
+        failWorkflowRun(
+          ctx,
+          workflowRunId,
+          claim.runtimeSessionId,
+          readErrorMessage(error, 'Unknown workflow execution failure.'),
+        ).pipe(
+          Effect.as({
+            status: 'failed',
+            eventCount: 0,
+          }),
+        ),
+      ),
     )
-
-    return {
-      status: 'failed',
-      eventCount: 0,
-    }
-  }
+  })
 }
 
 export const executeWorkflowRun = internalAction({
@@ -318,5 +303,10 @@ export const executeWorkflowRun = internalAction({
     status: v.string(),
     eventCount: v.number(),
   }),
-  handler: (ctx, args) => executeWorkflowRunHandler(ctx, args.workflowRunId),
+  handler: (ctx, args) =>
+    Effect.runPromise(
+      executeWorkflowRunProgram(ctx, args.workflowRunId).pipe(
+        Effect.provide(ExecutionBoundaryLive),
+      ),
+    ),
 })
