@@ -188,9 +188,12 @@ export function redeliverAppWebhookDelivery(
 ): Effect.Effect<void, BoundaryFailure> {
   return Effect.tryPromise({
     try: async () => {
-      await app.octokit.request('POST /app/hook/deliveries/{delivery_id}/attempts', {
-        delivery_id: deliveryId,
-      })
+      await app.octokit.request(
+        'POST /app/hook/deliveries/{delivery_id}/attempts',
+        {
+          delivery_id: deliveryId,
+        },
+      )
     },
     catch: (cause) =>
       toBoundaryFailure(

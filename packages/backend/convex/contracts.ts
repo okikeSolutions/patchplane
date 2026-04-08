@@ -1,16 +1,22 @@
 import { Schema } from 'effect'
 import { v } from 'convex/values'
 import {
+  ExecutionTargetSchema,
   GitHubInstallationSchema,
   GitHubPublicationRecordSchema,
   GitHubWebhookReconciliationStateSchema,
   IssueBindingSchema,
+  MergeDecisionSchema,
+  PendingApprovalSchema,
+  PendingInputSchema,
+  PolicyBundleSchema,
   PromptRequestCommandSchema,
   PromptRequestSchema,
   PullRequestBindingSchema,
   RepositoryConnectionSchema,
   ReviewRunSchema,
   RuntimeEventSchema,
+  RuntimeProviderEventSchema,
   RuntimeSessionSchema,
   WebhookDeliverySchema,
   WorkflowRunSchema,
@@ -22,7 +28,12 @@ import {
   githubRepositorySelectionModes,
   githubWebhookDeliveryStatuses,
   mergeDecisionStatuses,
+  pendingApprovalStatuses,
+  pendingApprovalResolutionStatuses,
+  pendingInputStatuses,
+  pendingInputResolutionStatuses,
   runtimeEventTypes,
+  runtimeProviderEventStreams,
   runtimeSessionStatuses,
   workflowRunStatuses,
   workflowStatuses,
@@ -65,6 +76,11 @@ export const runtimeEventTypeValidator = v.union(
   v.literal(runtimeEventTypes[6]),
   v.literal(runtimeEventTypes[7]),
   v.literal(runtimeEventTypes[8]),
+)
+
+export const runtimeProviderEventStreamValidator = v.union(
+  v.literal(runtimeProviderEventStreams[0]),
+  v.literal(runtimeProviderEventStreams[1]),
 )
 
 export const githubAccountTypeValidator = v.union(
@@ -118,6 +134,30 @@ export const mergeDecisionStatusValidator = v.union(
   v.literal(mergeDecisionStatuses[2]),
 )
 
+export const pendingApprovalStatusValidator = v.union(
+  v.literal(pendingApprovalStatuses[0]),
+  v.literal(pendingApprovalStatuses[1]),
+  v.literal(pendingApprovalStatuses[2]),
+  v.literal(pendingApprovalStatuses[3]),
+)
+
+export const pendingApprovalResolutionStatusValidator = v.union(
+  v.literal(pendingApprovalResolutionStatuses[0]),
+  v.literal(pendingApprovalResolutionStatuses[1]),
+  v.literal(pendingApprovalResolutionStatuses[2]),
+)
+
+export const pendingInputStatusValidator = v.union(
+  v.literal(pendingInputStatuses[0]),
+  v.literal(pendingInputStatuses[1]),
+  v.literal(pendingInputStatuses[2]),
+)
+
+export const pendingInputResolutionStatusValidator = v.union(
+  v.literal(pendingInputResolutionStatuses[0]),
+  v.literal(pendingInputResolutionStatuses[1]),
+)
+
 export const promptScopeValidator = v.object({
   repoUrl: v.string(),
   baseBranch: v.string(),
@@ -148,12 +188,47 @@ export const promptRequestSourceValidator = v.union(
 export const promptRequestCommandValidator = v.object({
   kind: v.literal('prompt_request.create'),
   projectId: v.string(),
-  executionTargetId: v.string(),
-  policyBundleId: v.string(),
+  executionTargetKey: v.string(),
+  policyBundleKey: v.string(),
   createdByUserId: v.string(),
   prompt: v.string(),
   scope: promptScopeValidator,
   source: promptRequestSourceValidator,
+})
+
+export const executionTargetValidator = v.object({
+  projectId: v.string(),
+  key: v.string(),
+  repositoryConnectionId: v.optional(v.id('repositories')),
+  sandboxProvider: v.string(),
+  runtimeProvider: v.string(),
+  defaultBaseBranch: v.optional(v.string()),
+  enabled: v.boolean(),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+
+export const policyBundleValidator = v.object({
+  projectId: v.string(),
+  key: v.string(),
+  requiredReviewers: v.array(v.string()),
+  minimumScore: v.number(),
+  enabled: v.boolean(),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+
+export const promptRequestValidator = v.object({
+  projectId: v.string(),
+  executionTargetId: v.id('executionTargets'),
+  policyBundleId: v.id('policyBundles'),
+  createdByUserId: v.string(),
+  prompt: v.string(),
+  scope: promptScopeValidator,
+  source: promptRequestSourceValidator,
+  status: workflowStatusValidator,
+  createdAt: v.number(),
+  updatedAt: v.number(),
 })
 
 export const githubInstallationValidator = v.object({
@@ -242,12 +317,67 @@ export const runtimeEventValidator = v.object({
   createdAt: v.number(),
 })
 
+export const runtimeProviderEventValidator = v.object({
+  requestId: v.id('promptRequests'),
+  workflowRunId: v.optional(v.id('workflowRuns')),
+  runtimeSessionId: v.optional(v.id('runtimeSessions')),
+  provider: v.string(),
+  eventType: v.string(),
+  stream: runtimeProviderEventStreamValidator,
+  sequence: v.number(),
+  rawPayload: v.string(),
+  providerTimestamp: v.optional(v.string()),
+  createdAt: v.number(),
+})
+
 export const reviewRunValidator = v.object({
   requestId: v.id('promptRequests'),
+  workflowRunId: v.id('workflowRuns'),
   reviewer: v.string(),
   score: v.number(),
   passed: v.boolean(),
   summary: v.string(),
+})
+
+export const pendingApprovalValidator = v.object({
+  promptRequestId: v.id('promptRequests'),
+  workflowRunId: v.id('workflowRuns'),
+  runtimeSessionId: v.optional(v.id('runtimeSessions')),
+  kind: v.string(),
+  title: v.string(),
+  body: v.optional(v.string()),
+  status: pendingApprovalStatusValidator,
+  requestedByUserId: v.string(),
+  resolvedByUserId: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+  resolvedAt: v.optional(v.number()),
+})
+
+export const pendingInputValidator = v.object({
+  promptRequestId: v.id('promptRequests'),
+  workflowRunId: v.id('workflowRuns'),
+  runtimeSessionId: v.optional(v.id('runtimeSessions')),
+  kind: v.string(),
+  prompt: v.string(),
+  status: pendingInputStatusValidator,
+  requestedByUserId: v.string(),
+  response: v.optional(v.string()),
+  resolvedByUserId: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+  resolvedAt: v.optional(v.number()),
+})
+
+export const mergeDecisionValidator = v.object({
+  workflowRunId: v.id('workflowRuns'),
+  policyBundleId: v.optional(v.id('policyBundles')),
+  status: mergeDecisionStatusValidator,
+  reasons: v.array(v.string()),
+  decidedByUserId: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+  decidedAt: v.optional(v.number()),
 })
 
 export const issueBindingValidator = v.object({
@@ -300,11 +430,23 @@ export const decodePromptRequest = Schema.decodeUnknownSync(PromptRequestSchema)
 export const decodePromptRequestCommand = Schema.decodeUnknownSync(
   PromptRequestCommandSchema,
 )
+export const decodeExecutionTarget = Schema.decodeUnknownSync(
+  ExecutionTargetSchema,
+)
+export const decodePolicyBundle = Schema.decodeUnknownSync(PolicyBundleSchema)
 export const decodeWorkflowRun = Schema.decodeUnknownSync(WorkflowRunSchema)
 export const decodeRuntimeSession =
   Schema.decodeUnknownSync(RuntimeSessionSchema)
 export const decodeRuntimeEvent = Schema.decodeUnknownSync(RuntimeEventSchema)
+export const decodeRuntimeProviderEvent = Schema.decodeUnknownSync(
+  RuntimeProviderEventSchema,
+)
 export const decodeReviewRun = Schema.decodeUnknownSync(ReviewRunSchema)
+export const decodePendingApproval = Schema.decodeUnknownSync(
+  PendingApprovalSchema,
+)
+export const decodePendingInput = Schema.decodeUnknownSync(PendingInputSchema)
+export const decodeMergeDecision = Schema.decodeUnknownSync(MergeDecisionSchema)
 export const decodeGitHubInstallation = Schema.decodeUnknownSync(
   GitHubInstallationSchema,
 )

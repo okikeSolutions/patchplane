@@ -1,32 +1,46 @@
 import { Context, Effect, Layer, ParseResult, Schema } from 'effect'
 import { BackendConfigFailure } from '../errors'
 
+const PositiveFiniteNumber = Schema.Finite.pipe(
+  Schema.greaterThan(0, {
+    identifier: 'PositiveFiniteNumber',
+    description: 'a positive finite number',
+  }),
+)
+
+const NonEmptyString = Schema.String.pipe(
+  Schema.minLength(1, {
+    identifier: 'NonEmptyString',
+    description: 'a non-empty string',
+  }),
+)
+
 export const BackendConfigSchema = Schema.Struct({
   github: Schema.Struct({
-    appId: Schema.Finite,
-    privateKey: Schema.String,
-    webhookSecret: Schema.String,
-    defaultExecutionTargetId: Schema.String,
-    defaultPolicyBundleId: Schema.String,
+    appId: PositiveFiniteNumber,
+    privateKey: NonEmptyString,
+    webhookSecret: NonEmptyString,
+    defaultExecutionTargetKey: Schema.NonEmptyTrimmedString,
+    defaultPolicyBundleKey: Schema.NonEmptyTrimmedString,
     baseUrl: Schema.optional(Schema.String),
   }),
   runtime: Schema.Struct({
     provider: Schema.Literal('pi-mono'),
-    command: Schema.String,
+    command: Schema.NonEmptyTrimmedString,
     envForwardKeys: Schema.Array(Schema.String),
   }),
   sandbox: Schema.Struct({
     provider: Schema.Literal('daytona'),
-    timeoutMs: Schema.Finite,
+    timeoutMs: PositiveFiniteNumber,
     apiKey: Schema.optional(Schema.String),
     apiUrl: Schema.optional(Schema.String),
     target: Schema.optional(Schema.String),
-    autoStopIntervalMinutes: Schema.Finite,
+    autoStopIntervalMinutes: PositiveFiniteNumber,
     ephemeral: Schema.Boolean,
   }),
   policy: Schema.Struct({
     requiredReviewers: Schema.Array(Schema.String),
-    minimumScore: Schema.Finite,
+    minimumScore: PositiveFiniteNumber,
   }),
 })
 
@@ -37,20 +51,21 @@ export class BackendConfig extends Context.Tag(
 )<BackendConfig, BackendConfigShape>() {}
 
 const decodeBackendConfig = Schema.decodeUnknown(BackendConfigSchema)
+const decodeBackendConfigSync = Schema.decodeUnknownSync(BackendConfigSchema)
 
-function readRawConfig() {
+export function readRawBackendConfig() {
   return {
     github: {
-      appId: Number(process.env.GITHUB_APP_ID ?? 0),
+      appId: Number(process.env.GITHUB_APP_ID ?? Number.NaN),
       privateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? '').replace(
         /\\n/g,
         '\n',
       ),
       webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? '',
-      defaultExecutionTargetId:
+      defaultExecutionTargetKey:
         process.env.PATCHPLANE_GITHUB_EXECUTION_TARGET_ID ??
         'github.issue_comment',
-      defaultPolicyBundleId:
+      defaultPolicyBundleKey:
         process.env.PATCHPLANE_GITHUB_POLICY_BUNDLE_ID ?? 'default',
       ...(process.env.GITHUB_API_BASE_URL
         ? { baseUrl: process.env.GITHUB_API_BASE_URL }
@@ -109,10 +124,22 @@ function toBackendConfigFailure(cause: ParseResult.ParseError) {
   })
 }
 
+export function readBackendConfigSync(): BackendConfigShape {
+  try {
+    return decodeBackendConfigSync(readRawBackendConfig())
+  } catch (error) {
+    if (ParseResult.isParseError(error)) {
+      throw toBackendConfigFailure(error)
+    }
+
+    throw error
+  }
+}
+
 export const BackendConfigLive = Layer.effect(
   BackendConfig,
   Effect.suspend(() =>
-    decodeBackendConfig(readRawConfig()).pipe(
+    decodeBackendConfig(readRawBackendConfig()).pipe(
       Effect.mapError(toBackendConfigFailure),
     ),
   ),

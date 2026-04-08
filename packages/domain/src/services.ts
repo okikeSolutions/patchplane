@@ -10,12 +10,13 @@ import type {
 } from './github'
 import type { PatchPlaneCommand } from './request-intake'
 import type {
-  RuntimeExecutionOutput,
-  RuntimeExecutionPlan,
-  RuntimeExecutionRequest,
-  SandboxExecutionRequest,
-  SandboxExecutionResult,
-} from './runtime'
+    RuntimeExecutionOutput,
+    RuntimeExecutionPlan,
+    RuntimeExecutionRequest,
+    RuntimeNormalizationResult,
+    SandboxExecutionRequest,
+    SandboxExecutionResult,
+  } from './runtime'
 
 export class BoundaryFailure extends Data.TaggedError('BoundaryFailure')<{
   readonly boundary: string
@@ -53,9 +54,7 @@ export interface GitHubWebhookDeliveryClient {
   listDeliveriesSince(
     deliveredSince: number,
   ): Effect.Effect<ReadonlyArray<GitHubWebhookDeliveryAttempt>, BoundaryFailure>
-  redeliverDelivery(
-    deliveryId: number,
-  ): Effect.Effect<void, BoundaryFailure>
+  redeliverDelivery(deliveryId: number): Effect.Effect<void, BoundaryFailure>
 }
 
 export interface GitHubPublisher {
@@ -73,7 +72,7 @@ export interface RuntimeAdapter {
   normalizeOutput(
     request: RuntimeExecutionRequest,
     output: RuntimeExecutionOutput,
-  ): Effect.Effect<SandboxExecutionResult['events'], BoundaryFailure>
+  ): Effect.Effect<RuntimeNormalizationResult, BoundaryFailure>
 }
 
 export interface SandboxAdapter {

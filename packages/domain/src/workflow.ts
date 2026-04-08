@@ -115,21 +115,13 @@ export type WorkflowRun = Schema.Schema.Type<typeof WorkflowRunSchema>
 export const ReviewRunSchema = Schema.Struct({
   id: Schema.String,
   requestId: Schema.String,
+  workflowRunId: Schema.String,
   reviewer: Schema.String,
   score: Schema.Number,
   passed: Schema.Boolean,
   summary: Schema.String,
 })
 export type ReviewRun = Schema.Schema.Type<typeof ReviewRunSchema>
-
-export const MergeDecisionSchema = Schema.Struct({
-  id: Schema.String,
-  workflowRunId: Schema.String,
-  status: MergeDecisionStatusSchema,
-  reasons: Schema.Array(Schema.String),
-  createdAt: Schema.Number,
-})
-export type MergeDecision = Schema.Schema.Type<typeof MergeDecisionSchema>
 
 export const coreCapabilities = [
   {

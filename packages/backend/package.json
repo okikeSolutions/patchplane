@@ -14,8 +14,8 @@
     "format": "oxfmt convex src"
   },
   "dependencies": {
-    "@daytonaio/sdk": "^0.155.0",
     "@convex-dev/workos-authkit": "^0.1.6",
+    "@daytonaio/sdk": "^0.155.0",
     "@patchplane/domain": "workspace:*",
     "convex": "latest",
     "effect": "3.21.0",

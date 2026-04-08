@@ -28,8 +28,8 @@ describe('domain contracts', () => {
     const command = decodePromptRequestCommand({
       kind: 'prompt_request.create',
       projectId: 'project_123',
-      executionTargetId: 'github.issue_comment',
-      policyBundleId: 'default',
+      executionTargetKey: 'github.issue_comment',
+      policyBundleKey: 'default',
       createdByUserId: 'octocat',
       prompt: 'Fix the failing test',
       scope: {
@@ -149,13 +149,18 @@ describe('domain contracts', () => {
           workingDirectory: 'workspace/run_1',
           env: {},
         }),
-      normalizeOutput: () => Effect.succeed([]),
+      normalizeOutput: () =>
+        Effect.succeed({
+          providerEvents: [],
+          events: [],
+        }),
     }
     const fakeSandboxAdapter = {
       name: 'fake-sandbox-adapter',
       execute: () =>
         Effect.succeed({
           externalSessionId: 'sandbox-1:session-1',
+          providerEvents: [],
           events: [],
         }),
     }
@@ -206,7 +211,11 @@ describe('domain contracts', () => {
 
     const resolved = await Effect.runPromise(
       Effect.provideService(
-        Effect.provideService(program, RuntimeAdapterService, fakeRuntimeAdapter),
+        Effect.provideService(
+          program,
+          RuntimeAdapterService,
+          fakeRuntimeAdapter,
+        ),
         SandboxAdapterService,
         fakeSandboxAdapter,
       ),

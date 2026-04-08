@@ -176,9 +176,7 @@ export const githubWebhookHandler = httpAction(async (ctx, request) => {
     })
   } catch (error) {
     const errorMessage =
-      error instanceof Error
-        ? error.message
-        : 'Unknown GitHub webhook failure.'
+      error instanceof Error ? error.message : 'Unknown GitHub webhook failure.'
 
     await ctx.runMutation(internal.github.markWebhookDeliveryOutcome, {
       deliveryRecordId: recordResult.deliveryRecordId,

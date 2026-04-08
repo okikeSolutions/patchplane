@@ -1,20 +1,23 @@
 import { defineSchema, defineTable } from 'convex/server'
-import { v } from 'convex/values'
 import {
+  executionTargetValidator,
   githubInstallationValidator,
   githubPublicationRecordValidator,
   githubWebhookReconciliationStateValidator,
   issueBindingValidator,
+  mergeDecisionValidator,
+  pendingApprovalValidator,
+  pendingInputValidator,
+  policyBundleValidator,
+  promptRequestValidator,
   pullRequestBindingValidator,
   repositoryConnectionValidator,
   reviewRunValidator,
   runtimeEventValidator,
+  runtimeProviderEventValidator,
   runtimeSessionValidator,
   webhookDeliveryValidator,
   workflowRunValidator,
-  workflowStatusValidator,
-  promptRequestSourceValidator,
-  promptScopeValidator,
 } from './contracts'
 
 export default defineSchema({
@@ -29,18 +32,17 @@ export default defineSchema({
     .index('by_delivery_id', ['deliveryId'])
     .index('by_received_at', ['receivedAt'])
     .index('by_event', ['event']),
-  promptRequests: defineTable({
-    projectId: v.string(),
-    executionTargetId: v.string(),
-    policyBundleId: v.string(),
-    createdByUserId: v.string(),
-    prompt: v.string(),
-    scope: promptScopeValidator,
-    source: promptRequestSourceValidator,
-    status: workflowStatusValidator,
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
+  executionTargets: defineTable(executionTargetValidator)
+    .index('by_project', ['projectId'])
+    .index('by_project_and_key', ['projectId', 'key'])
+    .index('by_repository_connection_and_key', [
+      'repositoryConnectionId',
+      'key',
+    ]),
+  policyBundles: defineTable(policyBundleValidator)
+    .index('by_project', ['projectId'])
+    .index('by_project_and_key', ['projectId', 'key']),
+  promptRequests: defineTable(promptRequestValidator)
     .index('by_created_at', ['createdAt'])
     .index('by_project', ['projectId']),
   workflowRuns: defineTable(workflowRunValidator)
@@ -54,9 +56,25 @@ export default defineSchema({
     .index('by_workflow_run_id', ['workflowRunId'])
     .index('by_workflow_run_id_created_at', ['workflowRunId', 'createdAt'])
     .index('by_runtime_session_id', ['runtimeSessionId']),
-  reviewRuns: defineTable(reviewRunValidator).index('by_request', [
-    'requestId',
-  ]),
+  runtimeProviderEvents: defineTable(runtimeProviderEventValidator)
+    .index('by_request', ['requestId'])
+    .index('by_workflow_run_id', ['workflowRunId'])
+    .index('by_workflow_run_id_created_at', ['workflowRunId', 'createdAt'])
+    .index('by_runtime_session_id', ['runtimeSessionId']),
+  reviewRuns: defineTable(reviewRunValidator)
+    .index('by_request', ['requestId'])
+    .index('by_workflow_run_id', ['workflowRunId']),
+  pendingApprovals: defineTable(pendingApprovalValidator)
+    .index('by_prompt_request_id', ['promptRequestId'])
+    .index('by_workflow_run_id', ['workflowRunId'])
+    .index('by_status_and_created_at', ['status', 'createdAt']),
+  pendingInputs: defineTable(pendingInputValidator)
+    .index('by_prompt_request_id', ['promptRequestId'])
+    .index('by_workflow_run_id', ['workflowRunId'])
+    .index('by_status_and_created_at', ['status', 'createdAt']),
+  mergeDecisions: defineTable(mergeDecisionValidator)
+    .index('by_workflow_run_id', ['workflowRunId'])
+    .index('by_status', ['status']),
   issueBindings: defineTable(issueBindingValidator)
     .index('by_repository_connection_and_issue', [
       'repositoryConnectionId',

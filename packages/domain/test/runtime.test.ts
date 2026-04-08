@@ -1,14 +1,22 @@
 import { describe, expect, test } from 'bun:test'
 import { Schema } from 'effect'
 import {
-  RuntimeEventSchema,
-  RuntimeExecutionRequestSchema,
-  RuntimeSessionSchema,
-  SandboxExecutionResultSchema,
-} from '../src/index'
+    RuntimeEventSchema,
+    RuntimeExecutionRequestSchema,
+    RuntimeNormalizationResultSchema,
+    RuntimeProviderEventSchema,
+    RuntimeSessionSchema,
+    SandboxExecutionResultSchema,
+  } from '../src/index'
 
 const decodeRuntimeSession = Schema.decodeUnknownSync(RuntimeSessionSchema)
 const decodeRuntimeEvent = Schema.decodeUnknownSync(RuntimeEventSchema)
+const decodeRuntimeNormalizationResult = Schema.decodeUnknownSync(
+  RuntimeNormalizationResultSchema,
+)
+const decodeRuntimeProviderEvent = Schema.decodeUnknownSync(
+  RuntimeProviderEventSchema,
+)
 const decodeRuntimeExecutionRequest = Schema.decodeUnknownSync(
   RuntimeExecutionRequestSchema,
 )
@@ -49,6 +57,27 @@ describe('runtime domain', () => {
     expect(event.message).toBe('git status')
   })
 
+  test('decodes raw provider runtime events for lossless persistence', () => {
+    const event = decodeRuntimeProviderEvent({
+      id: 'provider_event_1',
+      requestId: 'request_1',
+      workflowRunId: 'run_1',
+      runtimeSessionId: 'session_1',
+      provider: 'pi-mono',
+      eventType: 'message_update',
+      stream: 'stdout',
+      sequence: 3,
+      rawPayload:
+        '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}',
+      providerTimestamp: '2026-04-03T12:00:00.000Z',
+      createdAt: 1_710_000_000_003,
+    })
+
+    expect(event.provider).toBe('pi-mono')
+    expect(event.eventType).toBe('message_update')
+    expect(event.stream).toBe('stdout')
+  })
+
   test('rejects unsupported runtime event types', () => {
     expect(() =>
       decodeRuntimeEvent({
@@ -87,6 +116,19 @@ describe('runtime domain', () => {
   test('decodes sandbox execution results before persistence', () => {
     const result = decodeSandboxExecutionResult({
       externalSessionId: 'sandbox-1:patchplane-session_1',
+      providerEvents: [
+        {
+          requestId: 'request_1',
+          workflowRunId: 'run_1',
+          runtimeSessionId: 'session_1',
+          provider: 'pi-mono',
+          eventType: 'turn_start',
+          stream: 'stdout',
+          sequence: 0,
+          rawPayload: '{"type":"turn_start"}',
+          createdAt: 1_710_000_000_000,
+        },
+      ],
       events: [
         {
           requestId: 'request_1',
@@ -100,6 +142,34 @@ describe('runtime domain', () => {
     })
 
     expect(result.externalSessionId).toBe('sandbox-1:patchplane-session_1')
+    expect(result.providerEvents).toHaveLength(1)
+    expect(result.events).toHaveLength(1)
+  })
+
+  test('decodes runtime normalization results with raw and normalized events', () => {
+    const result = decodeRuntimeNormalizationResult({
+      providerEvents: [
+        {
+          requestId: 'request_1',
+          provider: 'pi-mono',
+          eventType: 'agent_end',
+          stream: 'stdout',
+          sequence: 1,
+          rawPayload: '{"type":"agent_end"}',
+          createdAt: 1_710_000_000_001,
+        },
+      ],
+      events: [
+        {
+          requestId: 'request_1',
+          type: 'session.completed',
+          message: 'Pi agent completed.',
+          createdAt: 1_710_000_000_001,
+        },
+      ],
+    })
+
+    expect(result.providerEvents).toHaveLength(1)
     expect(result.events).toHaveLength(1)
   })
 })

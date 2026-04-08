@@ -4,8 +4,8 @@ import { PromptRequestSourceSchema, PromptScopeSchema } from './workflow'
 export const PromptRequestCommandSchema = Schema.Struct({
   kind: Schema.Literal('prompt_request.create'),
   projectId: Schema.String,
-  executionTargetId: Schema.String,
-  policyBundleId: Schema.String,
+  executionTargetKey: Schema.String,
+  policyBundleKey: Schema.String,
   createdByUserId: Schema.String,
   prompt: Schema.String,
   scope: PromptScopeSchema,

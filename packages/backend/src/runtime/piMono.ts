@@ -7,6 +7,8 @@ import {
   type RuntimeExecutionOutput,
   type RuntimeExecutionPlan,
   type RuntimeExecutionRequest,
+  type RuntimeNormalizationResult,
+  type RuntimeProviderEventInput,
 } from '@patchplane/domain'
 
 export interface PiMonoRuntimeOptions {
@@ -35,6 +37,8 @@ interface PiJsonEvent {
   readonly willRetry?: boolean
   readonly assistantMessageEvent?: PiJsonAssistantMessageEvent
 }
+
+const PI_MONO_PROVIDER = 'pi-mono'
 
 function toBoundaryFailure(message: string, cause: unknown): BoundaryFailure {
   return new BoundaryFailure({
@@ -81,8 +85,9 @@ function toExecutionMessage(event: PiJsonEvent): string | null {
         : 'Pi auto-compaction completed.'
     case 'message_update':
       return event.assistantMessageEvent?.type === 'text_delta' &&
-        event.assistantMessageEvent.delta?.trim()
-        ? event.assistantMessageEvent.delta.trim()
+        event.assistantMessageEvent.delta &&
+        event.assistantMessageEvent.delta.trim().length > 0
+        ? event.assistantMessageEvent.delta
         : null
     case 'agent_end':
       return 'Pi agent completed.'
@@ -91,7 +96,9 @@ function toExecutionMessage(event: PiJsonEvent): string | null {
   }
 }
 
-function toRuntimeEventType(event: PiJsonEvent): RuntimeEventInput['type'] | null {
+function toRuntimeEventType(
+  event: PiJsonEvent,
+): RuntimeEventInput['type'] | null {
   switch (event.type) {
     case 'session':
       return 'session.started'
@@ -121,62 +128,121 @@ function toRuntimeEventType(event: PiJsonEvent): RuntimeEventInput['type'] | nul
 function parsePiEventLines(
   request: RuntimeExecutionRequest,
   output: RuntimeExecutionOutput,
-): RuntimeEventInput[] {
+): RuntimeNormalizationResult {
+  const baseCreatedAt = Date.now()
+  const providerEvents: RuntimeProviderEventInput[] = []
   const events: RuntimeEventInput[] = []
-  const lines = output.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+  let sequence = 0
+  const stdoutLines = output.stdout.split('\n')
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
+  for (const rawStdoutLine of stdoutLines) {
+    const line = rawStdoutLine.replace(/\r$/, '')
+    const trimmedLine = line.trim()
 
-    if (!line) {
+    if (trimmedLine.length === 0) {
       continue
     }
 
+    const createdAt = baseCreatedAt + sequence
+
     try {
-      const event = JSON.parse(line) as PiJsonEvent
+      const event = JSON.parse(trimmedLine) as PiJsonEvent
+      const eventType =
+        typeof event.type === 'string' && event.type.length > 0
+          ? event.type
+          : 'unknown'
       const type = toRuntimeEventType(event)
       const message = toExecutionMessage(event)
 
-      if (!type || !message) {
-        continue
-      }
-
-      events.push({
+      providerEvents.push({
         requestId: request.promptRequestId,
         workflowRunId: request.session.workflowRunId,
         runtimeSessionId: request.session.id,
-        type,
-        message,
-        createdAt: Date.now() + index,
+        provider: PI_MONO_PROVIDER,
+        eventType,
+        stream: 'stdout',
+        sequence,
+        rawPayload: line,
+        providerTimestamp: event.timestamp,
+        createdAt,
       })
+
+      if (type && message) {
+        events.push({
+          requestId: request.promptRequestId,
+          workflowRunId: request.session.workflowRunId,
+          runtimeSessionId: request.session.id,
+          type,
+          message,
+          createdAt,
+        })
+      }
     } catch {
+      providerEvents.push({
+        requestId: request.promptRequestId,
+        workflowRunId: request.session.workflowRunId,
+        runtimeSessionId: request.session.id,
+        provider: PI_MONO_PROVIDER,
+        eventType: 'unparsed',
+        stream: 'stdout',
+        sequence,
+        rawPayload: line,
+        providerTimestamp: undefined,
+        createdAt,
+      })
+
       events.push({
         requestId: request.promptRequestId,
         workflowRunId: request.session.workflowRunId,
         runtimeSessionId: request.session.id,
         type: 'artifact.emitted',
         message: line,
-        createdAt: Date.now() + index,
+        createdAt,
       })
     }
+
+    sequence += 1
   }
 
-  if (output.stderr.trim().length > 0) {
+  for (const rawStderrLine of output.stderr.split('\n')) {
+    const line = rawStderrLine.replace(/\r$/, '')
+    const trimmedLine = line.trim()
+
+    if (trimmedLine.length === 0) {
+      continue
+    }
+
+    const createdAt = baseCreatedAt + sequence
+
+    providerEvents.push({
+      requestId: request.promptRequestId,
+      workflowRunId: request.session.workflowRunId,
+      runtimeSessionId: request.session.id,
+      provider: PI_MONO_PROVIDER,
+      eventType: 'stderr',
+      stream: 'stderr',
+      sequence,
+      rawPayload: line,
+      providerTimestamp: undefined,
+      createdAt,
+    })
+
     events.push({
       requestId: request.promptRequestId,
       workflowRunId: request.session.workflowRunId,
       runtimeSessionId: request.session.id,
-      type:
-        output.exitCode === 0 ? 'artifact.emitted' : 'session.failed',
-      message: output.stderr.trim(),
-      createdAt: Date.now() + lines.length,
+      type: output.exitCode === 0 ? 'artifact.emitted' : 'session.failed',
+      message: trimmedLine,
+      createdAt,
     })
+
+    sequence += 1
   }
 
-  return events
+  return {
+    providerEvents,
+    events,
+  }
 }
 
 function buildPiPromptCommand(command: string, prompt: string): string {
@@ -211,7 +277,7 @@ export class PiMonoRuntimeAdapter implements RuntimeAdapter {
   normalizeOutput(
     request: RuntimeExecutionRequest,
     output: RuntimeExecutionOutput,
-  ): Effect.Effect<ReadonlyArray<RuntimeEventInput>, BoundaryFailure> {
+  ): Effect.Effect<RuntimeNormalizationResult, BoundaryFailure> {
     return Effect.try({
       try: () => parsePiEventLines(request, output),
       catch: (cause) =>

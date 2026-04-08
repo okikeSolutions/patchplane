@@ -7,7 +7,9 @@ import { internalAction, type ActionCtx } from './_generated/server'
 import { v } from 'convex/values'
 import {
   type BoundaryFailure,
+  type PolicyBundle,
   type RuntimeEventInput,
+  type RuntimeProviderEventInput,
   type RuntimeSessionStatus,
   type WorkflowRunStatus,
 } from '@patchplane/domain'
@@ -24,6 +26,7 @@ import {
   type ConvexInteropFailure,
 } from '../src/errors'
 import { ExecutionBoundaryLive } from '../src/execution/layers'
+import { reviewRuntimeExecution } from '../src/policy/runtimeReview'
 
 type WorkflowExecutionResult = {
   readonly status: string
@@ -60,6 +63,7 @@ interface WorkflowExecutionInput {
     readonly startedAt?: number
     readonly endedAt?: number
   }
+  readonly policyBundle: Pick<PolicyBundle, 'id' | 'requiredReviewers' | 'minimumScore'>
   readonly githubInstallationExternalId?: number
   readonly workflowStatus: WorkflowRunStatus
   readonly sandboxProvider: string
@@ -119,6 +123,36 @@ function buildRuntimeEvents(
   ]
 }
 
+function buildRuntimeProviderEvents(
+  claim: WorkflowExecutionClaim,
+  workflowRunId: Id<'workflowRuns'>,
+  providerEvents: ReadonlyArray<RuntimeProviderEventInput>,
+): Array<{
+  requestId: Id<'promptRequests'>
+  workflowRunId: Id<'workflowRuns'>
+  runtimeSessionId: Id<'runtimeSessions'>
+  provider: string
+  eventType: string
+  stream: RuntimeProviderEventInput['stream']
+  sequence: number
+  rawPayload: string
+  providerTimestamp?: string
+  createdAt: number
+}> {
+  return providerEvents.map((event) => ({
+    requestId: claim.promptRequestId,
+    workflowRunId,
+    runtimeSessionId: claim.runtimeSessionId,
+    provider: event.provider,
+    eventType: event.eventType,
+    stream: event.stream,
+    sequence: event.sequence,
+    rawPayload: event.rawPayload,
+    providerTimestamp: event.providerTimestamp,
+    createdAt: event.createdAt,
+  }))
+}
+
 function failWorkflowRun(
   ctx: ActionCtx,
   workflowRunId: Id<'workflowRuns'>,
@@ -166,15 +200,15 @@ function executeWorkflowRunProgram(
       }
     }
 
-    return yield* Effect.gen(function* () {
-      const input = (yield* tryConvexPromise(
-        'query workflows.getWorkflowRunExecutionInput',
-        () =>
-          ctx.runQuery(internal.workflows.getWorkflowRunExecutionInput, {
-            workflowRunId,
-            runtimeSessionId: claim.runtimeSessionId,
-          }),
-      )) as WorkflowExecutionInput | null
+      return yield* Effect.gen(function* () {
+        const input = (yield* tryConvexPromise(
+          'mutation workflows.getWorkflowRunExecutionInput',
+          () =>
+            ctx.runMutation(internal.workflows.getWorkflowRunExecutionInput, {
+              workflowRunId,
+              runtimeSessionId: claim.runtimeSessionId,
+            }),
+        )) as WorkflowExecutionInput | null
 
       if (!input) {
         yield* failWorkflowRun(
@@ -191,12 +225,14 @@ function executeWorkflowRunProgram(
       }
 
       const gitCredentials = input.githubInstallationExternalId
-        ? yield* auth.getInstallationToken(input.githubInstallationExternalId).pipe(
-            Effect.map((token) => ({
-              username: 'x-access-token',
-              password: token.token,
-            })),
-          )
+        ? yield* auth
+            .getInstallationToken(input.githubInstallationExternalId)
+            .pipe(
+              Effect.map((token) => ({
+                username: 'x-access-token',
+                password: token.token,
+              })),
+            )
         : undefined
 
       const startedAt = Date.now()
@@ -235,12 +271,20 @@ function executeWorkflowRunProgram(
         startedAt,
         executionResult.events,
       )
+      const providerEvents = buildRuntimeProviderEvents(
+        claim,
+        workflowRunId,
+        executionResult.providerEvents,
+      )
 
-      if (events.length > 0) {
-        yield* tryConvexPromise('mutation workflows.appendRuntimeEvents', () =>
-          ctx.runMutation(internal.workflows.appendRuntimeEvents, {
-            events,
-          }),
+      if (providerEvents.length > 0 || events.length > 0) {
+        yield* tryConvexPromise(
+          'mutation workflows.appendRuntimeEventBatch',
+          () =>
+            ctx.runMutation(internal.workflows.appendRuntimeEventBatch, {
+              providerEvents,
+              events,
+            }),
         )
       }
 
@@ -248,6 +292,14 @@ function executeWorkflowRunProgram(
       const failed =
         lastEvent?.type === 'session.failed' ||
         lastEvent?.type === 'turn.failed'
+
+      const reviewedAt = Date.now()
+      const reviewOutcome = yield* reviewRuntimeExecution({
+        requestId: String(claim.promptRequestId),
+        policy: input.policyBundle,
+        normalizedEvents: executionResult.events,
+        providerEvents: executionResult.providerEvents,
+      })
 
       if (failed) {
         yield* failWorkflowRun(
@@ -257,24 +309,57 @@ function executeWorkflowRunProgram(
           lastEvent?.message ?? 'Runtime execution failed.',
         )
 
-        return {
-          status: 'failed',
-          eventCount: events.length,
-        }
+      } else {
+        yield* tryConvexPromise(
+          'mutation workflows.completeWorkflowRunExecution',
+          () =>
+            ctx.runMutation(internal.workflows.completeWorkflowRunExecution, {
+              workflowRunId,
+              runtimeSessionId: claim.runtimeSessionId,
+              completedAt: reviewedAt,
+            }),
+        )
       }
 
       yield* tryConvexPromise(
-        'mutation workflows.completeWorkflowRunExecution',
+        'mutation workflows.recordWorkflowReviewOutcome',
         () =>
-          ctx.runMutation(internal.workflows.completeWorkflowRunExecution, {
+          ctx.runMutation(internal.workflows.recordWorkflowReviewOutcome, {
             workflowRunId,
+            promptRequestId: claim.promptRequestId,
             runtimeSessionId: claim.runtimeSessionId,
-            completedAt: Date.now(),
+            reviewRuns: reviewOutcome.reviewRuns.map((reviewRun) => ({
+              reviewer: reviewRun.reviewer,
+              score: reviewRun.score,
+              passed: reviewRun.passed,
+              summary: reviewRun.summary,
+            })),
+            pendingApproval: reviewOutcome.pendingApproval
+              ? {
+                  kind: reviewOutcome.pendingApproval.kind,
+                  title: reviewOutcome.pendingApproval.title,
+                  body: reviewOutcome.pendingApproval.body,
+                  requestedByUserId:
+                    reviewOutcome.pendingApproval.requestedByUserId,
+                }
+              : undefined,
+            pendingInputs: reviewOutcome.pendingInputs.map((pendingInput) => ({
+              kind: pendingInput.kind,
+              prompt: pendingInput.prompt,
+              requestedByUserId: pendingInput.requestedByUserId,
+            })),
+            mergeDecision: {
+              status: reviewOutcome.mergeDecision.status,
+              reasons: [...reviewOutcome.mergeDecision.reasons],
+              decidedByUserId: reviewOutcome.mergeDecision.decidedByUserId,
+            },
+            reviewedAt,
+            markWorkflowReviewed: !failed,
           }),
       )
 
       return {
-        status: 'completed',
+        status: failed ? 'failed' : reviewOutcome.mergeDecision.status,
         eventCount: events.length,
       }
     }).pipe(

@@ -56,7 +56,11 @@ describe('DaytonaSandboxAdapter', () => {
             retryable: false,
           }),
         ),
-      normalizeOutput: () => Effect.succeed([]),
+      normalizeOutput: () =>
+        Effect.succeed({
+          providerEvents: [],
+          events: [],
+        }),
     }
 
     const result = await Effect.runPromise(

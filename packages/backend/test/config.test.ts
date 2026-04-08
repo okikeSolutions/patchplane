@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Effect } from 'effect'
+import { readBootstrapConfigDefaults } from '../convex/lib/configDefaults'
 import { BackendConfig, BackendConfigLive } from '../src/config/schema'
 import { BackendConfigFailure } from '../src/errors'
 
@@ -36,7 +37,9 @@ function restoreEnv() {
   }
 }
 
-function configureValidEnv(overrides: Partial<Record<(typeof backendEnvKeys)[number], string>> = {}) {
+function configureValidEnv(
+  overrides: Partial<Record<(typeof backendEnvKeys)[number], string>> = {},
+) {
   process.env.GITHUB_APP_ID = '1'
   process.env.GITHUB_APP_PRIVATE_KEY = 'test-private-key'
   process.env.GITHUB_WEBHOOK_SECRET = 'test-webhook-secret'
@@ -65,7 +68,9 @@ async function loadBackendConfig() {
 
 describe('BackendConfigLive', () => {
   beforeEach(() => {
-    envSnapshot = new Map(backendEnvKeys.map((envKey) => [envKey, process.env[envKey]]))
+    envSnapshot = new Map(
+      backendEnvKeys.map((envKey) => [envKey, process.env[envKey]]),
+    )
   })
 
   afterEach(() => {
@@ -92,6 +97,52 @@ describe('BackendConfigLive', () => {
     expect(result.left.issues.length).toBeGreaterThan(0)
   })
 
+  test('rejects missing GitHub app credentials before Octokit is constructed', async () => {
+    configureValidEnv()
+    delete process.env.GITHUB_APP_ID
+    delete process.env.GITHUB_APP_PRIVATE_KEY
+    delete process.env.GITHUB_WEBHOOK_SECRET
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.gen(function* () {
+          return yield* BackendConfig
+        }).pipe(Effect.provide(BackendConfigLive)),
+      ),
+    )
+
+    expect(result._tag).toBe('Left')
+    if (result._tag !== 'Left') {
+      throw new Error('Expected config loading to fail.')
+    }
+
+    expect(result.left).toBeInstanceOf(BackendConfigFailure)
+    expect(result.left.issues).toContain('github')
+    expect(result.left.issues).toContain('appId')
+    expect(result.left.issues).toContain('privateKey')
+    expect(result.left.issues).toContain('webhookSecret')
+  })
+
+  test('rejects a non-positive GitHub app id', async () => {
+    configureValidEnv({ GITHUB_APP_ID: '0' })
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.gen(function* () {
+          return yield* BackendConfig
+        }).pipe(Effect.provide(BackendConfigLive)),
+      ),
+    )
+
+    expect(result._tag).toBe('Left')
+    if (result._tag !== 'Left') {
+      throw new Error('Expected config loading to fail.')
+    }
+
+    expect(result.left).toBeInstanceOf(BackendConfigFailure)
+    expect(result.left.issues).toContain('appId')
+  })
+
   test('reads environment values each time the layer is provided', async () => {
     configureValidEnv({ GITHUB_APP_ID: '7' })
     const first = await loadBackendConfig()
@@ -101,5 +152,29 @@ describe('BackendConfigLive', () => {
 
     expect(first.github.appId).toBe(7)
     expect(second.github.appId).toBe(42)
+  })
+
+  test('reuses validated backend config for bootstrap defaults', () => {
+    configureValidEnv({
+      PATCHPLANE_GITHUB_EXECUTION_TARGET_ID: 'repo.default',
+      PATCHPLANE_GITHUB_POLICY_BUNDLE_ID: 'strict',
+      PATCHPLANE_REQUIRED_REVIEWERS: 'quality,security',
+      PATCHPLANE_MINIMUM_REVIEW_SCORE: '0.9',
+    })
+
+    expect(readBootstrapConfigDefaults()).toEqual({
+      executionTargetKey: 'repo.default',
+      policyBundleKey: 'strict',
+      sandboxProvider: 'daytona',
+      runtimeProvider: 'pi-mono',
+      requiredReviewers: ['quality', 'security'],
+      minimumScore: 0.9,
+    })
+  })
+
+  test('fails bootstrap defaults on invalid backend config', () => {
+    configureValidEnv({ GITHUB_APP_ID: '0' })
+
+    expect(() => readBootstrapConfigDefaults()).toThrow(BackendConfigFailure)
   })
 })

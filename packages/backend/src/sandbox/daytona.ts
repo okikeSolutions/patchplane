@@ -91,11 +91,9 @@ function buildShellCommand(
     ([key, value]) => `export ${key}=${shellEscape(value)}`,
   )
 
-  return [
-    `cd ${shellEscape(workingDirectory)}`,
-    ...exports,
-    command,
-  ].join(' && ')
+  return [`cd ${shellEscape(workingDirectory)}`, ...exports, command].join(
+    ' && ',
+  )
 }
 
 function createDaytonaClient(options: DaytonaSandboxOptions): DaytonaClient {
@@ -163,16 +161,16 @@ export class DaytonaSandboxAdapter implements SandboxAdapter {
               })
             },
           ),
-          (sandbox) =>
+          (sandboxHandle) =>
             Effect.promise(() =>
               Promise.allSettled([
                 Promise.resolve().then(() =>
-                  sandbox.process.deleteSession(executionSessionId),
+                  sandboxHandle.process.deleteSession(executionSessionId),
                 ),
                 Promise.resolve().then(() =>
                   this.options.ephemeral
-                    ? sandbox.delete(commandTimeoutSeconds)
-                    : sandbox.stop(commandTimeoutSeconds),
+                    ? sandboxHandle.delete(commandTimeoutSeconds)
+                    : sandboxHandle.stop(commandTimeoutSeconds),
                 ),
               ]),
             ).pipe(Effect.map(() => undefined)),
@@ -222,11 +220,15 @@ export class DaytonaSandboxAdapter implements SandboxAdapter {
           stdout: result.stdout ?? result.output ?? '',
           stderr: result.stderr ?? '',
         }
-        const events = yield* runtime.normalizeOutput(runtimeRequest, output)
+        const normalizedResult = yield* runtime.normalizeOutput(
+          runtimeRequest,
+          output,
+        )
 
         return {
           externalSessionId: `${sandbox.id}:${executionSessionId}`,
-          events: [...events],
+          providerEvents: [...normalizedResult.providerEvents],
+          events: [...normalizedResult.events],
         }
       }),
     )

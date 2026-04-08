@@ -1,6 +1,5 @@
 import { Effect } from 'effect'
-import type { ReviewRun } from '@patchplane/domain'
-import type { BackendConfigShape } from '../config/schema'
+import type { PolicyBundle, ReviewRun } from '@patchplane/domain'
 import { ReviewFailure } from '../errors'
 
 export interface ReviewEvaluation {
@@ -8,11 +7,21 @@ export interface ReviewEvaluation {
   readonly reviewCount: number
 }
 
+export type ReviewEvaluationInput = Pick<
+  ReviewRun,
+  'reviewer' | 'score' | 'passed' | 'summary'
+>
+
 export function evaluateReviews(
   requestId: string,
-  reviewRuns: ReadonlyArray<ReviewRun>,
-  policy: BackendConfigShape['policy'],
+  reviewRuns: ReadonlyArray<ReviewEvaluationInput>,
+  policy: Pick<PolicyBundle, 'requiredReviewers' | 'minimumScore'>,
 ) {
+  const requiredReviewers = [...new Set(policy.requiredReviewers)]
+  const coveredReviewers = new Set(reviewRuns.map((review) => review.reviewer))
+  const missingReviewers = requiredReviewers.filter(
+    (reviewer) => !coveredReviewers.has(reviewer),
+  )
   const averageScore =
     reviewRuns.length === 0
       ? 0
@@ -20,8 +29,8 @@ export function evaluateReviews(
         reviewRuns.length
 
   const reasons = [
-    ...(reviewRuns.length < policy.requiredReviewers.length
-      ? ['Missing required review coverage.']
+    ...(missingReviewers.length > 0
+      ? [`Missing required reviewers: ${missingReviewers.join(', ')}.`]
       : []),
     ...(averageScore < policy.minimumScore
       ? ['Average review score is below policy minimum.']

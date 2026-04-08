@@ -28,9 +28,12 @@ describe('tryConvexPromise', () => {
 
   test('passes successful promise results through unchanged', async () => {
     const result = await Effect.runPromise(
-      tryConvexPromise('query github.getWebhookDeliveryForProcessing', async () => ({
-        ok: true as const,
-      })),
+      tryConvexPromise(
+        'query github.getWebhookDeliveryForProcessing',
+        async () => ({
+          ok: true as const,
+        }),
+      ),
     )
 
     expect(result).toEqual({ ok: true })

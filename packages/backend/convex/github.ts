@@ -1,8 +1,6 @@
 import { internalMutation, internalQuery, query } from './_generated/server'
 import type { Id } from './_generated/dataModel'
 import { v } from 'convex/values'
-import type { FunctionReference } from 'convex/server'
-import { internal } from './_generated/api'
 import {
   decodeGitHubWebhookReconciliationState,
   decodeGitHubInstallation,
@@ -16,6 +14,7 @@ import {
   promptRequestCommandValidator,
   workflowRunStatusValidator,
 } from './contracts'
+import { createPromptRequestFlow } from './lib/requestCreation'
 
 export const recordInstallationCallback = internalMutation({
   args: {
@@ -29,15 +28,12 @@ export const recordInstallationCallback = internalMutation({
     const existing = await ctx.db
       .query('githubInstallations')
       .withIndex('by_external_installation_id', (queryBuilder) =>
-        queryBuilder.eq(
-          'externalInstallationId',
-          args.externalInstallationId,
-        ),
+        queryBuilder.eq('externalInstallationId', args.externalInstallationId),
       )
       .unique()
 
     if (existing) {
-      await ctx.db.patch("githubInstallations", existing._id, {
+      await ctx.db.patch('githubInstallations', existing._id, {
         setupAction: args.setupAction,
         setupState: args.setupState,
         status: 'pending',
@@ -79,15 +75,12 @@ export const upsertInstallationScope = internalMutation({
     const existing = await ctx.db
       .query('githubInstallations')
       .withIndex('by_external_installation_id', (queryBuilder) =>
-        queryBuilder.eq(
-          'externalInstallationId',
-          args.externalInstallationId,
-        ),
+        queryBuilder.eq('externalInstallationId', args.externalInstallationId),
       )
       .unique()
 
     if (existing) {
-      await ctx.db.patch("githubInstallations", existing._id, {
+      await ctx.db.patch('githubInstallations', existing._id, {
         accountLogin: args.accountLogin,
         accountType: args.accountType,
         targetType: args.targetType,
@@ -152,7 +145,7 @@ export const upsertRepositoryConnections = internalMutation({
         .unique()
 
       if (existing) {
-        await ctx.db.patch("repositories", existing._id, {
+        await ctx.db.patch('repositories', existing._id, {
           githubInstallationId: args.githubInstallationId,
           fullName: repository.fullName,
           owner: repository.owner,
@@ -218,7 +211,7 @@ export const recordWebhookDelivery = internalMutation({
 
     if (existing) {
       if (existing.status === 'failed') {
-        await ctx.db.patch("webhookDeliveries", existing._id, {
+        await ctx.db.patch('webhookDeliveries', existing._id, {
           event: args.event,
           action: args.action,
           externalInstallationId: args.externalInstallationId,
@@ -274,7 +267,7 @@ export const queueWebhookDelivery = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch("webhookDeliveries", args.deliveryRecordId, {
+    await ctx.db.patch('webhookDeliveries', args.deliveryRecordId, {
       status: 'queued',
       signatureVerified: true,
     })
@@ -294,7 +287,7 @@ export const markWebhookDeliveryOutcome = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch("webhookDeliveries", args.deliveryRecordId, {
+    await ctx.db.patch('webhookDeliveries', args.deliveryRecordId, {
       status: args.status,
       commandEmitted: args.commandEmitted,
       promptRequestId: args.promptRequestId,
@@ -319,16 +312,6 @@ export const createPromptRequestFromCommand = internalMutation({
   handler: async (ctx, args) => {
     const command = decodePromptRequestCommand(args.command)
     const now = Date.now()
-    const workflowWorker = internal as typeof internal & {
-      workflowWorker: {
-        executeWorkflowRun: FunctionReference<
-          'action',
-          'internal',
-          { workflowRunId: Id<'workflowRuns'> },
-          { status: string; eventCount: number }
-        >
-      }
-    }
 
     let githubInstallationId: Id<'githubInstallations'> | undefined
     let repositoryConnectionId: Id<'repositories'> | undefined
@@ -378,78 +361,17 @@ export const createPromptRequestFromCommand = internalMutation({
       repositoryConnectionId = existingRepository._id
     }
 
-    const promptRequestId = await ctx.db.insert('promptRequests', {
-      projectId: command.projectId,
-      executionTargetId: command.executionTargetId,
-      policyBundleId: command.policyBundleId,
-      createdByUserId: command.createdByUserId,
-      prompt: command.prompt,
-      scope: {
-        ...command.scope,
-        includePaths: [...command.scope.includePaths],
-        excludePaths: [...command.scope.excludePaths],
-      },
-      source: command.source,
-      status: 'queued',
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    const workflowRunId = await ctx.db.insert('workflowRuns', {
-      promptRequestId,
-      githubInstallationId: githubInstallationId ?? undefined,
-      repositoryConnectionId: repositoryConnectionId ?? undefined,
-      sandboxProvider: 'daytona',
-      runtimeProvider: 'pi-mono',
-      status: 'queued',
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await ctx.scheduler.runAfter(
-      0,
-      workflowWorker.workflowWorker.executeWorkflowRun,
+    const { promptRequestId, workflowRunId } = await createPromptRequestFlow(
+      ctx,
       {
-        workflowRunId,
+        command,
+        githubInstallationId,
+        repositoryConnectionId,
       },
     )
 
-    if (
-      command.source.kind === 'github.issue_comment' &&
-      repositoryConnectionId !== undefined
-    ) {
-      const githubSource = command.source
-      const existingIssueBinding = await ctx.db
-        .query('issueBindings')
-        .withIndex('by_repository_connection_and_issue', (queryBuilder) =>
-          queryBuilder
-            .eq('repositoryConnectionId', repositoryConnectionId)
-            .eq('issueNumber', githubSource.issueNumber),
-        )
-        .unique()
-
-      if (existingIssueBinding) {
-        await ctx.db.patch("issueBindings", existingIssueBinding._id, {
-          promptRequestId,
-          workflowRunId,
-          latestCommentId: githubSource.commentId,
-          updatedAt: now,
-        })
-      } else {
-        await ctx.db.insert('issueBindings', {
-          repositoryConnectionId,
-          issueNumber: githubSource.issueNumber,
-          promptRequestId,
-          workflowRunId,
-          latestCommentId: githubSource.commentId,
-          createdAt: now,
-          updatedAt: now,
-        })
-      }
-    }
-
     if (args.deliveryRecordId) {
-      await ctx.db.patch("webhookDeliveries", args.deliveryRecordId, {
+      await ctx.db.patch('webhookDeliveries', args.deliveryRecordId, {
         status: 'accepted',
         commandEmitted: true,
         promptRequestId,
@@ -492,7 +414,10 @@ export const getWebhookDeliveryForProcessing = internalQuery({
     v.null(),
   ),
   handler: async (ctx, args) => {
-    const delivery = await ctx.db.get("webhookDeliveries", args.deliveryRecordId)
+    const delivery = await ctx.db.get(
+      'webhookDeliveries',
+      args.deliveryRecordId,
+    )
 
     if (!delivery) {
       return null
@@ -539,7 +464,7 @@ export const beginWebhookReconciliationRun = internalMutation({
       .unique()
 
     if (existing) {
-      await ctx.db.patch("githubWebhookReconciliationStates", existing._id, {
+      await ctx.db.patch('githubWebhookReconciliationStates', existing._id, {
         lastRunStartedAt: args.startedAt,
         lastRunStatus: 'running',
         lastErrorMessage: undefined,
@@ -582,7 +507,7 @@ export const completeWebhookReconciliationRun = internalMutation({
       .unique()
 
     if (existing) {
-      await ctx.db.patch("githubWebhookReconciliationStates", existing._id, {
+      await ctx.db.patch('githubWebhookReconciliationStates', existing._id, {
         lastSuccessfulRedeliveryStartedAt:
           args.lastSuccessfulRedeliveryStartedAt,
         lastRunCompletedAt: args.completedAt,
@@ -621,7 +546,7 @@ export const failWebhookReconciliationRun = internalMutation({
       .unique()
 
     if (existing) {
-      await ctx.db.patch("githubWebhookReconciliationStates", existing._id, {
+      await ctx.db.patch('githubWebhookReconciliationStates', existing._id, {
         lastRunCompletedAt: args.completedAt,
         lastRunStatus: 'failed',
         lastErrorMessage: args.errorMessage,

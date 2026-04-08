@@ -6,32 +6,42 @@ import {
   promptScopeValidator,
   workflowStatusValidator,
 } from './contracts'
+import { createPromptRequestFlow } from './lib/requestCreation'
 
 export const create = mutation({
   args: {
     projectId: v.string(),
-    executionTargetId: v.string(),
-    policyBundleId: v.string(),
+    executionTargetKey: v.string(),
+    policyBundleKey: v.string(),
     createdByUserId: v.string(),
     prompt: v.string(),
     scope: promptScopeValidator,
   },
-  returns: v.id('promptRequests'),
+  returns: v.object({
+    promptRequestId: v.id('promptRequests'),
+    workflowRunId: v.id('workflowRuns'),
+  }),
   handler: async (ctx, args) => {
-    const now = Date.now()
+    const { promptRequestId, workflowRunId } = await createPromptRequestFlow(
+      ctx,
+      {
+        command: {
+          kind: 'prompt_request.create',
+          projectId: args.projectId,
+          executionTargetKey: args.executionTargetKey,
+          policyBundleKey: args.policyBundleKey,
+          createdByUserId: args.createdByUserId,
+          prompt: args.prompt,
+          scope: args.scope,
+          source: { kind: 'manual' },
+        },
+      },
+    )
 
-    return await ctx.db.insert('promptRequests', {
-      projectId: args.projectId,
-      executionTargetId: args.executionTargetId,
-      policyBundleId: args.policyBundleId,
-      createdByUserId: args.createdByUserId,
-      prompt: args.prompt,
-      scope: args.scope,
-      source: { kind: 'manual' },
-      status: 'queued',
-      createdAt: now,
-      updatedAt: now,
-    })
+    return {
+      promptRequestId,
+      workflowRunId,
+    }
   },
 })
 
@@ -63,8 +73,8 @@ export const list = query({
       const decoded = decodePromptRequest({
         id: String(request._id),
         projectId: request.projectId,
-        executionTargetId: request.executionTargetId,
-        policyBundleId: request.policyBundleId,
+        executionTargetId: String(request.executionTargetId),
+        policyBundleId: String(request.policyBundleId),
         createdByUserId: request.createdByUserId,
         prompt: request.prompt,
         scope: request.scope,

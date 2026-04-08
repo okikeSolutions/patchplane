@@ -59,8 +59,8 @@ const GitHubWebhookIngestorLive = Layer.effect(
     const config = yield* BackendConfig
 
     return new IssueCommentGitHubWebhookIngestor({
-      executionTargetId: config.github.defaultExecutionTargetId,
-      policyBundleId: config.github.defaultPolicyBundleId,
+      executionTargetKey: config.github.defaultExecutionTargetKey,
+      policyBundleKey: config.github.defaultPolicyBundleKey,
     })
   }),
 ).pipe(Layer.provide(BackendConfigLive))

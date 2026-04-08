@@ -3,9 +3,7 @@ export const githubAppCurrentRepositoryPermissions = {
   issues: 'read',
 } as const
 
-export const githubAppCurrentWebhookSubscriptions = [
-  'issue_comment',
-] as const
+export const githubAppCurrentWebhookSubscriptions = ['issue_comment'] as const
 
 export const githubAppFutureRepositoryPermissions = {
   issues: 'write',

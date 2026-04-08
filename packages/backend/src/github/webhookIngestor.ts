@@ -8,11 +8,13 @@ import {
 } from '@patchplane/domain'
 import { PromptRequestCommandSchema } from '@patchplane/domain'
 
-const decodePromptRequestCommand = Schema.decodeUnknown(PromptRequestCommandSchema)
+const decodePromptRequestCommand = Schema.decodeUnknown(
+  PromptRequestCommandSchema,
+)
 
 export interface GitHubCommandDefaults {
-  readonly executionTargetId: string
-  readonly policyBundleId: string
+  readonly executionTargetKey: string
+  readonly policyBundleKey: string
 }
 
 interface GitHubIssueCommentPayload {
@@ -124,8 +126,8 @@ export class IssueCommentGitHubWebhookIngestor implements GitHubWebhookIngestor 
         yield* decodePromptRequestCommand({
           kind: 'prompt_request.create',
           projectId: repositoryFullName,
-          executionTargetId: defaults.executionTargetId,
-          policyBundleId: defaults.policyBundleId,
+          executionTargetKey: defaults.executionTargetKey,
+          policyBundleKey: defaults.policyBundleKey,
           createdByUserId: `github:${actorLogin}`,
           prompt: command,
           scope: {

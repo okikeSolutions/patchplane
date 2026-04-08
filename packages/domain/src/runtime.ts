@@ -31,6 +31,14 @@ export const runtimeEventTypes = [
 export const RuntimeEventTypeSchema = Schema.Literal(...runtimeEventTypes)
 export type RuntimeEventType = Schema.Schema.Type<typeof RuntimeEventTypeSchema>
 
+export const runtimeProviderEventStreams = ['stdout', 'stderr'] as const
+export const RuntimeProviderEventStreamSchema = Schema.Literal(
+  ...runtimeProviderEventStreams,
+)
+export type RuntimeProviderEventStream = Schema.Schema.Type<
+  typeof RuntimeProviderEventStreamSchema
+>
+
 export const RuntimeSessionSchema = Schema.Struct({
   id: Schema.String,
   workflowRunId: Schema.String,
@@ -69,6 +77,39 @@ export const RuntimeEventSchema = Schema.Struct({
 })
 export type RuntimeEvent = Schema.Schema.Type<typeof RuntimeEventSchema>
 
+export const RuntimeProviderEventInputSchema = Schema.Struct({
+  requestId: Schema.String,
+  workflowRunId: Schema.optional(Schema.String),
+  runtimeSessionId: Schema.optional(Schema.String),
+  provider: Schema.String,
+  eventType: Schema.String,
+  stream: RuntimeProviderEventStreamSchema,
+  sequence: Schema.Number,
+  rawPayload: Schema.String,
+  providerTimestamp: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+})
+export type RuntimeProviderEventInput = Schema.Schema.Type<
+  typeof RuntimeProviderEventInputSchema
+>
+
+export const RuntimeProviderEventSchema = Schema.Struct({
+  id: Schema.String,
+  requestId: Schema.String,
+  workflowRunId: Schema.optional(Schema.String),
+  runtimeSessionId: Schema.optional(Schema.String),
+  provider: Schema.String,
+  eventType: Schema.String,
+  stream: RuntimeProviderEventStreamSchema,
+  sequence: Schema.Number,
+  rawPayload: Schema.String,
+  providerTimestamp: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+})
+export type RuntimeProviderEvent = Schema.Schema.Type<
+  typeof RuntimeProviderEventSchema
+>
+
 export const RuntimeEnvironmentSchema = Schema.Record({
   key: Schema.String,
   value: Schema.String,
@@ -106,6 +147,14 @@ export type RuntimeExecutionOutput = Schema.Schema.Type<
   typeof RuntimeExecutionOutputSchema
 >
 
+export const RuntimeNormalizationResultSchema = Schema.Struct({
+  providerEvents: Schema.Array(RuntimeProviderEventInputSchema),
+  events: Schema.Array(RuntimeEventInputSchema),
+})
+export type RuntimeNormalizationResult = Schema.Schema.Type<
+  typeof RuntimeNormalizationResultSchema
+>
+
 export const SandboxGitCredentialsSchema = Schema.Struct({
   username: Schema.String,
   password: Schema.String,
@@ -131,6 +180,7 @@ export type SandboxExecutionRequest = Schema.Schema.Type<
 
 export const SandboxExecutionResultSchema = Schema.Struct({
   externalSessionId: Schema.String,
+  providerEvents: Schema.Array(RuntimeProviderEventInputSchema),
   events: Schema.Array(RuntimeEventInputSchema),
 })
 export type SandboxExecutionResult = Schema.Schema.Type<

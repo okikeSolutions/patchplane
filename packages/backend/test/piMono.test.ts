@@ -73,19 +73,56 @@ describe('PiMonoRuntimeAdapter', () => {
       }),
     )
 
-    expect(events.map((event) => event.type)).toEqual([
+    expect(events.providerEvents.map((event) => event.eventType)).toEqual([
+      'session',
+      'compaction_start',
+      'compaction_end',
+      'message_update',
+      'agent_end',
+    ])
+    expect(events.events.map((event) => event.type)).toEqual([
       'session.started',
       'artifact.emitted',
       'artifact.emitted',
       'artifact.emitted',
       'session.completed',
     ])
-    expect(events.map((event) => event.message)).toEqual([
+    expect(events.events.map((event) => event.message)).toEqual([
       'Pi session pi-session-1 attached in /workspace.',
       'Pi auto-compaction started: threshold.',
       'Pi auto-compaction completed.',
       'Finished.',
       'Pi agent completed.',
     ])
+  })
+
+  test('preserves meaningful whitespace in Pi text deltas', async () => {
+    const adapter = new PiMonoRuntimeAdapter({ command: 'pi' })
+    const events = await Effect.runPromise(
+      adapter.normalizeOutput(createRuntimeExecutionRequest(), {
+        exitCode: 0,
+        stdout: [
+          JSON.stringify({
+            type: 'message_update',
+            assistantMessageEvent: {
+              type: 'text_delta',
+              delta: '  hello world',
+            },
+          }),
+          JSON.stringify({
+            type: 'message_update',
+            assistantMessageEvent: {
+              type: 'text_delta',
+              delta: '   ',
+            },
+          }),
+        ].join('\n'),
+        stderr: '',
+      }),
+    )
+
+    expect(events.providerEvents).toHaveLength(2)
+    expect(events.events).toHaveLength(1)
+    expect(events.events[0]?.message).toBe('  hello world')
   })
 })

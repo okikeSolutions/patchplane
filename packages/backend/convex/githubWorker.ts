@@ -16,10 +16,7 @@ import {
   GitHubWebhookIngestorService,
 } from '@patchplane/domain'
 import { tryConvexPromise } from '../src/effect/convex'
-import {
-  readErrorMessage,
-  type ConvexInteropFailure,
-} from '../src/errors'
+import { readErrorMessage, type ConvexInteropFailure } from '../src/errors'
 import { processPatchPlaneCommandsSequentially } from '../src/github/commandQueue'
 import { GitHubAppRuntime, GitHubBoundaryLive } from '../src/github/layers'
 
@@ -80,7 +77,9 @@ function withGitHubRetry<A>(
   })
 }
 
-function toWebhookEnvelope(delivery: DeliveryForProcessing): GitHubWebhookEnvelope {
+function toWebhookEnvelope(
+  delivery: DeliveryForProcessing,
+): GitHubWebhookEnvelope {
   return {
     deliveryId: delivery.deliveryId,
     event: delivery.event,
@@ -321,9 +320,7 @@ function processWebhookDeliveryProgram(
   })
 }
 
-function reconcileWebhookDeliveriesProgram(
-  ctx: ActionCtx,
-) {
+function reconcileWebhookDeliveriesProgram(ctx: ActionCtx) {
   const runStartedAt = Date.now()
 
   return Effect.gen(function* () {
@@ -354,6 +351,8 @@ function reconcileWebhookDeliveriesProgram(
 
       const redeliveryCandidates = [...deliveriesByGuid.values()]
         .map((attempts) =>
+          // ES2022 target compatibility: `toSorted` is unavailable in the current tsconfig.
+          // oxlint-disable-next-line unicorn/no-array-sort
           [...attempts].sort(
             (left, right) =>
               Date.parse(right.deliveredAt) - Date.parse(left.deliveredAt),
@@ -425,7 +424,9 @@ async function processWebhookDeliveryHandler(
   args: { readonly deliveryRecordId: Id<'webhookDeliveries'> },
 ): Promise<GitHubWorkerResult> {
   return Effect.runPromise(
-    processWebhookDeliveryProgram(ctx, args).pipe(Effect.provide(GitHubBoundaryLive)),
+    processWebhookDeliveryProgram(ctx, args).pipe(
+      Effect.provide(GitHubBoundaryLive),
+    ),
   )
 }
 
@@ -433,7 +434,9 @@ async function reconcileWebhookDeliveriesHandler(
   ctx: ActionCtx,
 ): Promise<ReconciliationResult> {
   return Effect.runPromise(
-    reconcileWebhookDeliveriesProgram(ctx).pipe(Effect.provide(GitHubBoundaryLive)),
+    reconcileWebhookDeliveriesProgram(ctx).pipe(
+      Effect.provide(GitHubBoundaryLive),
+    ),
   )
 }
 
@@ -463,7 +466,9 @@ export const verifyWebhookDelivery = internalAction({
   }),
   handler: (_ctx, args) =>
     Effect.runPromise(
-      verifyWebhookDeliveryProgram(args).pipe(Effect.provide(GitHubBoundaryLive)),
+      verifyWebhookDeliveryProgram(args).pipe(
+        Effect.provide(GitHubBoundaryLive),
+      ),
     ),
 })
 
