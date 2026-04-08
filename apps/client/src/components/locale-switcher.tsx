@@ -1,11 +1,28 @@
-import { useRouterState } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
+import type { MouseEvent } from 'react'
 import * as m from '@/paraglide/messages'
-import { getLocale, localizeHref } from '@/paraglide/runtime'
+import {
+  getLocale,
+  localizeHref,
+  setLocale as setRuntimeLocale,
+} from '@/paraglide/runtime'
 import { localeLabels, supportedLocales } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from './ui/button'
 
+function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>) {
+  return !(
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.shiftKey
+  )
+}
+
 export default function LocaleSwitcher() {
+  const navigate = useNavigate()
   const { hash, pathname, searchStr } = useRouterState({
     select: (state) => ({
       hash: state.location.hash,
@@ -32,6 +49,19 @@ export default function LocaleSwitcher() {
             href={href}
             hrefLang={locale}
             aria-current={isActive ? 'page' : undefined}
+            onClick={async (event) => {
+              if (!isPlainLeftClick(event)) {
+                return
+              }
+
+              event.preventDefault()
+              if (isActive) {
+                return
+              }
+
+              await setRuntimeLocale(locale, { reload: false })
+              await navigate({ href })
+            }}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
               'locale-switcher__link',
