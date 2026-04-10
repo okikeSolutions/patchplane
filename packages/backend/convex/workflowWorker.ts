@@ -63,7 +63,10 @@ interface WorkflowExecutionInput {
     readonly startedAt?: number
     readonly endedAt?: number
   }
-  readonly policyBundle: Pick<PolicyBundle, 'id' | 'requiredReviewers' | 'minimumScore'>
+  readonly policyBundle: Pick<
+    PolicyBundle,
+    'id' | 'requiredReviewers' | 'minimumScore'
+  >
   readonly githubInstallationExternalId?: number
   readonly workflowStatus: WorkflowRunStatus
   readonly sandboxProvider: string
@@ -200,15 +203,15 @@ function executeWorkflowRunProgram(
       }
     }
 
-      return yield* Effect.gen(function* () {
-        const input = (yield* tryConvexPromise(
-          'mutation workflows.getWorkflowRunExecutionInput',
-          () =>
-            ctx.runMutation(internal.workflows.getWorkflowRunExecutionInput, {
-              workflowRunId,
-              runtimeSessionId: claim.runtimeSessionId,
-            }),
-        )) as WorkflowExecutionInput | null
+    return yield* Effect.gen(function* () {
+      const input = (yield* tryConvexPromise(
+        'mutation workflows.getWorkflowRunExecutionInput',
+        () =>
+          ctx.runMutation(internal.workflows.getWorkflowRunExecutionInput, {
+            workflowRunId,
+            runtimeSessionId: claim.runtimeSessionId,
+          }),
+      )) as WorkflowExecutionInput | null
 
       if (!input) {
         yield* failWorkflowRun(
@@ -308,7 +311,6 @@ function executeWorkflowRunProgram(
           claim.runtimeSessionId,
           lastEvent?.message ?? 'Runtime execution failed.',
         )
-
       } else {
         yield* tryConvexPromise(
           'mutation workflows.completeWorkflowRunExecution',

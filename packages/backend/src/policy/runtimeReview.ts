@@ -41,17 +41,14 @@ export interface RuntimeReviewOutcome {
   }
 }
 
-
 function buildPendingInputs(
   normalizedEvents: ReadonlyArray<RuntimeEventInput>,
   providerEvents: ReadonlyArray<RuntimeProviderEventInput>,
 ): RuntimeReviewOutcome['pendingInputs'] {
   const hasRuntimeFailure = normalizedEvents.some(
-    (event) =>
-      event.type === 'session.failed' || event.type === 'turn.failed',
+    (event) => event.type === 'session.failed' || event.type === 'turn.failed',
   )
-  const queueMessages =
-    summarizeQueueMessagesFromProviderEvents(providerEvents)
+  const queueMessages = summarizeQueueMessagesFromProviderEvents(providerEvents)
 
   if (hasRuntimeFailure) {
     const failureMessages = normalizedEvents
@@ -67,7 +64,9 @@ function buildPendingInputs(
         kind: 'runtime.follow_up',
         prompt:
           `Runtime execution failed. Provide follow-up guidance before retrying.` +
-          (failureMessages.length > 0 ? ` Last failure: ${failureMessages}` : ''),
+          (failureMessages.length > 0
+            ? ` Last failure: ${failureMessages}`
+            : ''),
         requestedByUserId: SYSTEM_INPUT_ACTOR,
       },
     ]
@@ -77,7 +76,8 @@ function buildPendingInputs(
     return [
       {
         kind: 'runtime.queue_resume',
-        prompt: `Runtime finished with queued follow-up work. Review and provide the next operator message. ${queueMessages.join(' ')}`.trim(),
+        prompt:
+          `Runtime finished with queued follow-up work. Review and provide the next operator message. ${queueMessages.join(' ')}`.trim(),
         requestedByUserId: SYSTEM_INPUT_ACTOR,
       },
     ]

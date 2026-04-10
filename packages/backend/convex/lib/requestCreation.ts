@@ -36,8 +36,7 @@ export function buildPromptRequestScope(
 ) {
   return {
     ...command.scope,
-    baseBranch:
-      executionTarget.defaultBaseBranch ?? command.scope.baseBranch,
+    baseBranch: executionTarget.defaultBaseBranch ?? command.scope.baseBranch,
     includePaths: [...command.scope.includePaths],
     excludePaths: [...command.scope.excludePaths],
   }

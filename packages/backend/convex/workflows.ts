@@ -266,7 +266,8 @@ export const recordWorkflowReviewOutcome = internalMutation({
 
       const duplicateApproval = existingApprovals.find(
         (approval) =>
-          approval.kind === pendingApproval.kind && approval.status === 'pending',
+          approval.kind === pendingApproval.kind &&
+          approval.status === 'pending',
       )
 
       if (!duplicateApproval) {
@@ -332,7 +333,10 @@ export const recordWorkflowReviewOutcome = internalMutation({
       .unique()
 
     const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
-    const promptRequest = await ctx.db.get('promptRequests', args.promptRequestId)
+    const promptRequest = await ctx.db.get(
+      'promptRequests',
+      args.promptRequestId,
+    )
     const resolvedConfig = promptRequest
       ? await ensurePromptRequestConfigReferences(ctx, {
           promptRequestId: args.promptRequestId,

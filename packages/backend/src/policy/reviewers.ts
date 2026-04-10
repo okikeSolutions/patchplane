@@ -70,8 +70,7 @@ function hasRuntimeFailure(
   normalizedEvents: ReadonlyArray<RuntimeEventInput>,
 ): boolean {
   return normalizedEvents.some(
-    (event) =>
-      event.type === 'session.failed' || event.type === 'turn.failed',
+    (event) => event.type === 'session.failed' || event.type === 'turn.failed',
   )
 }
 
@@ -207,7 +206,8 @@ const qualityReviewerRunner: RuntimeReviewerRunner = {
           reviewer: 'quality',
           score: 0.2,
           passed: false,
-          summary: `Runtime execution failed. ${summarizeRuntimeFailures(context.normalizedEvents)}`.trim(),
+          summary:
+            `Runtime execution failed. ${summarizeRuntimeFailures(context.normalizedEvents)}`.trim(),
         }
       }
 
@@ -225,7 +225,8 @@ const qualityReviewerRunner: RuntimeReviewerRunner = {
           reviewer: 'quality',
           score: 0.6,
           passed: false,
-          summary: `Runtime finished with queued follow-up messages. ${queueMessages.join(' ')}`.trim(),
+          summary:
+            `Runtime finished with queued follow-up messages. ${queueMessages.join(' ')}`.trim(),
         }
       }
 
@@ -243,7 +244,9 @@ const securityReviewerRunner: RuntimeReviewerRunner = {
   reviewer: 'security',
   run: (context) =>
     Effect.sync<ReviewEvaluationInput>(() => {
-      const suspiciousCommands = collectSuspiciousCommands(context.providerEvents)
+      const suspiciousCommands = collectSuspiciousCommands(
+        context.providerEvents,
+      )
 
       if (suspiciousCommands.length > 0) {
         const preview = suspiciousCommands.slice(0, 2).join(' | ')

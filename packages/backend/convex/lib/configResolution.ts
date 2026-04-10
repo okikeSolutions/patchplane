@@ -124,7 +124,9 @@ export function selectSingleExecutionTarget(
   const defaultTargets = targets.filter(
     (target) => target.repositoryConnectionId === undefined,
   )
-  const enabledDefaultTargets = defaultTargets.filter((target) => target.enabled)
+  const enabledDefaultTargets = defaultTargets.filter(
+    (target) => target.enabled,
+  )
 
   if (enabledDefaultTargets.length > 1) {
     throw createConfigResolutionError(

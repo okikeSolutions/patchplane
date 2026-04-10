@@ -9,7 +9,9 @@ import { buildPromptRequestScope } from '../convex/lib/requestCreation'
 
 type FakeTableName = 'executionTargets' | 'policyBundles'
 
-function createFakeDb(data: Record<FakeTableName, ReadonlyArray<Record<string, unknown>>>) {
+function createFakeDb(
+  data: Record<FakeTableName, ReadonlyArray<Record<string, unknown>>>,
+) {
   return {
     async get(table: FakeTableName, id: string) {
       return data[table].find((document) => document._id === id) ?? null
@@ -98,14 +100,11 @@ describe('config resolution', () => {
       ],
     })
 
-    const executionTarget = await findExecutionTargetByReference(
-      db as never,
-      {
-        projectId,
-        reference: 'github.issue_comment',
-        repositoryConnectionId,
-      },
-    )
+    const executionTarget = await findExecutionTargetByReference(db as never, {
+      projectId,
+      reference: 'github.issue_comment',
+      repositoryConnectionId,
+    })
     const policyBundle = await findPolicyBundleByReference(db as never, {
       projectId,
       reference: 'default',
