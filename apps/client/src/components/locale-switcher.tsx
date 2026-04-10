@@ -1,75 +1,29 @@
-import { useNavigate, useRouterState } from '@tanstack/react-router'
-import type { MouseEvent } from 'react'
 import * as m from '@/paraglide/messages'
-import {
-  getLocale,
-  localizeHref,
-  setLocale as setRuntimeLocale,
-} from '@/paraglide/runtime'
-import { localeLabels, supportedLocales } from '@/lib/i18n'
+import { getLocale, locales, setLocale } from '@/paraglide/runtime'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from './ui/button'
 
-function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>) {
-  return !(
-    event.defaultPrevented ||
-    event.button !== 0 ||
-    event.metaKey ||
-    event.altKey ||
-    event.ctrlKey ||
-    event.shiftKey
-  )
-}
-
 export default function LocaleSwitcher() {
-  const navigate = useNavigate()
-  const { hash, pathname, searchStr } = useRouterState({
-    select: (state) => ({
-      hash: state.location.hash,
-      pathname: state.location.pathname,
-      searchStr: state.location.searchStr,
-    }),
-  })
-  const currentLocale = getLocale()
-  const currentHref = `${pathname}${searchStr}${hash}`
-
   return (
     <div
-      className="locale-switcher"
+      className="inline-flex items-center gap-[0.2rem] rounded-full border border-white/[0.08] bg-white/[0.03] p-[0.2rem]"
       role="group"
       aria-label={m.header_locale_switcher()}
     >
-      {supportedLocales.map((locale) => {
-        const href = localizeHref(currentHref || '/', { locale })
-        const isActive = currentLocale === locale
-
+      {locales.map((locale) => {
         return (
-          <a
+          <button
             key={locale}
-            href={href}
-            hrefLang={locale}
-            aria-current={isActive ? 'page' : undefined}
-            onClick={async (event) => {
-              if (!isPlainLeftClick(event)) {
-                return
-              }
-
-              event.preventDefault()
-              if (isActive) {
-                return
-              }
-
-              await setRuntimeLocale(locale, { reload: false })
-              await navigate({ href })
-            }}
+            type="button"
+            data-active-locale={locale === getLocale()}
+            onClick={() => setLocale(locale)}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
-              'locale-switcher__link',
-              isActive && 'locale-switcher__link--active',
+              'min-w-[2.4rem] rounded-full text-muted-foreground data-[active-locale=true]:bg-white/[0.08] data-[active-locale=true]:text-foreground',
             )}
           >
-            {localeLabels[locale]}
-          </a>
+            {locale === 'en' ? 'EN' : locale === 'de' ? 'DE' : locale}
+          </button>
         )
       })}
     </div>

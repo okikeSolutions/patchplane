@@ -1,87 +1,24 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useRouter } from '@tanstack/react-router'
+import { createContext, type PropsWithChildren, use } from 'react'
+import { setThemeServerFn, type T as Theme } from '@/lib/theme'
 
-type Theme = 'dark' | 'light' | 'system'
+type ThemeContextVal = { theme: Theme; setTheme: (val: Theme) => void }
+type Props = PropsWithChildren<{ theme: Theme }>
 
-type ThemeProviderProps = {
-  children: React.ReactNode
-  defaultTheme?: Theme
-  storageKey?: string
-}
+const ThemeContext = createContext<ThemeContextVal | null>(null)
 
-type ThemeProviderState = {
-  theme: Theme
-  setTheme: (theme: Theme) => void
-}
+export function ThemeProvider({ children, theme }: Props) {
+  const router = useRouter()
 
-const ThemeProviderContext = createContext<ThemeProviderState | undefined>(
-  undefined,
-)
-
-function isTheme(value: string | null): value is Theme {
-  return value === 'dark' || value === 'light' || value === 'system'
-}
-
-function getInitialTheme(storageKey: string, defaultTheme: Theme): Theme {
-  if (typeof window === 'undefined') {
-    return defaultTheme
+  function setTheme(val: Theme) {
+    setThemeServerFn({ data: val }).then(() => router.invalidate())
   }
 
-  const storedTheme = window.localStorage.getItem(storageKey)
-
-  return isTheme(storedTheme) ? storedTheme : defaultTheme
+  return <ThemeContext value={{ theme, setTheme }}>{children}</ThemeContext>
 }
 
-export function ThemeProvider({
-  children,
-  defaultTheme = 'system',
-  storageKey = 'vite-ui-theme',
-  ...props
-}: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(() =>
-    getInitialTheme(storageKey, defaultTheme),
-  )
-
-  useEffect(() => {
-    const root = window.document.documentElement
-
-    root.classList.remove('light', 'dark')
-
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-        .matches
-        ? 'dark'
-        : 'light'
-
-      root.classList.add(systemTheme)
-      return
-    }
-
-    root.classList.add(theme)
-  }, [theme])
-
-  const value = {
-    theme,
-    setTheme: (nextTheme: Theme) => {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(storageKey, nextTheme)
-      }
-
-      setTheme(nextTheme)
-    },
-  }
-
-  return (
-    <ThemeProviderContext.Provider {...props} value={value}>
-      {children}
-    </ThemeProviderContext.Provider>
-  )
-}
-
-export const useTheme = () => {
-  const context = useContext(ThemeProviderContext)
-
-  if (context === undefined)
-    throw new Error('useTheme must be used within a ThemeProvider')
-
-  return context
+export function useTheme() {
+  const val = use(ThemeContext)
+  if (!val) throw new Error('useTheme called outside of ThemeProvider!')
+  return val
 }

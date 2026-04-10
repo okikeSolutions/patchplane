@@ -77,35 +77,49 @@ function AppShellPage() {
   ] as const
 
   return (
-    <main className="page-wrap product-page">
-      <section className="product-header reveal-up">
+    <main className="mx-auto w-[min(1120px,calc(100%-2rem))] pt-[clamp(2rem,5vw,3rem)] pb-16">
+      <section className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4 pt-4 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] max-[960px]:grid-cols-1">
         <div>
-          <Badge variant="outline" className="section-badge">
+          <Badge
+            variant="outline"
+            className="h-auto border-[rgb(255_208_132/0.22)] bg-[rgb(255_206_120/0.08)] px-[0.8rem] py-[0.45rem] uppercase tracking-[0.12em] text-inherit"
+          >
             {m.app_hero_badge()}
           </Badge>
-          <h1>{m.app_hero_title()}</h1>
-          <p>{m.app_hero_intro()}</p>
+          <h1 className="mt-[0.65rem] text-balance text-[clamp(2.6rem,6vw,5rem)] leading-[0.97] tracking-[-0.06em]">
+            {m.app_hero_title()}
+          </h1>
+          <p className="mt-[1.2rem] max-w-152 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+            {m.app_hero_intro()}
+          </p>
         </div>
         <Link
           to="/about"
           className={cn(
             buttonVariants({ variant: 'outline', size: 'lg' }),
-            'landing-button landing-button--secondary',
+            'rounded-full border-white/10 bg-white/2 px-[1.15rem] hover:-translate-y-px',
           )}
         >
           {m.app_hero_architecture_link()}
         </Link>
       </section>
 
-      <section className="product-grid">
-        <div className="product-panel reveal-up">
-          <div className="product-panel__header">
-            <Badge variant="outline" className="section-badge">
+      <section className="mt-4 grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-4 max-[960px]:grid-cols-1">
+        <div className="rounded-[1.8rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]">
+          <div className="grid gap-[0.7rem]">
+            <Badge
+              variant="outline"
+              className="h-auto border-[rgb(255_208_132/0.22)] bg-[rgb(255_206_120/0.08)] px-[0.8rem] py-[0.45rem] uppercase tracking-[0.12em] text-inherit"
+            >
               {m.app_auth_badge()}
             </Badge>
-            <h2>{m.app_auth_title()}</h2>
+            <h2 className="mt-[0.85rem] text-balance text-[clamp(1.7rem,3vw,2.5rem)] leading-[1.05] tracking-[-0.04em]">
+              {m.app_auth_title()}
+            </h2>
           </div>
-          <p className="product-note">{m.app_auth_intro()}</p>
+          <p className="m-0 leading-[1.7] text-muted-foreground">
+            {m.app_auth_intro()}
+          </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button
               type="button"
@@ -132,81 +146,114 @@ function AppShellPage() {
         </div>
 
         <div
-          className="product-panel reveal-up"
+          className="rounded-[1.8rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
           style={{ animationDelay: '120ms' }}
         >
-          <div className="product-panel__header">
-            <Badge variant="outline" className="section-badge">
+          <div className="grid gap-[0.7rem]">
+            <Badge
+              variant="outline"
+              className="h-auto border-[rgb(255_208_132/0.22)] bg-[rgb(255_206_120/0.08)] px-[0.8rem] py-[0.45rem] uppercase tracking-[0.12em] text-inherit"
+            >
               {m.app_auth_state_badge()}
             </Badge>
-            <h2>{m.app_auth_state_title()}</h2>
+            <h2 className="mt-[0.85rem] text-balance text-[clamp(1.7rem,3vw,2.5rem)] leading-[1.05] tracking-[-0.04em]">
+              {m.app_auth_state_title()}
+            </h2>
           </div>
           <AuthLoading>
-            <p className="product-note">{m.app_auth_loading()}</p>
+            <p className="m-0 leading-[1.7] text-muted-foreground">
+              {m.app_auth_loading()}
+            </p>
           </AuthLoading>
           <Authenticated>
             <AuthenticatedContent />
           </Authenticated>
           <Unauthenticated>
-            <p className="product-note">{m.app_unauthenticated()}</p>
+            <p className="m-0 leading-[1.7] text-muted-foreground">
+              {m.app_unauthenticated()}
+            </p>
           </Unauthenticated>
         </div>
       </section>
 
-      <section className="status-strip">
+      <section className="mt-8 grid grid-cols-3 gap-[0.85rem] max-[960px]:grid-cols-1">
         {timelineStatuses.map((status, index) => (
           <article
             key={status}
-            className="status-chip reveal-up"
+            className="rounded-[1.6rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
             style={{ animationDelay: `${index * 80 + 100}ms` }}
           >
-            <span className="status-chip__label">{getStatusLabel(status)}</span>
-            <p>{getStatusDetail(status)}</p>
+            <span className="text-[0.78rem] uppercase tracking-[0.12em] text-[rgb(255_203_116)]">
+              {getStatusLabel(status)}
+            </span>
+            <p className="m-0 leading-[1.7] text-muted-foreground">
+              {getStatusDetail(status)}
+            </p>
           </article>
         ))}
       </section>
 
-      <section className="product-grid">
-        <div className="product-panel reveal-up">
-          <div className="product-panel__header">
-            <Badge variant="outline" className="section-badge">
+      <section className="mt-4 grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-4 max-[960px]:grid-cols-1">
+        <div className="rounded-[1.8rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]">
+          <div className="grid gap-[0.7rem]">
+            <Badge
+              variant="outline"
+              className="h-auto border-[rgb(255_208_132/0.22)] bg-[rgb(255_206_120/0.08)] px-[0.8rem] py-[0.45rem] uppercase tracking-[0.12em] text-inherit"
+            >
               {m.app_workflow_badge()}
             </Badge>
-            <h2>{m.app_workflow_title()}</h2>
+            <h2 className="mt-[0.85rem] text-balance text-[clamp(1.7rem,3vw,2.5rem)] leading-[1.05] tracking-[-0.04em]">
+              {m.app_workflow_title()}
+            </h2>
           </div>
-          <ol className="timeline-list">
+          <ol className="mt-6 grid gap-4 pl-[1.2rem]">
             {timelineStatuses.map((status) => (
-              <li key={status}>
-                <span>{getStatusLabel(status)}</span>
-                <p>{m.app_workflow_status_detail()}</p>
+              <li key={status} className="pl-[0.2rem]">
+                <span className="m-0 text-[1.05rem] tracking-[-0.03em]">
+                  {getStatusLabel(status)}
+                </span>
+                <p className="m-0 leading-[1.7] text-muted-foreground">
+                  {m.app_workflow_status_detail()}
+                </p>
               </li>
             ))}
           </ol>
         </div>
 
         <div
-          className="product-panel reveal-up"
+          className="rounded-[1.8rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
           style={{ animationDelay: '120ms' }}
         >
-          <div className="product-panel__header">
-            <Badge variant="outline" className="section-badge">
+          <div className="grid gap-[0.7rem]">
+            <Badge
+              variant="outline"
+              className="h-auto border-[rgb(255_208_132/0.22)] bg-[rgb(255_206_120/0.08)] px-[0.8rem] py-[0.45rem] uppercase tracking-[0.12em] text-inherit"
+            >
               {m.app_focus_badge()}
             </Badge>
-            <h2>{m.app_focus_title()}</h2>
+            <h2 className="mt-[0.85rem] text-balance text-[clamp(1.7rem,3vw,2.5rem)] leading-[1.05] tracking-[-0.04em]">
+              {m.app_focus_title()}
+            </h2>
           </div>
-          <p className="product-note">{m.app_focus_intro()}</p>
+          <p className="m-0 leading-[1.7] text-muted-foreground">
+            {m.app_focus_intro()}
+          </p>
         </div>
       </section>
 
-      <section className="product-notes">
+      <section className="mt-8 grid grid-cols-3 gap-4 max-[960px]:grid-cols-1">
         {workspacePanels.map((panel, index) => (
           <article
             key={panel.title}
-            className="product-note-card reveal-up"
+            className="rounded-[1.6rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
             style={{ animationDelay: `${index * 90 + 160}ms` }}
           >
-            <h3>{panel.title}</h3>
-            <p>{panel.detail}</p>
+            <h3 className="m-0 text-[1.05rem] tracking-[-0.03em]">
+              {panel.title}
+            </h3>
+            <p className="m-0 leading-[1.7] text-muted-foreground">
+              {panel.detail}
+            </p>
           </article>
         ))}
       </section>
@@ -219,19 +266,25 @@ function AuthenticatedContent() {
   const requests = useQuery(api.requests.list)
 
   if (!viewer || !requests) {
-    return <p className="product-note">{m.app_authenticated_loading()}</p>
+    return (
+      <p className="m-0 leading-[1.7] text-muted-foreground">
+        {m.app_authenticated_loading()}
+      </p>
+    )
   }
 
   return (
     <div className="space-y-3">
-      <p className="product-note">
+      <p className="m-0 leading-[1.7] text-muted-foreground">
         {m.app_authenticated_welcome({ name: viewer.name })}
       </p>
       <p className="text-sm text-muted-foreground">
-        {m.app_viewer_subject()} <code>{viewer.subject}</code>
+        {m.app_viewer_subject()}{' '}
+        <code className="font-mono">{viewer.subject}</code>
       </p>
       <p className="text-sm text-muted-foreground">
-        {m.app_visible_requests()} <code>{requests.length}</code>
+        {m.app_visible_requests()}{' '}
+        <code className="font-mono">{requests.length}</code>
       </p>
     </div>
   )

@@ -17,19 +17,24 @@ export default function Header() {
   })
 
   return (
-    <header className="site-header">
-      <nav className="page-wrap site-nav">
-        <div className="brand-lockup">
-          <Link to="/" className="brand-link">
-            <span className="brand-link__pip" />
-            <span className="brand-link__wordmark">PatchPlane</span>
+    <header className="sticky top-0 z-50 min-h-(--header-height) border-b border-white/8 bg-(--surface-veil) backdrop-blur-[18px]">
+      <nav className="mx-auto flex min-h-(--header-height) w-[min(1120px,calc(100%-2rem))] items-center justify-between gap-4 py-[0.85rem] max-[720px]:flex-col max-[720px]:items-start">
+        <div className="flex min-w-0 flex-col gap-[0.2rem]">
+          <Link
+            to="/"
+            className="inline-flex w-fit items-center gap-[0.65rem] text-base font-bold tracking-[-0.03em] transition-colors hover:text-primary"
+          >
+            <span className="size-[0.7rem] rounded-full bg-[linear-gradient(135deg,rgb(255_144_52),rgb(255_209_122))] shadow-[0_0_24px_rgb(255_169_72/0.5)]" />
+            <span>PatchPlane</span>
           </Link>
-          <p className="brand-lockup__tag">{m.header_tagline()}</p>
+          <p className="m-0 text-[0.8rem] text-muted-foreground max-[720px]:hidden">
+            {m.header_tagline()}
+          </p>
         </div>
 
-        <div className="site-nav__controls">
+        <div className="flex flex-wrap items-center justify-end gap-[0.6rem] max-[720px]:w-full max-[720px]:justify-start">
           <NavigationMenu className="min-w-0 flex-none justify-start">
-            <NavigationMenuList className="site-nav__menu">
+            <NavigationMenuList className="gap-1">
               <NavigationMenuItem>
                 <NavigationMenuLink
                   render={<Link to="/" />}
@@ -69,7 +74,8 @@ export default function Header() {
             className={buttonVariants({
               variant: 'ghost',
               size: 'icon-sm',
-              className: 'site-nav__icon text-muted-foreground',
+              className:
+                'border border-white/8 bg-white/3 text-muted-foreground',
             })}
           >
             <span className="sr-only">{m.header_repository()}</span>

@@ -1,39 +1,45 @@
 import type { FileRoutesByTo } from '../routeTree.gen'
-import type { AppLocale } from './i18n'
+import { type Locale } from '@/paraglide/runtime'
 
 type RoutePath = keyof FileRoutesByTo
 
-type LocalizedPathnamesInput = Record<RoutePath, Record<AppLocale, string>>
+const excludedPaths = ['admin', 'docs', 'api'] as const
+
+type PublicRoutePath = Exclude<
+  RoutePath,
+  `${string}${(typeof excludedPaths)[number]}${string}`
+>
 
 type TranslatedPathname = {
   pattern: string
-  localized: Array<[AppLocale, string]>
+  localized: Array<[Locale, string]>
 }
 
 function toUrlPattern(path: string) {
-  const pattern = path
-    .replace(/\/\$$/, '/:path(.*)?')
-    .replace(/\{-\$([a-zA-Z0-9_]+)\}/g, ':$1?')
-    .replace(/\$([a-zA-Z0-9_]+)/g, ':$1')
-    .replace(/\/+$/, '')
-
-  return pattern === '' ? '/' : pattern
+  return (
+    path
+      // catch-all
+      .replace(/\/\$$/, '/:path(.*)?')
+      // optional parameters: {-$param}
+      .replace(/\{-\$([a-zA-Z0-9_]+)\}/g, ':$1?')
+      // named parameters: $param
+      .replace(/\$([a-zA-Z0-9_]+)/g, ':$1')
+      // remove trailing slash
+      .replace(/\/+$/, '')
+  )
 }
 
 function createTranslatedPathnames(
-  input: LocalizedPathnamesInput,
+  input: Record<PublicRoutePath, Record<Locale, string>>,
 ): TranslatedPathname[] {
-  return Object.entries(input).map(([path, locales]) => ({
-    pattern: toUrlPattern(path),
-    localized: Object.entries(locales).flatMap(([locale, localizedPath]) =>
-      localizedPath === path
-        ? []
-        : [
-            [locale as AppLocale, toUrlPattern(localizedPath)] satisfies [
-              AppLocale,
-              string,
-            ],
-          ],
+  return Object.entries(input).map(([pattern, locales]) => ({
+    pattern: toUrlPattern(pattern),
+    localized: Object.entries(locales).map(
+      ([locale, path]) =>
+        [locale as Locale, `/${locale}${toUrlPattern(path)}`] satisfies [
+          Locale,
+          string,
+        ],
     ),
   }))
 }
@@ -41,14 +47,14 @@ function createTranslatedPathnames(
 export const translatedPathnames = createTranslatedPathnames({
   '/': {
     en: '/',
-    de: '/de',
+    de: '/',
   },
   '/about': {
     en: '/about',
-    de: '/de/ueber',
+    de: '/ueber',
   },
   '/app': {
     en: '/app',
-    de: '/de/app',
+    de: '/app',
   },
-} satisfies LocalizedPathnamesInput)
+})
