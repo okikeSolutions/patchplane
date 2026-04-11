@@ -1,14 +1,20 @@
 import { describe, expect, test } from 'bun:test'
-import { Effect } from 'effect'
-import type { RuntimeExecutionRequest } from '@patchplane/domain'
+import { Effect, TestClock } from 'effect'
+import {
+  PromptRequestId,
+  RuntimeSessionId,
+  type RuntimeExecutionRequest,
+  WorkflowRunId,
+} from '@patchplane/domain'
 import { PiMonoRuntimeAdapter } from '../src/runtime/piMono'
+import { runEffectTest } from './effectTest'
 
 function createRuntimeExecutionRequest(): RuntimeExecutionRequest {
   return {
-    promptRequestId: 'request-1',
+    promptRequestId: PromptRequestId('request-1'),
     session: {
-      id: 'session-1',
-      workflowRunId: 'workflow-1',
+      id: RuntimeSessionId('session-1'),
+      workflowRunId: WorkflowRunId('workflow-1'),
       sandboxProvider: 'daytona',
       runtimeProvider: 'pi-mono',
       status: 'queued',
@@ -27,7 +33,7 @@ describe('PiMonoRuntimeAdapter', () => {
   test('builds a JSON-mode ephemeral CLI execution plan', async () => {
     const adapter = new PiMonoRuntimeAdapter({ command: 'pi' })
 
-    const plan = await Effect.runPromise(
+    const plan = await runEffectTest(
       adapter.createExecutionPlan(createRuntimeExecutionRequest()),
     )
 
@@ -40,36 +46,40 @@ describe('PiMonoRuntimeAdapter', () => {
 
   test('normalizes documented compaction events from the Pi JSON stream', async () => {
     const adapter = new PiMonoRuntimeAdapter({ command: 'pi' })
-    const events = await Effect.runPromise(
-      adapter.normalizeOutput(createRuntimeExecutionRequest(), {
-        exitCode: 0,
-        stdout: [
-          JSON.stringify({
-            type: 'session',
-            id: 'pi-session-1',
-            cwd: '/workspace',
-          }),
-          JSON.stringify({
-            type: 'compaction_start',
-            reason: 'threshold',
-          }),
-          JSON.stringify({
-            type: 'compaction_end',
-            reason: 'threshold',
-            aborted: false,
-          }),
-          JSON.stringify({
-            type: 'message_update',
-            assistantMessageEvent: {
-              type: 'text_delta',
-              delta: 'Finished.',
-            },
-          }),
-          JSON.stringify({
-            type: 'agent_end',
-          }),
-        ].join('\n'),
-        stderr: '',
+    const events = await runEffectTest(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(1_710_000_000_000)
+
+        return yield* adapter.normalizeOutput(createRuntimeExecutionRequest(), {
+          exitCode: 0,
+          stdout: [
+            JSON.stringify({
+              type: 'session',
+              id: 'pi-session-1',
+              cwd: '/workspace',
+            }),
+            JSON.stringify({
+              type: 'compaction_start',
+              reason: 'threshold',
+            }),
+            JSON.stringify({
+              type: 'compaction_end',
+              reason: 'threshold',
+              aborted: false,
+            }),
+            JSON.stringify({
+              type: 'message_update',
+              assistantMessageEvent: {
+                type: 'text_delta',
+                delta: 'Finished.',
+              },
+            }),
+            JSON.stringify({
+              type: 'agent_end',
+            }),
+          ].join('\n'),
+          stderr: '',
+        })
       }),
     )
 
@@ -94,35 +104,44 @@ describe('PiMonoRuntimeAdapter', () => {
       'Finished.',
       'Pi agent completed.',
     ])
+    expect(events.providerEvents.map((event) => event.createdAt)).toEqual([
+      1_710_000_000_000, 1_710_000_000_001, 1_710_000_000_002,
+      1_710_000_000_003, 1_710_000_000_004,
+    ])
   })
 
   test('preserves meaningful whitespace in Pi text deltas', async () => {
     const adapter = new PiMonoRuntimeAdapter({ command: 'pi' })
-    const events = await Effect.runPromise(
-      adapter.normalizeOutput(createRuntimeExecutionRequest(), {
-        exitCode: 0,
-        stdout: [
-          JSON.stringify({
-            type: 'message_update',
-            assistantMessageEvent: {
-              type: 'text_delta',
-              delta: '  hello world',
-            },
-          }),
-          JSON.stringify({
-            type: 'message_update',
-            assistantMessageEvent: {
-              type: 'text_delta',
-              delta: '   ',
-            },
-          }),
-        ].join('\n'),
-        stderr: '',
+    const events = await runEffectTest(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(1_710_000_000_100)
+
+        return yield* adapter.normalizeOutput(createRuntimeExecutionRequest(), {
+          exitCode: 0,
+          stdout: [
+            JSON.stringify({
+              type: 'message_update',
+              assistantMessageEvent: {
+                type: 'text_delta',
+                delta: '  hello world',
+              },
+            }),
+            JSON.stringify({
+              type: 'message_update',
+              assistantMessageEvent: {
+                type: 'text_delta',
+                delta: '   ',
+              },
+            }),
+          ].join('\n'),
+          stderr: '',
+        })
       }),
     )
 
     expect(events.providerEvents).toHaveLength(2)
     expect(events.events).toHaveLength(1)
     expect(events.events[0]?.message).toBe('  hello world')
+    expect(events.providerEvents[0]?.createdAt).toBe(1_710_000_000_100)
   })
 })

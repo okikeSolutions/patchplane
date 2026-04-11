@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Effect } from 'effect'
 import type { RuntimeProviderEventInput } from '@patchplane/domain'
 import { reviewRuntimeExecution } from '../src/policy/runtimeReview'
+import { runEffectTest } from './effectTest'
 
 function createPiProviderEvent(
   payload: Record<string, unknown>,
@@ -23,7 +24,7 @@ function createPiProviderEvent(
 
 describe('reviewRuntimeExecution', () => {
   test('approves a clean runtime execution for all configured automated reviewers', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {
@@ -59,7 +60,7 @@ describe('reviewRuntimeExecution', () => {
   })
 
   test('requests manual approval when an unknown reviewer is required', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {
@@ -87,7 +88,7 @@ describe('reviewRuntimeExecution', () => {
   })
 
   test('requests operator input when runtime execution fails', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {
@@ -113,7 +114,7 @@ describe('reviewRuntimeExecution', () => {
   })
 
   test('fails the security reviewer when Pi reports a destructive bash command', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {
@@ -153,7 +154,7 @@ describe('reviewRuntimeExecution', () => {
   })
 
   test('flags the quality reviewer when Pi reports a tool execution error', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {
@@ -191,7 +192,7 @@ describe('reviewRuntimeExecution', () => {
   })
 
   test('ignores cleared queue updates when the latest queue state is empty', async () => {
-    const outcome = await Effect.runPromise(
+    const outcome = await runEffectTest(
       reviewRuntimeExecution({
         requestId: 'request_1',
         policy: {

@@ -1,6 +1,6 @@
 'use node'
 
-import { Duration, Effect, Schedule } from 'effect'
+import { Clock, Duration, Effect, Schedule } from 'effect'
 import { internal } from './_generated/api'
 import type { Id } from './_generated/dataModel'
 import { internalAction, type ActionCtx } from './_generated/server'
@@ -18,7 +18,8 @@ import {
 import { tryConvexPromise } from '../src/effect/convex'
 import { readErrorMessage, type ConvexInteropFailure } from '../src/errors'
 import { processPatchPlaneCommandsSequentially } from '../src/github/commandQueue'
-import { GitHubAppRuntime, GitHubBoundaryLive } from '../src/github/layers'
+import { GitHubAppRuntime } from '../src/github/layers'
+import { GitHubBoundaryRuntime } from '../src/github/runtime'
 
 const webhookReconciliationKey = 'app_webhook_redelivery'
 const initialWebhookReconciliationLookbackMs = 7 * 24 * 60 * 60 * 1000
@@ -321,9 +322,8 @@ function processWebhookDeliveryProgram(
 }
 
 function reconcileWebhookDeliveriesProgram(ctx: ActionCtx) {
-  const runStartedAt = Date.now()
-
   return Effect.gen(function* () {
+    const runStartedAt = yield* Clock.currentTimeMillis
     const reconciliation = yield* tryConvexPromise(
       'mutation github.beginWebhookReconciliationRun',
       () =>
@@ -369,12 +369,17 @@ function reconcileWebhookDeliveriesProgram(ctx: ActionCtx) {
 
       yield* tryConvexPromise(
         'mutation github.completeWebhookReconciliationRun',
-        () =>
-          ctx.runMutation(internal.github.completeWebhookReconciliationRun, {
-            key: webhookReconciliationKey,
-            completedAt: Date.now(),
-            lastSuccessfulRedeliveryStartedAt: runStartedAt,
-          }),
+        () => {
+          const completedAt = Date.now()
+          return ctx.runMutation(
+            internal.github.completeWebhookReconciliationRun,
+            {
+              key: webhookReconciliationKey,
+              completedAt,
+              lastSuccessfulRedeliveryStartedAt: runStartedAt,
+            },
+          )
+        },
       )
 
       return {
@@ -384,22 +389,28 @@ function reconcileWebhookDeliveriesProgram(ctx: ActionCtx) {
       }
     }).pipe(
       Effect.catchAll((error) =>
-        tryConvexPromise('mutation github.failWebhookReconciliationRun', () =>
-          ctx.runMutation(internal.github.failWebhookReconciliationRun, {
-            key: webhookReconciliationKey,
-            completedAt: Date.now(),
-            errorMessage: readErrorMessage(
-              error,
-              'Unknown GitHub worker failure.',
-            ),
-          }),
-        ).pipe(
-          Effect.as({
+        Effect.gen(function* () {
+          const completedAt = yield* Clock.currentTimeMillis
+
+          yield* tryConvexPromise(
+            'mutation github.failWebhookReconciliationRun',
+            () =>
+              ctx.runMutation(internal.github.failWebhookReconciliationRun, {
+                key: webhookReconciliationKey,
+                completedAt,
+                errorMessage: readErrorMessage(
+                  error,
+                  'Unknown GitHub worker failure.',
+                ),
+              }),
+          )
+
+          return {
             status: 'failed',
             scannedDeliveries: 0,
             redeliveredDeliveries: 0,
-          }),
-        ),
+          }
+        }),
       ),
     )
   })
@@ -412,10 +423,8 @@ async function syncInstallationFromCallbackHandler(
   readonly githubInstallationId: string
   readonly repositoryCount: number
 }> {
-  return Effect.runPromise(
-    syncInstallationFromCallbackProgram(ctx, externalInstallationId).pipe(
-      Effect.provide(GitHubBoundaryLive),
-    ),
+  return GitHubBoundaryRuntime.runPromise(
+    syncInstallationFromCallbackProgram(ctx, externalInstallationId),
   )
 }
 
@@ -423,20 +432,16 @@ async function processWebhookDeliveryHandler(
   ctx: ActionCtx,
   args: { readonly deliveryRecordId: Id<'webhookDeliveries'> },
 ): Promise<GitHubWorkerResult> {
-  return Effect.runPromise(
-    processWebhookDeliveryProgram(ctx, args).pipe(
-      Effect.provide(GitHubBoundaryLive),
-    ),
+  return GitHubBoundaryRuntime.runPromise(
+    processWebhookDeliveryProgram(ctx, args),
   )
 }
 
 async function reconcileWebhookDeliveriesHandler(
   ctx: ActionCtx,
 ): Promise<ReconciliationResult> {
-  return Effect.runPromise(
-    reconcileWebhookDeliveriesProgram(ctx).pipe(
-      Effect.provide(GitHubBoundaryLive),
-    ),
+  return GitHubBoundaryRuntime.runPromise(
+    reconcileWebhookDeliveriesProgram(ctx),
   )
 }
 
@@ -465,11 +470,7 @@ export const verifyWebhookDelivery = internalAction({
     errorMessage: v.optional(v.string()),
   }),
   handler: (_ctx, args) =>
-    Effect.runPromise(
-      verifyWebhookDeliveryProgram(args).pipe(
-        Effect.provide(GitHubBoundaryLive),
-      ),
-    ),
+    GitHubBoundaryRuntime.runPromise(verifyWebhookDeliveryProgram(args)),
 })
 
 export const processWebhookDelivery = internalAction({

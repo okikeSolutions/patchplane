@@ -6,6 +6,7 @@ import {
   type SandboxExecutionRequest,
 } from '@patchplane/domain'
 import { DaytonaSandboxAdapter } from '../src/sandbox/daytona'
+import { runEffectTest } from './effectTest'
 
 function createSandboxExecutionRequest(): SandboxExecutionRequest {
   return {
@@ -63,7 +64,7 @@ describe('DaytonaSandboxAdapter', () => {
         }),
     }
 
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(adapter.execute(createSandboxExecutionRequest(), runtime)),
     )
 
@@ -133,7 +134,7 @@ describe('DaytonaSandboxAdapter', () => {
         ),
     }
 
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(adapter.execute(createSandboxExecutionRequest(), runtime)),
     )
 

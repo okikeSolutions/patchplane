@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import { readBootstrapConfigDefaults } from '../convex/lib/configDefaults'
 import { BackendConfig, BackendConfigLive } from '../src/config/schema'
 import { BackendConfigFailure } from '../src/errors'
+import { runEffectTest } from './effectTest'
 
 const backendEnvKeys = [
   'GITHUB_APP_ID',
@@ -59,7 +60,7 @@ function configureValidEnv(
 }
 
 async function loadBackendConfig() {
-  return Effect.runPromise(
+  return runEffectTest(
     Effect.gen(function* () {
       return yield* BackendConfig
     }).pipe(Effect.provide(BackendConfigLive)),
@@ -80,7 +81,7 @@ describe('BackendConfigLive', () => {
   test('fails with a typed config error instead of a defect', async () => {
     configureValidEnv({ GITHUB_APP_ID: 'not-a-number' })
 
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(
         Effect.gen(function* () {
           return yield* BackendConfig
@@ -103,7 +104,7 @@ describe('BackendConfigLive', () => {
     delete process.env.GITHUB_APP_PRIVATE_KEY
     delete process.env.GITHUB_WEBHOOK_SECRET
 
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(
         Effect.gen(function* () {
           return yield* BackendConfig
@@ -126,7 +127,7 @@ describe('BackendConfigLive', () => {
   test('rejects a non-positive GitHub app id', async () => {
     configureValidEnv({ GITHUB_APP_ID: '0' })
 
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(
         Effect.gen(function* () {
           return yield* BackendConfig

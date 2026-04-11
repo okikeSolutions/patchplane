@@ -1,4 +1,10 @@
 import { Schema } from 'effect'
+import {
+  PolicyBundleIdSchema,
+  PromptRequestIdSchema,
+  RuntimeSessionIdSchema,
+  WorkflowRunIdSchema,
+} from './ids'
 import { MergeDecisionStatusSchema } from './workflow'
 
 export const pendingApprovalStatuses = [
@@ -50,9 +56,9 @@ export type PendingInputResolutionStatus = Schema.Schema.Type<
 
 export const PendingApprovalSchema = Schema.Struct({
   id: Schema.String,
-  promptRequestId: Schema.String,
-  workflowRunId: Schema.String,
-  runtimeSessionId: Schema.optional(Schema.String),
+  promptRequestId: PromptRequestIdSchema,
+  workflowRunId: WorkflowRunIdSchema,
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   kind: Schema.String,
   title: Schema.String,
   body: Schema.optional(Schema.String),
@@ -67,9 +73,9 @@ export type PendingApproval = Schema.Schema.Type<typeof PendingApprovalSchema>
 
 export const PendingInputSchema = Schema.Struct({
   id: Schema.String,
-  promptRequestId: Schema.String,
-  workflowRunId: Schema.String,
-  runtimeSessionId: Schema.optional(Schema.String),
+  promptRequestId: PromptRequestIdSchema,
+  workflowRunId: WorkflowRunIdSchema,
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   kind: Schema.String,
   prompt: Schema.String,
   status: PendingInputStatusSchema,
@@ -84,8 +90,8 @@ export type PendingInput = Schema.Schema.Type<typeof PendingInputSchema>
 
 export const MergeDecisionSchema = Schema.Struct({
   id: Schema.String,
-  workflowRunId: Schema.String,
-  policyBundleId: Schema.optional(Schema.String),
+  workflowRunId: WorkflowRunIdSchema,
+  policyBundleId: Schema.optional(PolicyBundleIdSchema),
   status: MergeDecisionStatusSchema,
   reasons: Schema.Array(Schema.String),
   decidedByUserId: Schema.optional(Schema.String),

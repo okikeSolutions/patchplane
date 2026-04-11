@@ -6,9 +6,13 @@ import {
   GitHubIssueCommentPromptSourceSchema,
   GitHubWebhookReconciliationStateSchema,
   PromptRequestCommandSchema,
+  PromptRequestId,
   RuntimeAdapterService,
+  RuntimeSessionId,
   SandboxAdapterService,
+  WorkflowRunId,
 } from '../src/index'
+import { runEffectTest } from './effectTest'
 
 const decodePromptRequestCommand = Schema.decodeUnknownSync(
   PromptRequestCommandSchema,
@@ -133,7 +137,7 @@ describe('domain contracts', () => {
       return yield* auth.getInstallationToken(101)
     })
 
-    const token = await Effect.runPromise(
+    const token = await runEffectTest(
       Effect.provideService(program, GitHubAppAuthService, fakeGitHubAppAuth),
     )
 
@@ -169,10 +173,10 @@ describe('domain contracts', () => {
       const runtime = yield* RuntimeAdapterService
       const sandbox = yield* SandboxAdapterService
       const plan = yield* runtime.createExecutionPlan({
-        promptRequestId: 'request_1',
+        promptRequestId: PromptRequestId('request_1'),
         session: {
-          id: 'session_1',
-          workflowRunId: 'run_1',
+          id: RuntimeSessionId('session_1'),
+          workflowRunId: WorkflowRunId('run_1'),
           sandboxProvider: 'daytona',
           runtimeProvider: 'pi-mono',
           status: 'queued' as const,
@@ -186,10 +190,10 @@ describe('domain contracts', () => {
 
       const result = yield* sandbox.execute(
         {
-          promptRequestId: 'request_1',
+          promptRequestId: PromptRequestId('request_1'),
           session: {
-            id: 'session_1',
-            workflowRunId: 'run_1',
+            id: RuntimeSessionId('session_1'),
+            workflowRunId: WorkflowRunId('run_1'),
             sandboxProvider: 'daytona',
             runtimeProvider: 'pi-mono',
             status: 'queued' as const,
@@ -209,7 +213,7 @@ describe('domain contracts', () => {
       return { plan, result }
     })
 
-    const resolved = await Effect.runPromise(
+    const resolved = await runEffectTest(
       Effect.provideService(
         Effect.provideService(
           program,

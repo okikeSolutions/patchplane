@@ -1,4 +1,10 @@
 import { Schema } from 'effect'
+import {
+  GitHubInstallationIdSchema,
+  PromptRequestIdSchema,
+  RepositoryConnectionIdSchema,
+  WorkflowRunIdSchema,
+} from './ids'
 
 export const githubInstallationStatuses = [
   'pending',
@@ -118,7 +124,7 @@ export type GitHubCheckRunConclusion = Schema.Schema.Type<
 >
 
 export const GitHubInstallationSchema = Schema.Struct({
-  id: Schema.String,
+  id: GitHubInstallationIdSchema,
   externalInstallationId: Schema.Number,
   accountLogin: Schema.String,
   accountType: GitHubAccountTypeSchema,
@@ -173,8 +179,8 @@ export type GitHubInstallationScope = Schema.Schema.Type<
 >
 
 export const RepositoryConnectionSchema = Schema.Struct({
-  id: Schema.String,
-  githubInstallationId: Schema.String,
+  id: RepositoryConnectionIdSchema,
+  githubInstallationId: GitHubInstallationIdSchema,
   provider: Schema.Literal('github'),
   externalRepositoryId: Schema.Number,
   externalNodeId: Schema.String,
@@ -233,10 +239,10 @@ export type WebhookDelivery = Schema.Schema.Type<typeof WebhookDeliverySchema>
 
 export const IssueBindingSchema = Schema.Struct({
   id: Schema.String,
-  repositoryConnectionId: Schema.String,
+  repositoryConnectionId: RepositoryConnectionIdSchema,
   issueNumber: Schema.Number,
-  promptRequestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
+  promptRequestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
   latestCommentId: Schema.optional(Schema.Number),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
@@ -245,10 +251,10 @@ export type IssueBinding = Schema.Schema.Type<typeof IssueBindingSchema>
 
 export const PullRequestBindingSchema = Schema.Struct({
   id: Schema.String,
-  repositoryConnectionId: Schema.String,
+  repositoryConnectionId: RepositoryConnectionIdSchema,
   pullRequestNumber: Schema.Number,
-  promptRequestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
+  promptRequestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
   headBranch: Schema.String,
   baseBranch: Schema.String,
   draft: Schema.Boolean,
@@ -261,8 +267,8 @@ export type PullRequestBinding = Schema.Schema.Type<
 
 export const GitHubPublicationRecordSchema = Schema.Struct({
   id: Schema.String,
-  workflowRunId: Schema.String,
-  repositoryConnectionId: Schema.String,
+  workflowRunId: WorkflowRunIdSchema,
+  repositoryConnectionId: RepositoryConnectionIdSchema,
   publicationKey: Schema.String,
   kind: GitHubPublicationKindSchema,
   status: GitHubPublicationStatusSchema,

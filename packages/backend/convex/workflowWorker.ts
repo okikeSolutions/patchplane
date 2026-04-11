@@ -1,6 +1,6 @@
 'use node'
 
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 import { internal } from './_generated/api'
 import type { Id } from './_generated/dataModel'
 import { internalAction, type ActionCtx } from './_generated/server'
@@ -15,8 +15,11 @@ import {
 } from '@patchplane/domain'
 import {
   GitHubAppAuthService,
+  PromptRequestId,
   RuntimeAdapterService,
   SandboxAdapterService,
+  RuntimeSessionId,
+  WorkflowRunId,
 } from '@patchplane/domain'
 import { BackendConfig } from '../src/config/schema'
 import { tryConvexPromise } from '../src/effect/convex'
@@ -25,7 +28,7 @@ import {
   type BackendConfigFailure,
   type ConvexInteropFailure,
 } from '../src/errors'
-import { ExecutionBoundaryLive } from '../src/execution/layers'
+import { ExecutionBoundaryRuntime } from '../src/execution/runtime'
 import { reviewRuntimeExecution } from '../src/policy/runtimeReview'
 
 type WorkflowExecutionResult = {
@@ -162,14 +165,18 @@ function failWorkflowRun(
   runtimeSessionId: Id<'runtimeSessions'>,
   errorMessage: string,
 ): Effect.Effect<void, ConvexInteropFailure> {
-  return tryConvexPromise('mutation workflows.failWorkflowRunExecution', () =>
-    ctx.runMutation(internal.workflows.failWorkflowRunExecution, {
-      workflowRunId,
-      runtimeSessionId,
-      failedAt: Date.now(),
-      errorMessage,
-    }),
-  ).pipe(Effect.map(() => undefined))
+  return Effect.gen(function* () {
+    const failedAt = yield* Clock.currentTimeMillis
+
+    yield* tryConvexPromise('mutation workflows.failWorkflowRunExecution', () =>
+      ctx.runMutation(internal.workflows.failWorkflowRunExecution, {
+        workflowRunId,
+        runtimeSessionId,
+        failedAt,
+        errorMessage,
+      }),
+    )
+  })
 }
 
 function executeWorkflowRunProgram(
@@ -238,14 +245,16 @@ function executeWorkflowRunProgram(
             )
         : undefined
 
-      const startedAt = Date.now()
+      const startedAt = yield* Clock.currentTimeMillis
       const executionResult = yield* sandbox.execute(
         {
-          promptRequestId: String(claim.promptRequestId),
+          promptRequestId: PromptRequestId(String(claim.promptRequestId)),
           session: {
             ...input.runtimeSession,
-            id: String(input.runtimeSession.id),
-            workflowRunId: String(input.runtimeSession.workflowRunId),
+            id: RuntimeSessionId(String(input.runtimeSession.id)),
+            workflowRunId: WorkflowRunId(
+              String(input.runtimeSession.workflowRunId),
+            ),
           },
           prompt: input.prompt,
           repoUrl: input.scope.repoUrl,
@@ -296,9 +305,9 @@ function executeWorkflowRunProgram(
         lastEvent?.type === 'session.failed' ||
         lastEvent?.type === 'turn.failed'
 
-      const reviewedAt = Date.now()
+      const reviewedAt = yield* Clock.currentTimeMillis
       const reviewOutcome = yield* reviewRuntimeExecution({
-        requestId: String(claim.promptRequestId),
+        requestId: PromptRequestId(String(claim.promptRequestId)),
         policy: input.policyBundle,
         normalizedEvents: executionResult.events,
         providerEvents: executionResult.providerEvents,
@@ -391,9 +400,7 @@ export const executeWorkflowRun = internalAction({
     eventCount: v.number(),
   }),
   handler: (ctx, args) =>
-    Effect.runPromise(
-      executeWorkflowRunProgram(ctx, args.workflowRunId).pipe(
-        Effect.provide(ExecutionBoundaryLive),
-      ),
+    ExecutionBoundaryRuntime.runPromise(
+      executeWorkflowRunProgram(ctx, args.workflowRunId),
     ),
 })

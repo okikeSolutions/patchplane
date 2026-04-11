@@ -1,4 +1,12 @@
 import { Schema } from 'effect'
+import {
+  ExecutionTargetIdSchema,
+  GitHubInstallationIdSchema,
+  PolicyBundleIdSchema,
+  PromptRequestIdSchema,
+  RepositoryConnectionIdSchema,
+  WorkflowRunIdSchema,
+} from './ids'
 
 export const workflowStatuses = [
   'queued',
@@ -83,10 +91,10 @@ export type PromptRequestSource = Schema.Schema.Type<
 >
 
 export const PromptRequestSchema = Schema.Struct({
-  id: Schema.String,
+  id: PromptRequestIdSchema,
   projectId: Schema.String,
-  executionTargetId: Schema.String,
-  policyBundleId: Schema.String,
+  executionTargetId: ExecutionTargetIdSchema,
+  policyBundleId: PolicyBundleIdSchema,
   createdByUserId: Schema.String,
   prompt: Schema.String,
   scope: PromptScopeSchema,
@@ -98,10 +106,10 @@ export const PromptRequestSchema = Schema.Struct({
 export type PromptRequest = Schema.Schema.Type<typeof PromptRequestSchema>
 
 export const WorkflowRunSchema = Schema.Struct({
-  id: Schema.String,
-  promptRequestId: Schema.String,
-  githubInstallationId: Schema.optional(Schema.String),
-  repositoryConnectionId: Schema.optional(Schema.String),
+  id: WorkflowRunIdSchema,
+  promptRequestId: PromptRequestIdSchema,
+  githubInstallationId: Schema.optional(GitHubInstallationIdSchema),
+  repositoryConnectionId: Schema.optional(RepositoryConnectionIdSchema),
   sandboxProvider: Schema.String,
   runtimeProvider: Schema.String,
   status: WorkflowRunStatusSchema,
@@ -114,8 +122,8 @@ export type WorkflowRun = Schema.Schema.Type<typeof WorkflowRunSchema>
 
 export const ReviewRunSchema = Schema.Struct({
   id: Schema.String,
-  requestId: Schema.String,
-  workflowRunId: Schema.String,
+  requestId: PromptRequestIdSchema,
+  workflowRunId: WorkflowRunIdSchema,
   reviewer: Schema.String,
   score: Schema.Number,
   passed: Schema.Boolean,

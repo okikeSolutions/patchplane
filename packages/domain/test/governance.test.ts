@@ -82,7 +82,7 @@ describe('governance domain', () => {
       decidedAt: 1_710_000_005_000,
     })
 
-    expect(decision.policyBundleId).toBe('policy_1')
+    expect(String(decision.policyBundleId)).toBe('policy_1')
     expect(decision.status).toBe('approved')
   })
 })

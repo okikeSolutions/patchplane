@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 import {
   BoundaryFailure,
   type RuntimeAdapter,
@@ -128,8 +128,8 @@ function toRuntimeEventType(
 function parsePiEventLines(
   request: RuntimeExecutionRequest,
   output: RuntimeExecutionOutput,
+  baseCreatedAt: number,
 ): RuntimeNormalizationResult {
-  const baseCreatedAt = Date.now()
   const providerEvents: RuntimeProviderEventInput[] = []
   const events: RuntimeEventInput[] = []
   let sequence = 0
@@ -278,10 +278,14 @@ export class PiMonoRuntimeAdapter implements RuntimeAdapter {
     request: RuntimeExecutionRequest,
     output: RuntimeExecutionOutput,
   ): Effect.Effect<RuntimeNormalizationResult, BoundaryFailure> {
-    return Effect.try({
-      try: () => parsePiEventLines(request, output),
-      catch: (cause) =>
-        toBoundaryFailure('Failed to normalize Pi Mono output.', cause),
+    return Effect.gen(function* () {
+      const baseCreatedAt = yield* Clock.currentTimeMillis
+
+      return yield* Effect.try({
+        try: () => parsePiEventLines(request, output, baseCreatedAt),
+        catch: (cause) =>
+          toBoundaryFailure('Failed to normalize Pi Mono output.', cause),
+      })
     })
   }
 }

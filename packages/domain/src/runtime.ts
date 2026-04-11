@@ -1,4 +1,9 @@
 import { Schema } from 'effect'
+import {
+  PromptRequestIdSchema,
+  RuntimeSessionIdSchema,
+  WorkflowRunIdSchema,
+} from './ids'
 
 export const runtimeSessionStatuses = [
   'queued',
@@ -40,8 +45,8 @@ export type RuntimeProviderEventStream = Schema.Schema.Type<
 >
 
 export const RuntimeSessionSchema = Schema.Struct({
-  id: Schema.String,
-  workflowRunId: Schema.String,
+  id: RuntimeSessionIdSchema,
+  workflowRunId: WorkflowRunIdSchema,
   externalSessionId: Schema.optional(Schema.String),
   sandboxProvider: Schema.String,
   runtimeProvider: Schema.String,
@@ -55,9 +60,9 @@ export const RuntimeSessionSchema = Schema.Struct({
 export type RuntimeSession = Schema.Schema.Type<typeof RuntimeSessionSchema>
 
 export const RuntimeEventInputSchema = Schema.Struct({
-  requestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
-  runtimeSessionId: Schema.optional(Schema.String),
+  requestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   type: RuntimeEventTypeSchema,
   message: Schema.String,
   createdAt: Schema.Number,
@@ -68,9 +73,9 @@ export type RuntimeEventInput = Schema.Schema.Type<
 
 export const RuntimeEventSchema = Schema.Struct({
   id: Schema.String,
-  requestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
-  runtimeSessionId: Schema.optional(Schema.String),
+  requestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   type: RuntimeEventTypeSchema,
   message: Schema.String,
   createdAt: Schema.Number,
@@ -78,9 +83,9 @@ export const RuntimeEventSchema = Schema.Struct({
 export type RuntimeEvent = Schema.Schema.Type<typeof RuntimeEventSchema>
 
 export const RuntimeProviderEventInputSchema = Schema.Struct({
-  requestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
-  runtimeSessionId: Schema.optional(Schema.String),
+  requestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   provider: Schema.String,
   eventType: Schema.String,
   stream: RuntimeProviderEventStreamSchema,
@@ -95,9 +100,9 @@ export type RuntimeProviderEventInput = Schema.Schema.Type<
 
 export const RuntimeProviderEventSchema = Schema.Struct({
   id: Schema.String,
-  requestId: Schema.String,
-  workflowRunId: Schema.optional(Schema.String),
-  runtimeSessionId: Schema.optional(Schema.String),
+  requestId: PromptRequestIdSchema,
+  workflowRunId: Schema.optional(WorkflowRunIdSchema),
+  runtimeSessionId: Schema.optional(RuntimeSessionIdSchema),
   provider: Schema.String,
   eventType: Schema.String,
   stream: RuntimeProviderEventStreamSchema,
@@ -119,7 +124,7 @@ export type RuntimeEnvironment = Schema.Schema.Type<
 >
 
 export const RuntimeExecutionRequestSchema = Schema.Struct({
-  promptRequestId: Schema.String,
+  promptRequestId: PromptRequestIdSchema,
   session: RuntimeSessionSchema,
   prompt: Schema.String,
   workingDirectory: Schema.String,
@@ -164,7 +169,7 @@ export type SandboxGitCredentials = Schema.Schema.Type<
 >
 
 export const SandboxExecutionRequestSchema = Schema.Struct({
-  promptRequestId: Schema.String,
+  promptRequestId: PromptRequestIdSchema,
   session: RuntimeSessionSchema,
   prompt: Schema.String,
   repoUrl: Schema.String,

@@ -2,11 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import { Effect } from 'effect'
 import { tryConvexPromise } from '../src/effect/convex'
 import { ConvexInteropFailure } from '../src/errors'
+import { runEffectTest } from './effectTest'
 
 describe('tryConvexPromise', () => {
   test('maps rejected promises into typed Convex interop failures', async () => {
     const cause = new Error('mutation failed')
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       Effect.either(
         tryConvexPromise('mutation workflows.failWorkflowRunExecution', () =>
           Promise.reject(cause),
@@ -27,7 +28,7 @@ describe('tryConvexPromise', () => {
   })
 
   test('passes successful promise results through unchanged', async () => {
-    const result = await Effect.runPromise(
+    const result = await runEffectTest(
       tryConvexPromise(
         'query github.getWebhookDeliveryForProcessing',
         async () => ({

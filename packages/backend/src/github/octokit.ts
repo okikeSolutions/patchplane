@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 import { App, Octokit } from 'octokit'
 import {
   BoundaryFailure,
@@ -87,6 +87,20 @@ interface GitHubAppWebhookDeliveryResponse {
   readonly status: string
   readonly delivered_at: string
   readonly redelivery: boolean
+}
+
+interface GitHubAppInstallationResponse {
+  readonly data: {
+    readonly account?:
+      | {
+          readonly login?: string | null
+          readonly type?: string | null
+        }
+      | undefined
+    readonly target_type?: string | null
+    readonly repository_selection?: string | null
+    readonly permissions?: Record<string, unknown> | null
+  }
 }
 
 async function listRepositoryAccess(
@@ -212,80 +226,88 @@ export class OctokitGitHubAppAuth implements GitHubAppAuth {
   getInstallationToken(
     externalInstallationId: number,
   ): Effect.Effect<GitHubInstallationToken, BoundaryFailure> {
-    return Effect.tryPromise({
-      try: async () => {
-        const octokit = await this.app.getInstallationOctokit(
-          externalInstallationId,
-        )
-        const auth = (await octokit.auth({
-          type: 'installation',
-        })) as {
-          readonly token: string
-          readonly expiresAt?: string
-          readonly expires_at?: string
-        }
+    const app = this.app
 
-        return {
-          token: auth.token,
-          expiresAt:
-            auth.expiresAt ?? auth.expires_at ?? new Date().toISOString(),
-        }
-      },
-      catch: (cause) =>
-        toBoundaryFailure(
-          'github.appAuth',
-          `Failed to mint installation token for installation ${externalInstallationId}.`,
-          cause,
-        ),
+    return Effect.gen(function* () {
+      const auth = yield* Effect.tryPromise({
+        try: async () => {
+          const octokit = await app.getInstallationOctokit(
+            externalInstallationId,
+          )
+          return (await octokit.auth({
+            type: 'installation',
+          })) as {
+            readonly token: string
+            readonly expiresAt?: string
+            readonly expires_at?: string
+          }
+        },
+        catch: (cause) =>
+          toBoundaryFailure(
+            'github.appAuth',
+            `Failed to mint installation token for installation ${externalInstallationId}.`,
+            cause,
+          ),
+      })
+      const currentTimeMillis = yield* Clock.currentTimeMillis
+
+      return {
+        token: auth.token,
+        expiresAt:
+          auth.expiresAt ??
+          auth.expires_at ??
+          new Date(currentTimeMillis).toISOString(),
+      }
     })
   }
 
   resolveInstallationScope(
     externalInstallationId: number,
   ): Effect.Effect<GitHubInstallationScope, BoundaryFailure> {
-    return Effect.tryPromise({
-      try: async () => {
-        const installation = await this.app.octokit.request(
-          'GET /app/installations/{installation_id}',
-          {
-            installation_id: externalInstallationId,
-          },
-        )
-        const repositories = await listRepositoryAccess(
-          this.app,
-          externalInstallationId,
-        )
-        const account = installation.data.account as
-          | {
-              readonly login?: string | null
-              readonly type?: string | null
-            }
-          | undefined
+    const app = this.app
 
-        return {
-          externalInstallationId,
-          accountLogin: account?.login ?? 'unknown',
-          accountType: normalizeAccountType(account?.type ?? undefined),
-          targetType: normalizeAccountType(installation.data.target_type),
-          repositorySelection:
-            installation.data.repository_selection === 'all'
-              ? 'all'
-              : 'selected',
-          permissions: Object.fromEntries(
-            Object.entries(installation.data.permissions ?? {}).map(
-              ([key, value]) => [key, String(value)],
-            ),
+    return Effect.gen(function* () {
+      const installation = yield* Effect.tryPromise({
+        try: () =>
+          app.octokit.request('GET /app/installations/{installation_id}', {
+            installation_id: externalInstallationId,
+          }) as Promise<GitHubAppInstallationResponse>,
+        catch: (cause) =>
+          toBoundaryFailure(
+            'github.appAuth',
+            `Failed to resolve installation scope for installation ${externalInstallationId}.`,
+            cause,
           ),
-          repositories,
-          syncedAt: Date.now(),
-        }
-      },
-      catch: (cause) =>
-        toBoundaryFailure(
-          'github.appAuth',
-          `Failed to resolve installation scope for installation ${externalInstallationId}.`,
-          cause,
+      })
+      const repositories = yield* Effect.tryPromise({
+        try: () => listRepositoryAccess(app, externalInstallationId),
+        catch: (cause) =>
+          toBoundaryFailure(
+            'github.appAuth',
+            `Failed to resolve installation scope for installation ${externalInstallationId}.`,
+            cause,
+          ),
+      })
+      const syncedAt = yield* Clock.currentTimeMillis
+      const account = installation.data.account
+
+      return {
+        externalInstallationId,
+        accountLogin: account?.login ?? 'unknown',
+        accountType: normalizeAccountType(account?.type ?? undefined),
+        targetType: normalizeAccountType(
+          installation.data.target_type ?? undefined,
         ),
+        repositorySelection:
+          installation.data.repository_selection === 'all' ? 'all' : 'selected',
+        permissions: Object.fromEntries(
+          Object.entries(installation.data.permissions ?? {}).map(
+            ([key, value]) => [key, String(value)],
+          ),
+        ),
+        repositories,
+        syncedAt,
+      }
     })
   }
 }
