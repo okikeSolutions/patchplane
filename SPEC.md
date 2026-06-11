@@ -1,8 +1,8 @@
-# SPEC.md – PatchPlane – AI Change Control Plane
+# SPEC.md – PatchPlane v2 – Effect-Native AI Change Control Plane
 
-**Version:** 1.8  
-**Date:** March 25, 2026  
-**Status:** Stable MVP proposal with execution tracking delegated to [ROADMAP.md](./ROADMAP.md)
+**Version:** 2.0  
+**Date:** June 11, 2026  
+**Status:** Architecture revision for Effect v4 / effect-smol plugin-based MVP
 
 ---
 
@@ -10,41 +10,47 @@
 
 `SPEC.md` is the stable reference for product thesis, architecture, scope, and success criteria.
 
-Day-to-day execution tracking now lives in [ROADMAP.md](./ROADMAP.md).
+Day-to-day task tracking lives in [ROADMAP.md](./ROADMAP.md).
 
-- update [ROADMAP.md](./ROADMAP.md) when task status, evidence, or execution order changes,
-- update `SPEC.md` only when product scope, architecture, or MVP success criteria change.
+Update `ROADMAP.md` when execution order, status, or evidence changes. Update `SPEC.md` only when product scope, architecture, package boundaries, or MVP success criteria change.
 
 ---
 
 ## 1. Executive Summary
 
-**PatchPlane** is an open-source control plane for coordinating AI agents and humans around shared software changes.
+**PatchPlane** is an open-source AI change-control plane for coordinating humans and AI agents around software changes.
 
-The core thesis is not “replace Git everywhere,” and it is not “build a ticket workflow manager for coding agents.”
+PatchPlane is not a Git replacement and not a thin GitHub bot. It is a control plane that coordinates:
 
-The product thesis is narrower and more credible:
+1. prompt/request intake,
+2. workflow orchestration,
+3. sandboxed runtime execution,
+4. normalized event capture,
+5. automated review,
+6. human approval or rejection,
+7. provenance, rollback paths, and publication.
 
-1. provide a **live operational control plane** for agent-generated work,
-2. support **concurrent proposal, review, and merge workflows** without forcing humans to manually manage branches and rebases for every agent action,
-3. preserve **provenance, rollback, and human override** for every accepted change, and
-4. separate **orchestration**, **runtime execution**, and **merge governance** into explicit architectural layers.
+PatchPlane v2 keeps the original product thesis but revises the implementation architecture around an Effect-native plugin model:
 
-The first buildable MVP should focus on a narrow but credible loop:
+```text
+PatchPlane core defines capabilities.
+Plugins provide capabilities.
+The app composes plugins.
+```
 
-**GitHub issue, PR comment, or app prompt → Prompt Request in PatchPlane → Workflow Run → Daytona sandbox → Pi Mono runtime → normalized events → automated review → PatchPlane operator decision → GitHub feedback or PR publication**
+The first v2 foundation milestone is intentionally smaller than the full end-to-end product:
 
-This revision reflects nine deliberate decisions:
+```text
+Authenticated WorkOS user
+→ selected WorkOS organization
+→ PatchPlane Actor
+→ PatchPlane Workspace
+→ create PromptRequest
+→ create WorkflowRun
+→ persist through Convex Storage Plugin
+```
 
-- the product is positioned as an **agent-native change control plane built on top of append-only patch and provenance models**, not as a magical semantic replacement for source control,
-- **TypeScript** is the default implementation language across the platform,
-- **Effect** is the preferred programming model for the control-plane core, typed configuration, runtime boundaries, and error handling,
-- **WorkOS + Convex** is the default human identity stack,
-- **GitHub App** is the default repository authority and compatibility layer for existing developer workflows,
-- **Daytona** is the default sandbox execution layer,
-- **TanStack Start** is the default web framework for MVP delivery, with explicit acknowledgement that it still carries release-candidate framework risk,
-- **Pi Mono** is the default agent runtime for MVP, and
-- PatchPlane adopts an explicit **runtime adapter boundary**, typed configuration, and normalized runtime event model inspired by practical orchestration lessons from systems like Symphony, while remaining a different product category.
+The end-to-end hosted MVP expands that foundation with GitHub, Daytona, Pi Mono, runtime events, reviews, merge decisions, and publication.
 
 ---
 
@@ -52,200 +58,603 @@ This revision reflects nine deliberate decisions:
 
 ### 2.1 What PatchPlane is
 
-PatchPlane is a **collaborative execution, review, and merge system for AI-generated changes**.
+PatchPlane is a collaborative execution, review, and merge-governance system for AI-generated software changes.
 
-Its adoption wedge is **GitHub compatibility without GitHub dependence**:
-
-- GitHub remains the repository, community, and contribution surface teams already use,
-- PatchPlane becomes the primary hub for agent orchestration, execution, supervision, and policy,
-- over time, PatchPlane can internalize more patch-governance and rollback behavior without requiring teams to abandon GitHub on day one.
-
-It is designed for teams that want:
+It gives teams:
 
 - multiple agents proposing changes in parallel,
-- automated evaluation before merge,
-- a live shared view of what each agent is doing,
-- an immediate human interrupt or override path,
-- provenance for who proposed what, why it passed, and how to roll it back, and
-- a clean separation between the system that **coordinates work** and the runtime that **executes agent turns**.
+- durable workflow state for every request,
+- live operational visibility,
+- automated review before publication or merge,
+- explicit human interrupt and override paths,
+- provenance for who requested what, what the agent did, what passed, and why a decision was made,
+- replaceable runtime, sandbox, auth, storage, and repository infrastructure.
+
+PatchPlane's adoption wedge remains **GitHub compatibility without GitHub dependence**:
+
+- GitHub remains the initial repository, issue, PR, and community surface.
+- PatchPlane becomes the control plane for orchestration, execution, supervision, policy, review, and decision history.
+- Over time, PatchPlane may internalize more patch-governance and rollback behavior without forcing teams to abandon GitHub on day one.
 
 ### 2.2 What PatchPlane is not
 
-For the MVP, PatchPlane is **not**:
+For v2, PatchPlane is not:
 
 - a universal Git replacement,
-- a thin GitHub bot or PR-comment wrapper,
-- a full semantic conflict-resolution engine,
-- a ticket workflow manager in the style of Linear-first agent systems,
-- an open multi-tenant enterprise platform,
+- a generic issue tracker,
+- a project-management replacement,
 - a hosted LLM platform,
-- a fully offline local-first code editor.
-
-The MVP should instead be positioned as an **agent collaboration control plane with deterministic patch workflows, explicit runtime boundaries, and graph-based provenance**.
-
----
-
-## 3. Why Now
-
-The timing is credible, but the opportunity should be framed carefully.
-
-- AI coding agents are rapidly increasing the volume of machine-generated code and candidate changes.
-- The operational bottleneck is shifting from generation alone toward **review, trust, policy enforcement, merge safety, and rollback**.
-- Interoperability is improving through tool protocols, runtime APIs, and pluggable model layers, increasing the value of orchestration, governance, and observability layers.
-- Teams increasingly need a durable system that can coordinate agent work while keeping the execution runtime replaceable.
-
-**Implication:** the market pull is real, but a strong MVP must emphasize **governance, reliability, observability, runtime isolation, and merge safety**, not just autonomy.
+- a fully offline local-first code editor,
+- an open multi-tenant SaaS platform,
+- a full semantic conflict-resolution engine,
+- an enterprise RBAC suite.
 
 ---
 
-## 4. Problem Statement
-
-### 4.1 The operational problem
-
-Existing coding-agent workflows increase generation speed, but they still leave teams with five hard problems:
-
-1. **Concurrency:** multiple agents can propose overlapping changes at once.
-2. **Evaluation:** teams need repeatable checks before accepting agent output.
-3. **Coordination:** humans need live visibility and interrupt capability.
-4. **Provenance:** teams need to know what changed, why it changed, what passed, and how to revert.
-5. **Runtime coupling:** many systems blur the boundary between workflow orchestration and runtime execution, making later portability and governance harder.
-
-### 4.2 What current tools already do
-
-Current frameworks and platforms already cover parts of the stack:
-
-- agent frameworks and orchestration systems can run multi-step workflows,
-- coding assistants can generate and apply patches,
-- repo-centric tools can review and merge changes,
-- sandbox vendors can isolate code execution,
-- agent runtimes can manage sessions, tool calls, and iterative turns.
-
-### 4.3 The gap PatchPlane targets
-
-The opportunity is not that “nothing exists.” The opportunity is that there is still room for a product that combines:
-
-- **agent-native proposal workflows**,
-- **durable automated review**,
-- **live shared operational state**,
-- **graph provenance**,
-- **human-governed merge policy**, and
-- **runtime-agnostic orchestration**
-
-in a single developer-facing product.
-
----
-
-## 5. Product Principles for MVP
+## 3. Product Principles
 
 1. **Human-governed, agent-accelerated**  
-   Agents can propose and review; humans define criteria and can interrupt at any step.
+   Agents can propose and review; humans define criteria and can interrupt, redirect, approve, or reject.
 
 2. **Deterministic before autonomous**  
-   Use explicit checks, patch logs, and merge gates before attempting advanced semantic autonomy.
+   Use explicit checks, workflow states, patch logs, and merge gates before attempting advanced semantic autonomy.
 
 3. **Real-time by default**  
-   Every request, run, review, and merge should update across connected clients immediately.
+   Every request, run, review, event, and decision should be observable by connected clients.
 
 4. **Sandbox everything untrusted**  
-   Generated code, tool execution, and reviewer actions run outside the main control plane.
+   Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane.
 
-5. **Runtime is replaceable**  
-   The orchestrator must not depend on one specific agent runtime. Runtime integrations should sit behind a narrow adapter interface.
+5. **Plugins at the edge**  
+   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Mono, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries.
 
-6. **Graph for provenance, not magic**  
-   The graph explains lineage and decision history; it does not replace rigorous merge semantics by itself.
+6. **Schemas at the boundary, Effect services in the core, plugins at the edge**  
+   External inputs are decoded through Effect Schema; core capabilities are defined as Effect services; real infrastructure is provided by plugins and composed by the app.
 
-7. **Policy is explicit and serializable**  
-   Approval, sandbox, evaluation, and merge criteria must be attached to runs as auditable artifacts, not hidden in ad hoc business logic.
+7. **Graph for provenance, not magic**  
+   The graph explains lineage and decision history. It does not replace rigorous merge semantics by itself.
 
-8. **Types at the boundary, effects in the core**  
-   Runtime inputs, config, events, and policy payloads should be decoded explicitly, while long-running orchestration, retries, cancellation, and resource handling should be modeled in a consistent effect system.
-
----
-
-## 6. MVP Scope
-
-### In scope
-
-- WorkOS sign-in and organization-aware human identity
-- GitHub App installation, repository authorization, and webhook ingestion
-- Prompt request creation from the app UI or verified GitHub events
-- Durable `PromptRequest -> WorkflowRun -> RuntimeSession` execution flow
-- External sandbox run for code execution and checks
-- A first runtime adapter for Pi Mono
-- GitHub-aware repo checkout and scoped execution target selection
-- Normalized runtime event ingestion into PatchPlane domain events
-- GitHub feedback publication through comments, checks, and PR or draft PR creation
-- Reviewer fan-out (for example `oxlint`, test, security, quality reviewers)
-- Weighted score aggregation and policy checks
-- Real-time dashboard for requests, runs, approvals, and decisions
-- Human interrupt, approval, and redirect paths from the dashboard
-- Typed configuration for projects, runtimes, sandboxes, and policies
-- A TypeScript-first shared domain package with Effect-powered schemas and service boundaries
-
-### Explicitly out of scope
-
-- Fully automatic semantic conflict resolution
-- Broad transactional auto-merge across overlapping patch sets in the first vertical slice
-- Full rollback using stored materialized snapshots in the first vertical slice
-- Open multi-tenant SaaS hardening
-- Fine-grained enterprise RBAC and audit export
-- Background evolutionary remixing of prior successful changes
-- Full offline-first editing for source code
-- Deep desktop-native feature work beyond a thin shell
-- Built-in model serving
-- Mobile clients
-- A generic issue tracker or project-management replacement
+8. **Policy is explicit and serializable**  
+   Approval, sandbox, evaluation, and merge criteria are auditable artifacts, not hidden ad hoc business logic.
 
 ---
 
-## 7. Core System Model
+## 4. Package Architecture
 
-### 7.1 Primary primitives
+PatchPlane v2 uses this workspace shape:
 
-#### Prompt Request
+```text
+packages/
+  domain/
+    src/
+      ids.ts
+      actor.ts
+      workspace.ts
+      prompt-request.ts
+      workflow-run.ts
+      runtime-session.ts
+      runtime-event.ts
+      candidate-patch-set.ts
+      review-run.ts
+      merge-decision.ts
+      policy-bundle.ts
+      errors.ts
+      index.ts
+
+  core/
+    src/
+      services/
+        AuthService.ts
+        StorageService.ts
+        GitProviderService.ts
+        RuntimeService.ts
+        SandboxService.ts
+        ReviewService.ts
+        PolicyService.ts
+        TelemetryService.ts
+      workflows/
+        StartWorkflowFromPrompt.ts
+        IngestRuntimeEvent.ts
+        ProposeMergeDecision.ts
+      index.ts
+
+  plugins/
+    src/
+      workos/
+        WorkOSAuthPlugin.ts
+        WorkOSConfig.ts
+        mapping.ts
+        errors.ts
+        index.ts
+      convex/
+        ConvexStoragePlugin.ts
+        ConvexConfig.ts
+        schema.ts
+        mapping.ts
+        errors.ts
+        index.ts
+      github/
+        GitHubProviderPlugin.ts
+        GitHubConfig.ts
+        mapping.ts
+        errors.ts
+        index.ts
+      pimono/
+        PiMonoRuntimePlugin.ts
+        PiMonoConfig.ts
+        mapping.ts
+        errors.ts
+        index.ts
+      daytona/
+        DaytonaSandboxPlugin.ts
+        DaytonaConfig.ts
+        mapping.ts
+        errors.ts
+        index.ts
+
+apps/
+  app/
+    src/
+      effect/
+        layers.ts
+        runtime.ts
+      routes/
+      server/
+      convex/
+```
+
+### 4.1 Dependency direction
+
+```text
+domain → core → plugins → apps/app
+```
+
+More explicitly:
+
+- `packages/domain` imports Effect Schema, but no PatchPlane package.
+- `packages/core` imports `domain` only.
+- `packages/plugins` imports `core`, `domain`, and external SDKs.
+- `apps/app` imports `core` and `plugins`, then composes the runtime.
+
+### 4.2 Dependency restrictions
+
+`packages/core` must not import:
+
+- WorkOS SDK,
+- Convex SDK,
+- GitHub SDK,
+- Daytona SDK,
+- Pi Mono SDK,
+- OpenCode SDK,
+- Codex SDK,
+- TanStack Start APIs,
+- framework route/server-function modules.
+
+Those dependencies belong in `packages/plugins` or `apps/app`.
+
+---
+
+## 5. Effect v4 / effect-smol Implementation Rules
+
+PatchPlane v2 targets **Effect v4 beta / effect-smol** intentionally. Because v4 is still beta, Effect-heavy implementation should be isolated in `packages/core` and `packages/plugins`, not scattered through UI components.
+
+Rules:
+
+- Pin exact Effect v4 beta package versions.
+- Keep Effect ecosystem package versions aligned.
+- Keep migration notes in the repo when v4 APIs change.
+- Use `Context.Service` for core service definitions.
+- Use `Layer.effect` for plugin implementations.
+- Use `Layer.merge` for independent services.
+- Use `Layer.provide` for explicit dependencies.
+- Use `Layer.unwrap` later for config-driven plugin selection.
+- Use `Effect.fn` for traceable service methods where useful.
+- Use `ManagedRuntime` at the app boundary.
+- Use Effect Config for plugin configuration.
+- Use Effect Schema for domain models and external decoding.
+- Use `Schema.TaggedErrorClass` for typed errors.
+
+Plain TypeScript remains preferred for:
+
+- presentational React components,
+- simple UI view models,
+- small pure utilities,
+- app chrome and styling,
+- client-only interaction code that does not benefit from Effect.
+
+---
+
+## 6. Domain Package
+
+`packages/domain` owns PatchPlane's portable data model.
+
+Use Effect Schema from day one for runtime validation, serialization, JSON Schema generation, and TypeScript type inference.
+
+Rule:
+
+```text
+All external inputs must be decoded into PatchPlane domain schemas before entering core workflows.
+```
+
+Initial schemas:
+
+- `Actor`
+- `Workspace`
+- `Membership`
+- `Permission`
+- `PromptRequest`
+- `WorkflowRun`
+- `RuntimeSession`
+- `RuntimeEvent`
+- `CandidatePatchSet`
+- `ReviewRun`
+- `ReviewFinding`
+- `MergeDecision`
+- `PolicyBundle`
+- `RepositoryConnection`
+
+Important trust boundaries include:
+
+- WorkOS session data,
+- Convex documents,
+- GitHub webhooks,
+- GitHub API responses,
+- runtime events,
+- sandbox outputs,
+- review findings,
+- policy payloads,
+- UI inputs,
+- server-function inputs.
+
+---
+
+## 7. Typed Errors
+
+PatchPlane must model expected failures as typed errors, not raw SDK exceptions.
+
+Initial error families:
+
+- `AuthError`
+- `StorageError`
+- `GitProviderError`
+- `RuntimeError`
+- `SandboxError`
+- `ReviewError`
+- `PolicyError`
+- `DecisionError`
+- `WorkflowStateError`
+- `ValidationError`
+
+Expected failure modes include:
+
+- auth session missing,
+- workspace not selected,
+- permission denied,
+- GitHub installation missing,
+- repository not authorized,
+- sandbox provisioning failed,
+- runtime emitted invalid event,
+- review timed out,
+- policy blocked decision,
+- publication failed.
+
+Plugin-specific failures must be mapped into PatchPlane-owned typed errors before crossing into core workflows.
+
+---
+
+## 8. Core Package
+
+`packages/core` defines PatchPlane capabilities as Effect services and implements workflow behavior in terms of those capabilities.
+
+Core services:
+
+### `AuthService`
+
+- `getCurrentActor`
+- `getCurrentWorkspace`
+- `requirePermission`
+- `listMemberships`
+
+### `StorageService`
+
+- `createPromptRequest`
+- `createWorkflowRun`
+- `appendRuntimeEvent`
+- `createReviewRun`
+- `createMergeDecision`
+- `readTimeline`
+
+### `GitProviderService`
+
+- `verifyRepositoryAccess`
+- `createBranch`
+- `createCommit`
+- `createDraftPullRequest`
+- `publishComment`
+- `publishCheck`
+
+### `RuntimeService`
+
+- `startSession`
+- `sendInstruction`
+- `streamEvents`
+- `stopSession`
+
+### `SandboxService`
+
+- `provision`
+- `execute`
+- `collectArtifacts`
+- `destroy`
+
+### `ReviewService`
+
+- `runReview`
+- `emitFinding`
+- `completeReview`
+
+### `PolicyService`
+
+- `evaluatePolicy`
+- `proposeDecision`
+
+### `TelemetryService`
+
+- structured logging,
+- spans,
+- metrics,
+- contextual annotations.
+
+Initial core workflows:
+
+- `StartWorkflowFromPrompt`
+- `IngestRuntimeEvent`
+- `ProposeMergeDecision`
+
+---
+
+## 9. Plugins Package
+
+A PatchPlane plugin is a concrete implementation of a PatchPlane core service using an external system.
+
+Examples:
+
+- WorkOS Auth Plugin,
+- Convex Storage Plugin,
+- GitHub Provider Plugin,
+- Pi Mono Runtime Plugin,
+- Daytona Sandbox Plugin,
+- OpenCode Runtime Plugin,
+- Codex Runtime Plugin,
+- Postgres Storage Plugin,
+- MySQL Storage Plugin,
+- SQLite Storage Plugin,
+- GitLab Provider Plugin,
+- Kubernetes Sandbox Plugin.
+
+Rule:
+
+```text
+PatchPlane v2 uses real plugins from the start, but all real integrations must be accessed through PatchPlane-owned Effect services and layers.
+```
+
+### 9.1 Initial plugins
+
+Foundation MVP:
+
+- WorkOS Auth Plugin,
+- Convex Storage Plugin.
+
+End-to-end MVP:
+
+- GitHub Provider Plugin,
+- Daytona Sandbox Plugin,
+- Pi Mono Runtime Plugin.
+
+### 9.2 Later plugins
+
+- Postgres Storage Plugin,
+- MySQL Storage Plugin,
+- SQLite Storage Plugin,
+- OpenCode Runtime Plugin,
+- Codex Runtime Plugin,
+- GitLab Provider Plugin,
+- Kubernetes Sandbox Plugin.
+
+---
+
+## 10. WorkOS Auth Model
+
+WorkOS is the first-class `AuthService` implementation, not merely a Convex detail.
+
+Conceptually:
+
+- WorkOS owns identity, organization membership, and source role/permission data.
+- PatchPlane owns workflow authorization decisions.
+- Convex may validate WorkOS JWTs and store PatchPlane records, but Convex is not the source identity model.
+
+Mapping:
+
+```text
+WorkOS User             → Actor
+WorkOS Organization     → Workspace
+WorkOS Membership       → Membership
+WorkOS Role/Permissions → WorkspaceRole / Permission[]
+```
+
+Core must only know:
+
+- `Actor`,
+- `Workspace`,
+- `Membership`,
+- `Permission`.
+
+Core must not know:
+
+- `WorkOSUser`,
+- `WorkOSOrganization`,
+- `WorkOSOrganizationMembership`.
+
+### 10.1 Initial roles
+
+Keep the first role model simple:
+
+- `owner`
+- `admin`
+- `maintainer`
+- `reviewer`
+- `operator`
+- `viewer`
+
+Suggested first permission slugs:
+
+- `workspace:view`
+- `repo:connect`
+- `prompt:create`
+- `run:start`
+- `run:interrupt`
+- `review:create`
+- `decision:approve`
+- `decision:reject`
+- `publication:create`
+
+Do not overbuild enterprise RBAC in v2.
+
+---
+
+## 11. App Composition Root
+
+`apps/app` owns framework integration and deployment composition.
+
+It is responsible for:
+
+- TanStack Start routes,
+- WorkOS route/session helpers,
+- Convex client wiring,
+- server functions,
+- HTTP route handlers,
+- UI rendering,
+- composing plugin layers,
+- constructing the PatchPlane `ManagedRuntime`.
+
+`packages/core` must not depend on TanStack Start, Convex server functions, or WorkOS route helpers.
+
+### 11.1 ManagedRuntime bridge
+
+`apps/app` creates the PatchPlane runtime from composed plugin layers:
+
+```text
+apps/app/src/effect/layers.ts
+- compose WorkOSAuthPlugin.layer
+- compose ConvexStoragePlugin.layer
+- compose GitHubProviderPlugin.layer
+- compose PiMonoRuntimePlugin.layer
+- compose DaytonaSandboxPlugin.layer
+
+apps/app/src/effect/runtime.ts
+- create ManagedRuntime from PatchPlaneLayer
+- export helpers for server routes/functions
+```
+
+Route handlers and server functions call core workflows through this runtime.
+
+---
+
+## 12. Configuration
+
+Plugin configuration must use Effect Config.
+
+Each plugin owns its config:
+
+- `WorkOSConfig`
+- `ConvexConfig`
+- `GitHubConfig`
+- `PiMonoConfig`
+- `DaytonaConfig`
+
+Rules:
+
+- Plugins must not read raw environment variables from random files.
+- Plugin configuration is loaded through Effect Config and provided through plugin layers.
+- Secrets should use redacted config values where supported.
+- Configuration should fail at startup, not halfway through a workflow.
+
+Important secret-bearing config includes:
+
+- WorkOS API keys,
+- WorkOS client IDs and cookie/session secrets,
+- Convex URLs and deployment credentials,
+- GitHub App IDs and private keys,
+- Daytona tokens,
+- runtime credentials.
+
+---
+
+## 13. Observability
+
+PatchPlane is an operational control plane, so observability is part of the core/plugin contract.
+
+Every workflow and plugin operation should emit structured context where available:
+
+- `workspaceId`
+- `actorId`
+- `promptRequestId`
+- `workflowRunId`
+- `runtimeSessionId`
+- `reviewRunId`
+- `mergeDecisionId`
+- `pluginName`
+- `externalSystem`
+
+Initial spans:
+
+- `patchplane.prompt.create`
+- `patchplane.workflow.start`
+- `patchplane.auth.resolve_actor`
+- `patchplane.storage.create_workflow_run`
+- `patchplane.git.verify_repo`
+- `patchplane.runtime.start_session`
+- `patchplane.sandbox.provision`
+- `patchplane.review.run`
+- `patchplane.decision.propose`
+
+---
+
+## 14. Core System Model
+
+### 14.1 PromptRequest
 
 A user- or agent-created request containing:
 
 - intent or prompt,
-- source channel (app, issue, PR, issue comment, PR comment, automation),
-- target scope (repo, project, file set, artifact set),
+- source channel,
+- target scope,
 - expected outcome,
 - evaluation policy,
 - optional implementation hints,
-- initiator identity.
+- initiator identity,
+- workspace identity.
 
-#### GitHub Repository Connection
-
-The durable repository authority record containing:
-
-- GitHub App installation identity,
-- repository identity and permissions,
-- webhook routing metadata,
-- checkout or execution defaults,
-- bindings to issues, PRs, and prompt-request sources.
-
-This boundary determines what PatchPlane is allowed to observe and mutate in GitHub.
-
-#### Workflow Run
+### 14.2 WorkflowRun
 
 The durable orchestration record for one execution attempt containing:
 
 - prompt-request reference,
-- repository connection reference,
+- workspace reference,
+- repository connection reference when applicable,
 - selected execution target,
 - selected runtime and sandbox profile,
-- current lifecycle state,
-- GitHub callback targets,
+- lifecycle state,
+- callback targets,
 - policy bundle reference.
 
-Workflow runs are **control-plane truth** for execution attempts.
+Workflow runs are control-plane truth for execution attempts.
 
-#### Runtime Session
+### 14.3 RuntimeSession
 
-The operational container for one agent execution context:
+The operational container for one agent execution context containing:
 
-- runtime adapter identifier,
+- runtime plugin identifier,
 - sandbox identifier,
 - workspace root,
 - approval policy,
@@ -254,9 +663,24 @@ The operational container for one agent execution context:
 - current status,
 - resumability metadata.
 
-Runtime sessions are **execution state**, not product truth.
+Runtime sessions are execution state, not product truth.
 
-#### Candidate Patch Set
+### 14.4 RuntimeEvent
+
+A normalized event emitted by a runtime plugin, for example:
+
+- session started,
+- turn started,
+- tool call requested,
+- approval required,
+- artifact emitted,
+- turn completed,
+- turn failed,
+- session terminated.
+
+Runtime events are stored for observability and debugging, but they are not merge decisions.
+
+### 14.5 CandidatePatchSet
 
 The concrete output proposed by an agent run:
 
@@ -268,671 +692,442 @@ The concrete output proposed by an agent run:
 - machine-readable diff summary,
 - runtime session reference.
 
-#### Review Run
+### 14.6 ReviewRun
 
 A sandboxed evaluation result produced by a reviewer or tool:
 
-- pass or fail,
+- pass/fail,
 - numeric score,
 - comments,
 - structured findings,
 - execution logs,
 - artifact references.
 
-#### Merge Decision
+### 14.7 MergeDecision
 
-A durable system decision containing:
+A durable decision containing:
 
 - final weighted score,
 - criteria evaluation result,
-- draft-pr, ready-for-review, accepted, rejected, conflict, or manual-review state,
-- responsible workflow execution ID,
+- proposed state,
+- responsible workflow run,
 - related GitHub issue or PR reference,
-- policy bundle reference.
+- policy bundle reference,
+- deciding actor or automated policy source.
 
-#### Runtime Event
+### 14.8 RepositoryConnection
 
-A normalized operational event derived from a runtime adapter, for example:
+The durable repository authority record containing:
 
-- session started,
-- turn started,
-- tool call requested,
-- approval required,
-- artifact emitted,
-- turn completed,
-- turn failed,
-- session terminated.
+- provider,
+- installation identity,
+- repository identity and permissions,
+- webhook routing metadata,
+- checkout or execution defaults,
+- bindings to issues, PRs, and prompt-request sources.
 
-Runtime events are stored for observability and debugging, but are not the same thing as business-level merge decisions.
-
-#### Symbiosis Graph
+### 14.9 Symbiosis Graph
 
 An append-only provenance graph that links:
 
 - prompt requests,
 - workflow runs,
-- GitHub repository connections,
+- repository connections,
 - runtime sessions,
 - candidate patch sets,
 - review runs,
 - merge decisions,
+- publication events,
 - rollback operations.
 
-The graph is the **lineage model**, not the merge algorithm.
-
-### 7.2 GitHub compatibility model for MVP
-
-The first end-to-end MVP slice should use a **PatchPlane-primary, GitHub-compatible model**:
-
-- PatchPlane is the system of record for prompt requests, workflow runs, runtime sessions, approvals, reviews, and decisions,
-- candidate changes are materialized as git commits and branches inside the sandboxed repo workspace,
-- GitHub remains the initial repository and contribution surface for issues, PRs, comments, checks, and open-source collaboration,
-- accepted outputs are published back to GitHub as comments, checks, and PR or draft PR updates,
-- human review remains the default merge authority for the first vertical slice,
-- direct transactional auto-merge and PatchPlane-owned rollback are follow-on steps after the GitHub-compatible loop is proven,
-- overlapping or ambiguous changes should fall back to PR-based human arbitration, not semantic auto-resolution.
-
-The long-term product may internalize more patch lineage, rollback, and merge governance, but it should reach that state by **gradual migration from existing GitHub workflows**, not by demanding a workflow reset up front.
-
-### 7.3 Runtime boundary for MVP
-
-The MVP must preserve five distinct layers:
-
-1. **Base collaboration layer**  
-   GitHub remains the initial repository and community workflow surface.
-
-2. **Identity and repository authority layer**  
-   WorkOS + Convex owns human identity, while the GitHub App owns repo installation scope, webhook ingress, and outbound repository mutations.
-
-3. **Orchestration layer**  
-   PatchPlane owns durable progression through request, review, approval, and decision states.
-
-4. **Execution layer**  
-   PatchPlane dispatches and supervises sandbox lifecycle through Daytona.
-
-5. **Runtime layer**  
-   Pi Mono owns agent-session execution inside the sandbox through a PatchPlane runtime adapter.
-
-PatchPlane’s domain model must sit **above** the runtime, not be defined by it.
-
-### 7.4 Optional local-first enhancement
-
-For non-code structured documents or metadata-heavy collaborative surfaces, PatchPlane may later adopt CRDT-based collaboration.
-
-For code artifacts in MVP, stick to **transactional patch application**, not CRDT-based source merging.
+The graph is the lineage model, not the merge algorithm.
 
 ---
 
-## 8. High-Level Architecture
+## 15. GitHub Compatibility Model
 
-```text
-[Human User / Steering / Override]
-               |
-      +--------+--------+
-      |                 |
-  Web Dashboard      Thin Desktop Shell
- (TanStack Start)      (Electrobun)
-      |                 |
-      +------ Convex Realtime Backend ------+
-                     |
- [Requests / Runs / Policies / Decisions / Auth]
-                     |
-       PatchPlane Orchestration Layer
-                     |
-      GitHub App <-> Compatibility / Webhook Layer
-                     |
-           PatchPlane Runtime Adapter API
-                     |
-                Daytona Sandboxes
-                     |
-                Pi Mono Runtime
-                     |
-   Reviewer Agents / Tests / Security / Analysis
-                     |
-   GitHub repos / issues / PRs / comments / checks
-```
+The end-to-end MVP uses a PatchPlane-primary, GitHub-compatible model:
 
-### Lifecycle
-
-1. A human signs in through WorkOS and connects a repository through a GitHub App installation.
-2. A GitHub issue, PR comment, issue comment, or app prompt becomes a Prompt Request inside PatchPlane.
-3. PatchPlane persists the request and starts a durable workflow run.
-4. The workflow resolves repository authority, runtime policy, sandbox policy, and evaluation policy.
-5. PatchPlane dispatches one or more sandbox jobs through Daytona.
-6. Inside the sandbox, PatchPlane checks out the authorized repo and invokes Pi Mono through a runtime adapter.
-7. Runtime events are normalized into PatchPlane event types and streamed back into PatchPlane state.
-8. Reviewer outputs, approvals, and decision signals are attached to the workflow run.
-9. Operators supervise, interrupt, redirect, or approve from PatchPlane.
-10. PatchPlane publishes comments, checks, and PR or draft PR updates back to GitHub as needed.
-11. Later phases may internalize more patch-governance and rollback behavior while preserving GitHub interoperability where useful.
+- PatchPlane is the system of record for prompt requests, workflow runs, runtime sessions, approvals, reviews, and decisions.
+- Candidate changes are materialized as git commits and branches inside a sandboxed repo workspace.
+- GitHub remains the initial repository and contribution surface for issues, PRs, comments, checks, and open-source collaboration.
+- Accepted outputs are published back to GitHub as comments, checks, and PR or draft PR updates.
+- Human review remains the default merge authority for the first vertical slice.
+- Direct transactional auto-merge and PatchPlane-owned rollback are follow-on steps.
+- Overlapping or ambiguous changes fall back to PR-based human arbitration, not semantic auto-resolution.
 
 ---
 
-## 9. Final Technology Choices
-
-## 9.1 Language and programming model
-
-### **TypeScript** as the default implementation language
-
-Use TypeScript across the web app, desktop shell, Convex functions, shared domain packages, Daytona integration, and runtime adapters.
-
-Why:
-
-- it aligns with Convex, TanStack Start, Electrobun, and Daytona,
-- it enables end-to-end type sharing across control plane and clients,
-- it reduces integration friction across the chosen MVP stack,
-- it keeps the open-source contributor experience accessible.
-
-### **Effect** as the preferred control-plane programming model
-
-Use Effect deliberately where PatchPlane’s correctness burden is highest.
-
-Use Effect for:
-
-- shared domain schemas and boundary decoding,
-- runtime adapter contracts and external service wrappers,
-- orchestration helpers around retries, cancellation, timeout budgets, and resource lifecycles,
-- policy evaluation pipelines,
-- normalized runtime event ingestion,
-- typed error channels for execution, review, and merge decisions.
-
-Do **not** require Effect everywhere in v0.1.
-
-Use plain TypeScript for:
-
-- presentational React components,
-- simple UI view models,
-- straightforward Convex query and mutation surfaces,
-- small utility modules that do not benefit from Effect’s runtime model.
-
-### Implementation rule
-
-PatchPlane should be built as a **TypeScript platform with an Effect-powered control-plane core**, rather than as an “Effect everywhere” codebase.
-
-## 9.2 Backend and sync
-
-### **Convex**
-
-Use Convex as the shared backend for:
-
-- realtime subscriptions,
-- durable state,
-- actions,
-- workflows,
-- file references,
-- graph lineage storage,
-- configuration profiles,
-- runtime event ingestion,
-- optional vector or RAG capabilities later.
-
-### Recommendation
-
-Keep Convex as the backbone for MVP.
-
-## 9.3 Identity and repository authority
-
-### **WorkOS + Convex** for human identity
-
-Use WorkOS as the human authentication and identity layer, integrated with Convex.
-
-Why:
-
-- Convex has first-class WorkOS AuthKit integration,
-- WorkOS gives a clean path for passwords, social login, one-time codes, SSO, and organization-aware auth,
-- the stack remains TypeScript-friendly end-to-end,
-- it creates a better long-term path for B2B access control than shipping ad hoc auth first and reworking it later.
-
-### **GitHub App** for repository authority and GitHub compatibility
-
-Use a GitHub App as the default repository authority primitive and compatibility layer.
-
-Why:
-
-- GitHub App installations are the correct unit for repo-scoped authorization,
-- GitHub Apps support webhook delivery, installation-level permissions, and outbound mutations,
-- they provide a cleaner path for issue, PR, check, and comment workflows than plain GitHub OAuth alone,
-- they separate human identity from repository authority, which matches PatchPlane’s control-plane design.
-
-GitHub OAuth may still be used as a convenience for linking a user’s GitHub identity, but it should not be the sole repo-access primitive for MVP.
-
-GitHub is the **initial base layer for interoperability**, not the long-term system of record for agent orchestration.
-
-### MVP auth posture
-
-For MVP, support:
-
-- hosted human auth through WorkOS,
-- organization-aware user model,
-- GitHub App installation on selected repositories,
-- verified webhook delivery handling,
-- basic role distinction between admin, reviewer, and viewer.
-
-Do **not** try to fully solve enterprise RBAC in v0.1.
-
-## 9.4 Configuration model
-
-### **Typed configuration as a first-class product surface**
-
-PatchPlane should not rely on scattered environment variables as its primary configuration model.
-
-Use typed configuration objects for:
-
-- runtime adapters,
-- sandbox backends,
-- workspace rules,
-- policy bundles,
-- merge rules,
-- observability settings,
-- execution targets,
-- project-level defaults.
-
-### Why
-
-- it makes orchestration behavior explicit and auditable,
-- it reduces hidden coupling between runtime and product logic,
-- it improves portability across future runtimes,
-- it supports safer internal and team-level rollout.
-
-## 9.5 Workflow and orchestration
-
-### **Convex Workflow + Actions** as the default orchestrator
-
-Use Convex Workflow for the durable execution layer and standard actions for external calls.
-
-Why:
-
-- durable retries and resumability,
-- simpler operational model than introducing a second orchestration runtime into the critical path,
-- strong fit for request → review → merge workflows,
-- keeps product orchestration independent from the runtime implementation.
-
-## 9.6 Sandbox execution
-
-### **Daytona** as preferred execution layer
-
-Use Daytona as the default sandbox execution provider.
-
-Why:
-
-- purpose-built for running AI-generated code,
-- programmatic sandbox lifecycle through SDKs and API,
-- TypeScript support,
-- interactive capabilities beyond raw code execution, including file access, process execution, terminal sessions, and runtime control,
-- lower MVP complexity than self-hosting a custom sandbox stack from day one.
-
-### MVP usage model
-
-- one sandbox per generation or review task,
-- short-lived runtime by default,
-- explicit timeout and resource limits,
-- network restrictions where supported and required,
-- logs and artifacts streamed back into Convex.
-
-### Cost posture
-
-Daytona is suitable for MVP delivery, but it should be treated as **low-cost**, not “free forever.”
-
-## 9.7 Agent runtime
-
-### **Pi Mono** as the default runtime for MVP
-
-Use Pi Mono as the first agent runtime executed inside Daytona sandboxes.
-
-Why:
-
-- it provides a practical coding-agent runtime with tool usage and iterative execution,
-- it can be embedded behind a narrow runtime boundary,
-- it fits the goal of keeping PatchPlane runtime-agnostic at the orchestration layer,
-- it is a better fit for an open-source-first MVP than tightly coupling the control plane to a proprietary runtime contract.
-
-### Architectural note
-
-Pi Mono is the **runtime**, not the **orchestrator**.
-
-PatchPlane should define a runtime adapter contract with operations such as:
-
-- start session,
-- run turn,
-- stream events,
-- request approval,
-- collect artifacts,
-- terminate session.
-
-Future runtimes should be swappable without redefining the PatchPlane product model.
-
-## 9.8 Web dashboard
-
-### **TanStack Start** as the default web framework for MVP
-
-Use TanStack Start as the default web framework for the dashboard.
-
-Why:
-
-- React-first developer experience aligned with the rest of the stack,
-- strong fit with TanStack Router, Query, and modern type-safe data patterns,
-- good match for a highly interactive dashboard with SSR, streaming, and server functions,
-- consistent with a TypeScript-heavy codebase and team preference.
-
-### Risk note
-
-TanStack Start should still be acknowledged as a **Release Candidate-stage framework** rather than fully mature 1.0. For this MVP, that risk is accepted intentionally in exchange for stack alignment and delivery preference.
-
-## 9.9 Desktop app
-
-### **Electrobun**
-
-Keep Electrobun for the local command center.
-
-This remains a strong fit for a TypeScript-first desktop shell with native bindings, native webview rendering, and cross-platform support.
-
-## 9.10 Editor
-
-### **Monaco Editor**
-
-Use Monaco for embedded editing and diff inspection.
-
-Monaco provides the editor core that powers VS Code, which is sufficient for MVP editing, inspection, and patch review.
-
-## 9.11 Graph visualization
-
-Use either:
-
-- **React Flow** for workflow and interaction-oriented views, or
-- **Cytoscape.js** for denser graph exploration.
-
-Prefer React Flow for MVP unless graph scale quickly exceeds UI comfort limits.
+## 16. MVP Scope
+
+### 16.1 v2 Foundation MVP
+
+In scope:
+
+- `packages/domain` with Effect Schema,
+- `packages/core` with Effect services and workflows,
+- `packages/plugins` with real WorkOS and Convex plugins first,
+- `apps/app` composition root with TanStack Start and `ManagedRuntime`,
+- WorkOS Auth Plugin,
+- Convex Storage Plugin,
+- Actor and Workspace mapping,
+- PromptRequest creation through core,
+- WorkflowRun creation through core,
+- basic typed errors,
+- basic structured logs.
+
+Out of scope for the first foundation slice:
+
+- Daytona,
+- Pi Mono,
+- GitHub PR publication,
+- reviewer fan-out,
+- weighted score aggregation,
+- React Flow provenance graph,
+- desktop shell,
+- enterprise RBAC.
+
+### 16.2 End-to-End Hosted MVP
+
+In scope after the foundation is stable:
+
+- GitHub Provider Plugin,
+- Daytona Sandbox Plugin,
+- Pi Mono Runtime Plugin,
+- normalized RuntimeEvent ingestion,
+- CandidatePatchSet creation,
+- ReviewRun creation,
+- MergeDecision proposal,
+- GitHub comment/check/draft PR publication,
+- operator dashboard,
+- human approval/rejection path.
+
+### 16.3 Explicitly out of scope for v2 MVP
+
+- Fully automatic semantic conflict resolution,
+- broad transactional auto-merge across overlapping patch sets,
+- open multi-tenant SaaS hardening,
+- fine-grained enterprise RBAC and audit export,
+- background evolutionary remixing of prior successful changes,
+- full offline-first source-code editing,
+- deep desktop-native feature work,
+- built-in model serving,
+- mobile clients,
+- generic issue tracking or project management.
 
 ---
 
-## 10. Deployment and Cost Reality
+## 17. Technology Choices
 
-The earlier “$0 ongoing” claim should remain removed.
+### 17.1 Language
 
-### What is realistic
+Use TypeScript across the platform.
 
-- **Local prototype:** close to zero marginal infra cost if using existing hardware and free tiers.
-- **Shared internal MVP:** low cost, but not guaranteed zero.
-- **Commercial or public prototype:** definitely non-zero.
+### 17.2 Programming model
 
-### Why the original claim was too strong
+Use Effect v4 / effect-smol for:
 
-- shared or commercial deployment introduces real hosting constraints,
-- Convex free usage has explicit limits,
-- Daytona usage is metered even if free credits make early iteration inexpensive,
-- domains and production-like environments are not free,
-- runtime execution costs and evaluation fan-out can compound faster than expected.
+- schemas and boundary decoding,
+- core service definitions,
+- plugin layers,
+- typed errors,
+- configuration,
+- retries,
+- cancellation,
+- timeouts,
+- resource lifecycles,
+- workflow orchestration logic,
+- observability.
 
-### Revised statement
+### 17.3 Web framework
 
-**Target cost posture for MVP:** low-cost prototype using free tiers and credits where appropriate, but with the expectation of paid hosting for any shared or production-like deployment.
+Use TanStack Start for `apps/app`, while isolating framework risk in the app layer.
+
+### 17.4 Auth
+
+Use WorkOS AuthKit as the first auth plugin and source of human identity, organizations, memberships, roles, and permissions.
+
+### 17.5 Storage and realtime
+
+Use Convex as the first storage plugin and realtime backend.
+
+### 17.6 Repository provider
+
+Use GitHub App integration as the first repository provider plugin.
+
+### 17.7 Sandbox
+
+Use Daytona as the first sandbox plugin.
+
+### 17.8 Runtime
+
+Use Pi Mono as the first runtime plugin.
+
+### 17.9 Desktop
+
+A desktop shell remains post-foundation. Do not let desktop requirements shape the foundation MVP.
 
 ---
 
-## 11. Security Model
+## 18. Testing Strategy
 
-### 11.1 Trust boundaries
+PatchPlane v2 validates real plugins first, but keeps service boundaries testable.
 
-#### Trusted control plane
+Initial integration tests:
 
-- Convex backend
-- workflow state
-- policy definitions
-- merge decisions
-- user identity and permissions via WorkOS
-- GitHub App private key material and installation-token broker
-- verified webhook delivery state
-- configuration profiles
+- WorkOS session → PatchPlane Actor,
+- WorkOS organization → PatchPlane Workspace,
+- WorkOS roles/permissions → PatchPlane permissions,
+- Convex write through `StorageService`,
+- create PromptRequest through core workflow,
+- create WorkflowRun through core workflow.
 
-#### Semi-trusted clients
+Core tests after the first real path is proven:
 
-- web dashboard
-- desktop command center
+- workflow state transitions,
+- error handling,
+- permission checks,
+- retry behavior,
+- timeout behavior,
+- concurrent operations,
+- runtime-event validation.
 
-#### Untrusted execution plane
+Test layers are allowed and expected later. The spec does not require fake plugins before real WorkOS + Convex integration is proven.
 
-- generated code
-- agent tool calls
-- reviewer agents
-- third-party CLI invocations
-- runtime output
-- sandbox runtime output
+---
 
-### 11.2 Security rules for MVP
+## 19. Security Model
 
-- Run all generated code outside the control plane.
-- Default sandbox jobs to restricted network access where possible.
+### 19.1 Trust boundaries
+
+Trusted control plane:
+
+- core workflows,
+- plugin layers running in trusted server contexts,
+- WorkOS session validation,
+- Convex persistence,
+- policy definitions,
+- merge decisions,
+- GitHub App private key handling,
+- verified webhook delivery state,
+- configuration profiles.
+
+Semi-trusted clients:
+
+- web dashboard,
+- future desktop shell.
+
+Untrusted execution plane:
+
+- generated code,
+- agent tool calls,
+- reviewer agents,
+- third-party CLI invocations,
+- sandbox output,
+- runtime output.
+
+### 19.2 Rules
+
+- Run generated code outside the control plane.
 - Do not expose long-lived production credentials to sandbox runs.
-- Verify GitHub webhook signatures and deduplicate webhook deliveries.
-- Do not expose GitHub App private keys or long-lived installation credentials to sandbox runs.
-- Mint the narrowest possible repo-scoped credentials for sandbox checkout and outbound publication.
+- Verify GitHub webhook signatures.
+- Deduplicate webhook deliveries.
+- Keep GitHub App private keys and installation-token minting in trusted server contexts.
 - Store logs and artifacts separately from privileged secrets.
-- Make manual override and kill-switch available from UI.
-- Treat agent-generated dependency changes as high-risk and separately reviewable.
-- Validate workspaces, paths, and execution targets before runtime start.
+- Make manual override and kill-switch behavior available from the UI.
+- Treat dependency changes as high-risk.
+- Validate workspaces, paths, permissions, and execution targets before runtime start.
 - Make approval policy explicit per runtime session.
 
-### 11.3 Non-interactive execution posture
-
-The MVP should assume that not every run has a human actively watching.
-
-For each execution profile, define explicit behavior for:
-
-- auto-approve under bounded policy,
-- escalate to human review,
-- fail closed,
-- defer and resume,
-- terminate the session.
-
-### 11.4 Security posture statement
-
-The MVP is suitable for **single-team internal usage first**. It is **not yet suitable for open multi-tenant SaaS** without additional hardening, tenancy controls, formal sandbox governance, and stronger runtime isolation guarantees.
+The v2 MVP is suitable for single-team internal usage first. It is not suitable for open multi-tenant SaaS without additional tenancy, sandbox, audit, and isolation hardening.
 
 ---
 
-## 12. Data Model (MVP)
+## 20. Data Model
 
-### Core tables or entities
+Initial foundation entities:
 
-- `users`
-- `organizations`
+- `actors`
+- `workspaces`
 - `memberships`
-- `githubAccounts`
+- `permissions`
+- `promptRequests`
+- `workflowRuns`
+
+End-to-end MVP entities:
+
+- `repositoryConnections`
 - `githubInstallations`
 - `repositories`
 - `webhookDeliveries`
-- `promptRequests`
-- `workflowRuns`
 - `runtimeSessions`
 - `runtimeEvents`
+- `candidatePatchSets`
 - `reviewRuns`
+- `reviewFindings`
 - `mergeDecisions`
-- `issueBindings`
-- `pullRequestBindings`
 - `policyBundles`
 - `configProfiles`
 - `executionTargets`
 - `pendingApprovals`
 - `pendingInputs`
+- `publicationEvents`
 
-### Notes
+Notes:
 
-- `githubInstallations` and `repositories` define what PatchPlane is authorized to observe and mutate while GitHub remains the base collaboration layer.
-- `webhookDeliveries` provide idempotency, replay diagnostics, and signature-verification auditability.
-- `issueBindings` and `pullRequestBindings` connect product-level prompt requests to GitHub-native workflow surfaces.
-- `workflowRuns` are the durable orchestration unit for one execution attempt.
-- `runtimeSessions` store operational execution state but should not become the canonical source of merge truth.
-- `runtimeEvents` are normalized event records for observability, replay, and debugging.
-- `pendingApprovals` and `pendingInputs` capture blocking runtime state in a durable form.
-- richer artifact stores, rollback snapshots, and graph lineage tables can follow after the first GitHub-connected slice proves out.
-- auth-linked entities should map cleanly to WorkOS user and organization concepts.
+- WorkOS IDs may be stored as external IDs, but domain types remain PatchPlane-owned.
+- Convex document shapes must be mapped into domain schemas before entering core workflows.
+- Runtime events are normalized records for observability and replay.
+- Workflow runs are the durable orchestration unit.
+- Runtime sessions are execution state and must not become canonical merge truth.
 
 ---
 
-## 13. Build-Ready Implementation Blueprint
+## 21. Immediate Work Plan
 
-### 13.1 Current repo structure
+### Step 1 — Create package structure
 
 ```text
-/apps
-  /client              -> single TanStack Start app for landing, product shell, and architecture pages
-    /src
-      /components      -> app chrome, theme controls, and local UI primitives
-      /lib             -> client-side helpers
-      /platform        -> browser-first desktop bridge boundary
-      /routes          -> file-based routes for `/`, `/app`, and `/about`
-    /public            -> static assets
-/packages
-  /backend
-    /convex
-      /schema.ts       -> current Convex tables for prompt requests, runtime events, and review runs
-      /requests.ts     -> prompt request create/list surfaces
-    /src
-      /config          -> typed backend configuration schema and live layer
-      /graph           -> lineage projection helpers
-      /policy          -> review evaluation logic
-      /runtime         -> runtime adapter contract
-      /sandbox         -> sandbox adapter contract
-      /errors.ts       -> typed execution and review failures
-  /domain              -> shared Effect schemas, status labels, event types, review models, and product capability copy
-  /typescript-config   -> shared TypeScript baseline package
-/README.md             -> workspace overview and local commands
-/SPEC.md               -> product and implementation spec
-/package.json          -> Bun workspace scripts
+packages/domain
+packages/core
+packages/plugins
+apps/app
 ```
 
-### 13.1.1 Structure notes
+### Step 2 — Add Effect v4 beta intentionally
 
-- The repo currently has one app, `apps/client`; there is no separate `/web` and `/desktop` split yet.
-- The future desktop shell is only represented by a thin `DesktopBridge` interface in `apps/client/src/platform/bridge.ts`.
-- Runtime, sandbox, policy, and graph concerns already exist, but they are internal modules under `packages/backend/src` rather than separate workspace packages.
-- Shared UI is local to `apps/client` today; there is no top-level `/ui` package yet.
-- GitHub App integration, verified webhook intake, Convex-backed workflow orchestration boundaries, and shared Effect service tags are present in the repo today.
-- Concrete Daytona execution and Pi Mono runtime adapters are present in the repo today behind the shared execution boundary.
+Pin exact Effect v4 beta versions and keep Effect ecosystem package versions aligned.
 
-### 13.2 Core interface boundaries
+### Step 3 — Build `packages/domain`
 
-Define these interfaces early and treat them as product boundaries:
+Start with:
 
-- `RuntimeAdapter`
-- `ExecutionAdapter`
-- `GitHubInstallationBroker`
-- `WebhookIngestor`
-- `PolicyEvaluator`
-- `ArtifactStore`
-- `GraphProjector`
-- `InterruptController`
+- `Actor`
+- `Workspace`
+- `Membership`
+- `Permission`
+- `PromptRequest`
+- `WorkflowRun`
+- typed errors
 
-### 13.3 TypeScript baseline
+### Step 4 — Build `packages/core`
 
-Use a strict TypeScript posture from day one:
+Create:
 
-- `strict: true`
-- `noUncheckedIndexedAccess: true`
-- `exactOptionalPropertyTypes: true`
-- `noImplicitOverride: true`
-- `useUnknownInCatchVariables: true`
+- `AuthService`
+- `StorageService`
+- `StartWorkflowFromPrompt`
 
-For JavaScript and TypeScript code-quality tooling, PatchPlane should standardize on `oxlint` for linting and `oxfmt` for formatting instead of ESLint and Prettier.
+No WorkOS imports. No Convex imports.
 
-### 13.4 Effect usage guidance
+### Step 5 — Build `packages/plugins/workos`
 
-Use `effect/Schema` or equivalent typed Effect modules for:
+Implement:
 
-- prompt request decoding,
-- verified GitHub webhook payload decoding,
-- runtime event normalization,
-- config profile validation,
-- review-run payload validation,
-- merge-decision serialization.
+- WorkOS Auth Plugin,
+- `WorkOSConfig`,
+- WorkOS User → Actor mapping,
+- WorkOS Organization → Workspace mapping,
+- WorkOS roles/permissions → PatchPlane permissions mapping.
 
-Use Effect services for:
+### Step 6 — Build `packages/plugins/convex`
 
-- GitHub App auth, webhook delivery access, and publication boundaries,
-- Daytona client access,
-- Pi runtime process/session control,
-- policy evaluation side effects,
-- structured logging and telemetry,
-- cancellation and timeout coordination.
+Implement:
 
-Prefer `Context.Tag` plus `Layer` for long-lived service dependencies, and use `Effect.gen(...)` for multi-step orchestration flows where sequential control flow improves readability.
+- Convex Storage Plugin,
+- `ConvexConfig`,
+- `createPromptRequest`,
+- `createWorkflowRun`.
 
-### 13.5 Implementation summary
+### Step 7 — Compose in `apps/app`
 
-The canonical execution tracker lives in [ROADMAP.md](./ROADMAP.md).
+Create:
 
-The stable build sequence remains:
+```text
+apps/app/src/effect/layers.ts
+apps/app/src/effect/runtime.ts
+```
 
-1. promote shared contracts and remove backend-only contract duplication,
-2. finish repository authority and durable lifecycle state,
-3. prove the Daytona plus Pi runtime path,
-4. close the loop on runtime ingestion, review, and GitHub publication, and
-5. expose live operator visibility in the dashboard.
+Run one server-side action through the composed `ManagedRuntime`:
 
-## 14. Success Criteria for MVP
-
-The MVP is successful when all of the following are true:
-
-1. A user can authenticate through WorkOS and access the dashboard.
-2. A user can connect a GitHub repository through a GitHub App installation.
-3. A verified GitHub webhook or app prompt can create a durable Prompt Request.
-4. The system can durably fan out work to Daytona sandboxes.
-5. Pi Mono can run behind a PatchPlane runtime adapter with structured event capture.
-6. Shared domain schemas and config profiles are validated through the TypeScript + Effect core without ad hoc runtime parsing.
-7. At least one reviewer pipeline can return structured results.
-8. PatchPlane can publish comments, checks, and PR or draft PR updates back to GitHub.
-9. A human can interrupt, cancel, or force manual review during execution.
-10. One team can run the full loop against one repository end to end.
+```text
+Authenticated WorkOS user
+→ selected WorkOS organization
+→ PatchPlane Actor
+→ PatchPlane Workspace
+→ create PromptRequest
+→ create WorkflowRun
+→ persist in Convex through StorageService
+```
 
 ---
 
-## 15. Risks and Mitigations
+## 22. Success Criteria
 
-| Risk                                                                                        | Likelihood | Impact | Mitigation                                                                                  |
-| ------------------------------------------------------------------------------------------- | ---------: | -----: | ------------------------------------------------------------------------------------------- |
-| GitHub App installation, webhook, and repo-authority flows prove more complex than expected |     Medium |   High | Start with one repo, one installation, one event source, and one outbound publication path  |
-| Daytona integration becomes the main engineering sink                                       |     Medium |   High | Start with a narrow runtime profile and one language target                                 |
-| Pi runtime integration leaks too much runtime-specific behavior into the product model      |     Medium |   High | Enforce a strict runtime adapter contract and normalize events early                        |
-| TanStack Start RC issues affect delivery                                                    |     Medium | Medium | Keep architecture modular and maintain an escape hatch to a more mature React SSR stack     |
-| Realtime graph UI becomes noisy or unreadable                                               |     Medium | Medium | Separate operational timeline view from graph lineage view                                  |
-| Convex limits are hit under fan-out workflows                                               |     Medium | Medium | Keep heavy compute in sandboxes and keep Convex as the control plane                        |
-| Desktop shell adds maintenance overhead                                                     |     Medium | Medium | Keep desktop features minimal in v0.1                                                       |
-| Teams reject “Git-free” positioning                                                         |     Medium | Medium | Reframe as “agent-native collaboration layer” and provide export or snapshot bridges        |
-| Configuration model becomes too complex too early                                           |     Medium | Medium | Start with typed minimal profiles and add hierarchy only when needed                        |
-| Effect adoption slows delivery or fragments style                                           |     Medium | Medium | Constrain Effect to the control-plane core and document where plain TypeScript is preferred |
-| Security assumptions are misunderstood                                                      |     Medium |   High | Publish explicit trust-boundary and secret-handling rules                                   |
+### 22.1 Foundation MVP success
+
+The foundation MVP is successful when:
+
+1. A user can authenticate through WorkOS.
+2. A selected WorkOS organization maps to a PatchPlane Workspace.
+3. The WorkOS user maps to a PatchPlane Actor.
+4. WorkOS membership roles/permissions map to PatchPlane permissions.
+5. A server-side app action calls a core workflow through `ManagedRuntime`.
+6. The core workflow creates a PromptRequest through `StorageService`.
+7. The core workflow creates a WorkflowRun through `StorageService`.
+8. Convex persists those records through the Convex Storage Plugin.
+9. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Mono imports.
+10. Basic typed errors and structured logs exist for the path.
+
+### 22.2 End-to-end MVP success
+
+The hosted MVP is successful when:
+
+1. A user can connect a GitHub repository through a GitHub App installation.
+2. A verified GitHub webhook or app prompt can create a durable PromptRequest.
+3. PatchPlane can start a WorkflowRun for that request.
+4. Daytona can provision a sandbox through `SandboxService`.
+5. Pi Mono can run behind `RuntimeService`.
+6. Runtime events are normalized and persisted.
+7. A CandidatePatchSet can be produced.
+8. At least one ReviewRun can return structured results.
+9. A MergeDecision can be proposed.
+10. PatchPlane can publish comments, checks, or draft PRs back to GitHub.
+11. A human can approve, reject, interrupt, or force manual review.
+12. One team can run the loop against one repository end to end.
 
 ---
 
-## 16. Roadmap Recommendation
+## 23. Risks and Mitigations
 
-Detailed task tracking lives in [ROADMAP.md](./ROADMAP.md).
-
-The stable phase model is:
-
-| Phase                             | Goal                                                                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Phase 0 — Technical validation    | Prove the shared contract model, repo authority model, and sandbox-plus-runtime path against one repository. |
-| Phase 1 — MVP loop                | Close the operator loop from request intake to review to GitHub publication.                                 |
-| Phase 2 — Product differentiation | Add product leverage only after the MVP loop and section 14 success criteria are complete.                   |
-| Phase 3 — Advanced autonomy       | Treat autonomy-heavy work as explicitly post-MVP.                                                            |
+| Risk | Likelihood | Impact | Mitigation |
+| --- | ---: | ---: | --- |
+| Effect v4 beta APIs change | Medium | Medium | Pin exact versions, isolate Effect usage in core/plugins, keep migration notes |
+| TanStack Start framework churn affects delivery | Medium | Medium | Keep TanStack code in `apps/app`; protect core from framework imports |
+| WorkOS auth assumptions leak into domain | Medium | High | Map WorkOS types into Actor/Workspace/Membership/Permission only |
+| Convex storage shapes leak into core | Medium | High | Decode Convex documents through domain schemas and StorageService mappings |
+| Plugin boundaries slow early implementation | Medium | Medium | Start with only AuthService, StorageService, and StartWorkflowFromPrompt |
+| GitHub App flow is more complex than expected | Medium | High | Defer GitHub to end-to-end MVP after WorkOS + Convex foundation works |
+| Daytona integration becomes an engineering sink | Medium | High | Defer to end-to-end MVP and keep sandbox API narrow |
+| Runtime integration leaks behavior into product model | Medium | High | Normalize RuntimeEvent and keep RuntimeSession as execution state only |
+| Enterprise RBAC scope expands too early | Medium | Medium | Use simple roles and permission slugs for v2 |
+| Multi-tenant security assumptions are misunderstood | Medium | High | State single-team internal posture until hardening is complete |
 
 ---
 
-## 17. Recommendation
+## 24. Final Recommendation
 
-Proceed with **PatchPlane** as a focused internal MVP under the following constraints:
+Proceed with PatchPlane v2 as an Effect-native control-plane core with real infrastructure plugins.
 
-1. position it as an **AI change control plane**, not a universal Git replacement,
-2. define the first delivery slice around **PatchPlane-primary orchestration and execution with GitHub-compatible intake and publication**,
-3. use **Convex Workflow + Actions** as the default orchestrator,
-4. use **WorkOS + Convex** for human identity,
-5. use a **GitHub App** for repository authority and compatibility with existing workflows,
-6. use **Daytona** as the default execution boundary,
-7. use **Pi Mono** as the first runtime behind a replaceable adapter contract,
-8. use **TypeScript** as the platform language and **Effect** as the preferred model for the control-plane core,
-9. use **TanStack Start** for the dashboard while explicitly accepting RC-stage framework risk,
-10. treat cost as **low-cost, not zero-cost**, and
-11. validate with one team, one codebase, one GitHub installation, and one runtime before broadening the claim surface, and
-12. treat GitHub as the initial base layer rather than the long-term center of gravity for the product.
+The revised direction is:
 
-Under those assumptions, the concept remains credible and differentiated enough to justify MVP exploration, and the implementation strategy is now concrete enough to begin building without another major architecture pass.
+```text
+Real plugins first.
+Stable core service boundaries always.
+Effect Schema in domain from day one.
+WorkOS as first-class Auth Plugin.
+Convex as first Storage Plugin.
+apps/app as composition root.
+```
+
+PatchPlane v2 should validate real WorkOS + Convex infrastructure immediately while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Mono, Daytona, or any future agent harness.

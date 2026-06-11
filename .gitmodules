@@ -1,0 +1,15 @@
+[submodule "vendor/daytona"]
+	path = vendor/daytona
+	url = https://github.com/daytonaio/daytona.git
+[submodule "vendor/octokit.js"]
+	path = vendor/octokit.js
+	url = https://github.com/octokit/octokit.js.git
+[submodule "vendor/pi"]
+	path = vendor/pi
+	url = https://github.com/earendil-works/pi.git
+[submodule "vendor/workos-node"]
+	path = vendor/workos-node
+	url = https://github.com/workos/workos-node.git
+[submodule "vendor/effect"]
+	path = vendor/effect
+	url = https://github.com/Effect-TS/effect-smol.git
