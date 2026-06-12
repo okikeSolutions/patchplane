@@ -11,7 +11,7 @@ export function ThemeProvider({ children, theme }: Props) {
   const router = useRouter()
 
   function setTheme(val: Theme) {
-    setThemeServerFn({ data: val }).then(() => router.invalidate())
+    void setThemeServerFn({ data: val }).then(() => router.invalidate())
   }
 
   return <ThemeContext value={{ theme, setTheme }}>{children}</ThemeContext>

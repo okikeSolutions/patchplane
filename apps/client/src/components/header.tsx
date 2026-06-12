@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Github } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import * as m from '@/paraglide/messages'
 import { buttonVariants } from '@/components/ui/button'
 import {
@@ -79,7 +79,7 @@ export default function Header() {
             })}
           >
             <span className="sr-only">{m.header_repository()}</span>
-            <Github />
+            <ExternalLink />
           </a>
 
           <ModeToggle />

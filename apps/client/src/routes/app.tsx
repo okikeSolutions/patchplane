@@ -1,7 +1,7 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@workos-inc/authkit-react'
 import { api } from '@patchplane/backend/convex/_generated/api'
-import { type WorkflowStatus } from '@patchplane/domain'
+import { type WorkflowStatus } from '@patchplane/domain/workflow-run'
 import {
   Authenticated,
   AuthLoading,
@@ -37,26 +37,24 @@ export const Route = createFileRoute('/app')({
   component: AppShellPage,
 })
 
+const statusLabels = {
+  queued: m.app_status_queued_label,
+  running: m.app_status_running_label,
+  reviewed: m.app_status_reviewed_label,
+} satisfies Record<TimelineStatus, () => string>
+
+const statusDetails = {
+  queued: m.app_status_queued_detail,
+  running: m.app_status_running_detail,
+  reviewed: m.app_status_reviewed_detail,
+} satisfies Record<TimelineStatus, () => string>
+
 function getStatusLabel(status: TimelineStatus) {
-  switch (status) {
-    case 'queued':
-      return m.app_status_queued_label()
-    case 'running':
-      return m.app_status_running_label()
-    case 'reviewed':
-      return m.app_status_reviewed_label()
-  }
+  return statusLabels[status]()
 }
 
 function getStatusDetail(status: TimelineStatus) {
-  switch (status) {
-    case 'queued':
-      return m.app_status_queued_detail()
-    case 'running':
-      return m.app_status_running_detail()
-    case 'reviewed':
-      return m.app_status_reviewed_detail()
-  }
+  return statusDetails[status]()
 }
 
 function AppShellPage() {
@@ -125,7 +123,7 @@ function AppShellPage() {
               type="button"
               onClick={() => {
                 if (user) {
-                  void signOut()
+                  signOut()
                   return
                 }
 

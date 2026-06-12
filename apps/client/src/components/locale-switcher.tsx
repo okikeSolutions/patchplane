@@ -7,7 +7,6 @@ export default function LocaleSwitcher() {
   return (
     <div
       className="inline-flex items-center gap-[0.2rem] rounded-full border border-white/[0.08] bg-white/[0.03] p-[0.2rem]"
-      role="group"
       aria-label={m.header_locale_switcher()}
     >
       {locales.map((locale) => {

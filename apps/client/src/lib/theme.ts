@@ -10,12 +10,12 @@ const postThemeValidator = z.union([
 export type T = z.infer<typeof postThemeValidator>
 const storageKey = '_preferred-theme'
 
-export const getThemeServerFn = createServerFn().handler(
-  async () => (getCookie(storageKey) || 'dark') as T,
+export const getThemeServerFn = createServerFn().handler(async () =>
+  postThemeValidator.catch('dark').parse(getCookie(storageKey)),
 )
 
 export const setThemeServerFn = createServerFn({ method: 'POST' })
-  .inputValidator(postThemeValidator)
+  .validator(postThemeValidator)
   .handler(async ({ data }) =>
     setCookie(storageKey, data, {
       httpOnly: true,

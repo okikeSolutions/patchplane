@@ -8,18 +8,18 @@ import { deLocalizeUrl, localizeUrl } from './paraglide/runtime'
 import { routeTree } from './routeTree.gen'
 
 export function getRouter() {
-  const CONVEX_URL = (import.meta as any).env.VITE_CONVEX_URL!
-  const WORKOS_CLIENT_ID = (import.meta as any).env.VITE_WORKOS_CLIENT_ID!
-  const WORKOS_REDIRECT_URI = (import.meta as any).env.VITE_WORKOS_REDIRECT_URI!
+  const CONVEX_URL = import.meta.env.VITE_CONVEX_URL
+  const WORKOS_CLIENT_ID = import.meta.env.VITE_WORKOS_CLIENT_ID
+  const WORKOS_REDIRECT_URI = import.meta.env.VITE_WORKOS_REDIRECT_URI
 
   if (!CONVEX_URL) {
-    console.error('missing envar VITE_CONVEX_URL')
+    throw new Error('missing envar VITE_CONVEX_URL')
   }
   if (!WORKOS_CLIENT_ID) {
-    console.error('missing envar VITE_WORKOS_CLIENT_ID')
+    throw new Error('missing envar VITE_WORKOS_CLIENT_ID')
   }
   if (!WORKOS_REDIRECT_URI) {
-    console.error('missing envar VITE_WORKOS_REDIRECT_URI')
+    throw new Error('missing envar VITE_WORKOS_REDIRECT_URI')
   }
 
   const convexQueryClient = new ConvexQueryClient(CONVEX_URL)
