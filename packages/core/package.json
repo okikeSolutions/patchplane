@@ -1,0 +1,24 @@
+{
+  "name": "@patchplane/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./dev/context": "./src/dev/context.ts",
+    "./services/storage-service": "./src/services/storage-service.ts",
+    "./workflows/list-recent-workflow-starts": "./src/workflows/list-recent-workflow-starts.ts",
+    "./workflows/start-workflow-from-prompt": "./src/workflows/start-workflow-from-prompt.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@patchplane/domain": "workspace:*",
+    "effect": "4.0.0-beta.79"
+  },
+  "devDependencies": {
+    "@patchplane/typescript-config": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,5 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  },
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
@@ -14,6 +18,8 @@
     "apps/client/.tanstack/**",
     "apps/client/node_modules/**",
     "packages/backend/convex/_generated/**",
+    "packages/*/dist/**",
+    "vendor/**",
     "**/node_modules/**"
   ]
 }
