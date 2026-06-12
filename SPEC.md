@@ -41,16 +41,16 @@ The app composes plugins.
 The first v2 foundation milestone is intentionally smaller than the full end-to-end product:
 
 ```text
-Authenticated WorkOS user
-→ selected WorkOS organization
-→ PatchPlane Actor
-→ PatchPlane Workspace
+Local development actor
+→ default development workspace
 → create PromptRequest
 → create WorkflowRun
 → persist through Convex Storage Plugin
+
+Auth and WorkOS are explicitly deferred until after the foundation storage/core path is proven.
 ```
 
-The end-to-end hosted MVP expands that foundation with GitHub, Daytona, Pi Mono, runtime events, reviews, merge decisions, and publication.
+The end-to-end hosted MVP expands that foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
 
 ---
 
@@ -106,7 +106,7 @@ For v2, PatchPlane is not:
    Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane.
 
 5. **Plugins at the edge**  
-   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Mono, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries.
+   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Agent Core, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries.
 
 6. **Schemas at the boundary, Effect services in the core, plugins at the edge**  
    External inputs are decoded through Effect Schema; core capabilities are defined as Effect services; real infrastructure is provided by plugins and composed by the app.
@@ -179,9 +179,9 @@ packages/
         mapping.ts
         errors.ts
         index.ts
-      pimono/
-        PiMonoRuntimePlugin.ts
-        PiMonoConfig.ts
+      pi/
+        PiAgentRuntimePlugin.ts
+        PiAgentConfig.ts
         mapping.ts
         errors.ts
         index.ts
@@ -193,20 +193,22 @@ packages/
         index.ts
 
 apps/
-  app/
+  client/
     src/
       effect/
         layers.ts
         runtime.ts
       routes/
       server/
-      convex/
+
+packages/backend/
+  convex/            -> Convex deployment functions stay here for now
 ```
 
 ### 4.1 Dependency direction
 
 ```text
-domain → core → plugins → apps/app
+domain → core → plugins → apps/client
 ```
 
 More explicitly:
@@ -214,7 +216,7 @@ More explicitly:
 - `packages/domain` imports Effect Schema, but no PatchPlane package.
 - `packages/core` imports `domain` only.
 - `packages/plugins` imports `core`, `domain`, and external SDKs.
-- `apps/app` imports `core` and `plugins`, then composes the runtime.
+- `apps/client` imports `core` and `plugins`, then composes the runtime.
 
 ### 4.2 Dependency restrictions
 
@@ -224,13 +226,13 @@ More explicitly:
 - Convex SDK,
 - GitHub SDK,
 - Daytona SDK,
-- Pi Mono SDK,
+- Pi Agent Core SDK,
 - OpenCode SDK,
 - Codex SDK,
 - TanStack Start APIs,
 - framework route/server-function modules.
 
-Those dependencies belong in `packages/plugins` or `apps/app`.
+Those dependencies belong in `packages/plugins` or `apps/client`.
 
 ---
 
@@ -241,6 +243,8 @@ PatchPlane v2 targets **Effect v4 beta / effect-smol** intentionally. Because v4
 Rules:
 
 - Pin exact Effect v4 beta package versions.
+- Use `effect@4.0.0-beta.79` as the current researched baseline.
+- Use the `Effect-TS/effect-smol` repository for v4 research and vendored source.
 - Keep Effect ecosystem package versions aligned.
 - Keep migration notes in the repo when v4 APIs change.
 - Use `Context.Service` for core service definitions.
@@ -253,6 +257,10 @@ Rules:
 - Use Effect Config for plugin configuration.
 - Use Effect Schema for domain models and external decoding.
 - Use `Schema.TaggedErrorClass` for typed errors.
+- Effect v4 `unstable` modules are allowed when they are the correct API surface for the job.
+- Use `effect/unstable/httpapi` for PatchPlane-owned schema-first HTTP APIs when HTTP contracts are needed.
+- Use `effect/unstable/http` for Effect HTTP routing/client/server primitives.
+- Use `@effect/platform-node@4.0.0-beta.79` for Node-specific Effect runtime/platform services when server/plugin code needs them.
 
 Plain TypeScript remains preferred for:
 
@@ -261,6 +269,21 @@ Plain TypeScript remains preferred for:
 - small pure utilities,
 - app chrome and styling,
 - client-only interaction code that does not benefit from Effect.
+
+### 5.1 Researched vendor baselines
+
+The current `/vendor` research baseline is research-only. Vendored submodules are not application dependencies and should not be imported by PatchPlane packages. Runtime dependencies must be declared in package manifests with pinned versions, including `effect@4.0.0-beta.79` wherever Effect v4 is used.
+
+Current baseline:
+
+| System | Vendor path | Baseline | Spec implication |
+| --- | --- | --- | --- |
+| Effect | `vendor/effect` | `effect-smol`, `effect@4.0.0-beta.79` | Use Effect v4 APIs from the consolidated `effect` package. `effect/unstable/httpapi` and `effect/unstable/http` are allowed for PatchPlane-owned HTTP contracts and HTTP runtime boundaries. Treat v4 as beta and isolate it in domain/core/plugins/app server code. |
+| Daytona | `vendor/daytona` | TypeScript SDK `@daytona/sdk` | Use `Daytona` from `@daytona/sdk`; config keys are `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and `DAYTONA_TARGET`. Sandbox creation supports `ephemeral`, `autoStopInterval`, `autoDeleteInterval`, `networkBlockAll`, `networkAllowList`, resources, snapshots, process execution, filesystem, and git operations. |
+| GitHub | `vendor/octokit.js` | `octokit` v5 line | Use `Octokit` and `App` from `octokit`; GitHub App webhook handling should verify signed payloads through Octokit webhook APIs before ingestion. |
+| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.1` | Runtime plugin should wrap `Agent`, event subscription, steering/follow-up queues, abort, and `waitForIdle`; normalize Pi events into PatchPlane `RuntimeEvent`. |
+| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.2.0` | Auth plugin should wrap `WorkOS`, `userManagement`, `organizations`, and organization membership data; WorkOS requires Node 22.11+, while Pi requires Node 22.19+, so PatchPlane server runtime should target Node 22.19+ where Node compatibility matters. |
+| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.79` | Use for Node-specific Effect services such as `NodeRuntime`, `NodeHttpServer`, `NodeHttpClient`, filesystem/path/crypto, and long-running worker/plugin processes. Do not use it to replace TanStack Start in `apps/client` unless a standalone Node service is intentionally introduced. |
 
 ---
 
@@ -362,7 +385,8 @@ Core services:
 - `appendRuntimeEvent`
 - `createReviewRun`
 - `createMergeDecision`
-- `readTimeline`
+- `listRecentWorkflowStarts` for the foundation read-back path
+- `readWorkflowTimeline` later, once runtime/review/decision events exist
 
 ### `GitProviderService`
 
@@ -422,7 +446,7 @@ Examples:
 - WorkOS Auth Plugin,
 - Convex Storage Plugin,
 - GitHub Provider Plugin,
-- Pi Mono Runtime Plugin,
+- Pi Agent Runtime Plugin,
 - Daytona Sandbox Plugin,
 - OpenCode Runtime Plugin,
 - Codex Runtime Plugin,
@@ -442,14 +466,17 @@ PatchPlane v2 uses real plugins from the start, but all real integrations must b
 
 Foundation MVP:
 
-- WorkOS Auth Plugin,
 - Convex Storage Plugin.
+
+Deferred until after foundation:
+
+- WorkOS Auth Plugin.
 
 End-to-end MVP:
 
 - GitHub Provider Plugin,
 - Daytona Sandbox Plugin,
-- Pi Mono Runtime Plugin.
+- Pi Agent Runtime Plugin.
 
 ### 9.2 Later plugins
 
@@ -524,13 +551,13 @@ Do not overbuild enterprise RBAC in v2.
 
 ## 11. App Composition Root
 
-`apps/app` owns framework integration and deployment composition.
+`apps/client` owns framework integration and deployment composition.
 
 It is responsible for:
 
 - TanStack Start routes,
-- WorkOS route/session helpers,
 - Convex client wiring,
+- WorkOS route/session helpers later when auth work resumes,
 - server functions,
 - HTTP route handlers,
 - UI rendering,
@@ -541,17 +568,17 @@ It is responsible for:
 
 ### 11.1 ManagedRuntime bridge
 
-`apps/app` creates the PatchPlane runtime from composed plugin layers:
+`apps/client` creates the PatchPlane runtime from composed plugin layers:
 
 ```text
-apps/app/src/effect/layers.ts
-- compose WorkOSAuthPlugin.layer
-- compose ConvexStoragePlugin.layer
-- compose GitHubProviderPlugin.layer
-- compose PiMonoRuntimePlugin.layer
-- compose DaytonaSandboxPlugin.layer
+apps/client/src/effect/layers.ts
+- foundation: compose ConvexStoragePlugin.layer
+- later: compose WorkOSAuthPlugin.layer
+- later: compose GitHubProviderPlugin.layer
+- later: compose PiAgentRuntimePlugin.layer
+- later: compose DaytonaSandboxPlugin.layer
 
-apps/app/src/effect/runtime.ts
+apps/client/src/effect/runtime.ts
 - create ManagedRuntime from PatchPlaneLayer
 - export helpers for server routes/functions
 ```
@@ -569,7 +596,7 @@ Each plugin owns its config:
 - `WorkOSConfig`
 - `ConvexConfig`
 - `GitHubConfig`
-- `PiMonoConfig`
+- `PiAgentConfig`
 - `DaytonaConfig`
 
 Rules:
@@ -766,11 +793,11 @@ In scope:
 
 - `packages/domain` with Effect Schema,
 - `packages/core` with Effect services and workflows,
-- `packages/plugins` with real WorkOS and Convex plugins first,
-- `apps/app` composition root with TanStack Start and `ManagedRuntime`,
-- WorkOS Auth Plugin,
+- `packages/plugins` created immediately,
+- `apps/client` composition root with TanStack Start and `ManagedRuntime`,
 - Convex Storage Plugin,
-- Actor and Workspace mapping,
+- development actor/workspace context for the first local path,
+- WorkOS Auth Plugin deferred until after foundation storage/core is proven,
 - PromptRequest creation through core,
 - WorkflowRun creation through core,
 - basic typed errors,
@@ -779,7 +806,7 @@ In scope:
 Out of scope for the first foundation slice:
 
 - Daytona,
-- Pi Mono,
+- Pi Agent Core,
 - GitHub PR publication,
 - reviewer fan-out,
 - weighted score aggregation,
@@ -793,7 +820,7 @@ In scope after the foundation is stable:
 
 - GitHub Provider Plugin,
 - Daytona Sandbox Plugin,
-- Pi Mono Runtime Plugin,
+- Pi Agent Runtime Plugin,
 - normalized RuntimeEvent ingestion,
 - CandidatePatchSet creation,
 - ReviewRun creation,
@@ -823,6 +850,13 @@ In scope after the foundation is stable:
 
 Use TypeScript across the platform.
 
+Runtime and TypeScript constraints from vendored SDK research:
+
+- use Node 22.19+ for server/plugin contexts that execute WorkOS Node SDK and Pi Agent Core code,
+- Bun remains the workspace package runner,
+- server/plugin code executes under Node, not Bun, unless explicitly validated otherwise,
+- Octokit v5 uses conditional exports, so plugin package TypeScript configs must use a Node-compatible module mode where necessary (`moduleResolution: "node16"`/`"nodenext"` and matching module setting) instead of blindly relying on bundler resolution for server-only packages.
+
 ### 17.2 Programming model
 
 Use Effect v4 / effect-smol for:
@@ -841,11 +875,11 @@ Use Effect v4 / effect-smol for:
 
 ### 17.3 Web framework
 
-Use TanStack Start for `apps/app`, while isolating framework risk in the app layer.
+Use the existing `apps/client` TanStack Start app as the composition root, while isolating framework risk in the app layer. Do not create a separate `apps/app` package for v2.
 
 ### 17.4 Auth
 
-Use WorkOS AuthKit as the first auth plugin and source of human identity, organizations, memberships, roles, and permissions.
+WorkOS AuthKit remains the planned first auth plugin and source of human identity, organizations, memberships, roles, and permissions, but auth is deferred until after the foundation storage/core path works.
 
 ### 17.5 Storage and realtime
 
@@ -857,11 +891,11 @@ Use GitHub App integration as the first repository provider plugin.
 
 ### 17.7 Sandbox
 
-Use Daytona as the first sandbox plugin.
+Use Daytona as the first sandbox plugin. The Daytona plugin should use `@daytona/sdk`, not the older `@daytonaio/sdk` package name. Initial implementation should prefer ephemeral or auto-deleting sandboxes, explicit `autoStopInterval`, and network controls (`networkBlockAll` / `networkAllowList`) when supported by the selected profile.
 
 ### 17.8 Runtime
 
-Use Pi Mono as the first runtime plugin.
+Use `@earendil-works/pi-agent-core` as the first runtime plugin. The runtime plugin should map Pi agent events such as `agent_start`, `turn_start`, `message_start`, `message_update`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end` into PatchPlane `RuntimeEvent` schemas.
 
 ### 17.9 Desktop
 
@@ -892,7 +926,7 @@ Core tests after the first real path is proven:
 - concurrent operations,
 - runtime-event validation.
 
-Test layers are allowed and expected later. The spec does not require fake plugins before real WorkOS + Convex integration is proven.
+Test layers are allowed and expected later. The spec does not require fake plugins before the real Convex storage/core foundation is proven.
 
 ---
 
@@ -991,12 +1025,12 @@ Notes:
 packages/domain
 packages/core
 packages/plugins
-apps/app
+apps/client
 ```
 
 ### Step 2 — Add Effect v4 beta intentionally
 
-Pin exact Effect v4 beta versions and keep Effect ecosystem package versions aligned.
+Pin `effect@4.0.0-beta.79` everywhere Effect v4 is used and keep Effect ecosystem package versions aligned. If `@effect/platform-node` is added, pin it to `4.0.0-beta.79` as well.
 
 ### Step 3 — Build `packages/domain`
 
@@ -1014,23 +1048,13 @@ Start with:
 
 Create:
 
-- `AuthService`
 - `StorageService`
 - `StartWorkflowFromPrompt`
+- optional `AuthService` interface only if needed for later WorkOS integration
 
 No WorkOS imports. No Convex imports.
 
-### Step 5 — Build `packages/plugins/workos`
-
-Implement:
-
-- WorkOS Auth Plugin,
-- `WorkOSConfig`,
-- WorkOS User → Actor mapping,
-- WorkOS Organization → Workspace mapping,
-- WorkOS roles/permissions → PatchPlane permissions mapping.
-
-### Step 6 — Build `packages/plugins/convex`
+### Step 5 — Build `packages/plugins/convex`
 
 Implement:
 
@@ -1039,22 +1063,34 @@ Implement:
 - `createPromptRequest`,
 - `createWorkflowRun`.
 
-### Step 7 — Compose in `apps/app`
+Keep current Convex backend code in `packages/backend/convex` for now. Convex function location is separate from the Storage Plugin boundary; do not move Convex files until there is a concrete deployment reason.
+
+### Step 6 — Defer `packages/plugins/workos`
+
+WorkOS Auth Plugin is not part of the foundation path. Auth is deferred until after the core/storage foundation works.
+
+Later implement:
+
+- WorkOS Auth Plugin,
+- `WorkOSConfig`,
+- WorkOS User → Actor mapping,
+- WorkOS Organization → Workspace mapping,
+- WorkOS roles/permissions → PatchPlane permissions mapping.
+
+### Step 7 — Compose in `apps/client`
 
 Create:
 
 ```text
-apps/app/src/effect/layers.ts
-apps/app/src/effect/runtime.ts
+apps/client/src/effect/layers.ts
+apps/client/src/effect/runtime.ts
 ```
 
 Run one server-side action through the composed `ManagedRuntime`:
 
 ```text
-Authenticated WorkOS user
-→ selected WorkOS organization
-→ PatchPlane Actor
-→ PatchPlane Workspace
+Local development actor
+→ default development workspace
 → create PromptRequest
 → create WorkflowRun
 → persist in Convex through StorageService
@@ -1068,15 +1104,15 @@ Authenticated WorkOS user
 
 The foundation MVP is successful when:
 
-1. A user can authenticate through WorkOS.
-2. A selected WorkOS organization maps to a PatchPlane Workspace.
-3. The WorkOS user maps to a PatchPlane Actor.
-4. WorkOS membership roles/permissions map to PatchPlane permissions.
+1. `packages/domain`, `packages/core`, and `packages/plugins` exist and typecheck.
+2. Existing Convex backend code remains in `packages/backend/convex` unless a concrete deployment reason requires moving it.
+3. A local development actor and default development workspace can be represented as PatchPlane domain values.
+4. WorkOS/auth is not required for the foundation success path.
 5. A server-side app action calls a core workflow through `ManagedRuntime`.
 6. The core workflow creates a PromptRequest through `StorageService`.
 7. The core workflow creates a WorkflowRun through `StorageService`.
 8. Convex persists those records through the Convex Storage Plugin.
-9. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Mono imports.
+9. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Agent Core imports.
 10. Basic typed errors and structured logs exist for the path.
 
 ### 22.2 End-to-end MVP success
@@ -1087,7 +1123,7 @@ The hosted MVP is successful when:
 2. A verified GitHub webhook or app prompt can create a durable PromptRequest.
 3. PatchPlane can start a WorkflowRun for that request.
 4. Daytona can provision a sandbox through `SandboxService`.
-5. Pi Mono can run behind `RuntimeService`.
+5. Pi Agent Core can run behind `RuntimeService`.
 6. Runtime events are normalized and persisted.
 7. A CandidatePatchSet can be produced.
 8. At least one ReviewRun can return structured results.
@@ -1103,11 +1139,11 @@ The hosted MVP is successful when:
 | Risk | Likelihood | Impact | Mitigation |
 | --- | ---: | ---: | --- |
 | Effect v4 beta APIs change | Medium | Medium | Pin exact versions, isolate Effect usage in core/plugins, keep migration notes |
-| TanStack Start framework churn affects delivery | Medium | Medium | Keep TanStack code in `apps/app`; protect core from framework imports |
+| TanStack Start framework churn affects delivery | Medium | Medium | Keep TanStack code in `apps/client`; protect core from framework imports |
 | WorkOS auth assumptions leak into domain | Medium | High | Map WorkOS types into Actor/Workspace/Membership/Permission only |
 | Convex storage shapes leak into core | Medium | High | Decode Convex documents through domain schemas and StorageService mappings |
-| Plugin boundaries slow early implementation | Medium | Medium | Start with only AuthService, StorageService, and StartWorkflowFromPrompt |
-| GitHub App flow is more complex than expected | Medium | High | Defer GitHub to end-to-end MVP after WorkOS + Convex foundation works |
+| Plugin boundaries slow early implementation | Medium | Medium | Start with StorageService and StartWorkflowFromPrompt; defer AuthService implementation |
+| GitHub App flow is more complex than expected | Medium | High | Defer GitHub to end-to-end MVP after Convex storage/core foundation works |
 | Daytona integration becomes an engineering sink | Medium | High | Defer to end-to-end MVP and keep sandbox API narrow |
 | Runtime integration leaks behavior into product model | Medium | High | Normalize RuntimeEvent and keep RuntimeSession as execution state only |
 | Enterprise RBAC scope expands too early | Medium | Medium | Use simple roles and permission slugs for v2 |
@@ -1122,12 +1158,12 @@ Proceed with PatchPlane v2 as an Effect-native control-plane core with real infr
 The revised direction is:
 
 ```text
-Real plugins first.
+Real plugins first where they matter for the current slice.
 Stable core service boundaries always.
 Effect Schema in domain from day one.
-WorkOS as first-class Auth Plugin.
 Convex as first Storage Plugin.
-apps/app as composition root.
+WorkOS Auth Plugin deferred until after foundation.
+apps/client as composition root.
 ```
 
-PatchPlane v2 should validate real WorkOS + Convex infrastructure immediately while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Mono, Daytona, or any future agent harness.
+PatchPlane v2 should validate real Convex-backed storage and core workflow boundaries first, then add WorkOS auth after the foundation works, while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Agent Core, Daytona, or any future agent harness.
