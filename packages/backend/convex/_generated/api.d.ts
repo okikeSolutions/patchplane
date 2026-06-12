@@ -10,6 +10,10 @@
 
 import type * as auth from "../auth.js";
 import type * as http from "../http.js";
+import type * as promptRequests from "../promptRequests.js";
+import type * as requests from "../requests.js";
+import type * as workflowRuns from "../workflowRuns.js";
+import type * as workflowStarts from "../workflowStarts.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +24,10 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   http: typeof http;
+  promptRequests: typeof promptRequests;
+  requests: typeof requests;
+  workflowRuns: typeof workflowRuns;
+  workflowStarts: typeof workflowStarts;
 }>;
 
 /**
@@ -49,41 +57,5 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
-  workOSAuthKit: {
-    lib: {
-      enqueueWebhookEvent: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          apiKey: string;
-          event: string;
-          eventId: string;
-          eventTypes?: Array<string>;
-          logLevel?: "DEBUG";
-          onEventHandle?: string;
-          updatedAt?: string;
-        },
-        any
-      >;
-      getAuthUser: FunctionReference<
-        "query",
-        "internal",
-        { id: string },
-        {
-          createdAt: string;
-          email: string;
-          emailVerified: boolean;
-          externalId?: null | string;
-          firstName?: null | string;
-          id: string;
-          lastName?: null | string;
-          lastSignInAt?: null | string;
-          locale?: null | string;
-          metadata: Record<string, any>;
-          profilePictureUrl?: null | string;
-          updatedAt: string;
-        } | null
-      >;
-    };
-  };
+  workOSAuthKit: import("@convex-dev/workos-authkit/_generated/component.js").ComponentApi<"workOSAuthKit">;
 };

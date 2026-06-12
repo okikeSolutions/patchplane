@@ -1,0 +1,24 @@
+{
+  "name": "@patchplane/plugins",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./convex/config": "./src/convex/ConvexConfig.ts",
+    "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@patchplane/core": "workspace:*",
+    "@patchplane/domain": "workspace:*",
+    "convex": "^1.41.0",
+    "effect": "4.0.0-beta.79"
+  },
+  "devDependencies": {
+    "@patchplane/typescript-config": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

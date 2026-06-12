@@ -2,9 +2,6 @@
   "extends": "@patchplane/typescript-config/base.json",
   "include": ["src/**/*.ts"],
   "compilerOptions": {
-    "paths": {
-      "@patchplane/domain": ["../domain/src/index.ts"]
-    },
     "types": ["node"]
   }
 }

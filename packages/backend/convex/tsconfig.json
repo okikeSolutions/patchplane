@@ -20,9 +20,7 @@
     "module": "ESNext",
     "isolatedModules": true,
     "noEmit": true,
-    "paths": {
-      "@patchplane/domain": ["../../domain/src/index.ts"]
-    }
+    "paths": {}
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]
