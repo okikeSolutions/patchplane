@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     "./convex/config": "./src/convex/ConvexConfig.ts",
-    "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts"
+    "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts",
+    "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",
+    "./workos/config": "./src/workos/WorkOSConfig.ts",
+    "./workos/session": "./src/workos/session.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -14,6 +17,7 @@
   "dependencies": {
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
+    "@workos-inc/node": "10.2.0",
     "convex": "^1.41.0",
     "effect": "4.0.0-beta.79"
   },
