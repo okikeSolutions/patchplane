@@ -1,5 +1,90 @@
-import { mutation, query } from './_generated/server'
-import { v } from 'convex/values'
+import type { UserIdentity } from 'convex/server'
+import { ConvexError, v } from 'convex/values'
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
+
+function workOSOrganizationId(identity: UserIdentity) {
+  const value =
+    identity.organizationId ??
+    identity.orgId ??
+    identity.organization_id ??
+    identity.org_id
+
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function requireWorkOSWorkspace(identity: UserIdentity, workspaceId: string) {
+  const organizationId = workOSOrganizationId(identity)
+
+  if (organizationId === null) {
+    throw new ConvexError('Active WorkOS organization required')
+  }
+
+  if (workspaceId !== `workos:${organizationId}`) {
+    throw new ConvexError('Workspace mismatch')
+  }
+}
+
+async function requireWorkOSIdentity(ctx: {
+  auth: { getUserIdentity(): Promise<UserIdentity | null> }
+}) {
+  const identity = await ctx.auth.getUserIdentity()
+
+  if (identity === null) {
+    throw new ConvexError('Authentication required')
+  }
+
+  return identity
+}
+
+function workspaceOrganizationId(workspaceId: string) {
+  return workspaceId.startsWith('workos:')
+    ? workspaceId.slice('workos:'.length)
+    : null
+}
+
+async function requireMembershipPermission(
+  ctx: QueryCtx | MutationCtx,
+  identity: UserIdentity,
+  workspaceId: string,
+  permission: string,
+) {
+  const organizationId = workspaceOrganizationId(workspaceId)
+
+  if (organizationId === null) {
+    throw new ConvexError('WorkOS workspace required')
+  }
+
+  const membership = await ctx.db
+    .query('memberships')
+    .withIndex('by_auth_and_org', (q) =>
+      q.eq('authId', identity.subject).eq('organizationId', organizationId),
+    )
+    .unique()
+
+  if (membership === null || membership.status !== 'active') {
+    throw new ConvexError('Active membership required')
+  }
+
+  if (!membership.permissions.includes(permission)) {
+    throw new ConvexError('Permission required')
+  }
+
+  return membership
+}
+
+const workflowStartArgs = {
+  workspaceId: v.string(),
+  actorId: v.string(),
+  actorDisplayName: v.string(),
+  source: v.union(
+    v.literal('dev'),
+    v.literal('app'),
+    v.literal('github_issue'),
+    v.literal('github_pr_comment'),
+  ),
+  traceId: v.string(),
+  prompt: v.string(),
+}
 
 const workflowStartReturn = v.object({
   promptRequest: v.object({
@@ -31,22 +116,17 @@ const workflowStartReturn = v.object({
   }),
 })
 
-export const create = mutation({
+async function createWorkflowStartRecord(
+  ctx: MutationCtx,
   args: {
-    workspaceId: v.string(),
-    actorId: v.string(),
-    actorDisplayName: v.string(),
-    source: v.union(
-      v.literal('dev'),
-      v.literal('app'),
-      v.literal('github_issue'),
-      v.literal('github_pr_comment'),
-    ),
-    traceId: v.string(),
-    prompt: v.string(),
+    workspaceId: string
+    actorId: string
+    actorDisplayName: string
+    source: 'dev' | 'app' | 'github_issue' | 'github_pr_comment'
+    traceId: string
+    prompt: string
   },
-  returns: workflowStartReturn,
-  handler: async (ctx, args) => {
+) {
     const createdAt = Date.now()
     const promptRequestStatus = 'created' as const
     const workflowRunStatus = 'queued' as const
@@ -96,6 +176,19 @@ export const create = mutation({
         createdAt,
       },
     }
+}
+
+export const createTrusted = internalMutation({
+  args: workflowStartArgs,
+  returns: workflowStartReturn,
+  handler: createWorkflowStartRecord,
+})
+
+export const create = mutation({
+  args: workflowStartArgs,
+  returns: v.null(),
+  handler: () => {
+    throw new ConvexError('Use trusted workflow start boundary')
   },
 })
 
@@ -106,6 +199,15 @@ export const listRecent = query({
   },
   returns: v.array(workflowStartReturn),
   handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    requireWorkOSWorkspace(identity, args.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      args.workspaceId,
+      'workspace:view',
+    )
+
     const workflowRuns = await ctx.db
       .query('workflowRuns')
       .withIndex('by_workspace', (q) => q.eq('workspaceId', args.workspaceId))

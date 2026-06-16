@@ -1,5 +1,5 @@
+import { ConvexError, v } from 'convex/values'
 import { query } from './_generated/server'
-import { v } from 'convex/values'
 
 export const list = query({
   args: {},
@@ -21,7 +21,19 @@ export const list = query({
     }),
   ),
   handler: async (ctx) => {
-    const requests = await ctx.db.query('promptRequests').order('desc').take(50)
+    const identity = await ctx.auth.getUserIdentity()
+
+    if (identity === null) {
+      throw new ConvexError('Authentication required')
+    }
+
+    const requests = await ctx.db
+      .query('promptRequests')
+      .withIndex('by_actor', (q) =>
+        q.eq('actorId', `workos:${identity.subject}`),
+      )
+      .order('desc')
+      .take(50)
 
     return requests.map((request) => ({
       id: request['_id'],
