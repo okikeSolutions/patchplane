@@ -115,7 +115,7 @@ function AboutPage() {
               className="rounded-[1.6rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
               style={{ animationDelay: `${index * 80 + 100}ms` }}
             >
-              <p className="text-[0.78rem] uppercase tracking-[0.12em] text-[rgb(255_203_116)]">
+              <p className="text-[0.78rem] uppercase tracking-[0.12em] text-(--brand-readable)">
                 {entry.name}
               </p>
               <p className="m-0 leading-[1.7] text-muted-foreground">

@@ -78,6 +78,13 @@ export default function Header() {
           </NavigationMenu>
 
           <a
+            href="/api/auth/sign-in?returnPathname=/app"
+            className={buttonVariants({ variant: 'default', size: 'sm' })}
+          >
+            {m.app_sign_in()}
+          </a>
+
+          <a
             href="https://github.com/okikeSolutions/patchplane"
             target="_blank"
             rel="noreferrer"

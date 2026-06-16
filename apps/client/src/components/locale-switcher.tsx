@@ -2,6 +2,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { Languages } from 'lucide-react'
 import * as m from '@/paraglide/messages'
 import {
+  deLocalizeHref,
   getLocale,
   locales,
   localizeHref,
@@ -18,7 +19,15 @@ import {
 } from './ui/dropdown-menu'
 
 function getLocaleLabel(locale: string) {
-  return locale === 'en' ? 'EN' : locale === 'de' ? 'DE' : locale
+  if (locale === 'en') {
+    return m.header_locale_en()
+  }
+
+  if (locale === 'de') {
+    return m.header_locale_de()
+  }
+
+  return locale
 }
 
 function isLocale(locale: string): locale is (typeof locales)[number] {
@@ -42,7 +51,8 @@ export default function LocaleSwitcher() {
       return
     }
 
-    const href = localizeHref(currentHref || '/', { locale })
+    const baseHref = deLocalizeHref(currentHref || '/')
+    const href = localizeHref(baseHref, { locale })
 
     await setRuntimeLocale(locale, { reload: false })
     await navigate({ href, reloadDocument: true })

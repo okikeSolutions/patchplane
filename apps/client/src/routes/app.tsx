@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@workos/authkit-tanstack-react-start/client'
 import { api } from '@patchplane/backend/convex/_generated/api'
@@ -6,13 +7,14 @@ import {
   Authenticated,
   AuthLoading,
   Unauthenticated,
+  useMutation,
   useQuery,
 } from 'convex/react'
-import { makeFunctionReference } from 'convex/server'
 import * as m from '@/paraglide/messages'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { startWorkflowServerFn } from '@/lib/start-workflow'
 
 const timelineStatuses = [
   'queued',
@@ -27,11 +29,6 @@ interface ViewerIdentity {
   email?: string
 }
 
-const viewerQuery = makeFunctionReference<
-  'query',
-  Record<string, never>,
-  ViewerIdentity
->('viewer:current')
 
 export const Route = createFileRoute('/app')({
   component: AppShellPage,
@@ -202,7 +199,7 @@ function AppShellPage() {
             className="rounded-[1.6rem] border border-white/8 bg-(--surface-panel) p-[1.35rem] backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
             style={{ animationDelay: `${index * 80 + 100}ms` }}
           >
-            <span className="text-[0.78rem] uppercase tracking-[0.12em] text-[rgb(255_203_116)]">
+            <span className="text-[0.78rem] uppercase tracking-[0.12em] text-(--brand-readable)">
               {getStatusLabel(status)}
             </span>
             <p className="m-0 leading-[1.7] text-muted-foreground">
@@ -225,6 +222,7 @@ function AppShellPage() {
               {m.app_workflow_title()}
             </h2>
           </div>
+          <StartWorkflowForm />
           <ol className="mt-6 grid gap-4 pl-[1.2rem]">
             {timelineStatuses.map((status) => (
               <li key={status} className="pl-[0.2rem]">
@@ -280,9 +278,122 @@ function AppShellPage() {
   )
 }
 
+function StartWorkflowForm() {
+  const { user, organizationId } = useAuth()
+  const [prompt, setPrompt] = useState(
+    'Review the recent authentication foundation and suggest one safe next patch.',
+  )
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [result, setResult] = useState<{
+    promptRequestId: string
+    workflowRunId: string
+    workflowStatus: string
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const canSubmit =
+    Boolean(user) && Boolean(organizationId) && prompt.trim().length > 0
+
+  return (
+    <form
+      className="mt-6 grid gap-3 rounded-[1.25rem] border border-white/8 bg-white/3 p-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!canSubmit || isSubmitting) {
+          return
+        }
+
+        setIsSubmitting(true)
+        setError(null)
+        setResult(null)
+        void startWorkflowServerFn({ data: { prompt: prompt.trim() } })
+          .then((response) => {
+            if (!response.ok) {
+              setError(response.error)
+              return
+            }
+
+            setResult({
+              promptRequestId: response.workflowStart.promptRequest.id,
+              workflowRunId: response.workflowStart.workflowRun.id,
+              workflowStatus: response.workflowStart.workflowRun.status,
+            })
+          })
+          .catch((cause: unknown) => {
+            setError(
+              cause instanceof Error
+                ? cause.message
+                : m.app_workflow_start_error(),
+            )
+          })
+          .finally(() => {
+            setIsSubmitting(false)
+          })
+      }}
+    >
+      <label className="grid gap-2 text-sm font-medium" htmlFor="workflow-prompt">
+        {m.app_workflow_prompt_label()}
+        <textarea
+          id="workflow-prompt"
+          value={prompt}
+          onChange={(event) => setPrompt(event.currentTarget.value)}
+          disabled={isSubmitting}
+          rows={4}
+          className="min-h-28 w-full resize-y rounded-xl border border-input bg-transparent px-3 py-2 text-sm leading-6 outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+          placeholder={m.app_workflow_prompt_placeholder()}
+          aria-label={m.app_workflow_prompt_label()}
+        />
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={!canSubmit || isSubmitting}>
+          {isSubmitting
+            ? m.app_workflow_start_submitting()
+            : m.app_workflow_start_button()}
+        </Button>
+        {!user ? (
+          <span className="text-sm text-muted-foreground">
+            {m.app_workflow_start_signed_out()}
+          </span>
+        ) : null}
+        {user && !organizationId ? (
+          <span className="text-sm text-muted-foreground">
+            {m.app_workflow_start_no_org()}
+          </span>
+        ) : null}
+      </div>
+      {result ? (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/8 p-3 text-sm text-muted-foreground">
+          <p className="m-0">{m.app_workflow_start_success()}</p>
+          <p className="m-0 mt-2">
+            {m.app_workflow_prompt_request_id()}{' '}
+            <code className="font-mono">{result.promptRequestId}</code>
+          </p>
+          <p className="m-0">
+            {m.app_workflow_run_id()}{' '}
+            <code className="font-mono">{result.workflowRunId}</code>
+          </p>
+          <p className="m-0">
+            {m.app_workflow_run_status()}{' '}
+            <code className="font-mono">{result.workflowStatus}</code>
+          </p>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/8 p-3 text-sm text-muted-foreground">
+          {error}
+        </div>
+      ) : null}
+    </form>
+  )
+}
+
 function AuthenticatedContent() {
-  const viewer = useQuery(viewerQuery, {})
-  const requests = useQuery(api.requests.list)
+  const ensureCurrentUser = useMutation(api.auth.ensureCurrentUser)
+  const viewer = useQuery(api.viewer.current, {}) as ViewerIdentity | undefined
+  const requests = useQuery(api.requests.list, {})
+
+  useEffect(() => {
+    void ensureCurrentUser({})
+  }, [ensureCurrentUser])
 
   if (!viewer || !requests) {
     return (

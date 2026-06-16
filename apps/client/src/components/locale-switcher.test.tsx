@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import LocaleSwitcher from './locale-switcher'
 
 const mocks = vi.hoisted(() => ({
+  deLocalizeHref: vi.fn<(href: string) => string>(),
   localizeHref: vi.fn<
     (href: string, options: { locale: 'de' | 'en' }) => string
   >(),
@@ -41,6 +42,7 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/paraglide/runtime', () => ({
+  deLocalizeHref: (href: string) => mocks.deLocalizeHref(href),
   getLocale: mocks.getLocale,
   locales: ['en', 'de'],
   localizeHref: (href: string, options: { locale: 'de' | 'en' }) =>
@@ -63,12 +65,14 @@ describe('LocaleSwitcher', () => {
   })
 
   beforeEach(() => {
+    mocks.deLocalizeHref.mockReset()
     mocks.localizeHref.mockReset()
     mocks.setLocale.mockReset()
     mocks.navigate.mockReset()
     mocks.getLocale.mockReset()
 
     mocks.getLocale.mockReturnValue('de')
+    mocks.deLocalizeHref.mockImplementation((href) => href.replace(/^\/(en|de)(?=\/|$)/, '') || '/')
     mocks.localizeHref.mockImplementation((href, { locale }) =>
       locale === 'de' ? `/de${href}` : `/en${href}`,
     )
@@ -82,6 +86,7 @@ describe('LocaleSwitcher', () => {
 
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'EN' }))
 
+    expect(mocks.deLocalizeHref).toHaveBeenCalledWith('/app')
     expect(mocks.localizeHref).toHaveBeenCalledWith('/app', { locale: 'en' })
     expect(mocks.setLocale).toHaveBeenCalledWith('en', { reload: false })
     await waitFor(() => {
