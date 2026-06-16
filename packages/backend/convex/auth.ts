@@ -1,11 +1,12 @@
 import { AuthKit, type AuthFunctions } from '@convex-dev/workos-authkit'
+import { ConvexError, v } from 'convex/values'
 import {
   mapWorkspaceRolesToPermissions,
   normalizeWorkspaceRole,
 } from '@patchplane/domain/authorization'
 import { components, internal } from './_generated/api'
 import type { DataModel } from './_generated/dataModel'
-import type { MutationCtx } from './_generated/server'
+import { mutation, type MutationCtx } from './_generated/server'
 
 const authFunctions: AuthFunctions = internal.auth
 
@@ -139,24 +140,80 @@ export async function syncWorkOSUserDeleted(
   })
 }
 
-export async function syncWorkOSMembershipCreated(
+async function findMembershipForUpsert(
   ctx: MutationCtx,
   data: WorkOSMembershipData,
 ) {
-  const membership = await ctx.db
+  const byMembershipId = await ctx.db
     .query('memberships')
     .withIndex('by_workos_membership_id', (q) =>
       q.eq('workosMembershipId', data.id),
     )
     .unique()
+
+  if (byMembershipId !== null) {
+    return byMembershipId
+  }
+
+  const byUserAndOrganization = await ctx.db
+    .query('memberships')
+    .withIndex('by_auth_and_org', (q) =>
+      q.eq('authId', data.userId).eq('organizationId', data.organizationId),
+    )
+    .collect()
+
+  let latest = byUserAndOrganization[0] ?? null
+
+  for (const membership of byUserAndOrganization) {
+    if (latest === null || membership.updatedAt > latest.updatedAt) {
+      latest = membership
+    }
+  }
+
+  return latest
+}
+
+async function markDuplicateMembershipsDeleted(
+  ctx: MutationCtx,
+  keepId: string,
+  data: WorkOSMembershipData,
+) {
+  const duplicates = await ctx.db
+    .query('memberships')
+    .withIndex('by_auth_and_org', (q) =>
+      q.eq('authId', data.userId).eq('organizationId', data.organizationId),
+    )
+    .collect()
+  const now = Date.now()
+
+  for (const duplicate of duplicates) {
+    if (duplicate['_id'] === keepId) {
+      continue
+    }
+
+    await ctx.db.patch('memberships', duplicate['_id'], {
+      status: 'deleted',
+      deletedAt: now,
+      updatedAt: now,
+    })
+  }
+}
+
+export async function syncWorkOSMembershipCreated(
+  ctx: MutationCtx,
+  data: WorkOSMembershipData,
+) {
+  const membership = await findMembershipForUpsert(ctx, data)
   const patch = membershipPatch(data)
 
   if (membership === null) {
-    await ctx.db.insert('memberships', patch)
+    const membershipId = await ctx.db.insert('memberships', patch)
+    await markDuplicateMembershipsDeleted(ctx, membershipId, data)
     return
   }
 
   await ctx.db.replace('memberships', membership['_id'], patch)
+  await markDuplicateMembershipsDeleted(ctx, membership['_id'], data)
 }
 
 export async function syncWorkOSMembershipUpdated(
@@ -203,6 +260,40 @@ export const { authKitEvent } = authKit.events({
     syncWorkOSMembershipUpdated(ctx, event.data),
   'organization_membership.deleted': (ctx, event) =>
     syncWorkOSMembershipDeleted(ctx, event.data),
+})
+
+export const ensureCurrentUser = mutation({
+  args: {},
+  returns: v.object({
+    authId: v.string(),
+    status: v.union(v.literal('active'), v.literal('deleted')),
+  }),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity()
+
+    if (identity === null) {
+      throw new ConvexError('Authentication required')
+    }
+
+    const authUser = await authKit.getAuthUser(ctx)
+    const userData: WorkOSUserData = authUser
+      ? {
+          id: authUser.id,
+          email: authUser.email,
+          name: authUser.name,
+          firstName: authUser.firstName,
+          lastName: authUser.lastName,
+        }
+      : {
+          id: identity.subject,
+          email: identity.email ?? `${identity.subject}@unknown.local`,
+          name: identity.name ?? identity.email ?? identity.subject,
+        }
+
+    await syncWorkOSUserUpdated(ctx, userData)
+
+    return { authId: userData.id, status: 'active' as const }
+  },
 })
 
 export const { backfillUsers } = authKit.utils()

@@ -232,4 +232,30 @@ describe('WorkOS membership sync', () => {
     })
     expect(membership?.deletedAt).toBeUndefined()
   })
+
+  test('organization_membership.created after delete reuses the user organization row', async () => {
+    const t = convexTest(schema, modules)
+
+    await t.run((ctx) => syncWorkOSMembershipCreated(ctx, testMembership()))
+    await t.run((ctx) => syncWorkOSMembershipDeleted(ctx, testMembership()))
+    await t.run((ctx) =>
+      syncWorkOSMembershipCreated(ctx, testMembership({ id: 'om_456' })),
+    )
+
+    const memberships = await t.run((ctx) =>
+      ctx.db
+        .query('memberships')
+        .withIndex('by_auth_and_org', (q) =>
+          q.eq('authId', 'user_123').eq('organizationId', 'org_123'),
+        )
+        .collect(),
+    )
+
+    expect(memberships).toHaveLength(1)
+    expect(memberships[0]).toMatchObject({
+      workosMembershipId: 'om_456',
+      status: 'active',
+    })
+    expect(memberships[0]?.deletedAt).toBeUndefined()
+  })
 })

@@ -1,5 +1,4 @@
-import { Config, Effect, Layer, Redacted } from 'effect'
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
+import { Config, Effect, Layer } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
@@ -15,6 +14,19 @@ import {
 } from '@patchplane/core/services/storage-service'
 import { ConvexConfig } from './ConvexConfig'
 
+const createWorkflowStartMutation = makeFunctionReference<
+  'mutation',
+  {
+    workspaceId: string
+    actorId: string
+    actorDisplayName: string
+    source: 'dev' | 'app' | 'github_issue' | 'github_pr_comment'
+    traceId: string
+    prompt: string
+  },
+  unknown
+>('workflowStarts:create')
+
 const listRecentWorkflowStartsQuery = makeFunctionReference<
   'query',
   {
@@ -28,19 +40,12 @@ function normalizeConvexUrl(url: { toString(): string }) {
   return url.toString().replace(/\/$/, '')
 }
 
-function normalizeConvexSiteUrl(url: { toString(): string }) {
-  return normalizeConvexUrl(url).replace('.convex.cloud', '.convex.site')
-}
-
 export const ConvexStoragePlugin = {
   layer: Layer.effect(
     StorageService,
     Effect.gen(function* () {
       const config = yield* ConvexConfig
       const convexUrl = normalizeConvexUrl(config.url)
-      const convexSiteUrl = normalizeConvexSiteUrl(config.url)
-      const trustedWriteSecret = Redacted.value(config.trustedWriteSecret)
-      const httpClient = yield* HttpClient.HttpClient
 
       const createWorkflowFromPrompt = Effect.fn(
         '@patchplane/plugins/convex/createWorkflowFromPrompt',
@@ -55,34 +60,32 @@ export const ConvexStoragePlugin = {
               actorId: input.actor.id,
             })
 
-            yield* Effect.logInfo('Calling trusted Convex workflow start endpoint')
+            yield* Effect.logInfo('Calling authenticated Convex workflow start mutation')
 
-            const value = yield* HttpClientRequest.post(
-              `${convexSiteUrl}/workflow-starts/create`,
-            ).pipe(
-              HttpClientRequest.setHeaders({
-                'x-patchplane-convex-write-secret': trustedWriteSecret,
-              }),
-              HttpClientRequest.bodyJsonUnsafe({
-                workspaceId: input.workspaceId,
-                actorId: input.actor.id,
-                actorDisplayName: input.actor.displayName,
-                source: input.source,
-                traceId: input.traceId,
-                prompt: input.prompt,
-              }),
-              httpClient.execute,
-              Effect.flatMap(HttpClientResponse.filterStatusOk),
-              Effect.flatMap((response) => response.json),
-              Effect.mapError(
-                (cause) =>
-                  new StorageError({
-                    operation: 'createWorkflowFromPrompt',
-                    message: 'Convex failed to create workflow from prompt',
-                    cause,
-                  }),
-              ),
-            )
+            const value = yield* Effect.tryPromise({
+              try: () => {
+                const client = new ConvexHttpClient(convexUrl)
+
+                if (input.authToken !== undefined) {
+                  client.setAuth(input.authToken)
+                }
+
+                return client.mutation(createWorkflowStartMutation, {
+                  workspaceId: input.workspaceId,
+                  actorId: input.actor.id,
+                  actorDisplayName: input.actor.displayName,
+                  source: input.source,
+                  traceId: input.traceId,
+                  prompt: input.prompt,
+                })
+              },
+              catch: (cause) =>
+                new StorageError({
+                  operation: 'createWorkflowFromPrompt',
+                  message: 'Convex failed to create workflow from prompt',
+                  cause,
+                }),
+            })
 
             const workflowStart = yield* decodeWorkflowStart(value).pipe(
               Effect.mapError(
@@ -95,7 +98,7 @@ export const ConvexStoragePlugin = {
               ),
             )
 
-            yield* Effect.logInfo('Trusted Convex workflow start succeeded', {
+            yield* Effect.logInfo('Authenticated Convex workflow start succeeded', {
               promptRequestId: workflowStart.promptRequest.id,
               workflowRunId: workflowStart.workflowRun.id,
             })
@@ -165,7 +168,7 @@ export const ConvexStoragePlugin = {
         listRecentWorkflowStarts,
       })
     }),
-  ).pipe(Layer.provide(FetchHttpClient.layer)),
+  ),
   config: ConvexConfig,
 } satisfies {
   readonly layer: Layer.Layer<StorageService, Config.ConfigError>

@@ -6,7 +6,6 @@ const convexUrl = Config.url('CONVEX_URL').pipe(
 
 export const ConvexConfig = Config.all({
   url: convexUrl,
-  trustedWriteSecret: Config.redacted('PATCHPLANE_CONVEX_WRITE_SECRET'),
 })
 
 export type ConvexConfig = typeof ConvexConfig extends Config.Config<infer A>

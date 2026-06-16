@@ -1,6 +1,6 @@
 import type { UserIdentity } from 'convex/server'
 import { ConvexError, v } from 'convex/values'
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
+import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 
 function workOSOrganizationId(identity: UserIdentity) {
   const value =
@@ -54,22 +54,29 @@ async function requireMembershipPermission(
     throw new ConvexError('WorkOS workspace required')
   }
 
-  const membership = await ctx.db
+  const memberships = await ctx.db
     .query('memberships')
     .withIndex('by_auth_and_org', (q) =>
       q.eq('authId', identity.subject).eq('organizationId', organizationId),
     )
-    .unique()
+    .collect()
+  const activeMemberships = memberships.filter(
+    (membership) => membership.status === 'active',
+  )
 
-  if (membership === null || membership.status !== 'active') {
+  if (activeMemberships.length === 0) {
     throw new ConvexError('Active membership required')
   }
 
-  if (!membership.permissions.includes(permission)) {
+  const membershipWithPermission = activeMemberships.find((membership) =>
+    membership.permissions.includes(permission),
+  )
+
+  if (membershipWithPermission === undefined) {
     throw new ConvexError('Permission required')
   }
 
-  return membership
+  return membershipWithPermission
 }
 
 const workflowStartArgs = {
@@ -178,17 +185,29 @@ async function createWorkflowStartRecord(
     }
 }
 
-export const createTrusted = internalMutation({
-  args: workflowStartArgs,
-  returns: workflowStartReturn,
-  handler: createWorkflowStartRecord,
-})
-
 export const create = mutation({
   args: workflowStartArgs,
-  returns: v.null(),
-  handler: () => {
-    throw new ConvexError('Use trusted workflow start boundary')
+  returns: workflowStartReturn,
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    requireWorkOSWorkspace(identity, args.workspaceId)
+
+    if (args.actorId !== `workos:${identity.subject}`) {
+      throw new ConvexError('Actor mismatch')
+    }
+
+    if (args.source !== 'app') {
+      throw new ConvexError('App workflow source required')
+    }
+
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      args.workspaceId,
+      'prompt:create',
+    )
+
+    return createWorkflowStartRecord(ctx, args)
   },
 })
 

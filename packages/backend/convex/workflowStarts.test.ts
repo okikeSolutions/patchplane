@@ -27,7 +27,7 @@ interface WorkflowStartResult {
 const createWorkflowStart = makeFunctionReference<
   'mutation',
   CreateWorkflowStartArgs,
-  null
+  unknown
 >('workflowStarts:create')
 
 const listRecentWorkflowStarts = makeFunctionReference<
@@ -58,6 +58,7 @@ function authenticatedTest() {
 async function seedMembership(
   t: ReturnType<typeof authenticatedTest>,
   overrides: Partial<{
+    workosMembershipId: string
     authId: string
     organizationId: string
     status: 'active' | 'inactive' | 'pending' | 'deleted'
@@ -91,64 +92,74 @@ function isWorkflowStartResult(value: unknown): value is WorkflowStartResult {
   )
 }
 
-async function trustedCreate(
+async function createWorkflowStartForTest(
   t: ReturnType<typeof authenticatedTest>,
   args: CreateWorkflowStartArgs = createArgs(),
 ) {
-  const response = await t.fetch('/workflow-starts/create', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-patchplane-convex-write-secret': 'test-write-secret',
-    },
-    body: JSON.stringify(args),
-  })
-  const body: unknown = await response.json()
+  const result = await t.mutation(createWorkflowStart, args)
 
-  if (!isWorkflowStartResult(body)) {
-    throw new Error('Expected workflow start response body')
+  if (!isWorkflowStartResult(result)) {
+    throw new Error('Expected workflow start result')
   }
 
-  return { response, body }
+  return result
 }
 
 describe('workflowStarts trusted boundary and authz', () => {
-  test('rejects direct public creates, including source dev', async () => {
+  test('public workflow start requires authentication', async () => {
     const t = convexTest(schema, modules)
 
     await expect(t.mutation(createWorkflowStart, createArgs())).rejects.toThrow(
-      'Use trusted workflow start boundary',
+      'Authentication required',
     )
-    await expect(
-      t.mutation(
-        createWorkflowStart,
-        createArgs({ actorId: 'system:dev', source: 'dev' }),
-      ),
-    ).rejects.toThrow('Use trusted workflow start boundary')
   })
 
-  test('rejects trusted workflow starts with invalid secret', async () => {
+  test('public workflow start requires active organization membership and prompt:create', async () => {
     const t = authenticatedTest()
 
-    const response = await t.fetch('/workflow-starts/create', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-patchplane-convex-write-secret': 'wrong',
-      },
-      body: JSON.stringify(createArgs()),
+    await expect(t.mutation(createWorkflowStart, createArgs())).rejects.toThrow(
+      'Active membership required',
+    )
+
+    await seedMembership(t, {
+      role: 'viewer',
+      roles: ['viewer'],
+      permissions: ['workspace:view'],
     })
 
-    expect(response.status).toBe(401)
+    await expect(t.mutation(createWorkflowStart, createArgs())).rejects.toThrow(
+      'Permission required',
+    )
   })
 
-  test('allows trusted workflow starts after server-side WorkOS checks', async () => {
+  test('public workflow start rejects workspace, actor, and source spoofing', async () => {
     const t = authenticatedTest()
+    await seedMembership(t)
 
-    const { response, body } = await trustedCreate(t)
+    await expect(
+      t.mutation(createWorkflowStart, createArgs({ workspaceId: 'workos:org_456' })),
+    ).rejects.toThrow('Workspace mismatch')
 
-    expect(response.status).toBe(200)
-    expect(body.promptRequest).toMatchObject({
+    await expect(
+      t.mutation(createWorkflowStart, createArgs({ actorId: 'workos:user_456' })),
+    ).rejects.toThrow('Actor mismatch')
+
+    await expect(
+      t.mutation(createWorkflowStart, createArgs({ source: 'github_issue' })),
+    ).rejects.toThrow('App workflow source required')
+  })
+
+  test('public workflow start succeeds with active membership and prompt:create', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+
+    const result = await t.mutation(createWorkflowStart, createArgs())
+
+    expect(isWorkflowStartResult(result)).toBe(true)
+    if (!isWorkflowStartResult(result)) {
+      throw new Error('Expected workflow start result')
+    }
+    expect(result.promptRequest).toMatchObject({
       workspaceId: 'workos:org_123',
       actorId: 'workos:user_123',
       source: 'app',
@@ -156,10 +167,26 @@ describe('workflowStarts trusted boundary and authz', () => {
     })
   })
 
+  test('public workflow start tolerates duplicate mirrored memberships', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t, {
+      permissions: ['workspace:view'],
+      workosMembershipId: 'om_viewer',
+    })
+    await seedMembership(t, {
+      permissions: ['workspace:view', 'prompt:create'],
+      workosMembershipId: 'om_operator',
+    })
+
+    const result = await t.mutation(createWorkflowStart, createArgs())
+
+    expect(isWorkflowStartResult(result)).toBe(true)
+  })
+
   test('listRecent requires active WorkOS organization access', async () => {
     const t = authenticatedTest()
     await seedMembership(t)
-    await trustedCreate(t)
+    await createWorkflowStartForTest(t)
 
     await expect(
       convexTest(schema, modules).query(listRecentWorkflowStarts, {
@@ -178,7 +205,6 @@ describe('workflowStarts trusted boundary and authz', () => {
 
   test('listRecent rejects missing mirrored membership', async () => {
     const t = authenticatedTest()
-    await trustedCreate(t)
 
     await expect(
       t.query(listRecentWorkflowStarts, { workspaceId: 'workos:org_123' }),
@@ -192,7 +218,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       roles: ['custom'],
       permissions: ['prompt:create'],
     })
-    await trustedCreate(t)
+    await createWorkflowStartForTest(t)
 
     await expect(
       t.query(listRecentWorkflowStarts, { workspaceId: 'workos:org_123' }),

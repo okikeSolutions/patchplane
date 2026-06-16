@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as http from "../http.js";
 import type * as promptRequests from "../promptRequests.js";
 import type * as requests from "../requests.js";
+import type * as viewer from "../viewer.js";
 import type * as workflowRuns from "../workflowRuns.js";
 import type * as workflowStarts from "../workflowStarts.js";
 
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   promptRequests: typeof promptRequests;
   requests: typeof requests;
+  viewer: typeof viewer;
   workflowRuns: typeof workflowRuns;
   workflowStarts: typeof workflowStarts;
 }>;
