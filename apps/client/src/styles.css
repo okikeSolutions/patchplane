@@ -77,6 +77,8 @@
   --hero-grid: rgb(169 125 57 / 0.1);
   --hero-glow: rgb(235 171 66 / 0.24);
   --hero-glow-soft: rgb(246 213 154 / 0.2);
+  --brand-readable: oklch(0.45 0.12 72);
+  --success-readable: oklch(0.42 0.13 150);
 }
 
 .dark {
@@ -146,6 +148,8 @@
   --hero-grid: rgb(237 190 100 / 0.11);
   --hero-glow: rgb(232 169 70 / 0.18);
   --hero-glow-soft: rgb(67 97 143 / 0.18);
+  --brand-readable: oklch(0.86 0.11 72);
+  --success-readable: oklch(0.88 0.1 150);
 }
 
 @theme inline {
