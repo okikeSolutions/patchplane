@@ -2,24 +2,14 @@ import { createRouter } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { routerWithQueryClient } from '@tanstack/react-router-with-query'
 import { ConvexQueryClient } from '@convex-dev/react-query'
-import { ConvexProviderWithAuthKit } from '@convex-dev/workos'
-import { AuthKitProvider, useAuth } from '@workos-inc/authkit-react'
 import { deLocalizeUrl, localizeUrl } from './paraglide/runtime'
 import { routeTree } from './routeTree.gen'
 
 export function getRouter() {
   const CONVEX_URL = import.meta.env.VITE_CONVEX_URL
-  const WORKOS_CLIENT_ID = import.meta.env.VITE_WORKOS_CLIENT_ID
-  const WORKOS_REDIRECT_URI = import.meta.env.VITE_WORKOS_REDIRECT_URI
 
   if (!CONVEX_URL) {
     throw new Error('missing envar VITE_CONVEX_URL')
-  }
-  if (!WORKOS_CLIENT_ID) {
-    throw new Error('missing envar VITE_WORKOS_CLIENT_ID')
-  }
-  if (!WORKOS_REDIRECT_URI) {
-    throw new Error('missing envar VITE_WORKOS_REDIRECT_URI')
   }
 
   const convexQueryClient = new ConvexQueryClient(CONVEX_URL)
@@ -38,25 +28,12 @@ export function getRouter() {
     createRouter({
       routeTree,
       defaultPreload: 'intent',
-      context: { queryClient },
+      context: { queryClient, convexClient: convexQueryClient.convexClient },
       scrollRestoration: true,
       rewrite: {
         input: ({ url }) => deLocalizeUrl(url),
         output: ({ url }) => localizeUrl(url),
       },
-      Wrap: ({ children }) => (
-        <AuthKitProvider
-          clientId={WORKOS_CLIENT_ID}
-          redirectUri={WORKOS_REDIRECT_URI}
-        >
-          <ConvexProviderWithAuthKit
-            client={convexQueryClient.convexClient}
-            useAuth={useAuth}
-          >
-            {children}
-          </ConvexProviderWithAuthKit>
-        </AuthKitProvider>
-      ),
     }),
     queryClient,
   )

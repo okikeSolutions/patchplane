@@ -1,6 +1,18 @@
 import { QueryClient } from '@tanstack/react-query'
-import { createRootRouteWithContext } from '@tanstack/react-router'
-import { HeadContent, Scripts } from '@tanstack/react-router'
+import { type AuthTokenFetcher } from 'convex/react'
+import {
+  createRootRouteWithContext,
+  HeadContent,
+  Scripts,
+  useRouterState,
+} from '@tanstack/react-router'
+import { ConvexProviderWithAuthKit } from '@convex-dev/workos'
+import { getAuth } from '@workos/authkit-tanstack-react-start'
+import {
+  AuthKitProvider,
+  useAccessToken,
+  useAuth,
+} from '@workos/authkit-tanstack-react-start/client'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import * as m from '@/paraglide/messages'
@@ -12,8 +24,14 @@ import appCss from '../styles.css?url'
 import { cn } from '@/lib/utils'
 import { getThemeServerFn } from '@/lib/theme'
 
+interface ConvexAuthClient {
+  setAuth(fetchToken: AuthTokenFetcher): void
+  clearAuth(): void
+}
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
+  convexClient: ConvexAuthClient
 }>()({
   head: () => ({
     meta: [
@@ -39,16 +57,22 @@ export const Route = createRootRouteWithContext<{
       },
     ],
   }),
-  loader: () => getThemeServerFn(),
+  loader: async () => ({
+    theme: await getThemeServerFn(),
+    initialAuth: await getAuth(),
+  }),
   shellComponent: RootDocument,
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const theme = Route.useLoaderData()
+  const { convexClient } = Route.useRouteContext()
+  const { theme, initialAuth } = Route.useLoaderData()
+  useRouterState({ select: (state) => state.location.pathname })
+  const locale = getLocale()
 
   return (
     <html
-      lang={getLocale()}
+      lang={locale}
       className={cn('scroll-smooth', theme)}
       suppressHydrationWarning
     >
@@ -56,10 +80,17 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="min-h-screen wrap-anywhere bg-background bg-[radial-gradient(circle_at_top_left,var(--hero-glow),transparent_30rem),radial-gradient(circle_at_85%_15%,var(--hero-glow-soft),transparent_24rem),linear-gradient(180deg,rgb(255_255_255/0.02),transparent_28rem)] bg-fixed font-sans text-foreground antialiased selection:bg-primary/28">
-        <ThemeProvider theme="dark">
-          <Header />
-          {children}
-          <Footer />
+        <ThemeProvider theme={theme}>
+          <AuthKitProvider initialAuth={initialAuth}>
+            <ConvexProviderWithAuthKit
+              client={convexClient}
+              useAuth={useConvexAuthFromWorkOS}
+            >
+              <Header />
+              <div key={locale}>{children}</div>
+              <Footer />
+            </ConvexProviderWithAuthKit>
+          </AuthKitProvider>
           <TanStackDevtools
             config={{
               position: 'bottom-right',
@@ -76,4 +107,16 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </body>
     </html>
   )
+}
+
+function useConvexAuthFromWorkOS() {
+  const auth = useAuth()
+  const { getAccessToken } = useAccessToken()
+
+  return {
+    isLoading: auth.loading,
+    isAuthenticated: auth.user !== null,
+    user: auth.user,
+    getAccessToken: async () => (await getAccessToken()) ?? null,
+  }
 }

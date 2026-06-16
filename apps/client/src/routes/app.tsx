@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { useAuth } from '@workos-inc/authkit-react'
+import { useAuth } from '@workos/authkit-tanstack-react-start/client'
 import { api } from '@patchplane/backend/convex/_generated/api'
 import { type WorkflowStatus } from '@patchplane/domain/workflow-run'
 import {
@@ -58,7 +58,7 @@ function getStatusDetail(status: TimelineStatus) {
 }
 
 function AppShellPage() {
-  const { user, signIn, signOut } = useAuth()
+  const { user, organizationId, signOut } = useAuth()
   const workspacePanels = [
     {
       title: m.app_panel_1_title(),
@@ -119,19 +119,23 @@ function AppShellPage() {
             {m.app_auth_intro()}
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              onClick={() => {
-                if (user) {
-                  signOut()
-                  return
-                }
-
-                void signIn()
-              }}
-            >
-              {user ? m.app_sign_out() : m.app_sign_in()}
-            </Button>
+            {user ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  void signOut()
+                }}
+              >
+                {m.app_sign_out()}
+              </Button>
+            ) : (
+              <a
+                href="/api/auth/sign-in?returnPathname=/app"
+                className={buttonVariants()}
+              >
+                {m.app_sign_in()}
+              </a>
+            )}
             <span className="text-sm text-muted-foreground">
               {user
                 ? m.app_signed_in_as({
@@ -140,6 +144,23 @@ function AppShellPage() {
                   })
                 : m.app_sign_in_prompt()}
             </span>
+            {user && !organizationId ? (
+              <div className="basis-full rounded-2xl border border-amber-400/20 bg-amber-400/8 p-4 text-sm text-muted-foreground">
+                <p className="m-0">
+                  No active WorkOS organization is selected. Reconnect with
+                  WorkOS or select an organization from your WorkOS session
+                  before starting authenticated workflows.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <a
+                    href="/api/auth/sign-in?returnPathname=/app"
+                    className={buttonVariants({ variant: 'secondary' })}
+                  >
+                    Reconnect with WorkOS
+                  </a>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 

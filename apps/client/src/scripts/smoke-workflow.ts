@@ -1,10 +1,31 @@
-import { devActor, devWorkspace } from '@patchplane/core/dev/context'
-import { ListRecentWorkflowStarts } from '@patchplane/core/workflows/list-recent-workflow-starts'
-import { StartWorkflowFromPrompt } from '@patchplane/core/workflows/start-workflow-from-prompt'
+import { makeWorkOSActorId, makeWorkOSWorkspaceId } from '@patchplane/domain/ids'
+import { StorageService } from '@patchplane/core/services/storage-service'
 import { Effect } from 'effect'
 import { patchPlaneRuntime } from '../effect/runtime'
 
-const workspaceId = devWorkspace.id
+const accessToken = process.env.PATCHPLANE_WORKOS_ACCESS_TOKEN
+const userId = process.env.PATCHPLANE_WORKOS_USER_ID
+const organizationId = process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID
+const actorDisplayName = process.env.PATCHPLANE_WORKOS_ACTOR_NAME ?? 'Smoke user'
+
+if (!accessToken || !userId || !organizationId) {
+  throw new Error(
+    [
+      'Authenticated smoke workflow requires:',
+      '  PATCHPLANE_WORKOS_ACCESS_TOKEN',
+      '  PATCHPLANE_WORKOS_USER_ID',
+      '  PATCHPLANE_WORKOS_ORGANIZATION_ID',
+      '',
+      'The token must contain the same WorkOS user subject and active organization.',
+    ].join('\n'),
+  )
+}
+
+const actor = {
+  id: makeWorkOSActorId(userId),
+  displayName: actorDisplayName,
+}
+const workspaceId = makeWorkOSWorkspaceId(organizationId)
 
 function printInspectCommands() {
   console.log('\nInspect Effect logs:')
@@ -19,12 +40,16 @@ async function startWorkflow(prompt: string) {
   const traceId = crypto.randomUUID()
 
   const result = await patchPlaneRuntime.runPromise(
-    StartWorkflowFromPrompt({
-      actor: devActor,
-      workspace: devWorkspace,
-      source: 'dev',
-      traceId,
-      prompt,
+    Effect.gen(function* () {
+      const storage = yield* StorageService
+      return yield* storage.createWorkflowFromPrompt({
+        actor,
+        workspaceId,
+        source: 'app',
+        traceId,
+        prompt,
+        authToken: accessToken,
+      })
     }).pipe(
       Effect.annotateLogs({ traceId, entrypoint: 'smoke-workflow:start' }),
       Effect.annotateSpans({ traceId, entrypoint: 'smoke-workflow:start' }),
@@ -45,7 +70,14 @@ async function listWorkflowStarts(limit: number) {
   const traceId = crypto.randomUUID()
 
   const workflowStarts = await patchPlaneRuntime.runPromise(
-    ListRecentWorkflowStarts({ workspaceId, limit }).pipe(
+    Effect.gen(function* () {
+      const storage = yield* StorageService
+      return yield* storage.listRecentWorkflowStarts({
+        workspaceId,
+        limit,
+        authToken: accessToken,
+      })
+    }).pipe(
       Effect.annotateLogs({ traceId, entrypoint: 'smoke-workflow:list' }),
       Effect.annotateSpans({ traceId, entrypoint: 'smoke-workflow:list' }),
       Effect.withLogSpan('smoke-workflow:list'),
@@ -79,7 +111,7 @@ const prompt =
   `Smoke workflow from script ${new Date().toISOString()}`
 
 try {
-  console.log('\nRunning PatchPlane workflow smoke tests...')
+  console.log('\nRunning PatchPlane authenticated workflow smoke tests...')
 
   await startWorkflow(prompt)
   await listWorkflowStarts(5)

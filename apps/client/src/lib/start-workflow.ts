@@ -1,27 +1,28 @@
 import { createServerFn } from '@tanstack/react-start'
-import { devActor, devWorkspace } from '@patchplane/core/dev/context'
-import { StartWorkflowFromPrompt } from '@patchplane/core/workflows/start-workflow-from-prompt'
-import { Effect } from 'effect'
-import * as z from 'zod'
+import { AuthRequestContext } from '@patchplane/core/services/auth-request-context'
+import { StartAuthenticatedWorkflowFromPrompt } from '@patchplane/core/workflows/start-authenticated-workflow-from-prompt'
+import { Effect, Schema } from 'effect'
 import { patchPlaneRuntime } from '@/effect/runtime'
+import { getWorkOSAuthRequest } from './workos-auth-request'
 
-const startWorkflowInput = z.object({
-  prompt: z.string().min(1),
+const StartWorkflowInput = Schema.Struct({
+  prompt: Schema.String.check(Schema.isNonEmpty()),
 })
+const decodeStartWorkflowInput = Schema.decodeUnknownSync(StartWorkflowInput)
 
 export const startWorkflowServerFn = createServerFn({ method: 'POST' })
-  .validator(startWorkflowInput)
+  .validator(decodeStartWorkflowInput)
   .handler(async ({ data }) => {
     const traceId = crypto.randomUUID()
+    const authRequest = await getWorkOSAuthRequest()
 
     return patchPlaneRuntime.runPromise(
-      StartWorkflowFromPrompt({
-        actor: devActor,
-        workspace: devWorkspace,
-        source: 'dev',
+      StartAuthenticatedWorkflowFromPrompt({
+        source: 'app',
         traceId,
         prompt: data.prompt,
       }).pipe(
+        Effect.provideService(AuthRequestContext, authRequest),
         Effect.annotateLogs({ traceId, entrypoint: 'startWorkflowServerFn' }),
         Effect.annotateSpans({ traceId, entrypoint: 'startWorkflowServerFn' }),
         Effect.withLogSpan('startWorkflowServerFn'),

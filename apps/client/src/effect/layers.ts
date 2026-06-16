@@ -1,4 +1,5 @@
 import { ConvexStoragePlugin } from '@patchplane/plugins/convex/storage-plugin'
+import { WorkOSAuthPlugin } from '@patchplane/plugins/workos/auth-plugin'
 import { NodeFileSystem } from '@effect/platform-node'
 import { Layer, Logger } from 'effect'
 
@@ -16,5 +17,6 @@ export const ObservabilityLayer = Logger.layer([
 
 export const PatchPlaneLayer = Layer.mergeAll(
   ConvexStoragePlugin.layer,
+  WorkOSAuthPlugin.layer,
   ObservabilityLayer,
 )

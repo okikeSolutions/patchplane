@@ -1,21 +1,26 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getCookie, setCookie } from '@tanstack/react-start/server'
-import * as z from 'zod'
+import { Schema } from 'effect'
 
-const postThemeValidator = z.union([
-  z.literal('light'),
-  z.literal('dark'),
-  z.literal('system'),
-])
-export type T = z.infer<typeof postThemeValidator>
+const Theme = Schema.Literals(['light', 'dark', 'system'])
+export type T = Schema.Schema.Type<typeof Theme>
+const decodeTheme = Schema.decodeUnknownSync(Theme)
 const storageKey = '_preferred-theme'
 
+function decodeThemeOrDefault(value: unknown): T {
+  try {
+    return decodeTheme(value)
+  } catch {
+    return 'dark'
+  }
+}
+
 export const getThemeServerFn = createServerFn().handler(async () =>
-  postThemeValidator.catch('dark').parse(getCookie(storageKey)),
+  decodeThemeOrDefault(getCookie(storageKey)),
 )
 
 export const setThemeServerFn = createServerFn({ method: 'POST' })
-  .validator(postThemeValidator)
+  .validator(decodeTheme)
   .handler(async ({ data }) =>
     setCookie(storageKey, data, {
       httpOnly: true,

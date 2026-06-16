@@ -1,8 +1,21 @@
 import { Layer, ManagedRuntime } from 'effect'
 import { PatchPlaneLayer } from './layers'
 
-export const appMemoMap = Layer.makeMemoMapUnsafe()
+const appMemoMap = Layer.makeMemoMapUnsafe()
 
 export const patchPlaneRuntime = ManagedRuntime.make(PatchPlaneLayer, {
   memoMap: appMemoMap,
 })
+
+export function disposePatchPlaneRuntime() {
+  return patchPlaneRuntime.dispose()
+}
+
+if (typeof process !== 'undefined' && process.release?.name === 'node') {
+  const disposeRuntime = () => {
+    void disposePatchPlaneRuntime()
+  }
+
+  process.once('SIGINT', disposeRuntime)
+  process.once('SIGTERM', disposeRuntime)
+}
