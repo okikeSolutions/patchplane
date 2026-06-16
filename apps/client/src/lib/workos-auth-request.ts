@@ -1,7 +1,7 @@
-import { getAuth } from '@workos/authkit-tanstack-react-start'
 import { mapWorkOSSessionToAuthRequest } from '@patchplane/plugins/workos/session'
 
 export async function getWorkOSAuthRequest() {
+  const { getAuth } = await import('@workos/authkit-tanstack-react-start')
   const auth = await getAuth()
 
   if (!auth.user) {
