@@ -26,11 +26,11 @@ Covered today:
 - WorkOS organization and membership API calls are wrapped as `AuthError` on failure.
 - Explicit WorkOS permission claims are only honored when the actor has an active membership in the active organization.
 - Convex viewer and request-list queries require authenticated `ctx.auth` identity.
-- Convex workflow creation is routed through a trusted HTTP action and internal mutation; direct public `workflowStarts:create` calls are rejected.
+- User-facing Convex workflow creation uses public `workflowStarts:create` with WorkOS JWT validation, active mirrored membership, actor/workspace anti-spoofing, and `prompt:create` authorization.
 - Convex recent workflow reads require WorkOS auth and mirrored active WorkOS membership with `workspace:view` for the requested organization workspace.
 - WorkOS user create/update/delete events sync an app-level `users` table, reactivation clears soft-delete state, and `auth:backfillUsers` is exported for existing WorkOS tenants.
 - WorkOS organization membership create/update/delete events sync an app-level `memberships` table for Convex-side authorization.
-- TanStack server workflow starts still perform live WorkOS membership/permission checks before calling the trusted Convex write boundary.
+- TanStack server workflow starts still perform live WorkOS membership/permission checks before calling the authenticated Convex write mutation; Convex repeats the app-level authorization as the storage boundary.
 
 ## Manual smoke required before calling the plugin alpha-complete
 
@@ -44,6 +44,7 @@ Client / TanStack Start:
 - `WORKOS_CLIENT_ID`
 - `WORKOS_COOKIE_PASSWORD`
 - `VITE_CONVEX_URL`
+- `CONVEX_URL` if the server runtime cannot read `VITE_CONVEX_URL`
 
 Convex deployment:
 
@@ -51,7 +52,6 @@ Convex deployment:
 - `WORKOS_WEBHOOK_SECRET`
 - `WORKOS_ACTION_SECRET` if WorkOS Actions are enabled
 - `WORKOS_API_KEY` if running WorkOS AuthKit component backfill/actions that call WorkOS
-- `PATCHPLANE_CONVEX_WRITE_SECRET`, shared with the TanStack server runtime, for trusted workflow-start writes
 
 ### AuthKit sign-in smoke
 
@@ -100,6 +100,5 @@ npx convex run auth:backfillUsers
 
 ## Remaining product decisions
 
-- Whether the trusted workflow-start boundary should use stronger HMAC request signing instead of the current shared secret header.
 - Whether WorkOS action handlers should always allow during alpha or enforce product-specific registration rules.
 - Whether to add WorkOS Authorization API resource checks for repository/project-level permissions beyond organization-level membership roles.

@@ -38,13 +38,13 @@ WorkOS AuthKit session
 → TanStack Start server workflow
 → WorkOSAuthPlugin live membership/permission check
 → StorageService
-→ Convex trusted HTTP action
-→ internal workflow start mutation
+→ Convex public workflow mutation with WorkOS JWT
+→ Convex mirrored membership + `prompt:create` authorization
 → promptRequests + workflowRuns
 → authenticated Convex reads filtered by mirrored WorkOS membership/permissions
 ```
 
-The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, direct public workflow-start writes are rejected, and workflow creation goes through a trusted Convex boundary. Daytona, Pi Agent Core, GitHub publication, reviewer fan-out, and graph UI remain deferred until the authenticated control-plane loop is productized in the UI.
+The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, user-facing workflow creation goes through Convex JWT validation plus mirrored membership authorization, and the authenticated control-plane loop is productized in the UI. Daytona, Pi Agent Core, GitHub publication, reviewer fan-out, and graph UI remain deferred until the next product slice.
 
 ---
 
@@ -170,24 +170,24 @@ Acceptance criteria:
 
 ### M4 — Convex function boundary
 
-**Status:** Authenticated/trusted foundation slice working
+**Status:** Authenticated foundation slice working
 
 Tasks:
 
 - [x] Keep existing Convex deployment functions in `packages/backend/convex`.
 - [x] Add minimal Convex mutations/queries needed by the foundation storage path.
-- [x] Collapse foundation write into one internal Convex mutation, `workflowStarts:createTrusted`, so PromptRequest and WorkflowRun are inserted transactionally.
+- [x] Keep workflow-start creation transactional in `workflowStarts:create`, so PromptRequest and WorkflowRun are inserted together after Convex-side authz.
 - [x] Keep Convex functions as the database API: validate args/returns and perform transactional writes.
 - [x] Do not move Convex code into `apps/client` until there is a concrete deployment reason.
 - [x] Store `traceId` on foundation records and log successful mutation execution.
-- [x] Reject direct public `workflowStarts:create` writes; trusted writes go through `POST /workflow-starts/create` and then the internal mutation.
+- [x] Gate public `workflowStarts:create` writes with WorkOS JWT validation, active mirrored membership, actor/workspace anti-spoofing, and `prompt:create`.
 - [x] Gate `workflowStarts:listRecent` with WorkOS AuthKit identity and mirrored active membership permission `workspace:view`.
 
 Acceptance criteria:
 
 - Convex backend code still lives under `packages/backend/convex`.
 - Foundation Convex functions can typecheck.
-- Convex generated API exposes the public reads, trusted HTTP action, and internal mutation needed by `ConvexStoragePlugin`.
+- Convex generated API exposes the public reads and authenticated workflow-start mutation needed by `ConvexStoragePlugin`.
 
 ---
 
@@ -203,15 +203,15 @@ Tasks:
   - [x] workflowRuns.
 - [x] Add `ConvexConfig` using Effect Config.
 - [x] Implement experimental domain ↔ Convex document mapping.
-- [x] Implement `createWorkflowFromPrompt` through trusted Convex HTTP action.
+- [x] Implement `createWorkflowFromPrompt` through authenticated Convex mutation with WorkOS JWT.
 - [x] Decode Convex documents back through domain schemas.
 
 Acceptance criteria:
 
 - Foundation records persist through `StorageService`.
 - Core does not import Convex APIs.
-- Convex trusted write/read errors map into `StorageError`.
-- Plugin HTTP calls use Effect `HttpClient` / `FetchHttpClient.layer` instead of raw `fetch`.
+- Convex authenticated write/read errors map into `StorageError`.
+- Plugin Convex access uses vendor SDK boundaries instead of raw `fetch`.
 
 ---
 
@@ -228,13 +228,13 @@ Tasks:
 - [x] Create `ManagedRuntime` from composed layer.
 - [x] Implement one server-side action that runs authenticated workflow start.
 - [x] Wire WorkOS AuthKit provider and Convex AuthKit provider in the root route.
-- [x] Pass WorkOS access tokens into Convex storage/trusted write path where needed.
-- [ ] Productize the visible prompt/workflow UI beyond the current alpha shell.
+- [x] Pass WorkOS access tokens into Convex storage write/read paths where needed.
+- [x] Productize the visible prompt/workflow UI for the current alpha shell.
 - [x] Add Effect observability layer with pretty terminal logs and JSONL file logs.
 
 Acceptance criteria:
 
-- Authenticated WorkOS actor/workspace can create a `PromptRequest` and `WorkflowRun` in Convex via core workflow and trusted write boundary.
+- Authenticated WorkOS actor/workspace can create a `PromptRequest` and `WorkflowRun` in Convex via core workflow and Convex-side WorkOS authorization.
 - App route/server function talks to core through `ManagedRuntime`.
 - No SDK-specific object leaks into core output.
 
@@ -251,9 +251,9 @@ TanStack Start server function
 → WorkOSAuthPlugin.requirePermission("prompt:create")
 → StorageService
 → ConvexStoragePlugin
-→ Effect HttpClient
-→ POST /workflow-starts/create
-→ internal.workflowStarts.createTrusted
+→ ConvexHttpClient with WorkOS access token
+→ workflowStarts:create
+→ Convex mirrored membership + `prompt:create` authorization
 → promptRequests + workflowRuns
 ```
 
@@ -270,8 +270,8 @@ Convex client with WorkOS AuthKit token
 Evidence:
 
 - `bun run --cwd packages/backend test` passes, including Convex tests for:
-  - trusted workflow-start HTTP boundary,
-  - direct public workflow-start rejection,
+  - authenticated public workflow-start boundary,
+  - actor/workspace/source anti-spoofing,
   - WorkOS user sync,
   - WorkOS membership sync,
   - mirrored membership/permission read authorization.
@@ -296,7 +296,6 @@ CONVEX_URL=... \
 PATCHPLANE_WORKOS_ACCESS_TOKEN=... \
 PATCHPLANE_WORKOS_USER_ID=... \
 PATCHPLANE_WORKOS_ORGANIZATION_ID=... \
-PATCHPLANE_CONVEX_WRITE_SECRET=... \
   bun run smoke:foundation "Prompt"
 ```
 
@@ -342,11 +341,11 @@ Tasks:
 - [x] Add app-level `users` table synced from WorkOS user events.
 - [x] Add app-level `memberships` table synced from WorkOS organization membership events.
 - [x] Add mirrored membership checks in Convex reads.
-- [x] Move workflow-start writes behind trusted HTTP action + internal mutation.
+- [x] Move user-facing workflow-start writes behind Convex WorkOS JWT validation and mirrored `prompt:create` authorization.
 - [x] Ensure raw WorkOS objects do not cross into core.
 - [ ] Add WorkOS `organization_role.updated` / `permission.updated` handling or documented backfill strategy if role definitions become dynamic in production.
 - [ ] Add WorkOS Authorization API resource-level checks once PatchPlane introduces repository/project-scoped permissions.
-- [ ] Replace trusted write shared-secret header with stronger HMAC signing if this boundary is exposed beyond the app server.
+- [ ] Add a dedicated signed system-ingestion boundary if future non-user integrations need to create workflow starts outside a WorkOS user session.
 
 ---
 
@@ -464,12 +463,12 @@ Tasks:
 
 - [ ] No long-lived credentials in sandboxes.
 - [ ] GitHub webhook signatures verified before ingestion.
-- [x] Convex SDK / trusted HTTP errors map into typed PatchPlane `StorageError` for foundation.
+- [x] Convex SDK errors map into typed PatchPlane `StorageError` for foundation.
 - [x] WorkOS SDK errors map into typed PatchPlane `AuthError` for authenticated foundation.
-- [x] Direct public `workflowStarts:create` writes are rejected.
-- [x] Trusted workflow-start writes use an internal Convex mutation behind an HTTP action guarded by `PATCHPLANE_CONVEX_WRITE_SECRET`.
+- [x] Public `workflowStarts:create` writes require WorkOS JWT validation, active mirrored membership, actor/workspace anti-spoofing, and `prompt:create`.
+- [x] User-facing workflow starts are authorized by Convex with the caller's WorkOS JWT and mirrored permissions.
 - [x] Convex reads require WorkOS AuthKit identity and mirrored active membership permissions.
-- [ ] Upgrade trusted write shared-secret header to HMAC signing before production exposure.
+- [ ] Use HMAC or equivalent request signing for any future non-user system ingestion boundary before production exposure.
 - [ ] Add WorkOS Authorization API checks for resource-scoped permissions when repository/project resources are introduced.
 - [ ] Sandbox profiles have explicit network and lifecycle policy.
 

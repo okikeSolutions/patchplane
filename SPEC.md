@@ -1,8 +1,8 @@
 # SPEC.md – PatchPlane v2 – Effect-Native AI Change Control Plane
 
 **Version:** 2.0  
-**Date:** June 11, 2026  
-**Status:** Architecture revision for Effect v4 / effect-smol plugin-based MVP
+**Date:** June 16, 2026  
+**Status:** Authenticated foundation architecture for Effect v4 / effect-smol plugin-based MVP
 
 ---
 
@@ -38,19 +38,22 @@ Plugins provide capabilities.
 The app composes plugins.
 ```
 
-The first v2 foundation milestone is intentionally smaller than the full end-to-end product:
+The first v2 foundation milestone has advanced from a local storage smoke into an authenticated control-plane slice:
 
 ```text
-Local development actor
-→ default development workspace
-→ create PromptRequest
-→ create WorkflowRun
-→ persist through Convex Storage Plugin
-
-Auth and WorkOS are explicitly deferred until after the foundation storage/core path is proven.
+WorkOS AuthKit session
+→ TanStack Start server workflow
+→ WorkOSAuthPlugin live membership/permission check
+→ StorageService
+→ Convex public workflow mutation with WorkOS JWT
+→ Convex mirrored membership + `prompt:create` authorization
+→ PromptRequest + WorkflowRun
+→ authenticated Convex reads filtered by mirrored WorkOS membership/permissions
 ```
 
-The end-to-end hosted MVP expands that foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
+WorkOS and Convex remain separate plugins composed at the app/client/server boundary. WorkOS is the identity, organization, membership, and permission source. Convex is the realtime storage and query boundary, with selected WorkOS user and membership data mirrored for server-side authorization in Convex functions.
+
+The end-to-end hosted MVP expands this authenticated foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
 
 ---
 
@@ -310,7 +313,7 @@ agent:<sessionId>
 system:<identifier>
 ```
 
-For the foundation path, local development actor/workspace IDs use the `system:` namespace.
+For local development smoke paths, actor/workspace IDs may use the `system:` namespace. The authenticated foundation uses `workos:<userId>` actor IDs and `workos:<organizationId>` workspace IDs.
 
 Initial schemas:
 
@@ -393,12 +396,11 @@ Core services:
 
 ### `StorageService`
 
-- `createPromptRequest`
-- `createWorkflowRun`
+- `createWorkflowFromPrompt` as the atomic foundation write that creates both PromptRequest and WorkflowRun
+- `listRecentWorkflowStarts` for the authenticated foundation read-back path
 - `appendRuntimeEvent`
 - `createReviewRun`
 - `createMergeDecision`
-- `listRecentWorkflowStarts` for the foundation read-back path
 - `readWorkflowTimeline` later, once runtime/review/decision events exist
 
 ### `GitProviderService`
@@ -477,13 +479,10 @@ PatchPlane v2 uses real plugins from the start, but all real integrations must b
 
 ### 9.1 Initial plugins
 
-Foundation MVP:
+Authenticated foundation:
 
+- WorkOS Auth Plugin,
 - Convex Storage Plugin.
-
-Deferred until after foundation:
-
-- WorkOS Auth Plugin.
 
 End-to-end MVP:
 
@@ -512,6 +511,8 @@ Conceptually:
 - WorkOS owns identity, organization membership, and source role/permission data.
 - PatchPlane owns workflow authorization decisions.
 - Convex may validate WorkOS JWTs and store PatchPlane records, but Convex is not the source identity model.
+- Convex may mirror WorkOS users and organization memberships for local query authorization, but mirrored rows are derived state.
+- TanStack server workflows perform live WorkOS permission checks before privileged writes; Convex public reads perform local mirrored-membership checks.
 
 Mapping:
 
@@ -570,7 +571,7 @@ It is responsible for:
 
 - TanStack Start routes,
 - Convex client wiring,
-- WorkOS route/session helpers later when auth work resumes,
+- WorkOS AuthKit route/session helpers,
 - server functions,
 - HTTP route handlers,
 - UI rendering,
@@ -585,8 +586,8 @@ It is responsible for:
 
 ```text
 apps/client/src/effect/layers.ts
+- foundation: compose WorkOSAuthPlugin.layer
 - foundation: compose ConvexStoragePlugin.layer
-- later: compose WorkOSAuthPlugin.layer
 - later: compose GitHubProviderPlugin.layer
 - later: compose PiAgentRuntimePlugin.layer
 - later: compose DaytonaSandboxPlugin.layer
@@ -800,7 +801,7 @@ The end-to-end MVP uses a PatchPlane-primary, GitHub-compatible model:
 
 ## 16. MVP Scope
 
-### 16.1 v2 Foundation MVP
+### 16.1 v2 Authenticated Foundation MVP
 
 In scope:
 
@@ -808,13 +809,17 @@ In scope:
 - `packages/core` with Effect services and workflows,
 - `packages/plugins` created immediately,
 - `apps/client` composition root with TanStack Start and `ManagedRuntime`,
+- WorkOS Auth Plugin,
 - Convex Storage Plugin,
-- development actor/workspace context for the first local path,
-- WorkOS Auth Plugin deferred until after foundation storage/core is proven,
+- WorkOS AuthKit session integration,
+- Convex AuthKit client integration,
+- WorkOS user and organization membership sync into Convex,
+- trusted Convex workflow-start write boundary,
 - PromptRequest creation through core,
 - WorkflowRun creation through core,
-- basic typed errors,
-- basic structured logs.
+- authenticated read-back through Convex queries,
+- typed auth/storage errors,
+- structured logs.
 
 Out of scope for the first foundation slice:
 
@@ -892,7 +897,9 @@ Use the existing `apps/client` TanStack Start app as the composition root, while
 
 ### 17.4 Auth
 
-WorkOS AuthKit remains the planned first auth plugin and source of human identity, organizations, memberships, roles, and permissions, but auth is deferred until after the foundation storage/core path works.
+WorkOS AuthKit is the first auth plugin and source of human identity, organizations, memberships, roles, and permissions. The WorkOS Node SDK must remain server-only. Browser-safe session data is mapped separately from server-only SDK-backed authorization code.
+
+`@convex-dev/workos` provides the client-side Convex/AuthKit bridge. `@convex-dev/workos-authkit` provides Convex backend webhook/action plumbing for WorkOS metadata, while PatchPlane remains responsible for app-specific authorization policy such as `prompt:create` and `workspace:view`.
 
 ### 17.5 Storage and realtime
 
@@ -924,8 +931,12 @@ Initial integration tests:
 
 - WorkOS session → PatchPlane Actor,
 - WorkOS organization → PatchPlane Workspace,
+- WorkOS organization membership → PatchPlane Membership,
 - WorkOS roles/permissions → PatchPlane permissions,
-- Convex write through `StorageService`,
+- WorkOS user and membership webhook sync into Convex app tables,
+- Convex authenticated workflow write through `StorageService`,
+- public workflow-start writes reject missing auth, spoofed actor/workspace/source, inactive membership, and missing `prompt:create`,
+- authenticated Convex reads require mirrored active membership permissions,
 - create PromptRequest through core workflow,
 - create WorkflowRun through core workflow.
 
@@ -981,6 +992,10 @@ Untrusted execution plane:
 - Deduplicate webhook deliveries.
 - Keep GitHub App private keys and installation-token minting in trusted server contexts.
 - Store logs and artifacts separately from privileged secrets.
+- Keep WorkOS SDK usage server-only.
+- Treat WorkOS/AuthKit access tokens as request-scoped credentials.
+- Do not allow public Convex mutations to bypass Convex-side authorization for privileged writes.
+- Guard any future non-user HTTP ingestion boundary with server-only request signing.
 - Make manual override and kill-switch behavior available from the UI.
 - Treat dependency changes as high-risk.
 - Validate workspaces, paths, permissions, and execution targets before runtime start.
@@ -994,9 +1009,10 @@ The v2 MVP is suitable for single-team internal usage first. It is not suitable 
 
 Initial foundation entities:
 
+- `users`
+- `memberships`
 - `actors`
 - `workspaces`
-- `memberships`
 - `permissions`
 - `promptRequests`
 - `workflowRuns`
@@ -1061,9 +1077,10 @@ Start with:
 
 Create:
 
+- `AuthService`
 - `StorageService`
 - `StartWorkflowFromPrompt`
-- optional `AuthService` interface only if needed for later WorkOS integration
+- authenticated workflow-start orchestration
 
 No WorkOS imports. No Convex imports.
 
@@ -1073,22 +1090,22 @@ Implement:
 
 - Convex Storage Plugin,
 - `ConvexConfig`,
-- `createPromptRequest`,
-- `createWorkflowRun`.
+- user-facing workflow-start write through Convex WorkOS JWT validation and mirrored `prompt:create` authorization,
+- recent workflow read-back through Convex queries.
 
 Keep current Convex backend code in `packages/backend/convex` for now. Convex function location is separate from the Storage Plugin boundary; do not move Convex files until there is a concrete deployment reason.
 
-### Step 6 — Defer `packages/plugins/workos`
+### Step 6 — Build `packages/plugins/workos`
 
-WorkOS Auth Plugin is not part of the foundation path. Auth is deferred until after the core/storage foundation works.
-
-Later implement:
+Implement:
 
 - WorkOS Auth Plugin,
 - `WorkOSConfig`,
 - WorkOS User → Actor mapping,
 - WorkOS Organization → Workspace mapping,
-- WorkOS roles/permissions → PatchPlane permissions mapping.
+- WorkOS Membership → Membership mapping,
+- WorkOS roles/permissions → PatchPlane permissions mapping,
+- server-only WorkOS SDK boundary.
 
 ### Step 7 — Compose in `apps/client`
 
@@ -1099,34 +1116,37 @@ apps/client/src/effect/layers.ts
 apps/client/src/effect/runtime.ts
 ```
 
-Run one server-side action through the composed `ManagedRuntime`:
+Run one authenticated server-side action through the composed `ManagedRuntime`:
 
 ```text
-Local development actor
-→ default development workspace
+WorkOS AuthKit session
+→ WorkOSAuthPlugin.requirePermission("prompt:create")
 → create PromptRequest
 → create WorkflowRun
-→ persist in Convex through StorageService
+→ persist in Convex through StorageService with WorkOS JWT and Convex-side membership authorization
 ```
 
 ---
 
 ## 22. Success Criteria
 
-### 22.1 Foundation MVP success
+### 22.1 Authenticated foundation MVP success
 
-The foundation MVP is successful when:
+The authenticated foundation MVP is successful when:
 
 1. `packages/domain`, `packages/core`, and `packages/plugins` exist and typecheck.
 2. Existing Convex backend code remains in `packages/backend/convex` unless a concrete deployment reason requires moving it.
-3. A local development actor and default development workspace can be represented as PatchPlane domain values.
-4. WorkOS/auth is not required for the foundation success path.
+3. WorkOS AuthKit can authenticate a user and selected organization.
+4. WorkOS user and organization membership data can be mapped into PatchPlane domain values.
 5. A server-side app action calls a core workflow through `ManagedRuntime`.
-6. The core workflow creates a PromptRequest through `StorageService`.
-7. The core workflow creates a WorkflowRun through `StorageService`.
-8. Convex persists those records through the Convex Storage Plugin.
-9. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Agent Core imports.
-10. Basic typed errors and structured logs exist for the path.
+6. The server-side workflow verifies `prompt:create` through `AuthService` before writing.
+7. The core workflow creates a PromptRequest through `StorageService`.
+8. The core workflow creates a WorkflowRun through `StorageService`.
+9. Convex persists those records through the Convex Storage Plugin using WorkOS JWT validation and mirrored `prompt:create` authorization.
+10. Public Convex workflow-start writes reject unauthenticated calls, workspace/actor/source spoofing, inactive memberships, and missing `prompt:create`.
+11. Convex authenticated reads require WorkOS identity and mirrored active membership permissions.
+12. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Agent Core imports.
+13. Typed auth/storage errors and structured logs exist for the path.
 
 ### 22.2 End-to-end MVP success
 
@@ -1155,7 +1175,7 @@ The hosted MVP is successful when:
 | TanStack Start framework churn affects delivery | Medium | Medium | Keep TanStack code in `apps/client`; protect core from framework imports |
 | WorkOS auth assumptions leak into domain | Medium | High | Map WorkOS types into Actor/Workspace/Membership/Permission only |
 | Convex storage shapes leak into core | Medium | High | Decode Convex documents through domain schemas and StorageService mappings |
-| Plugin boundaries slow early implementation | Medium | Medium | Start with StorageService and StartWorkflowFromPrompt; defer AuthService implementation |
+| Plugin boundaries slow early implementation | Medium | Medium | Keep core service contracts narrow and compose WorkOS/Convex only at app/plugin boundaries |
 | GitHub App flow is more complex than expected | Medium | High | Defer GitHub to end-to-end MVP after Convex storage/core foundation works |
 | Daytona integration becomes an engineering sink | Medium | High | Defer to end-to-end MVP and keep sandbox API narrow |
 | Runtime integration leaks behavior into product model | Medium | High | Normalize RuntimeEvent and keep RuntimeSession as execution state only |
@@ -1174,9 +1194,9 @@ The revised direction is:
 Real plugins first where they matter for the current slice.
 Stable core service boundaries always.
 Effect Schema in domain from day one.
-Convex as first Storage Plugin.
-WorkOS Auth Plugin deferred until after foundation.
+WorkOS as first Auth Plugin.
+Convex as first Storage Plugin and realtime backend.
 apps/client as composition root.
 ```
 
-PatchPlane v2 should validate real Convex-backed storage and core workflow boundaries first, then add WorkOS auth after the foundation works, while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Agent Core, Daytona, or any future agent harness.
+PatchPlane v2 should validate the authenticated WorkOS + Convex foundation first, then expand into GitHub, Daytona, Pi Agent Core, reviews, decisions, and publication while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Agent Core, Daytona, or any future agent harness.

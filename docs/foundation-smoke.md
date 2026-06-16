@@ -42,10 +42,9 @@ export PATCHPLANE_WORKOS_ACCESS_TOKEN="<authkit-access-token>"
 export PATCHPLANE_WORKOS_USER_ID="<workos-user-id>"
 export PATCHPLANE_WORKOS_ORGANIZATION_ID="<active-workos-organization-id>"
 export PATCHPLANE_WORKOS_ACTOR_NAME="Smoke user" # optional
-export PATCHPLANE_CONVEX_WRITE_SECRET="<shared-convex-write-secret>"
 ```
 
-The token must authenticate the same user and active organization. The TanStack server path checks WorkOS membership/permissions before calling Convex, and Convex only accepts workflow-start writes through the trusted HTTP action guarded by `PATCHPLANE_CONVEX_WRITE_SECRET`.
+The token must authenticate the same user and active organization. The TanStack server path checks WorkOS membership/permissions before calling Convex, and Convex repeats the storage-boundary authorization with mirrored active membership plus `prompt:create` before accepting `workflowStarts:create`.
 
 ## Run
 
@@ -56,7 +55,6 @@ CONVEX_URL="https://<deployment>.convex.cloud" \
 PATCHPLANE_WORKOS_ACCESS_TOKEN="<authkit-access-token>" \
 PATCHPLANE_WORKOS_USER_ID="<workos-user-id>" \
 PATCHPLANE_WORKOS_ORGANIZATION_ID="<active-workos-organization-id>" \
-PATCHPLANE_CONVEX_WRITE_SECRET="<shared-convex-write-secret>" \
   bun run smoke:foundation "Smoke prompt"
 ```
 
@@ -67,7 +65,6 @@ CONVEX_URL="https://<deployment>.convex.cloud" \
 PATCHPLANE_WORKOS_ACCESS_TOKEN="<authkit-access-token>" \
 PATCHPLANE_WORKOS_USER_ID="<workos-user-id>" \
 PATCHPLANE_WORKOS_ORGANIZATION_ID="<active-workos-organization-id>" \
-PATCHPLANE_CONVEX_WRITE_SECRET="<shared-convex-write-secret>" \
   bun run --cwd apps/client smoke "Smoke prompt"
 ```
 
