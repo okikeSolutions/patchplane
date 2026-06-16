@@ -1,4 +1,10 @@
 import { describe, expect, it } from '@effect/vitest'
+import {
+  makePromptRequestId,
+  makeSystemActorId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import { Effect, Layer } from 'effect'
 import { StorageService } from '../services/storage-service'
 import { ListRecentWorkflowStarts } from './list-recent-workflow-starts'
@@ -11,9 +17,9 @@ const TestStorageLayer = Layer.succeed(
       Effect.succeed([
         {
           promptRequest: {
-            id: 'prompt-1',
+            id: makePromptRequestId('prompt-1'),
             workspaceId: input.workspaceId,
-            actorId: 'actor-1',
+            actorId: makeSystemActorId('actor-1'),
             traceId: 'trace-1',
             source: 'dev',
             prompt: 'Fix the bug',
@@ -21,8 +27,8 @@ const TestStorageLayer = Layer.succeed(
             createdAt: 1,
           },
           workflowRun: {
-            id: 'workflow-1',
-            promptRequestId: 'prompt-1',
+            id: makeWorkflowRunId('workflow-1'),
+            promptRequestId: makePromptRequestId('prompt-1'),
             workspaceId: input.workspaceId,
             traceId: 'trace-1',
             status: 'queued',
@@ -37,7 +43,7 @@ describe('ListRecentWorkflowStarts', () => {
   it.effect('reads recent workflow starts through StorageService', () =>
     Effect.gen(function* () {
       const result = yield* ListRecentWorkflowStarts({
-        workspaceId: 'workspace-1',
+        workspaceId: makeSystemWorkspaceId('workspace-1'),
         limit: 5,
       })
 

@@ -1,4 +1,10 @@
 import { describe, expect, it } from '@effect/vitest'
+import {
+  makePromptRequestId,
+  makeSystemActorId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import { Effect, Layer } from 'effect'
 import { StorageService } from '../services/storage-service'
 import { StartWorkflowFromPrompt } from './start-workflow-from-prompt'
@@ -10,7 +16,7 @@ const TestStorageLayer = Layer.succeed(
     createWorkflowFromPrompt: (input) =>
       Effect.succeed({
         promptRequest: {
-          id: 'prompt-1',
+          id: makePromptRequestId('prompt-1'),
           workspaceId: input.workspaceId,
           actorId: input.actor.id,
           traceId: input.traceId,
@@ -20,8 +26,8 @@ const TestStorageLayer = Layer.succeed(
           createdAt: 1,
         },
         workflowRun: {
-          id: 'workflow-1',
-          promptRequestId: 'prompt-1',
+          id: makeWorkflowRunId('workflow-1'),
+          promptRequestId: makePromptRequestId('prompt-1'),
           workspaceId: input.workspaceId,
           traceId: input.traceId,
           status: 'queued',
@@ -36,11 +42,11 @@ describe('StartWorkflowFromPrompt', () => {
     Effect.gen(function* () {
       const result = yield* StartWorkflowFromPrompt({
         actor: {
-          id: 'actor-1',
+          id: makeSystemActorId('actor-1'),
           displayName: 'Actor One',
         },
         workspace: {
-          id: 'workspace-1',
+          id: makeSystemWorkspaceId('workspace-1'),
           name: 'Workspace One',
         },
         source: 'dev',
@@ -49,7 +55,7 @@ describe('StartWorkflowFromPrompt', () => {
       })
 
       expect(result.promptRequest.prompt).toBe('Fix the bug')
-      expect(result.promptRequest.actorId).toBe('actor-1')
+      expect(result.promptRequest.actorId).toBe('system:actor-1')
       expect(result.promptRequest.source).toBe('dev')
       expect(result.promptRequest.traceId).toBe('trace-1')
       expect(result.workflowRun.traceId).toBe('trace-1')
