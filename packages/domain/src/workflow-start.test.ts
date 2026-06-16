@@ -8,8 +8,8 @@ describe('domain schemas', () => {
       const value = yield* decodeWorkflowStart({
         promptRequest: {
           id: 'prompt-1',
-          workspaceId: 'workspace-1',
-          actorId: 'actor-1',
+          workspaceId: 'system:workspace-1',
+          actorId: 'system:actor-1',
           traceId: 'trace-1',
           source: 'dev',
           prompt: 'Fix the bug',
@@ -19,7 +19,7 @@ describe('domain schemas', () => {
         workflowRun: {
           id: 'workflow-1',
           promptRequestId: 'prompt-1',
-          workspaceId: 'workspace-1',
+          workspaceId: 'system:workspace-1',
           traceId: 'trace-1',
           status: 'queued',
           createdAt: 1,
@@ -37,8 +37,8 @@ describe('domain schemas', () => {
         decodeWorkflowStart({
           promptRequest: {
             id: 'prompt-1',
-            workspaceId: 'workspace-1',
-            actorId: 'actor-1',
+            workspaceId: 'system:workspace-1',
+            actorId: 'system:actor-1',
             traceId: 'trace-1',
             source: 'not-a-source',
             prompt: 'Fix the bug',
@@ -48,7 +48,7 @@ describe('domain schemas', () => {
           workflowRun: {
             id: 'workflow-1',
             promptRequestId: 'prompt-1',
-            workspaceId: 'workspace-1',
+            workspaceId: 'system:workspace-1',
             traceId: 'trace-1',
             status: 'queued',
             createdAt: 1,

@@ -1,5 +1,14 @@
 import { Schema } from 'effect'
 
+export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
+  'AuthError',
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
 export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
   'StorageError',
   {

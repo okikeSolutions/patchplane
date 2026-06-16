@@ -5,9 +5,12 @@
   "type": "module",
   "exports": {
     "./actor": "./src/actor.ts",
+    "./authorization": "./src/authorization.ts",
     "./errors": "./src/errors.ts",
     "./ids": "./src/ids.ts",
     "./list-recent-workflow-starts": "./src/list-recent-workflow-starts.ts",
+    "./membership": "./src/membership.ts",
+    "./permission": "./src/permission.ts",
     "./prompt-request": "./src/prompt-request.ts",
     "./start-workflow": "./src/start-workflow.ts",
     "./workflow-run": "./src/workflow-run.ts",
