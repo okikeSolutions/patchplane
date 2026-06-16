@@ -299,6 +299,19 @@ Rule:
 All external inputs must be decoded into PatchPlane domain schemas before entering core workflows.
 ```
 
+Provider-backed domain IDs should be namespaced opaque strings so provenance survives across plugins and ID systems:
+
+```text
+workos:<userId>
+workos:<organizationId>
+github:<userId>
+github-app:<installationId>
+agent:<sessionId>
+system:<identifier>
+```
+
+For the foundation path, local development actor/workspace IDs use the `system:` namespace.
+
 Initial schemas:
 
 - `Actor`

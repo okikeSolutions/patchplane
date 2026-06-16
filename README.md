@@ -1,6 +1,8 @@
 # PatchPlane
 
-AI change control plane for coordinating agents and humans around shared software changes.
+Open-source pre-CI sandbox and trust layer for AI-generated code changes.
+
+PatchPlane treats every AI-generated patch as untrusted until it has been executed, validated, and reported from an isolated environment. It helps maintainers and teams keep normal GitHub and CI/CD workflows while adding a trust boundary before generated code reaches secrets, shared caches, trusted automation, or merge paths.
 
 Core docs:
 
