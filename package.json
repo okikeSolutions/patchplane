@@ -1,6 +1,9 @@
 {
   "name": "patchplane",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"

@@ -17,6 +17,7 @@
     "apps/client/.output/**",
     "apps/client/.tanstack/**",
     "apps/client/node_modules/**",
+    "apps/client/src/components/ui/**",
     "packages/backend/convex/_generated/**",
     "packages/*/dist/**",
     "vendor/**",
