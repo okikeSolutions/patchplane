@@ -76,7 +76,7 @@ WorkOS AuthKit session
 
 The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, user-facing workflow creation goes through Convex JWT validation plus mirrored membership authorization, and the authenticated control-plane loop is productized in the UI.
 
-For the current alpha, Convex is intentionally the realtime orchestration/read-model backend: it owns durable workflow records, live reads, and Convex-side authorization around public mutations/queries. PatchPlane core workflows still run against `StorageService`, so another storage provider can later implement the same durable workflow-state capability without changing core workflow code. Replacing Convex entirely would still require replacing the Convex client/read-model/auth-mirroring integration, but the workflow persistence contract is already isolated.
+For the current alpha, Convex is intentionally the realtime orchestration/read-model backend: it owns live reads, WorkOS-derived auth mirroring, and Convex-side authorization around public mutations/queries. PatchPlane core workflows still run against `StorageService`, so another storage provider can later implement durable workflow-state persistence without changing core workflow code. SQL storage plugins are not a full Convex replacement; they are durable workflow storage alternatives while Convex can remain the realtime projection/UI orchestration layer.
 
 The next slice is not "more platform." It is the smallest credible trust-boundary loop:
 
@@ -258,6 +258,7 @@ Tasks:
 Acceptance criteria:
 
 - Foundation records persist through `StorageService`.
+- Convex is the alpha durable storage implementation, but `StorageService` remains the boundary for future SQL workflow persistence plugins.
 - Core does not import Convex APIs.
 - Convex authenticated write/read errors map into `StorageError`.
 - Plugin Convex access uses vendor SDK boundaries instead of raw `fetch`.
@@ -549,6 +550,41 @@ Acceptance criteria:
 - A generated patch remains untrusted until sandbox execution and review complete.
 - A human can approve or reject the candidate before publication/merge path handoff.
 - The alpha demo can show why the decision was made using persisted provenance, not only transient logs.
+
+---
+
+### M10.5 — Optional SQL durable workflow storage plugins
+
+**Status:** Deferred until after the pre-CI trust-boundary demo has real workflow/event shapes
+
+Scope:
+
+SQL plugins are for durable workflow persistence only. They are not intended to replace Convex's realtime UI/read-model role, WorkOS auth mirroring, or Convex-side public query/mutation authorization in the alpha. Convex may continue to project and serve live dashboard state while `StorageService` writes durable workflow records to another backend.
+
+Provider assessment from Effect SQL research:
+
+- Postgres: first production SQL target. Use `@effect/sql-pg` with matching Effect v4 beta version. Supports pools, transactions, JSON helpers, streaming, LISTEN/NOTIFY, migrations, and strong error mapping.
+- SQLite Node: first local/self-hosted target. Use `@effect/sql-sqlite-node` backed by `better-sqlite3`. Good fit for simple OSS/dev deployments and tests.
+- MySQL: feasible after Postgres/SQLite. Use `@effect/sql-mysql2`; account for dialect differences around IDs, timestamps, JSON, and returning values.
+- D1: possible later for Cloudflare deployments. Use `@effect/sql-d1`, but note the vendored driver does not support transactions or streaming queries and requires a Workers `D1Database` binding.
+
+Tasks:
+
+- [ ] Extract shared SQL workflow-storage implementation around generic `effect/unstable/sql` `SqlClient` where dialect differences allow.
+- [ ] Add SQL migrations for `prompt_requests`, `workflow_runs`, and later runtime/review/decision tables.
+- [ ] Implement `PostgresWorkflowStoragePlugin` via `@effect/sql-pg`.
+- [ ] Implement `SQLiteNodeWorkflowStoragePlugin` via `@effect/sql-sqlite-node`.
+- [ ] Implement `MySQLWorkflowStoragePlugin` via `@effect/sql-mysql2` only after SQL schema portability is proven.
+- [ ] Consider `D1WorkflowStoragePlugin` only when PatchPlane has a Cloudflare deployment target or edge-specific reason.
+- [ ] Keep all SQL driver types, schemas, migrations, and dialect handling inside plugin packages; core/domain continue to see only PatchPlane domain schemas and `StorageService`.
+- [ ] If Convex remains the realtime projection layer, define an explicit projection/update path from durable SQL workflow writes into Convex-visible state.
+
+Acceptance criteria:
+
+- A SQL plugin can implement `StorageService.createWorkflowFromPrompt` and `StorageService.listRecentWorkflowStarts` without changing `packages/core`.
+- PromptRequest + WorkflowRun creation remains atomic for providers with transactions.
+- SQL plugin failures map to PatchPlane `StorageError`; raw SQL/driver errors do not cross into core.
+- Convex can remain enabled for realtime UI even when durable workflow persistence is SQL-backed.
 
 ---
 
