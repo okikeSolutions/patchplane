@@ -1,90 +1,59 @@
-# Welcome to your Convex functions directory!
+# PatchPlane Convex functions
 
-Write your Convex functions here.
-See https://docs.convex.dev/functions for more.
+This directory contains the Convex deployment functions for PatchPlane's alpha control-plane backend.
 
-A query function that takes two arguments looks like:
+Convex currently provides:
 
-```ts
-// convex/myFunctions.ts
-import { query } from './_generated/server'
-import { v } from 'convex/values'
+- WorkOS/AuthKit backend integration and webhook handling,
+- mirrored WorkOS users and organization memberships,
+- authenticated workflow-start mutations,
+- authenticated/restricted read models for the app UI,
+- signed external-ingestion workflow starts,
+- generic external workflow reference persistence and idempotency.
 
-export const myQueryFunction = query({
-  // Validators for arguments.
-  args: {
-    first: v.number(),
-    second: v.string(),
-  },
+## Important files
 
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Read the database as many times as you need here.
-    // See https://docs.convex.dev/database/reading-data.
-    const documents = await ctx.db.query('tablename').collect()
+- `schema.ts` — app tables for users, memberships, prompt requests, workflow runs, and `externalWorkflowRefs`.
+- `workflowStarts.ts` — transactional workflow-start creation for user and external intake paths.
+- `auth.ts` / `http.ts` / `auth.config.ts` — WorkOS AuthKit and Convex auth plumbing.
+- `viewer.ts`, `requests.ts` — authenticated read-model functions used by the app.
+- `*.test.ts` — Convex tests for auth mirroring, authorization, workflow creation, and external-intake dedupe.
 
-    // Arguments passed from the client are properties of the args object.
-    console.log(args.first, args.second)
+## Workflow-start boundaries
 
-    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
-    // remove non-public properties, or create new objects.
-    return documents
-  },
-})
+User flow:
+
+```text
+workflowStarts:create
+→ ctx.auth.getUserIdentity()
+→ workspace matches WorkOS organization
+→ actor matches WorkOS subject
+→ source must be "app"
+→ active mirrored membership includes prompt:create
+→ promptRequests + workflowRuns
 ```
 
-Using this query function in a React component looks like:
+External/provider flow:
 
-```ts
-const data = useQuery(api.myFunctions.myQueryFunction, {
-  first: 10,
-  second: 'hello',
-})
+```text
+workflowStarts:createFromExternalIntake
+→ PATCHPLANE_SYSTEM_INGESTION_SECRET
+→ source must be "external"
+→ dedupe by provider/comment, provider/repository/issue/event, then provider/delivery
+→ promptRequests + workflowRuns + externalWorkflowRefs
 ```
 
-A mutation function looks like:
+`externalWorkflowRefs` is intentionally generic. Do not add provider-specific tables such as `githubWorkflowRefs` unless the product intentionally accepts provider coupling.
 
-```ts
-// convex/myFunctions.ts
-import { mutation } from './_generated/server'
-import { v } from 'convex/values'
+## Development
 
-export const myMutationFunction = mutation({
-  // Validators for arguments.
-  args: {
-    first: v.string(),
-    second: v.string(),
-  },
+Run from `packages/backend`:
 
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Insert or modify documents in the database here.
-    // Mutations can also read from the database like queries.
-    // See https://docs.convex.dev/database/writing-data.
-    const message = { body: args.first, author: args.second }
-    const id = await ctx.db.insert('messages', message)
-
-    // Optionally, return a value from your mutation.
-    return await ctx.db.get('messages', id)
-  },
-})
+```bash
+bun run dev
+bun run typecheck
+bun run lint
+bun run test
 ```
 
-Using this mutation function in a React component looks like:
-
-```ts
-const mutation = useMutation(api.myFunctions.myMutationFunction)
-function handleButtonPress() {
-  // fire and forget, the most common way to use mutations
-  mutation({ first: 'Hello!', second: 'me' })
-  // OR
-  // use the result once the mutation has completed
-  mutation({ first: 'Hello!', second: 'me' }).then((result) =>
-    console.log(result),
-  )
-}
-```
-
-Use the Convex CLI to push your functions to a deployment. See everything
-the Convex CLI can do by running `npx convex -h` in your project root
-directory. To learn more, launch the docs with `npx convex docs`.
+Use Convex validators for all args/returns, keep authorization checks inside public functions, and keep provider-specific SDK usage out of Convex functions unless there is a concrete deployment reason.

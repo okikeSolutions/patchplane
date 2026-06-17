@@ -1,6 +1,6 @@
 # `@patchplane/backend`
 
-Convex lives in this package on purpose.
+Convex deployment functions live in this package on purpose. The app and plugins call Convex through PatchPlane-owned service boundaries; Convex functions remain the deployment/database API and enforce Convex-side validation, authorization, and transactional writes.
 
 ## Commands
 
@@ -8,59 +8,89 @@ Convex lives in this package on purpose.
 bun run dev
 ```
 
-This starts `convex dev` from `packages/backend`.
+Starts `convex dev` from `packages/backend`.
 
 ```bash
 bun run codegen
 ```
 
-This generates `convex/_generated/*` once a Convex deployment has been configured.
+Generates `convex/_generated/*` once a Convex deployment has been configured.
 
 ```bash
 bun run typecheck
 ```
 
-This checks the backend core in `src/`.
-
-```bash
-bun run typecheck:convex
-```
-
-This checks Convex functions after `_generated/server` exists.
+Runs Convex TypeScript typechecking.
 
 ```bash
 bun run lint
 ```
 
-This runs `oxlint` first, then a focused ESLint pass over `convex/` for the
-Convex-specific rules that Oxlint does not fully cover yet.
+Runs `oxlint` over backend source plus the focused ESLint pass over `convex/` for Convex-specific rules.
 
-## GitHub App Setup
+```bash
+bun run test
+```
+
+Runs Convex tests, including WorkOS auth mirroring, authenticated workflow-start authorization, signed external intake, and redelivery dedupe.
+
+## Current Convex boundaries
+
+User-facing workflow starts:
+
+```text
+workflowStarts:create
+→ WorkOS JWT identity
+→ active mirrored membership
+→ prompt:create permission
+→ actor/workspace/source anti-spoofing
+→ promptRequests + workflowRuns
+```
+
+External/provider workflow starts:
+
+```text
+workflowStarts:createFromExternalIntake
+→ PATCHPLANE_SYSTEM_INGESTION_SECRET
+→ externalWorkflowRefs idempotency checks
+→ promptRequests + workflowRuns + externalWorkflowRefs
+```
+
+Current read paths require WorkOS identity and mirrored membership permissions where appropriate.
+
+## GitHub App setup for the current alpha
 
 PatchPlane should keep the GitHub App scoped to the minimum currently implemented slice.
 
-Current required repository permissions:
+Required repository permissions for inbound intake and repository access verification:
 
 - `Metadata: Read-only`
 - `Issues: Read-only`
 
-Current required webhook subscriptions:
+Required webhook subscriptions:
 
-- `issue_comment`
+- `Issues` for `issues.opened`
+- `Issue comments` for `issue_comment.created`; PR issue comments are normalized as `github.pull_request_comment.created`
 
-This matches the current inbound path:
+Required app/client server environment for webhook-to-workflow creation:
 
-- install callback plus authoritative repository sync
-- verified `issue_comment.created` intake for `/patchplane ...`
-- fast `202` webhook acknowledgement with queued background processing
-- periodic failed-delivery reconciliation via [crons.ts](/Users/ugouwakwe/Documents/Github/patchplane/packages/backend/convex/crons.ts)
+```text
+GITHUB_APP_ID
+GITHUB_PRIVATE_KEY
+GITHUB_WEBHOOK_SECRET
+CONVEX_URL or VITE_CONVEX_URL
+PATCHPLANE_SYSTEM_INGESTION_SECRET
+PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo
+PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
+```
 
-Do not enable broader repository permissions or extra webhook subscriptions until the matching runtime paths are live.
-
-When outbound publication is enabled end to end, PatchPlane will additionally need:
+Outbound issue-comment publication is implemented in the GitHub provider plugin as a generic source-control `createIssueComment` capability. When publication is wired end to end, the GitHub App will additionally need:
 
 - `Issues: Read and write`
+
+Future check/draft PR publication will require:
+
 - `Checks: Read and write`
 - `Pull requests: Read and write`
 
-The repo-local source of truth for this is [appRequirements.ts](/Users/ugouwakwe/Documents/Github/patchplane/packages/backend/src/github/appRequirements.ts).
+Do not enable broader repository permissions or extra webhook subscriptions until the matching runtime paths are live.

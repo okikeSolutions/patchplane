@@ -1,191 +1,96 @@
-Welcome to your new TanStack Start app!
+# `@patchplane/client`
 
-# Getting Started
+PatchPlane's TanStack Start app and server composition root.
 
-To run this application:
+This app owns framework integration:
 
-```bash
-bun install
-bun --bun run dev
-```
+- TanStack Router/Start routes and server functions,
+- WorkOS AuthKit UI/session integration,
+- Convex client/AuthKit integration,
+- `/api/github/webhook`,
+- Effect `ManagedRuntime` composition,
+- UI shell and workflow prompt/read-model surfaces.
 
-# Building For Production
+Core workflow logic lives in `packages/core`; infrastructure SDKs are wrapped in `packages/plugins`.
 
-To build this application for production:
-
-```bash
-bun --bun run build
-```
-
-## Testing
-
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+## Commands
 
 ```bash
-bun --bun run test
+bun run dev
+bun run build
+bun run test
+bun run typecheck
 ```
 
-## Styling
+From the repository root, these are usually invoked as:
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `bun install @tailwindcss/vite tailwindcss -D`
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from '@tanstack/react-router'
+```bash
+bun run dev:client
+bun run build:client
+bun run typecheck
 ```
 
-Then anywhere in your JSX you can use it like so:
+## Runtime composition
 
-```tsx
-<Link to="/about">About</Link>
+Current runtimes:
+
+- `src/effect/runtime.ts` — normal app runtime composed from WorkOS auth, Convex storage, and observability layers.
+- `src/effect/github-runtime.ts` — GitHub webhook runtime composed from GitHub provider, Convex storage, and observability layers. This keeps GitHub env requirements out of ordinary app startup.
+
+Server functions use `src/lib/effect-server-fn.ts`, which dynamically imports the server runtime only inside the server handler so WorkOS server SDK code does not enter the browser bundle.
+
+## Routes of interest
+
+- `/` — landing page.
+- `/app` — authenticated alpha workflow prompt/read-model shell.
+- `/api/auth/sign-in` and `/api/auth/callback` — WorkOS AuthKit hosted sign-in flow.
+- `/api/github/webhook` — GitHub App webhook intake.
+
+## GitHub webhook intake
+
+Required headers:
+
+```text
+x-github-delivery
+x-github-event
+x-hub-signature-256
 ```
 
-This will create a link that will navigate to the `/about` route.
+Required server environment for creating workflows from webhooks:
 
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
+```text
+GITHUB_APP_ID
+GITHUB_PRIVATE_KEY
+GITHUB_WEBHOOK_SECRET
+CONVEX_URL or VITE_CONVEX_URL
+PATCHPLANE_SYSTEM_INGESTION_SECRET
+PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo
+PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 ```
 
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
+Flow:
 
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-
-  return <div>Server time: {time}</div>
-}
+```text
+raw request body
+→ GitHubWebhookService.verifyWebhook
+→ IngestGitHubWebhookToWorkflowIntake
+→ repository allowlist
+→ StartWorkflowFromIntake
+→ StorageService.createWorkflowFromIntake
 ```
 
-## API Routes
+The success response is intentionally compact and returns IDs/provider metadata rather than echoing full webhook payloads.
 
-You can create API routes by using the `server` property in your route definitions:
+## Styling and UI
 
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
+The app uses Tailwind CSS and local UI components in `src/components/ui`. Do not fork a full dashboard starter; compose future dashboard/review screens from the existing shell and components.
 
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
+## Client-bundle guard
+
+After `bun run build`, server-only SDKs and secrets should not appear in client assets:
+
+```bash
+rg "WORKOS_API_KEY|PATCHPLANE_SYSTEM_INGESTION_SECRET|GITHUB_PRIVATE_KEY|GITHUB_WEBHOOK_SECRET|octokit|github-runtime|workos-node|api.workos.com" dist/client
 ```
 
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+No matches are expected.

@@ -40,7 +40,7 @@ Plugins provide capabilities.
 The app composes plugins.
 ```
 
-The first v2 foundation milestone has advanced from a local storage smoke into an authenticated control-plane slice:
+The first v2 foundation milestone has advanced from a local storage smoke into two authenticated/control-plane intake paths:
 
 ```text
 WorkOS AuthKit session
@@ -53,9 +53,22 @@ WorkOS AuthKit session
 → authenticated Convex reads filtered by mirrored WorkOS membership/permissions
 ```
 
+```text
+GitHub webhook route
+→ raw body + GitHub headers
+→ GitHubWebhookService / Octokit signature verification
+→ GitHub-specific normalization
+→ generic WorkflowIntake + ExternalWorkflowRef
+→ StartWorkflowFromIntake
+→ generic SourceControlService repository-access verification
+→ StorageService.createWorkflowFromIntake
+→ Convex signed external-ingestion mutation
+→ PromptRequest + WorkflowRun + externalWorkflowRefs
+```
+
 WorkOS and Convex remain separate plugins composed at the app/client/server boundary. WorkOS is the identity, organization, membership, and permission source. Convex is the current realtime orchestration and UI read-model backend: it serves live reads and performs Convex-side authorization for public mutations/queries using mirrored WorkOS-derived membership data. PatchPlane workflows themselves are defined in `packages/core` against `StorageService`, so durable workflow state can later be written through another storage plugin such as Postgres, MySQL, SQLite, or D1 without replacing Convex's realtime/auth-mirroring role. Convex is therefore the alpha orchestrator/read-model backend, not the permanent durable workflow storage abstraction.
 
-The end-to-end hosted MVP expands this authenticated foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
+The end-to-end hosted MVP expands this authenticated foundation with GitHub publication, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
 
 ### 1.1 Current ecosystem context
 
@@ -177,6 +190,9 @@ packages/
       actor.ts
       workspace.ts
       prompt-request.ts
+      workflow-intake.ts
+      external-workflow-ref.ts
+      github.ts
       workflow-run.ts
       runtime-session.ts
       runtime-event.ts
@@ -190,16 +206,23 @@ packages/
   core/
     src/
       services/
-        AuthService.ts
-        StorageService.ts
-        GitProviderService.ts
+        auth-service.ts
+        auth-request-context.ts
+        storage-service.ts
+        source-control-service.ts
+        github-webhook-service.ts
         RuntimeService.ts
         SandboxService.ts
         ReviewService.ts
         PolicyService.ts
         TelemetryService.ts
       workflows/
-        StartWorkflowFromPrompt.ts
+        start-workflow-from-prompt.ts
+        start-authenticated-workflow-from-prompt.ts
+        start-workflow-from-intake.ts
+        ingest-github-webhook.ts
+        github-event-to-intake.ts
+        list-recent-workflow-starts.ts
         IngestRuntimeEvent.ts
         ProposeMergeDecision.ts
       index.ts
@@ -342,7 +365,7 @@ Use Effect Schema from day one for runtime validation, serialization, JSON Schem
 Rule:
 
 ```text
-All external inputs must be decoded into PatchPlane domain schemas before entering core workflows.
+All external inputs must be decoded into PatchPlane domain schemas before entering core workflows. Provider-originated requests should become a generic `WorkflowIntake` with optional `ExternalWorkflowRef`; provider names and event kinds belong in `externalRef`, not in storage/workflow method names.
 ```
 
 Provider-backed domain IDs should be namespaced opaque strings so provenance survives across plugins and ID systems:
@@ -374,6 +397,9 @@ Initial schemas:
 - `MergeDecision`
 - `PolicyBundle`
 - `RepositoryConnection`
+- `ExternalWorkflowRef`
+- `WorkflowIntake`
+- GitHub normalized webhook event schemas, used only at the provider-normalization edge
 
 Important trust boundaries include:
 
@@ -398,7 +424,8 @@ Initial error families:
 
 - `AuthError`
 - `StorageError`
-- `GitProviderError`
+- `SourceControlError`
+- `GitHubError` for GitHub webhook/normalization failures
 - `RuntimeError`
 - `SandboxError`
 - `ReviewError`
@@ -439,21 +466,29 @@ Core services:
 
 ### `StorageService`
 
-- `createWorkflowFromPrompt` as the atomic foundation write that creates both PromptRequest and WorkflowRun
+- `createWorkflowFromPrompt` as the authenticated/app prompt write that creates both PromptRequest and WorkflowRun
+- `createWorkflowFromIntake` as the generic workflow-intake write used by provider-originated requests with optional `ExternalWorkflowRef` metadata
 - `listRecentWorkflowStarts` for the authenticated foundation read-back path
 - `appendRuntimeEvent`
 - `createReviewRun`
 - `createMergeDecision`
 - `readWorkflowTimeline` later, once runtime/review/decision events exist
 
-### `GitProviderService`
+### `SourceControlService`
+
+Generic source-control operations used after provider-specific normalization:
 
 - `verifyRepositoryAccess`
-- `createBranch`
-- `createCommit`
-- `createDraftPullRequest`
-- `publishComment`
-- `publishCheck`
+- `createIssueComment`
+- later: `createBranch`, `createCommit`, `createDraftPullRequest`, `publishCheck`
+
+### `GitHubWebhookService`
+
+Provider-specific GitHub webhook edge capability:
+
+- `verifyWebhook` using Octokit's `app.webhooks.verify(rawPayload, signature)`
+
+GitHub webhook parsing and normalization may remain GitHub-specific, but once normalized it must map into generic `WorkflowIntake` / `ExternalWorkflowRef` before storage.
 
 ### `RuntimeService`
 
@@ -487,11 +522,17 @@ Core services:
 - metrics,
 - contextual annotations.
 
-Initial core workflows:
+Current and planned core workflows:
 
 - `StartWorkflowFromPrompt`
-- `IngestRuntimeEvent`
-- `ProposeMergeDecision`
+- `StartAuthenticatedWorkflowFromPrompt`
+- `StartWorkflowFromIntake`
+- `IngestGitHubWebhook` for GitHub-specific verification/normalization
+- `IngestGitHubWebhookToWorkflowIntake` for the composed GitHub → generic intake path
+- `GitHubEventToWorkflowIntake`
+- `ListRecentWorkflowStarts`
+- `IngestRuntimeEvent` later
+- `ProposeMergeDecision` later
 
 ---
 
@@ -530,9 +571,15 @@ Authenticated foundation:
 - WorkOS Auth Plugin,
 - Convex Storage Plugin.
 
+Current GitHub/external intake slice:
+
+- GitHub Provider Plugin implementing generic `SourceControlService` plus GitHub-specific `GitHubWebhookService`,
+- TanStack `/api/github/webhook` adapter,
+- generic `WorkflowIntake` and `externalWorkflowRefs` persistence.
+
 End-to-end MVP:
 
-- GitHub Provider Plugin,
+- GitHub publication paths,
 - Daytona Sandbox Plugin,
 - Pi Agent Runtime Plugin.
 
@@ -635,13 +682,19 @@ It is responsible for:
 apps/client/src/effect/layers.ts
 - foundation: compose WorkOSAuthPlugin.layer
 - foundation: compose ConvexStoragePlugin.layer
-- later: compose GitHubProviderPlugin.layer
-- later: compose PiAgentRuntimePlugin.layer
-- later: compose DaytonaSandboxPlugin.layer
 
 apps/client/src/effect/runtime.ts
 - create ManagedRuntime from PatchPlaneLayer
 - export helpers for server routes/functions
+
+apps/client/src/effect/github-runtime.ts
+- compose GitHubProviderPlugin.layer
+- compose ConvexStoragePlugin.layer
+- keep GitHub config out of normal app startup until GitHub webhook ingestion is enabled
+
+later:
+- compose PiAgentRuntimePlugin.layer
+- compose DaytonaSandboxPlugin.layer
 ```
 
 Route handlers and server functions call core workflows through this runtime.
@@ -950,11 +1003,11 @@ WorkOS AuthKit is the first auth plugin and source of human identity, organizati
 
 ### 17.5 Storage and realtime
 
-Use Convex as the first storage plugin and realtime backend.
+Use Convex as the first storage plugin and realtime backend. User workflow starts use Convex WorkOS JWT authorization and mirrored `prompt:create` checks. Provider/external workflow starts use a signed system-ingestion mutation and generic `externalWorkflowRefs` for idempotency and provenance.
 
 ### 17.6 Repository provider
 
-Use GitHub App integration as the first repository provider plugin.
+Use GitHub App integration as the first repository provider plugin. GitHub webhook verification remains provider-specific and server-only; after verification and normalization, GitHub events become generic `WorkflowIntake` values with `source: "external"` and provider details in `ExternalWorkflowRef`. The alpha webhook route requires `PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES` to prevent globally configured GitHub App deliveries from entering the wrong workspace.
 
 ### 17.7 Sandbox
 
@@ -983,9 +1036,13 @@ Initial integration tests:
 - WorkOS user and membership webhook sync into Convex app tables,
 - Convex authenticated workflow write through `StorageService`,
 - public workflow-start writes reject missing auth, spoofed actor/workspace/source, inactive membership, and missing `prompt:create`,
+- signed external workflow intake creates PromptRequest + WorkflowRun + `externalWorkflowRefs`,
+- external workflow intake deduplicates GitHub redelivery by comment, issue-event, and delivery keys,
 - authenticated Convex reads require mirrored active membership permissions,
 - create PromptRequest through core workflow,
-- create WorkflowRun through core workflow.
+- create WorkflowRun through core workflow,
+- GitHub webhook verification/normalization maps into generic `WorkflowIntake`,
+- `StartWorkflowFromIntake` verifies repository access before storage when repository metadata is present.
 
 Core tests after the first real path is proven:
 
@@ -1035,14 +1092,15 @@ Untrusted execution plane:
 
 - Run generated code outside the control plane.
 - Do not expose long-lived production credentials to sandbox runs.
-- Verify GitHub webhook signatures.
-- Deduplicate webhook deliveries.
+- Verify GitHub webhook signatures against the raw request body before parsing or persistence.
+- Deduplicate webhook deliveries and external references through generic `externalWorkflowRefs`.
+- Require explicit repository/workspace allowlisting for the alpha GitHub webhook route.
 - Keep GitHub App private keys and installation-token minting in trusted server contexts.
 - Store logs and artifacts separately from privileged secrets.
 - Keep WorkOS SDK usage server-only.
 - Treat WorkOS/AuthKit access tokens as request-scoped credentials.
-- Do not allow public Convex mutations to bypass Convex-side authorization for privileged writes.
-- Guard any future non-user HTTP ingestion boundary with server-only request signing.
+- Do not allow public Convex mutations to bypass Convex-side authorization for privileged user writes.
+- Keep external/system Convex ingestion behind a server-only shared secret until a stronger signed service-auth mechanism is introduced.
 - Make manual override and kill-switch behavior available from the UI.
 - Treat dependency changes as high-risk.
 - Validate workspaces, paths, permissions, and execution targets before runtime start.
@@ -1126,10 +1184,15 @@ Create:
 
 - `AuthService`
 - `StorageService`
+- `SourceControlService`
+- `GitHubWebhookService` for the GitHub edge verifier
 - `StartWorkflowFromPrompt`
+- `StartAuthenticatedWorkflowFromPrompt`
+- `StartWorkflowFromIntake`
+- GitHub webhook normalization and GitHub → generic intake mapping
 - authenticated workflow-start orchestration
 
-No WorkOS imports. No Convex imports.
+No WorkOS imports. No Convex imports. No Octokit imports.
 
 ### Step 5 — Build `packages/plugins/convex`
 
@@ -1138,6 +1201,8 @@ Implement:
 - Convex Storage Plugin,
 - `ConvexConfig`,
 - user-facing workflow-start write through Convex WorkOS JWT validation and mirrored `prompt:create` authorization,
+- signed external-intake workflow-start write through `workflowStarts:createFromExternalIntake`,
+- `externalWorkflowRefs` persistence and idempotency,
 - recent workflow read-back through Convex queries.
 
 Keep current Convex backend code in `packages/backend/convex` for now. Convex function location is separate from the Storage Plugin boundary; do not move Convex files until there is a concrete deployment reason.
@@ -1161,6 +1226,7 @@ Create:
 ```text
 apps/client/src/effect/layers.ts
 apps/client/src/effect/runtime.ts
+apps/client/src/effect/github-runtime.ts
 ```
 
 Run one authenticated server-side action through the composed `ManagedRuntime`:
@@ -1177,9 +1243,9 @@ WorkOS AuthKit session
 
 ## 22. Success Criteria
 
-### 22.1 Authenticated foundation MVP success
+### 22.1 Authenticated foundation and external intake success
 
-The authenticated foundation MVP is successful when:
+The authenticated foundation plus initial external intake slice is successful when:
 
 1. `packages/domain`, `packages/core`, and `packages/plugins` exist and typecheck.
 2. Existing Convex backend code remains in `packages/backend/convex` unless a concrete deployment reason requires moving it.
@@ -1189,19 +1255,21 @@ The authenticated foundation MVP is successful when:
 6. The server-side workflow verifies `prompt:create` through `AuthService` before writing.
 7. The core workflow creates a PromptRequest through `StorageService`.
 8. The core workflow creates a WorkflowRun through `StorageService`.
-9. Convex persists those records through the Convex Storage Plugin using WorkOS JWT validation and mirrored `prompt:create` authorization.
+9. Convex persists user workflow records through the Convex Storage Plugin using WorkOS JWT validation and mirrored `prompt:create` authorization.
 10. Public Convex workflow-start writes reject unauthenticated calls, workspace/actor/source spoofing, inactive memberships, and missing `prompt:create`.
 11. Convex authenticated reads require WorkOS identity and mirrored active membership permissions.
-12. Core contains no WorkOS, Convex, TanStack Start, GitHub, Daytona, or Pi Agent Core imports.
-13. Typed auth/storage errors and structured logs exist for the path.
+12. A signed GitHub webhook can be verified, normalized, converted into generic `WorkflowIntake`, repository-allowlisted, repository-access-checked, and persisted through `StorageService.createWorkflowFromIntake`.
+13. External refs persist in generic `externalWorkflowRefs`, not provider-specific storage tables.
+14. Core contains no WorkOS, Convex, TanStack Start, Octokit, Daytona, or Pi Agent Core imports.
+15. Typed auth/storage/source-control/GitHub errors and structured logs exist for the path.
 
 ### 22.2 End-to-end MVP success
 
 The hosted MVP is successful when:
 
-1. A user can connect a GitHub repository through a GitHub App installation.
+1. A user can connect or allowlist a GitHub repository through a GitHub App installation.
 2. A verified GitHub webhook or app prompt can create a durable PromptRequest.
-3. PatchPlane can start a WorkflowRun for that request.
+3. PatchPlane can start a WorkflowRun for that request through generic `WorkflowIntake` / `StorageService` boundaries.
 4. Daytona can provision a sandbox through `SandboxService`.
 5. Pi Agent Core can run behind `RuntimeService`.
 6. Runtime events are normalized and persisted.
@@ -1223,7 +1291,7 @@ The hosted MVP is successful when:
 | WorkOS auth assumptions leak into domain | Medium | High | Map WorkOS types into Actor/Workspace/Membership/Permission only |
 | Convex storage shapes leak into core | Medium | High | Decode Convex documents through domain schemas and StorageService mappings |
 | Plugin boundaries slow early implementation | Medium | Medium | Keep core service contracts narrow and compose WorkOS/Convex only at app/plugin boundaries |
-| GitHub App flow is more complex than expected | Medium | High | Defer GitHub to end-to-end MVP after Convex storage/core foundation works |
+| GitHub App flow is more complex than expected | Medium | High | Keep GitHub-specific logic at the webhook/provider edge; route verified events through generic `WorkflowIntake` and require repository allowlisting |
 | Daytona integration becomes an engineering sink | Medium | High | Defer to end-to-end MVP and keep sandbox API narrow |
 | Runtime integration leaks behavior into product model | Medium | High | Normalize RuntimeEvent and keep RuntimeSession as execution state only |
 | Enterprise RBAC scope expands too early | Medium | Medium | Use simple roles and permission slugs for v2 |
