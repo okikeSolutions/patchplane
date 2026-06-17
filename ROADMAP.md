@@ -76,6 +76,8 @@ WorkOS AuthKit session
 
 The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, user-facing workflow creation goes through Convex JWT validation plus mirrored membership authorization, and the authenticated control-plane loop is productized in the UI.
 
+For the current alpha, Convex is intentionally the realtime orchestration/read-model backend: it owns durable workflow records, live reads, and Convex-side authorization around public mutations/queries. PatchPlane core workflows still run against `StorageService`, so another storage provider can later implement the same durable workflow-state capability without changing core workflow code. Replacing Convex entirely would still require replacing the Convex client/read-model/auth-mirroring integration, but the workflow persistence contract is already isolated.
+
 The next slice is not "more platform." It is the smallest credible trust-boundary loop:
 
 ```text
@@ -213,7 +215,7 @@ Acceptance criteria:
 
 ---
 
-### M4 — Convex function boundary
+### M4 — Convex realtime orchestration/read-model boundary
 
 **Status:** Authenticated foundation slice working
 

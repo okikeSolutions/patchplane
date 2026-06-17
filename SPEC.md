@@ -53,7 +53,7 @@ WorkOS AuthKit session
 → authenticated Convex reads filtered by mirrored WorkOS membership/permissions
 ```
 
-WorkOS and Convex remain separate plugins composed at the app/client/server boundary. WorkOS is the identity, organization, membership, and permission source. Convex is the realtime storage and query boundary, with selected WorkOS user and membership data mirrored for server-side authorization in Convex functions.
+WorkOS and Convex remain separate plugins composed at the app/client/server boundary. WorkOS is the identity, organization, membership, and permission source. Convex is the current realtime control-plane state backend: it stores workflow records, serves live reads, and performs Convex-side authorization for public mutations/queries using mirrored WorkOS-derived membership data. PatchPlane workflows themselves are defined in `packages/core` against `StorageService`, so the durable workflow state backend can later be replaced by another storage plugin such as Postgres, MySQL, or SQLite. Convex is therefore the alpha orchestrator/read-model backend, not the permanent workflow or identity abstraction.
 
 The end-to-end hosted MVP expands this authenticated foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
 
@@ -149,7 +149,7 @@ PatchPlane integrates with those systems through plugins when they are useful. I
    Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane. Sandboxes need explicit lifecycle, resource, credential, and network policy.
 
 5. **Plugins at the edge**  
-   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Agent Core, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries.
+   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Agent Core, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries. Convex is the first realtime orchestration/read-model backend, but workflow state is accessed through `StorageService` so another storage provider can implement the same capability later.
 
 6. **Schemas at the boundary, Effect services in the core, plugins at the edge**  
    External inputs are decoded through Effect Schema; core capabilities are defined as Effect services; real infrastructure is provided by plugins and composed by the app.
@@ -519,6 +519,8 @@ Rule:
 ```text
 PatchPlane v2 uses real plugins from the start, but all real integrations must be accessed through PatchPlane-owned Effect services and layers.
 ```
+
+For the alpha, Convex is the concrete realtime orchestration/read-model backend. It is allowed to own Convex-specific transactions, queries, indexes, auth mirroring, and live UI integration. The portability boundary is `StorageService`: PatchPlane core workflows should not know whether durable workflow state is stored in Convex, Postgres, MySQL, SQLite, or another backend.
 
 ### 9.1 Initial plugins
 
