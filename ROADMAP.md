@@ -93,6 +93,8 @@ GitHub issue/comment or prompt
 
 For alpha, graph UI, multi-sandbox backends, weighted scoring, full enterprise RBAC, and Origin-style forge behavior remain explicitly deferred.
 
+UI strategy: do not fork or adopt a full dashboard starter. PatchPlane already has TanStack Start, WorkOS, Convex, Paraglide, Effect runtime, theme, and shadcn/base-nova wiring in place. Use the existing app shell and compose screens from `apps/client/src/components/ui` components. Copy small layout ideas or shadcn blocks only when useful, but preserve PatchPlane's current integration surface.
+
 ---
 
 ## 2. Milestones
@@ -489,6 +491,41 @@ Acceptance criteria:
 - PatchPlane can start one Pi Agent Core session inside a sandbox-backed workflow.
 - Pi events are normalized into PatchPlane `RuntimeEvent` records.
 - Operator abort/interrupt maps to runtime stop or continuation without exposing Pi-specific objects to core/UI.
+
+---
+
+### M9.5 — Dashboard and workflow visibility pass
+
+**Status:** Planned after Pi produces real runtime events; keep only light shell work before then
+
+Timing:
+
+- Before GitHub/Daytona/Pi: keep UI functional, not polished. Maintain prompt intake, auth/workspace state, recent workflow visibility, status badges, and loading/error states.
+- After GitHub and Daytona: add real repository, sandbox, command/log, and provenance placeholders backed by actual data.
+- After Pi runtime events: shift into the first serious dashboard/review UX pass because the control-plane value is then visible from real workflow data.
+
+Rules:
+
+- [ ] Do not fork full dashboard starters or replace the current app shell.
+- [ ] Build from local shadcn components in `apps/client/src/components/ui`.
+- [ ] Prefer selective composition of existing `Sidebar`, `Card`, `Table`, `Badge`, `Tabs`, `Sheet`, `Dialog`, `Command`, `Skeleton`, `Empty`, `Progress`, `Textarea`, `Field`, and `Tooltip` components.
+- [ ] Keep complex provenance graph UI deferred; use tables and simple vertical timelines first.
+- [ ] Keep AI summaries secondary/collapsible; make raw patch/diff, logs, and provenance easy to inspect.
+
+First dashboard scope:
+
+- [ ] Left navigation for Dashboard, Workflows, Reviews, Sandboxes, Settings/Plugins, and Activity.
+- [ ] Dashboard cards for open workflows, pending reviews, sandbox failures, and recently published patches.
+- [ ] Recent workflows table with status, source, runtime, sandbox, last update, and workspace.
+- [ ] Workflow detail page or side panel with prompt, timeline, runtime events, sandbox logs, and publication state.
+- [ ] Review split view once candidate patches exist: diff/logs first, AI summary/provenance second, approve/reject/request-changes controls with required comment.
+- [ ] Keyboard-friendly command/search palette after the main table/detail paths are useful.
+
+Acceptance criteria:
+
+- Dashboard uses the existing PatchPlane shell and local UI components instead of a starter fork.
+- A real Pi/Daytona/GitHub-backed workflow is understandable from the UI without reading server logs.
+- Review ergonomics are good enough to dogfood on GuerillaGlass.
 
 ---
 
