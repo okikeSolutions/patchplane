@@ -1,4 +1,4 @@
-import { Config, Effect, Layer } from 'effect'
+import { Config, Effect, Layer, Option, Redacted } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
@@ -14,18 +14,53 @@ import {
 } from '@patchplane/core/services/storage-service'
 import { ConvexConfig } from './ConvexConfig'
 
+interface ExternalWorkflowRefInput {
+  readonly provider: string
+  readonly deliveryId: string
+  readonly eventKind: string
+  readonly repositoryProvider?: string | undefined
+  readonly repositoryInstallationId?: string | undefined
+  readonly repositoryExternalId?: string | undefined
+  readonly repositoryOwner?: string | undefined
+  readonly repositoryName?: string | undefined
+  readonly repositoryFullName?: string | undefined
+  readonly issueExternalId?: string | undefined
+  readonly issueNumber?: number | undefined
+  readonly issueTitle?: string | undefined
+  readonly commentExternalId?: string | undefined
+  readonly url?: string | undefined
+  readonly senderProvider?: string | undefined
+  readonly senderExternalId?: string | undefined
+  readonly senderLogin?: string | undefined
+}
+
 const createWorkflowStartMutation = makeFunctionReference<
   'mutation',
   {
     workspaceId: string
     actorId: string
     actorDisplayName: string
-    source: 'dev' | 'app' | 'github_issue' | 'github_pr_comment'
+    source: 'dev' | 'app' | 'external'
     traceId: string
     prompt: string
   },
   unknown
 >('workflowStarts:create')
+
+const createWorkflowStartFromExternalIntakeMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workspaceId: string
+    actorId: string
+    actorDisplayName: string
+    source: 'external'
+    traceId: string
+    prompt: string
+    externalRef: ExternalWorkflowRefInput
+  },
+  unknown
+>('workflowStarts:createFromExternalIntake')
 
 const listRecentWorkflowStartsQuery = makeFunctionReference<
   'query',
@@ -46,6 +81,9 @@ export const ConvexStoragePlugin = {
     Effect.gen(function* () {
       const config = yield* ConvexConfig
       const convexUrl = normalizeConvexUrl(config.url)
+      const systemIngestionSecret = Option.getOrUndefined(
+        config.systemIngestionSecret,
+      )
 
       const createWorkflowFromPrompt = Effect.fn(
         '@patchplane/plugins/convex/createWorkflowFromPrompt',
@@ -65,6 +103,34 @@ export const ConvexStoragePlugin = {
             const value = yield* Effect.tryPromise({
               try: () => {
                 const client = new ConvexHttpClient(convexUrl)
+
+                if (input.externalRef !== undefined) {
+                  if (systemIngestionSecret === undefined) {
+                    throw new Error(
+                      'PATCHPLANE_SYSTEM_INGESTION_SECRET is required for external workflow ingestion',
+                    )
+                  }
+
+                  if (input.source !== 'external') {
+                    throw new Error(
+                      'External workflow ingestion requires the external prompt source',
+                    )
+                  }
+
+                  return client.mutation(
+                    createWorkflowStartFromExternalIntakeMutation,
+                    {
+                      systemSecret: Redacted.value(systemIngestionSecret),
+                      workspaceId: input.workspaceId,
+                      actorId: input.actor.id,
+                      actorDisplayName: input.actor.displayName,
+                      source: input.source,
+                      traceId: input.traceId,
+                      prompt: input.prompt,
+                      externalRef: input.externalRef,
+                    },
+                  )
+                }
 
                 if (input.authToken !== undefined) {
                   client.setAuth(input.authToken)
@@ -164,6 +230,7 @@ export const ConvexStoragePlugin = {
       )
 
       return StorageService.of({
+        createWorkflowFromIntake: createWorkflowFromPrompt,
         createWorkflowFromPrompt,
         listRecentWorkflowStarts,
       })

@@ -6,6 +6,9 @@ const convexUrl = Config.url('CONVEX_URL').pipe(
 
 export const ConvexConfig = Config.all({
   url: convexUrl,
+  systemIngestionSecret: Config.option(
+    Config.redacted('PATCHPLANE_SYSTEM_INGESTION_SECRET'),
+  ),
 })
 
 export type ConvexConfig = typeof ConvexConfig extends Config.Config<infer A>
