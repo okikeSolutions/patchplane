@@ -1,8 +1,8 @@
 # SPEC.md – PatchPlane v2 – Effect-Native AI Change Control Plane
 
-**Version:** 2.0  
-**Date:** June 16, 2026  
-**Status:** Authenticated foundation architecture for Effect v4 / effect-smol plugin-based MVP
+**Version:** 2.1
+**Date:** June 17, 2026
+**Status:** Authenticated foundation plus pre-CI trust-boundary scope for Effect v4 / effect-smol plugin-based MVP
 
 ---
 
@@ -20,7 +20,9 @@ Update `ROADMAP.md` when execution order, status, or evidence changes. Update `S
 
 **PatchPlane** is an open-source AI change-control plane for coordinating humans and AI agents around software changes.
 
-PatchPlane is not a Git replacement and not a thin GitHub bot. It is a control plane that coordinates:
+PatchPlane sits at the **pre-CI trust boundary**. Every AI-generated patch, regardless of the agent or harness that produced it, is treated as untrusted until PatchPlane has executed it in an isolated sandbox, captured provenance, run validation/review, and recorded a human or policy decision before it enters normal GitHub, CI, or merge paths.
+
+PatchPlane is not a Git replacement, a hosted LLM platform, or a thin GitHub bot. It is a control plane that coordinates:
 
 1. prompt/request intake,
 2. workflow orchestration,
@@ -55,6 +57,29 @@ WorkOS and Convex remain separate plugins composed at the app/client/server boun
 
 The end-to-end hosted MVP expands this authenticated foundation with GitHub, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
 
+### 1.1 Current ecosystem context
+
+Research refreshed on June 17, 2026 confirms the market is moving toward background AI coding agents, cloud execution, and isolated sandboxes:
+
+- GitHub Copilot cloud agent works in a GitHub Actions-powered environment, can be started from issues and other entry points, and creates branches/PRs for review.
+- OpenAI Codex is positioned as a cloud coding agent that can work in isolated environments and propose pull requests.
+- Cursor Background Agents and similar tools are normalizing parallel remote coding sessions that clone repositories, push branches, and raise PRs.
+- Pi and Flue-style harnesses focus on agent runtime/harness behavior, durable agent execution, tools, extensions, and sessions.
+- Daytona, Modal, E2B, Northflank, Vercel Sandbox, Cloudflare Sandboxes, and related products validate sandboxed code execution as a separate infrastructure layer.
+
+PatchPlane's differentiation is the neutral governance layer between those agent/runtime/sandbox systems and trusted repository/CI/merge infrastructure. It is complementary to agent harnesses, sandboxes, hosted coding agents, and Git forges because it owns the policy, provenance, review, and approval boundary across them.
+
+Research sources:
+
+- [GitHub Copilot cloud agent docs](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent)
+- [GitHub Copilot coding agent announcement](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)
+- [OpenAI Codex announcement](https://openai.com/index/introducing-codex/)
+- [Daytona sandboxes docs](https://www.daytona.io/docs/en/sandboxes/)
+- [Daytona TypeScript SDK sandbox reference](https://www.daytona.io/docs/en/typescript-sdk/sandbox/)
+- [Pi repository](https://github.com/earendil-works/pi)
+- [Flue repository](https://github.com/withastro/flue)
+- [Modal sandbox comparison](https://modal.com/resources/best-code-execution-sandboxes-ai-agents)
+
 ---
 
 ## 2. Product Thesis
@@ -77,7 +102,18 @@ PatchPlane's adoption wedge remains **GitHub compatibility without GitHub depend
 
 - GitHub remains the initial repository, issue, PR, and community surface.
 - PatchPlane becomes the control plane for orchestration, execution, supervision, policy, review, and decision history.
+- GitHub Copilot cloud agent, Codex, Cursor Background Agents, Pi, Flue, OpenCode, Claude Code, and custom harnesses can all be treated as possible runtime/input sources rather than product dependencies.
 - Over time, PatchPlane may internalize more patch-governance and rollback behavior without forcing teams to abandon GitHub on day one.
+
+The strategic wedge is therefore:
+
+```text
+Agents generate patches.
+Sandboxes execute untrusted work.
+Git forges host collaboration.
+CI validates trusted branches.
+PatchPlane decides what is allowed to cross from untrusted agent output into trusted team workflows.
+```
 
 ### 2.2 What PatchPlane is not
 
@@ -91,6 +127,10 @@ For v2, PatchPlane is not:
 - an open multi-tenant SaaS platform,
 - a full semantic conflict-resolution engine,
 - an enterprise RBAC suite.
+- a competitor to Daytona, Modal, E2B, Northflank, Vercel Sandbox, or Cloudflare Sandboxes.
+- a competitor to Pi, Flue, Codex, Cursor Background Agents, Claude Code, or GitHub Copilot cloud agent.
+
+PatchPlane integrates with those systems through plugins when they are useful. It should avoid rebuilding their core runtime, sandbox, or editor/forge surfaces.
 
 ---
 
@@ -106,7 +146,7 @@ For v2, PatchPlane is not:
    Every request, run, review, event, and decision should be observable by connected clients.
 
 4. **Sandbox everything untrusted**  
-   Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane.
+   Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane. Sandboxes need explicit lifecycle, resource, credential, and network policy.
 
 5. **Plugins at the edge**  
    Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Agent Core, OpenCode, Codex, Postgres, or MySQL must be accessed through PatchPlane-owned plugin boundaries.
@@ -119,6 +159,9 @@ For v2, PatchPlane is not:
 
 8. **Policy is explicit and serializable**  
    Approval, sandbox, evaluation, and merge criteria are auditable artifacts, not hidden ad hoc business logic.
+
+9. **Complement hot tools, do not chase them**
+   PatchPlane should consume agent outputs and sandbox capabilities through stable contracts. The alpha should prove trust-boundary value without trying to outbuild coding agents, sandboxes, or Git forges.
 
 ---
 

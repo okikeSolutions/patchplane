@@ -1,6 +1,6 @@
 # ROADMAP.md – PatchPlane v2 Execution Plan
 
-**Date:** June 12, 2026  
+**Date:** June 17, 2026
 **Source of truth:** [SPEC.md](./SPEC.md)  
 **Architecture:** Effect v4 / effect-smol core with real infrastructure plugins
 
@@ -27,11 +27,41 @@ Spec adjustments made from research:
 - clarified `@daytona/sdk` package name and sandbox lifecycle/network implications,
 - added Node 22.19+ and Octokit conditional-export TypeScript constraints.
 
+### 0.1 Ecosystem research refresh — June 17, 2026
+
+Current external research reinforces the PatchPlane wedge: agent vendors are converging on background coding sessions and PR creation, while sandbox vendors are converging on isolated execution, lifecycle policy, network controls, and resource governance. PatchPlane should not compete with those layers. It should provide the neutral pre-CI trust boundary that decides when untrusted agent output is allowed to enter trusted GitHub/CI/merge workflows.
+
+Research findings:
+
+- GitHub Copilot cloud agent runs autonomously in a GitHub Actions-powered environment and can start from issues or other entry points before creating reviewable branches/PRs.
+- OpenAI Codex is positioned as a cloud coding agent that can operate in isolated environments and propose pull requests for review.
+- Cursor Background Agents normalize parallel remote coding tasks that clone repositories, push changes, and open PRs, reinforcing the need for independent governance outside any one editor.
+- Pi and Flue validate the runtime/harness layer: sessions, tools, event streams, durable execution, extensions, and subagents.
+- Daytona and other sandbox providers validate sandboxing as its own infrastructure layer with lifecycle, snapshot, resource, and network policy surfaces.
+
+Implications for alpha:
+
+- Keep PatchPlane runtime-neutral: Pi first is an integration choice, not the product boundary.
+- Keep PatchPlane sandbox-neutral: Daytona first is an integration choice, not the product boundary.
+- Keep PatchPlane forge-compatible: GitHub first is the adoption wedge, not a permanent dependency.
+- Prioritize a demo that shows an AI-generated patch blocked from trusted workflows until sandbox execution, validation, provenance capture, and explicit approval complete.
+
+Sources:
+
+- [GitHub Copilot cloud agent docs](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent)
+- [GitHub Copilot coding agent announcement](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)
+- [OpenAI Codex announcement](https://openai.com/index/introducing-codex/)
+- [Daytona sandboxes docs](https://www.daytona.io/docs/en/sandboxes/)
+- [Daytona TypeScript SDK sandbox reference](https://www.daytona.io/docs/en/typescript-sdk/sandbox/)
+- [Pi repository](https://github.com/earendil-works/pi)
+- [Flue repository](https://github.com/withastro/flue)
+- [Modal sandbox comparison](https://modal.com/resources/best-code-execution-sandboxes-ai-agents)
+
 ---
 
 ## 1. Current Objective
 
-Build the **PatchPlane v2 authenticated foundation**:
+Complete the **PatchPlane v2 authenticated foundation**, then ship the first pre-CI trust-boundary demo:
 
 ```text
 WorkOS AuthKit session
@@ -44,7 +74,22 @@ WorkOS AuthKit session
 → authenticated Convex reads filtered by mirrored WorkOS membership/permissions
 ```
 
-The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, user-facing workflow creation goes through Convex JWT validation plus mirrored membership authorization, and the authenticated control-plane loop is productized in the UI. Daytona, Pi Agent Core, GitHub publication, reviewer fan-out, and graph UI remain deferred until the next product slice.
+The foundation path has moved beyond the original local-development actor smoke. WorkOS + Convex are now composed at the app layer, WorkOS users and organization memberships are mirrored into Convex via `@convex-dev/workos-authkit`, user-facing workflow creation goes through Convex JWT validation plus mirrored membership authorization, and the authenticated control-plane loop is productized in the UI.
+
+The next slice is not "more platform." It is the smallest credible trust-boundary loop:
+
+```text
+GitHub issue/comment or prompt
+→ authenticated PatchPlane workflow
+→ repository access verification
+→ Daytona sandbox provisioning
+→ Pi/agent execution in sandbox
+→ candidate patch + logs + test/review result
+→ human approve/reject
+→ GitHub comment/check/draft PR publication
+```
+
+For alpha, graph UI, multi-sandbox backends, weighted scoring, full enterprise RBAC, and Origin-style forge behavior remain explicitly deferred.
 
 ---
 
@@ -68,7 +113,7 @@ Tasks:
 - [x] Decide vendor usage: `/vendor` is research-only.
 - [x] Decide Effect policy: pin `effect@4.0.0-beta.79` everywhere Effect v4 is used.
 - [ ] Add Node engine note or tooling guard for Node 22.19+ where server/plugin code runs.
-- [ ] Update TS config strategy for server/plugin packages that import Octokit conditional exports.
+- [x] Verify current package TS config can typecheck `octokit` conditional exports in `packages/plugins`; revisit Node16 module settings if runtime packaging changes.
 
 Acceptance criteria:
 
@@ -351,6 +396,8 @@ Tasks:
 
 ### M7 — GitHub Provider Plugin
 
+**Status:** In progress
+
 Vendor facts:
 
 - Use `octokit` v5 line.
@@ -360,15 +407,28 @@ Vendor facts:
 
 Tasks:
 
-- [ ] Add `GitHubConfig` with app ID, private key, webhook secret, base URL.
-- [ ] Implement installation-token broker.
-- [ ] Implement `verifyRepositoryAccess`.
-- [ ] Implement webhook verification and event normalization.
-- [ ] Implement comment/check/draft PR publication.
+- [x] Add `GitHubConfig` with app ID, private key, webhook secret, base URL.
+- [x] Implement installation-token broker via Octokit `App.getInstallationOctokit`.
+- [x] Implement `verifyRepositoryAccess`.
+- [x] Implement pure webhook signature verification with Octokit `app.webhooks.verify(...)` and minimal event normalization from the raw JSON payload.
+- [x] Implement issue comment publication.
+- [x] Add nock-backed GitHub provider tests for repository access, issue comments, and webhook signatures.
+- [ ] Implement check/draft PR publication.
+- [ ] Wire GitHub webhook ingestion into the app/backend request path.
+- [ ] Add one user-visible GitHub publication path for the alpha demo: issue comment first, then check or draft PR.
+- [ ] Persist normalized GitHub event references on workflow records once webhook ingestion is live.
+
+Acceptance criteria:
+
+- GitHub App installation token flow is isolated inside `packages/plugins`.
+- Signed GitHub webhooks are verified before normalization or persistence.
+- PatchPlane can publish an alpha workflow result back to GitHub without leaking Octokit objects into core.
 
 ---
 
 ### M8 — Daytona Sandbox Plugin
+
+**Status:** Next alpha blocker after GitHub publication path
 
 Vendor facts:
 
@@ -381,13 +441,22 @@ Tasks:
 - [ ] Add `DaytonaConfig` with redacted API key.
 - [ ] Implement `SandboxService.provision`.
 - [ ] Prefer ephemeral or auto-deleting sandbox profiles for MVP.
+- [ ] Add explicit sandbox policy fields for lifecycle, resources, timeout, and network posture.
 - [ ] Implement checkout/clone support through Daytona git APIs.
 - [ ] Implement command execution and artifact collection.
 - [ ] Always destroy or stop sandboxes on workflow cancellation/failure where possible.
 
+Acceptance criteria:
+
+- A workflow can provision a sandbox, check out a GitHub repository ref, run at least one command, collect logs/artifacts, and tear down the sandbox.
+- Sandboxes never receive long-lived WorkOS, Convex, or GitHub App credentials.
+- Sandbox lifecycle and network policy are visible in stored workflow provenance.
+
 ---
 
 ### M9 — Pi Agent Runtime Plugin
+
+**Status:** Next alpha runtime after sandbox execution exists
 
 Vendor facts:
 
@@ -411,10 +480,19 @@ Tasks:
   - [ ] `agent_end`
 - [ ] Map `agent.abort()` to `RuntimeService.stopSession`.
 - [ ] Map steering/follow-up to human interrupt/redirect primitives.
+- [ ] Preserve enough raw event metadata for debugging while storing normalized PatchPlane events as product truth.
+
+Acceptance criteria:
+
+- PatchPlane can start one Pi Agent Core session inside a sandbox-backed workflow.
+- Pi events are normalized into PatchPlane `RuntimeEvent` records.
+- Operator abort/interrupt maps to runtime stop or continuation without exposing Pi-specific objects to core/UI.
 
 ---
 
 ### M10 — Review, decision, and publication loop
+
+**Status:** Alpha demo finish line
 
 Tasks:
 
@@ -425,6 +503,31 @@ Tasks:
 - [ ] Implement `ProposeMergeDecision`.
 - [ ] Publish GitHub comment/check/draft PR through GitHub plugin.
 - [ ] Add operator approval/rejection path.
+- [ ] Record provenance linking prompt, actor, workspace, repository, sandbox, runtime session, commands/tests, candidate patch, review result, and final decision.
+
+Acceptance criteria:
+
+- A generated patch remains untrusted until sandbox execution and review complete.
+- A human can approve or reject the candidate before publication/merge path handoff.
+- The alpha demo can show why the decision was made using persisted provenance, not only transient logs.
+
+---
+
+### M11 — Dogfood on GuerillaGlass
+
+**Status:** Planned after M10 minimum loop
+
+Tasks:
+
+- [ ] Connect the GuerillaGlass repository through the GitHub plugin.
+- [ ] Run at least three real issue/prompt workflows through PatchPlane.
+- [ ] Capture friction in setup, sandbox lifecycle, event readability, review usefulness, and approval ergonomics.
+- [ ] Convert dogfood findings into M10/M12 follow-up issues before broader launch.
+
+Acceptance criteria:
+
+- At least one real GuerillaGlass patch is generated, sandboxed, reviewed, approved, and published through the PatchPlane loop.
+- The demo path is reproducible without manually editing database state.
 
 ---
 
@@ -463,6 +566,7 @@ Tasks:
 
 - [ ] No long-lived credentials in sandboxes.
 - [ ] GitHub webhook signatures verified before ingestion.
+- [ ] Treat every runtime-produced patch and artifact as untrusted until sandbox review and approval complete.
 - [x] Convex SDK errors map into typed PatchPlane `StorageError` for foundation.
 - [x] WorkOS SDK errors map into typed PatchPlane `AuthError` for authenticated foundation.
 - [x] Public `workflowStarts:create` writes require WorkOS JWT validation, active mirrored membership, actor/workspace anti-spoofing, and `prompt:create`.
@@ -487,6 +591,16 @@ Do not implement before the WorkOS/Convex alpha smoke is complete:
 - desktop shell,
 - full enterprise RBAC beyond current WorkOS organization roles/permissions,
 - production-grade resource authorization beyond the current org-level WorkOS membership mirror.
+
+Do not implement before the first pre-CI trust-boundary demo is complete:
+
+- multiple sandbox providers beyond Daytona,
+- multiple Git forges beyond GitHub,
+- Origin-style internal forge behavior,
+- semantic merge/conflict resolution,
+- monetization or billing,
+- broad plugin marketplace work,
+- generalized enterprise policy editor.
 
 ---
 
