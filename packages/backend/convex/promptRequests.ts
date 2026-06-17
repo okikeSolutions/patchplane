@@ -9,8 +9,6 @@ export const create = mutation({
     source: v.union(
       v.literal('dev'),
       v.literal('app'),
-      v.literal('github_issue'),
-      v.literal('github_pr_comment'),
     ),
     traceId: v.string(),
     prompt: v.string(),
@@ -23,8 +21,6 @@ export const create = mutation({
     source: v.union(
       v.literal('dev'),
       v.literal('app'),
-      v.literal('github_issue'),
-      v.literal('github_pr_comment'),
     ),
     prompt: v.string(),
     status: v.literal('created'),

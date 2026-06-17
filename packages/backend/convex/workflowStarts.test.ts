@@ -10,13 +10,14 @@ type CreateWorkflowStartArgs = Record<string, unknown> & {
   workspaceId: string
   actorId: string
   actorDisplayName: string
-  source: 'dev' | 'app' | 'github_issue' | 'github_pr_comment'
+  source: 'dev' | 'app' | 'external'
   traceId: string
   prompt: string
 }
 
 interface WorkflowStartResult {
   promptRequest: {
+    id: string
     workspaceId: string
     actorId: string
     source: string
@@ -35,6 +36,12 @@ const listRecentWorkflowStarts = makeFunctionReference<
   { workspaceId: string; limit?: number },
   Array<unknown>
 >('workflowStarts:listRecent')
+
+const createWorkflowStartFromExternalIntake = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:createFromExternalIntake')
 
 function createArgs(overrides: Partial<CreateWorkflowStartArgs> = {}) {
   return {
@@ -106,6 +113,65 @@ async function createWorkflowStartForTest(
 }
 
 describe('workflowStarts trusted boundary and authz', () => {
+  test('system external intake creates a workflow and dedupes redelivery', async () => {
+    const t = convexTest(schema, modules)
+    const args = {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external',
+      traceId: 'trace_github_123',
+      prompt: 'Fix auth callback',
+      externalRef: {
+        provider: 'github',
+        deliveryId: 'delivery-1',
+        eventKind: 'github.issue.opened',
+        repositoryProvider: 'github',
+        repositoryInstallationId: '123',
+        repositoryExternalId: '456',
+        repositoryOwner: 'patchplane',
+        repositoryName: 'demo',
+        repositoryFullName: 'patchplane/demo',
+        issueExternalId: '789',
+        issueNumber: 7,
+        issueTitle: 'Fix auth callback',
+        url: 'https://github.com/patchplane/demo/issues/7',
+        senderProvider: 'github',
+        senderLogin: 'octocat',
+      },
+    }
+
+    const first = await t.mutation(createWorkflowStartFromExternalIntake, args)
+    const second = await t.mutation(createWorkflowStartFromExternalIntake, {
+      ...args,
+      traceId: 'trace_github_456',
+      externalRef: {
+        ...args.externalRef,
+        deliveryId: 'delivery-redelivery',
+      },
+    })
+
+    expect(isWorkflowStartResult(first)).toBe(true)
+    expect(isWorkflowStartResult(second)).toBe(true)
+    if (!isWorkflowStartResult(first) || !isWorkflowStartResult(second)) {
+      throw new Error('Expected workflow start results')
+    }
+
+    expect(second.promptRequest.id).toBe(first.promptRequest.id)
+    expect(first.promptRequest).toMatchObject({
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      source: 'external',
+      prompt: 'Fix auth callback',
+    })
+
+    const refs = await t.run((ctx) =>
+      ctx.db.query('externalWorkflowRefs').collect(),
+    )
+    expect(refs).toHaveLength(1)
+  })
+
   test('public workflow start requires authentication', async () => {
     const t = convexTest(schema, modules)
 
@@ -145,7 +211,7 @@ describe('workflowStarts trusted boundary and authz', () => {
     ).rejects.toThrow('Actor mismatch')
 
     await expect(
-      t.mutation(createWorkflowStart, createArgs({ source: 'github_issue' })),
+      t.mutation(createWorkflowStart, createArgs({ source: 'external' })),
     ).rejects.toThrow('App workflow source required')
   })
 

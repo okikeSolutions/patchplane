@@ -1,4 +1,5 @@
 import type { UserIdentity } from 'convex/server'
+import type { Id } from './_generated/dataModel'
 import { ConvexError, v } from 'convex/values'
 import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 
@@ -79,6 +80,26 @@ async function requireMembershipPermission(
   return membershipWithPermission
 }
 
+const externalWorkflowRefArg = v.object({
+  provider: v.string(),
+  deliveryId: v.string(),
+  eventKind: v.string(),
+  repositoryProvider: v.optional(v.string()),
+  repositoryInstallationId: v.optional(v.string()),
+  repositoryExternalId: v.optional(v.string()),
+  repositoryOwner: v.optional(v.string()),
+  repositoryName: v.optional(v.string()),
+  repositoryFullName: v.optional(v.string()),
+  issueExternalId: v.optional(v.string()),
+  issueNumber: v.optional(v.number()),
+  issueTitle: v.optional(v.string()),
+  commentExternalId: v.optional(v.string()),
+  url: v.optional(v.string()),
+  senderProvider: v.optional(v.string()),
+  senderExternalId: v.optional(v.string()),
+  senderLogin: v.optional(v.string()),
+})
+
 const workflowStartArgs = {
   workspaceId: v.string(),
   actorId: v.string(),
@@ -86,8 +107,7 @@ const workflowStartArgs = {
   source: v.union(
     v.literal('dev'),
     v.literal('app'),
-    v.literal('github_issue'),
-    v.literal('github_pr_comment'),
+    v.literal('external'),
   ),
   traceId: v.string(),
   prompt: v.string(),
@@ -102,10 +122,10 @@ const workflowStartReturn = v.object({
     source: v.union(
       v.literal('dev'),
       v.literal('app'),
-      v.literal('github_issue'),
-      v.literal('github_pr_comment'),
+      v.literal('external'),
     ),
     prompt: v.string(),
+    externalRef: v.optional(externalWorkflowRefArg),
     status: v.literal('created'),
     createdAt: v.number(),
   }),
@@ -129,9 +149,28 @@ async function createWorkflowStartRecord(
     workspaceId: string
     actorId: string
     actorDisplayName: string
-    source: 'dev' | 'app' | 'github_issue' | 'github_pr_comment'
+    source: 'dev' | 'app' | 'external'
     traceId: string
     prompt: string
+    externalRef?: {
+      provider: string
+      deliveryId: string
+      eventKind: string
+      repositoryProvider?: string
+      repositoryInstallationId?: string
+      repositoryExternalId?: string
+      repositoryOwner?: string
+      repositoryName?: string
+      repositoryFullName?: string
+      issueExternalId?: string
+      issueNumber?: number
+      issueTitle?: string
+      commentExternalId?: string
+      url?: string
+      senderProvider?: string
+      senderExternalId?: string
+      senderLogin?: string
+    }
   },
 ) {
     const createdAt = Date.now()
@@ -145,6 +184,7 @@ async function createWorkflowStartRecord(
       traceId: args.traceId,
       source: args.source,
       prompt: args.prompt,
+      ...(args.externalRef === undefined ? {} : { externalRef: args.externalRef }),
       status: promptRequestStatus,
       createdAt,
     })
@@ -171,6 +211,7 @@ async function createWorkflowStartRecord(
         traceId: args.traceId,
         source: args.source,
         prompt: args.prompt,
+        ...(args.externalRef === undefined ? {} : { externalRef: args.externalRef }),
         status: promptRequestStatus,
         createdAt,
       },
@@ -183,6 +224,104 @@ async function createWorkflowStartRecord(
         createdAt,
       },
     }
+}
+
+async function workflowStartFromIds(
+  ctx: MutationCtx,
+  ids: {
+    promptRequestId: Id<'promptRequests'>
+    workflowRunId: Id<'workflowRuns'>
+  },
+) {
+  const promptRequest = await ctx.db.get('promptRequests', ids.promptRequestId)
+  const workflowRun = await ctx.db.get('workflowRuns', ids.workflowRunId)
+
+  if (promptRequest === null || workflowRun === null) {
+    throw new ConvexError('External workflow reference is missing workflow records')
+  }
+
+  return {
+    promptRequest: {
+      id: promptRequest['_id'],
+      workspaceId: promptRequest.workspaceId,
+      actorId: promptRequest.actorId,
+      traceId: promptRequest.traceId ?? 'legacy',
+      source: promptRequest.source,
+      prompt: promptRequest.prompt,
+      ...(promptRequest.externalRef === undefined
+        ? {}
+        : { externalRef: promptRequest.externalRef }),
+      status: promptRequest.status,
+      createdAt: promptRequest.createdAt,
+    },
+    workflowRun: {
+      id: workflowRun['_id'],
+      promptRequestId: workflowRun.promptRequestId,
+      workspaceId: workflowRun.workspaceId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      status: workflowRun.status,
+      createdAt: workflowRun.createdAt,
+    },
+  }
+}
+
+async function existingExternalWorkflowRef(ctx: MutationCtx, externalRef: {
+  provider: string
+  deliveryId: string
+  eventKind: string
+  repositoryExternalId?: string
+  issueExternalId?: string
+  commentExternalId?: string
+}) {
+  if (externalRef.commentExternalId !== undefined) {
+    const byComment = await ctx.db
+      .query('externalWorkflowRefs')
+      .withIndex('by_comment', (q) =>
+        q
+          .eq('provider', externalRef.provider)
+          .eq('commentExternalId', externalRef.commentExternalId),
+      )
+      .unique()
+
+    if (byComment !== null) {
+      return byComment
+    }
+  }
+
+  if (
+    externalRef.repositoryExternalId !== undefined &&
+    externalRef.issueExternalId !== undefined
+  ) {
+    const byIssueEvent = await ctx.db
+      .query('externalWorkflowRefs')
+      .withIndex('by_issue_event', (q) =>
+        q
+          .eq('provider', externalRef.provider)
+          .eq('repositoryExternalId', externalRef.repositoryExternalId)
+          .eq('issueExternalId', externalRef.issueExternalId)
+          .eq('eventKind', externalRef.eventKind),
+      )
+      .unique()
+
+    if (byIssueEvent !== null) {
+      return byIssueEvent
+    }
+  }
+
+  return ctx.db
+    .query('externalWorkflowRefs')
+    .withIndex('by_delivery', (q) =>
+      q.eq('provider', externalRef.provider).eq('deliveryId', externalRef.deliveryId),
+    )
+    .unique()
+}
+
+function requireSystemIngestionSecret(secret: string) {
+  const expected = process.env.PATCHPLANE_SYSTEM_INGESTION_SECRET
+
+  if (expected === undefined || expected.length === 0 || secret !== expected) {
+    throw new ConvexError('System ingestion secret required')
+  }
 }
 
 export const create = mutation({
@@ -208,6 +347,51 @@ export const create = mutation({
     )
 
     return createWorkflowStartRecord(ctx, args)
+  },
+})
+
+export const createFromExternalIntake = mutation({
+  args: {
+    systemSecret: v.string(),
+    workspaceId: v.string(),
+    actorId: v.string(),
+    actorDisplayName: v.string(),
+    source: v.literal('external'),
+    traceId: v.string(),
+    prompt: v.string(),
+    externalRef: externalWorkflowRefArg,
+  },
+  returns: workflowStartReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+
+    const existing = await existingExternalWorkflowRef(ctx, args.externalRef)
+
+    if (existing !== null) {
+      return workflowStartFromIds(ctx, {
+        promptRequestId: existing.promptRequestId,
+        workflowRunId: existing.workflowRunId,
+      })
+    }
+
+    const workflowStart = await createWorkflowStartRecord(ctx, {
+      workspaceId: args.workspaceId,
+      actorId: args.actorId,
+      actorDisplayName: args.actorDisplayName,
+      source: args.source,
+      traceId: args.traceId,
+      prompt: args.prompt,
+      externalRef: args.externalRef,
+    })
+
+    await ctx.db.insert('externalWorkflowRefs', {
+      ...args.externalRef,
+      promptRequestId: workflowStart.promptRequest.id,
+      workflowRunId: workflowStart.workflowRun.id,
+      createdAt: workflowStart.promptRequest.createdAt,
+    })
+
+    return workflowStart
   },
 })
 
@@ -252,6 +436,9 @@ export const listRecent = query({
           traceId: promptRequest.traceId ?? 'legacy',
           source: promptRequest.source,
           prompt: promptRequest.prompt,
+          ...(promptRequest.externalRef === undefined
+            ? {}
+            : { externalRef: promptRequest.externalRef }),
           status: promptRequest.status,
           createdAt: promptRequest.createdAt,
         },

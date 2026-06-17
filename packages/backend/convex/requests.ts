@@ -12,8 +12,7 @@ export const list = query({
       source: v.union(
         v.literal('dev'),
         v.literal('app'),
-        v.literal('github_issue'),
-        v.literal('github_pr_comment'),
+        v.literal('external'),
       ),
       prompt: v.string(),
       status: v.literal('created'),

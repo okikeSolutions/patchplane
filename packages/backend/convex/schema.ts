@@ -40,16 +40,67 @@ export default defineSchema({
     source: v.union(
       v.literal('dev'),
       v.literal('app'),
-      v.literal('github_issue'),
-      v.literal('github_pr_comment'),
+      v.literal('external'),
     ),
     prompt: v.string(),
+    externalRef: v.optional(
+      v.object({
+        provider: v.string(),
+        deliveryId: v.string(),
+        eventKind: v.string(),
+        repositoryProvider: v.optional(v.string()),
+        repositoryInstallationId: v.optional(v.string()),
+        repositoryExternalId: v.optional(v.string()),
+        repositoryOwner: v.optional(v.string()),
+        repositoryName: v.optional(v.string()),
+        repositoryFullName: v.optional(v.string()),
+        issueExternalId: v.optional(v.string()),
+        issueNumber: v.optional(v.number()),
+        issueTitle: v.optional(v.string()),
+        commentExternalId: v.optional(v.string()),
+        url: v.optional(v.string()),
+        senderProvider: v.optional(v.string()),
+        senderExternalId: v.optional(v.string()),
+        senderLogin: v.optional(v.string()),
+      }),
+    ),
     status: v.literal('created'),
     createdAt: v.number(),
   })
     .index('by_workspace', ['workspaceId'])
     .index('by_actor', ['actorId'])
     .index('by_trace', ['traceId']),
+
+  externalWorkflowRefs: defineTable({
+    provider: v.string(),
+    deliveryId: v.string(),
+    eventKind: v.string(),
+    repositoryProvider: v.optional(v.string()),
+    repositoryInstallationId: v.optional(v.string()),
+    repositoryExternalId: v.optional(v.string()),
+    repositoryOwner: v.optional(v.string()),
+    repositoryName: v.optional(v.string()),
+    repositoryFullName: v.optional(v.string()),
+    issueExternalId: v.optional(v.string()),
+    issueNumber: v.optional(v.number()),
+    issueTitle: v.optional(v.string()),
+    commentExternalId: v.optional(v.string()),
+    url: v.optional(v.string()),
+    senderProvider: v.optional(v.string()),
+    senderExternalId: v.optional(v.string()),
+    senderLogin: v.optional(v.string()),
+    promptRequestId: v.id('promptRequests'),
+    workflowRunId: v.id('workflowRuns'),
+    createdAt: v.number(),
+  })
+    .index('by_delivery', ['provider', 'deliveryId'])
+    .index('by_issue_event', [
+      'provider',
+      'repositoryExternalId',
+      'issueExternalId',
+      'eventKind',
+    ])
+    .index('by_comment', ['provider', 'commentExternalId']),
 
   workflowRuns: defineTable({
     promptRequestId: v.id('promptRequests'),
