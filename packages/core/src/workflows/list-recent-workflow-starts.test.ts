@@ -12,6 +12,7 @@ import { ListRecentWorkflowStarts } from './list-recent-workflow-starts'
 const TestStorageLayer = Layer.succeed(
   StorageService,
   StorageService.of({
+    createWorkflowFromIntake: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     listRecentWorkflowStarts: (input) =>
       Effect.succeed([

@@ -13,6 +13,27 @@ const TestStorageLayer = Layer.succeed(
   StorageService,
   StorageService.of({
     listRecentWorkflowStarts: () => Effect.succeed([]),
+    createWorkflowFromIntake: (input) =>
+      Effect.succeed({
+        promptRequest: {
+          id: makePromptRequestId('prompt-1'),
+          workspaceId: input.workspaceId,
+          actorId: input.actor.id,
+          traceId: input.traceId,
+          source: input.source,
+          prompt: input.prompt,
+          status: 'created',
+          createdAt: 1,
+        },
+        workflowRun: {
+          id: makeWorkflowRunId('workflow-1'),
+          promptRequestId: makePromptRequestId('prompt-1'),
+          workspaceId: input.workspaceId,
+          traceId: input.traceId,
+          status: 'queued',
+          createdAt: 1,
+        },
+      }),
     createWorkflowFromPrompt: (input) =>
       Effect.succeed({
         promptRequest: {
