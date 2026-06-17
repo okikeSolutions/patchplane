@@ -1,11 +1,11 @@
 import { Schema } from 'effect'
+import { ExternalWorkflowRef } from './external-workflow-ref'
 import { ActorId, PromptRequestId, WorkspaceId } from './ids'
 
 export const PromptRequestSource = Schema.Literals([
   'dev',
   'app',
-  'github_issue',
-  'github_pr_comment',
+  'external',
 ])
 export type PromptRequestSource = Schema.Schema.Type<
   typeof PromptRequestSource
@@ -23,6 +23,7 @@ export const PromptRequest = Schema.Struct({
   traceId: Schema.String,
   source: PromptRequestSource,
   prompt: Schema.String,
+  externalRef: Schema.optional(ExternalWorkflowRef),
   status: PromptRequestStatus,
   createdAt: Schema.Number,
 })

@@ -3,6 +3,13 @@ import { Actor } from './actor'
 import { PromptRequestSource } from './prompt-request'
 import { Workspace } from './workspace'
 
+export const StartWorkflowPromptInput = Schema.Struct({
+  prompt: Schema.String.check(Schema.isNonEmpty()),
+})
+export type StartWorkflowPromptInput = Schema.Schema.Type<
+  typeof StartWorkflowPromptInput
+>
+
 export const StartWorkflowInput = Schema.Struct({
   actor: Actor,
   workspace: Workspace,

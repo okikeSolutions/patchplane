@@ -39,6 +39,14 @@ const decodeWorkspaceIdSync = Schema.decodeUnknownSync(WorkspaceId)
 const decodePromptRequestIdSync = Schema.decodeUnknownSync(PromptRequestId)
 const decodeWorkflowRunIdSync = Schema.decodeUnknownSync(WorkflowRunId)
 
+export function makeActorId(actorId: string): ActorId {
+  return decodeActorIdSync(actorId)
+}
+
+export function makeWorkspaceId(workspaceId: string): WorkspaceId {
+  return decodeWorkspaceIdSync(workspaceId)
+}
+
 export function makePromptRequestId(promptRequestId: string): PromptRequestId {
   return decodePromptRequestIdSync(promptRequestId)
 }
@@ -49,6 +57,10 @@ export function makeWorkflowRunId(workflowRunId: string): WorkflowRunId {
 
 export function makeWorkOSActorId(userId: string): ActorId {
   return decodeActorIdSync(`workos:${userId}`)
+}
+
+export function makeGitHubAppActorId(installationId: string): ActorId {
+  return decodeActorIdSync(`github-app:${installationId}`)
 }
 
 export function makeSystemActorId(actorId: string): ActorId {
