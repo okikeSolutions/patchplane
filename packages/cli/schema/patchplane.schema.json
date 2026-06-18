@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchplane.dev/schemas/patchplane.schema.json",
+  "title": "PatchPlane project config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "$ref": "#/$defs/pluginList"
+        },
+        "githubWebhook": {
+          "$ref": "#/$defs/pluginList"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "githubWebhookExecution": {
+          "type": "string",
+          "enum": ["daytona-command", "daytona-pi"],
+          "default": "daytona-command"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pluginId": {
+      "type": "string",
+      "enum": ["convex", "workos", "github", "daytona", "pi"]
+    },
+    "pluginList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pluginId"
+      },
+      "uniqueItems": true
+    }
+  }
+}
