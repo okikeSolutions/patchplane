@@ -2,7 +2,7 @@
   "name": "patchplane",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "workspaces": [
     "apps/*",
@@ -12,13 +12,14 @@
     "prepare": "effect-language-service patch",
     "dev:client": "bun run --cwd apps/client dev",
     "dev:backend": "bun run --cwd packages/backend dev",
+    "patchplane": "bun run packages/cli/src/main.ts",
     "build:client": "bun run --cwd apps/client build",
     "test:backend": "bun run --cwd packages/backend test",
     "test:domain": "bun run --cwd packages/domain test",
     "test:core": "bun run --cwd packages/core test",
     "test:plugins": "bun run --cwd packages/plugins test",
     "smoke:foundation": "bun run --cwd apps/client smoke",
-    "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/plugins typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck",
+    "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/plugins typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck",
     "lint": "oxlint apps packages && bun run --cwd packages/backend lint:convex",
     "lint:fix": "oxlint --fix apps packages && bun run --cwd packages/backend lint:convex:fix",
     "fmt": "oxfmt .",
@@ -27,11 +28,11 @@
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "effect": "4.0.0-beta.79"
+    "effect": "4.0.0-beta.84"
   },
   "devDependencies": {
     "@effect/language-service": "^0.86.2",
-    "@effect/vitest": "4.0.0-beta.79",
+    "@effect/vitest": "4.0.0-beta.84",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.9.3",
     "oxfmt": "^0.54.0",
