@@ -1,5 +1,6 @@
 import { Config } from 'effect'
 
+/** GitHub App credentials and optional Enterprise API endpoint. */
 export const GitHubConfig = Config.all({
   appId: Config.string('GITHUB_APP_ID'),
   privateKey: Config.redacted('GITHUB_PRIVATE_KEY'),

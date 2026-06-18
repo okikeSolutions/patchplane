@@ -111,6 +111,7 @@ export function selectedEnvVars(selection: EnvSelection) {
   }
 }
 
+/** Renders a dotenv template for the selected plugin set or runtime surface. */
 export function envTemplateText(selection: EnvSelection) {
   const selected = selectedEnvVars(selection)
   const lines = [
@@ -139,6 +140,7 @@ export interface EnvCheckResult {
 
 export type EnvCheckResults = ReadonlyArray<EnvCheckResult>
 
+/** Environment-file boundary for template generation, checks, and init updates. */
 export class CliEnvFile extends Context.Service<CliEnvFile, {
   readonly loadKnownEnvFiles: Effect.Effect<Map<string, string>, PlatformError>
   readonly collectEnvCheck: (selection: EnvSelection) => Effect.Effect<EnvCheckResults, PlatformError>

@@ -4,6 +4,7 @@ const convexUrl = Config.url('CONVEX_URL').pipe(
   Config.orElse(() => Config.url('VITE_CONVEX_URL')),
 )
 
+/** Convex storage plugin configuration read from deployment environment. */
 export const ConvexConfig = Config.all({
   url: convexUrl,
   systemIngestionSecret: Config.option(

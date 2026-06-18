@@ -9,6 +9,13 @@ export type SandboxExecutionStatus = Schema.Schema.Type<
   typeof SandboxExecutionStatus
 >
 
+/**
+ * Result of executing repository work in an isolated sandbox.
+ *
+ * @remarks
+ * Sandbox executions capture command output and timing without exposing the
+ * sandbox provider's native response shape to core workflow consumers.
+ */
 export const SandboxExecution = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,

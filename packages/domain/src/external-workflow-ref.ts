@@ -1,5 +1,12 @@
 import { Schema } from 'effect'
 
+/**
+ * Provider-specific provenance stored beside a generic PatchPlane workflow.
+ *
+ * @remarks
+ * This keeps workflow records provider-neutral while preserving enough external
+ * identity for idempotency, audit trails, and publication back to the source.
+ */
 export const ExternalWorkflowRef = Schema.Struct({
   provider: Schema.String,
   deliveryId: Schema.String,

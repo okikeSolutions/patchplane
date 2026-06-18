@@ -1,5 +1,6 @@
 export type PatchPlaneRuntimeSurface = 'app' | 'githubWebhook'
 
+/** Environment variable metadata exposed by PatchPlane plugin discovery and CLI env commands. */
 export interface PatchPlanePluginEnvVar {
   readonly name: string
   readonly required: boolean
@@ -8,6 +9,13 @@ export interface PatchPlanePluginEnvVar {
   readonly description: string
 }
 
+/**
+ * Static description of a PatchPlane infrastructure plugin.
+ *
+ * @remarks
+ * The registry is intentionally metadata-only: it may name required secrets,
+ * but it must never contain secret values.
+ */
 export interface PatchPlanePluginMetadata {
   readonly id: string
   readonly name: string
@@ -20,6 +28,7 @@ export interface PatchPlanePluginMetadata {
   readonly env: readonly PatchPlanePluginEnvVar[]
 }
 
+/** Built-in plugin registry used by config generation, diagnostics, and docs. */
 export const patchPlanePlugins = {
   convex: {
     id: 'convex',
@@ -192,6 +201,7 @@ export function getPatchPlanePlugin(id: string): PatchPlanePluginMetadata | unde
     .find((plugin) => plugin.id === id)
 }
 
+/** Returns the de-duplicated environment variable requirements for plugin ids. */
 export function getPatchPlaneEnvVars(pluginIds: readonly string[]): PatchPlanePluginEnvVar[] {
   const env = new Map<string, PatchPlanePluginEnvVar>()
 

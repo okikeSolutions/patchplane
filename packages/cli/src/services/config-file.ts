@@ -29,6 +29,7 @@ export interface ProjectConfigFile {
 export const initRecoveryMessage = 'patchplane init needs an interactive terminal or explicit flags.\nRe-run with: patchplane init --profile app --yes'
 export const initApprovalMessage = 'patchplane init in non-interactive mode requires --yes to write files.'
 
+/** Builds the non-secret root `patchplane.config.json` content for an init profile. */
 export function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 'withPi'>) {
   const githubPlugins = options.withPi
     ? ['github', 'convex', 'daytona', 'pi']
@@ -49,6 +50,7 @@ export function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 
   }, null, 2)}\n`
 }
 
+/** File-system boundary for CLI-managed project config and generated local state. */
 export class CliConfigFile extends Context.Service<CliConfigFile, {
   readonly writeProjectConfig: (options: ResolvedInitOptions) => Effect.Effect<string, PlatformError>
   readonly ensureStateDirectories: (options: Pick<ResolvedInitOptions, 'dryRun'>) => Effect.Effect<string, PlatformError>

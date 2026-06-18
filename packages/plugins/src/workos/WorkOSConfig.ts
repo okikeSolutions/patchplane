@@ -1,5 +1,6 @@
 import { Config } from 'effect'
 
+/** WorkOS/AuthKit server configuration for authentication and membership checks. */
 export const WorkOSConfig = Config.all({
   apiKey: Config.redacted('WORKOS_API_KEY'),
   clientId: Config.string('WORKOS_CLIENT_ID'),

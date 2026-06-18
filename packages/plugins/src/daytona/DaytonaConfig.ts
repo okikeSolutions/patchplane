@@ -8,6 +8,7 @@ export const DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS = 120
 export const DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS = 2
 export const DAYTONA_DEFAULT_PI_CLI_VERSION = '0.79.6'
 
+/** Minimal Daytona sandbox configuration; execution tuning uses PatchPlane defaults. */
 export const DaytonaConfig = Config.all({
   apiKey: Config.redacted('DAYTONA_API_KEY'),
   apiUrl: Config.option(Config.string('DAYTONA_API_URL')),

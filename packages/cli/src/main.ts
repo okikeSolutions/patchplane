@@ -7,6 +7,7 @@ import { initCommand } from './commands/init'
 import { pluginsCommand } from './commands/plugins'
 import { cliRuntime } from './runtime'
 
+/** Root Effect CLI command for PatchPlane onboarding and diagnostics. */
 export const patchPlaneCommand = Command.make('patchplane', {}, () =>
   Effect.fail(new CliError.ShowHelp({
     commandPath: ['patchplane'],
