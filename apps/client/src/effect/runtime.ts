@@ -1,10 +1,10 @@
 import { Layer, ManagedRuntime } from 'effect'
 import { PatchPlaneLayer } from './layers'
 
-const appMemoMap = Layer.makeMemoMapUnsafe()
+const patchPlaneMemoMap = Layer.makeMemoMapUnsafe()
 
 export const patchPlaneRuntime = ManagedRuntime.make(PatchPlaneLayer, {
-  memoMap: appMemoMap,
+  memoMap: patchPlaneMemoMap,
 })
 
 export function disposePatchPlaneRuntime() {

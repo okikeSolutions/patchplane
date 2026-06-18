@@ -69,8 +69,9 @@ export const Route = createRootRouteWithContext<{
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { convexClient } = Route.useRouteContext();
   const { theme, initialAuth } = Route.useLoaderData();
-  useRouterState({ select: (state) => state.location.pathname });
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const locale = getLocale();
+  const isAppShellRoute = pathname.startsWith('/app');
 
   return (
     <html
@@ -89,9 +90,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
                 client={convexClient}
                 useAuth={useConvexAuthFromWorkOS}
               >
-                <Header />
+                {isAppShellRoute ? null : <Header />}
                 <div key={locale}>{children}</div>
-                <Footer />
+                {isAppShellRoute ? null : <Footer />}
               </ConvexProviderWithAuthKit>
             </AuthKitProvider>
             <TanStackDevtools

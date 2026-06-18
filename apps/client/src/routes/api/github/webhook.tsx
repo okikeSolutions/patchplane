@@ -15,19 +15,6 @@ function requiredHeader(request: Request, name: string) {
   return value === null || value.length === 0 ? undefined : value
 }
 
-function allowedRepositories(value: string | undefined) {
-  if (value === undefined || value.trim().length === 0) {
-    return undefined
-  }
-
-  return new Set(
-    value
-      .split(',')
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean),
-  )
-}
-
 export const Route = createFileRoute('/api/github/webhook')({
   server: {
     handlers: {
@@ -62,53 +49,46 @@ export const Route = createFileRoute('/api/github/webhook')({
           effectModule,
           ingestModule,
           startModule,
+          sandboxModule,
+          sandboxAgentModule,
+          publishModule,
           runtimeModule,
+          configModule,
           errorsModule,
-          idsModule,
         ] = await Promise.all([
           import('effect'),
           import('@patchplane/core/workflows/ingest-github-webhook'),
           import('@patchplane/core/workflows/start-workflow-from-intake'),
-          import('@/effect/github-runtime'),
+          import('@patchplane/core/workflows/run-sandbox-command-for-workflow'),
+          import('@patchplane/core/workflows/run-sandbox-agent-for-workflow'),
+          import('@patchplane/core/workflows/publish-sandbox-result-to-source'),
+          import('@/effect/runtime'),
+          import('@/effect/patchplane-config'),
           import('@patchplane/domain/errors'),
-          import('@patchplane/domain/ids'),
         ])
         const { Cause, Effect, Exit } = effectModule
         const { IngestGitHubWebhookToWorkflowIntake } = ingestModule
         const { StartWorkflowFromIntake } = startModule
-        const { githubRuntime } = runtimeModule
+        const { RunSandboxCommandForWorkflow } = sandboxModule
+        const { RunSandboxAgentForWorkflow } = sandboxAgentModule
+        const { PublishSandboxResultToSource } = publishModule
+        const { patchPlaneRuntime } = runtimeModule
+        const { loadGitHubWebhookRouteConfig } = configModule
         const { publicErrorMessage } = errorsModule
-        const { makeWorkspaceId, makeWorkOSWorkspaceId } = idsModule
 
         const traceId = crypto.randomUUID()
         const payload = await request.text()
-        const workspaceId = process.env.PATCHPLANE_GITHUB_WORKSPACE_ID
-          ? makeWorkspaceId(process.env.PATCHPLANE_GITHUB_WORKSPACE_ID)
-          : process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID
-            ? makeWorkOSWorkspaceId(process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID)
-            : undefined
-        const repositoryAllowlist = allowedRepositories(
-          process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES,
-        )
+        const routeConfig = (() => {
+          try {
+            return loadGitHubWebhookRouteConfig()
+          } catch (error) {
+            return error instanceof Error ? error : new Error(String(error))
+          }
+        })()
 
-        if (workspaceId === undefined) {
+        if (routeConfig instanceof Error) {
           return jsonResponse(
-            {
-              ok: false,
-              error:
-                'PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID is required for GitHub workflow ingestion',
-            },
-            { status: 500 },
-          )
-        }
-
-        if (repositoryAllowlist === undefined) {
-          return jsonResponse(
-            {
-              ok: false,
-              error:
-                'PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES is required for GitHub workflow ingestion',
-            },
+            { ok: false, error: routeConfig.message },
             { status: 500 },
           )
         }
@@ -119,13 +99,13 @@ export const Route = createFileRoute('/api/github/webhook')({
             eventName,
             signature,
             payload,
-            workspaceId,
+            workspaceId: routeConfig.workspaceId,
             traceId,
           })
           const repositoryFullName = intake.externalRef?.repositoryFullName
           if (
             repositoryFullName === undefined ||
-            !repositoryAllowlist.has(repositoryFullName.toLowerCase())
+            !routeConfig.repositoryAllowlist.has(repositoryFullName.toLowerCase())
           ) {
             return yield* new errorsModule.SourceControlError({
               operation: 'githubWebhookRoute.repositoryAllowlist',
@@ -135,8 +115,26 @@ export const Route = createFileRoute('/api/github/webhook')({
           }
 
           const workflowStart = yield* StartWorkflowFromIntake(intake)
+          const sandboxExecution = routeConfig.execution.mode === 'daytona-pi'
+            ? yield* RunSandboxAgentForWorkflow({
+                workflowStart,
+                provider: routeConfig.execution.provider,
+                model: routeConfig.execution.model,
+                apiKey: routeConfig.execution.apiKey,
+                timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              })
+            : yield* RunSandboxCommandForWorkflow({
+                workflowStart,
+                command: routeConfig.execution.command,
+                timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              })
 
-          return { intake, workflowStart }
+          const publication = yield* PublishSandboxResultToSource({
+            workflowStart,
+            sandboxExecution,
+          })
+
+          return { intake, workflowStart, sandboxExecution, publication }
         }).pipe(
           Effect.annotateLogs({
             traceId,
@@ -152,7 +150,7 @@ export const Route = createFileRoute('/api/github/webhook')({
           }),
         )
 
-        const exit = await githubRuntime.runPromiseExit(program)
+        const exit = await patchPlaneRuntime.runPromiseExit(program)
 
         if (Exit.isSuccess(exit)) {
           return jsonResponse(
@@ -163,6 +161,10 @@ export const Route = createFileRoute('/api/github/webhook')({
               promptRequestId: exit.value.workflowStart.promptRequest.id,
               externalProvider: exit.value.intake.externalRef?.provider,
               externalEventKind: exit.value.intake.externalRef?.eventKind,
+              sandboxExecutionId: exit.value.sandboxExecution?.id,
+              sandboxStatus: exit.value.sandboxExecution?.status,
+              publishedProvider: exit.value.publication?.provider,
+              publishedIssueNumber: exit.value.publication?.issueNumber,
             },
             { status: 202 },
           )

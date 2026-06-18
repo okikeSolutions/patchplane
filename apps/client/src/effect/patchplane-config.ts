@@ -1,0 +1,199 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import {
+  patchPlaneDefaultSurfaces,
+  patchPlanePlugins,
+  type PatchPlanePluginId,
+  type PatchPlaneRuntimeSurface,
+} from '@patchplane/plugins/registry'
+import {
+  DAYTONA_DEFAULT_COMMAND,
+  DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+} from '@patchplane/plugins/daytona/config'
+import { PI_DEFAULT_MODEL, PI_DEFAULT_PROVIDER } from '@patchplane/plugins/pi/config'
+import { makeWorkspaceId, makeWorkOSWorkspaceId, type WorkspaceId } from '@patchplane/domain/ids'
+
+export type GitHubWebhookExecutionMode = 'daytona-command' | 'daytona-pi'
+
+export interface PatchPlaneConfig {
+  readonly plugins: Partial<Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>>
+  readonly runtime: {
+    readonly githubWebhookExecution: GitHubWebhookExecutionMode
+  }
+}
+
+export interface GitHubWebhookRouteConfig {
+  readonly workspaceId: WorkspaceId
+  readonly repositoryAllowlist: ReadonlySet<string>
+  readonly execution:
+    | {
+      readonly mode: 'daytona-command'
+      readonly command: string
+      readonly timeoutSeconds?: number | undefined
+    }
+    | {
+      readonly mode: 'daytona-pi'
+      readonly provider: string
+      readonly model: string
+      readonly apiKey?: string | undefined
+      readonly timeoutSeconds?: number | undefined
+    }
+}
+
+const defaultConfig: PatchPlaneConfig = {
+  plugins: patchPlaneDefaultSurfaces,
+  runtime: {
+    githubWebhookExecution: 'daytona-command',
+  },
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatConfigValue(value: unknown) {
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function isPatchPlanePluginId(value: string): value is PatchPlanePluginId {
+  return value in patchPlanePlugins
+}
+
+function parsePluginIds(value: unknown, surface: PatchPlaneRuntimeSurface) {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const ids: PatchPlanePluginId[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || !isPatchPlanePluginId(item)) {
+      throw new Error(`PatchPlane config contains an unknown plugin for ${surface}: ${formatConfigValue(item)}`)
+    }
+    ids.push(item)
+  }
+  return ids
+}
+
+function parseExecutionMode(value: unknown): GitHubWebhookExecutionMode | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === 'daytona-command' || value === 'daytona-pi') {
+    return value
+  }
+  throw new Error(`PatchPlane config contains an unsupported runtime.githubWebhookExecution: ${formatConfigValue(value)}`)
+}
+
+function parseConfigJson(value: unknown): PatchPlaneConfig {
+  if (!isRecord(value)) {
+    throw new Error('PatchPlane config must contain a JSON object')
+  }
+
+  const plugins = isRecord(value.plugins) ? value.plugins : {}
+  const runtime = isRecord(value.runtime) ? value.runtime : {}
+
+  return {
+    plugins: {
+      app: parsePluginIds(plugins.app, 'app') ?? defaultConfig.plugins.app,
+      githubWebhook: parsePluginIds(plugins.githubWebhook, 'githubWebhook') ??
+        defaultConfig.plugins.githubWebhook,
+    },
+    runtime: {
+      githubWebhookExecution: parseExecutionMode(runtime.githubWebhookExecution) ??
+        defaultConfig.runtime.githubWebhookExecution,
+    },
+  }
+}
+
+export function loadPatchPlaneConfig(path = 'patchplane.config.json'): PatchPlaneConfig {
+  const absolutePath = resolve(path)
+  if (existsSync(absolutePath)) {
+    return parseConfigJson(JSON.parse(readFileSync(absolutePath, 'utf8')))
+  }
+
+  const legacyPath = resolve('.patchplane/config.json')
+  if (path === 'patchplane.config.json' && existsSync(legacyPath)) {
+    console.warn('Using legacy .patchplane/config.json. Move this file to patchplane.config.json; .patchplane is reserved for generated local state.')
+    return parseConfigJson(JSON.parse(readFileSync(legacyPath, 'utf8')))
+  }
+
+  return defaultConfig
+}
+
+export function getSurfacePluginIds(surface: PatchPlaneRuntimeSurface) {
+  return loadPatchPlaneConfig().plugins[surface] ?? patchPlaneDefaultSurfaces[surface]
+}
+
+function parseRepositoryAllowlist(value: string | undefined) {
+  if (value === undefined || value.trim().length === 0) {
+    throw new Error('PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES is required for GitHub workflow ingestion')
+  }
+
+  const repositories = value
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (repositories.length === 0) {
+    throw new Error('PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES must include at least one owner/repo entry')
+  }
+
+  return new Set(repositories)
+}
+
+function parseGitHubWorkspaceId() {
+  const workspaceId = process.env.PATCHPLANE_GITHUB_WORKSPACE_ID?.trim()
+  if (workspaceId) {
+    return makeWorkspaceId(workspaceId)
+  }
+
+  const organizationId = process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID?.trim()
+  if (organizationId) {
+    return makeWorkOSWorkspaceId(organizationId)
+  }
+
+  throw new Error(
+    'PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID is required for GitHub workflow ingestion',
+  )
+}
+
+function providerApiKeyEnvName(provider: string) {
+  const names: Readonly<Record<string, string>> = {
+    anthropic: 'ANTHROPIC_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    google: 'GEMINI_API_KEY',
+    'github-copilot': 'COPILOT_GITHUB_TOKEN',
+    openrouter: 'OPENROUTER_API_KEY',
+  }
+  return names[provider] ?? 'OPENAI_API_KEY'
+}
+
+export function loadGitHubWebhookRouteConfig(): GitHubWebhookRouteConfig {
+  const config = loadPatchPlaneConfig()
+  const mode = config.runtime.githubWebhookExecution
+
+  if (mode === 'daytona-pi') {
+    const provider = PI_DEFAULT_PROVIDER
+    return {
+      workspaceId: parseGitHubWorkspaceId(),
+      repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+      execution: {
+        mode,
+        provider,
+        model: PI_DEFAULT_MODEL,
+        apiKey: process.env[providerApiKeyEnvName(provider)],
+        timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+      },
+    }
+  }
+
+  return {
+    workspaceId: parseGitHubWorkspaceId(),
+    repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+    execution: {
+      mode,
+      command: DAYTONA_DEFAULT_COMMAND,
+      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    },
+  }
+}

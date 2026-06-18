@@ -1,0 +1,81 @@
+import { useAuth } from '@workos/authkit-tanstack-react-start/client'
+import {
+  BoxesIcon,
+  ClipboardCheckIcon,
+  GitBranchIcon,
+  LayoutDashboardIcon,
+  LifeBuoyIcon,
+  Settings2Icon,
+  WorkflowIcon,
+} from 'lucide-react'
+import * as m from '@/paraglide/messages'
+import { NavMain } from './nav-main'
+import { NavSecondary } from './nav-secondary'
+import { NavUser } from './nav-user'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from '@/components/ui/sidebar'
+
+const navMain = [
+  {
+    title: 'Dashboard',
+    href: '#overview',
+    icon: LayoutDashboardIcon,
+    isActive: true,
+  },
+  { title: 'Workflows', href: '#workflows', icon: WorkflowIcon },
+  { title: 'Repositories', href: '#repositories', icon: GitBranchIcon },
+  { title: 'Reviews', href: '#reviews', icon: ClipboardCheckIcon },
+  { title: 'Sandboxes', href: '#sandboxes', icon: BoxesIcon },
+]
+
+const navSecondary = [
+  { title: 'Architecture', href: '/about', icon: LifeBuoyIcon },
+  { title: 'Settings', href: '#settings', icon: Settings2Icon },
+]
+
+export function AppSidebar() {
+  const { user, signOut } = useAuth()
+  const displayName = user?.firstName ?? user?.email ?? m.app_operator_fallback()
+
+  return (
+    <Sidebar variant="inset" collapsible="icon">
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              render={<a href="#overview" aria-label="PatchPlane overview" />}
+            >
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg border border-white/8 bg-sidebar-primary/10 shadow-[0_0_24px_rgb(255_169_72/0.22)]">
+                <span className="size-3 rounded-full bg-[linear-gradient(135deg,rgb(255_144_52),rgb(255_209_122))] shadow-[0_0_18px_rgb(255_169_72/0.6)]" />
+              </div>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">PatchPlane</span>
+                <span className="truncate text-xs">Trust boundary</span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+      <SidebarContent>
+        <NavMain items={navMain} />
+        <NavSecondary items={navSecondary} className="mt-auto" />
+      </SidebarContent>
+      <NavUser
+        displayName={displayName}
+        isSignedIn={Boolean(user)}
+        onSignOut={() => {
+          void signOut()
+        }}
+      />
+      <SidebarRail />
+    </Sidebar>
+  )
+}
