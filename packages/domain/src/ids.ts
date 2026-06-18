@@ -39,10 +39,6 @@ const decodeWorkspaceIdSync = Schema.decodeUnknownSync(WorkspaceId)
 const decodePromptRequestIdSync = Schema.decodeUnknownSync(PromptRequestId)
 const decodeWorkflowRunIdSync = Schema.decodeUnknownSync(WorkflowRunId)
 
-export function makeActorId(actorId: string): ActorId {
-  return decodeActorIdSync(actorId)
-}
-
 export function makeWorkspaceId(workspaceId: string): WorkspaceId {
   return decodeWorkspaceIdSync(workspaceId)
 }

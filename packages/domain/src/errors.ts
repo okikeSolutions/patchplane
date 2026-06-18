@@ -34,6 +34,24 @@ export class SourceControlError
     cause: Schema.Defect(),
   }) {}
 
+export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
+  'SandboxError',
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()(
+  'RuntimeError',
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
 export class WorkflowStateError
   extends Schema.TaggedErrorClass<WorkflowStateError>()('WorkflowStateError', {
     message: Schema.String,
@@ -47,23 +65,6 @@ export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()(
   },
 ) {}
 
-function property(value: unknown, key: string) {
-  if (typeof value !== 'object' || value === null) {
-    return undefined
-  }
-
-  return Reflect.get(value, key)
-}
-
-function stringProperty(value: unknown, key: string) {
-  const item = property(value, key)
-  return typeof item === 'string' ? item : undefined
-}
-
-function causeProperty(value: unknown) {
-  return property(value, 'cause')
-}
-
 export function publicErrorMessage(
   cause: unknown,
   fallback = 'Operation failed',
@@ -76,14 +77,28 @@ export function publicErrorMessage(
     seen.add(cause)
   }
 
-  const message = cause instanceof Error ? cause.message : stringProperty(cause, 'message')
-  const name = stringProperty(cause, 'name')
-  const tag = stringProperty(cause, '_tag')
-  const nestedCause = causeProperty(cause)
-  const nestedMessage =
-    nestedCause === undefined
-      ? undefined
-      : publicErrorMessage(nestedCause, fallback, seen)
+  const messageValue: unknown = typeof cause === 'object' && cause !== null
+    ? Reflect.get(cause, 'message')
+    : undefined
+  const nameValue: unknown = typeof cause === 'object' && cause !== null
+    ? Reflect.get(cause, 'name')
+    : undefined
+  const tagValue: unknown = typeof cause === 'object' && cause !== null
+    ? Reflect.get(cause, '_tag')
+    : undefined
+  const nestedCause: unknown = typeof cause === 'object' && cause !== null
+    ? Reflect.get(cause, 'cause')
+    : undefined
+  const message = cause instanceof Error
+    ? cause.message
+    : typeof messageValue === 'string'
+    ? messageValue
+    : undefined
+  const name = typeof nameValue === 'string' ? nameValue : undefined
+  const tag = typeof tagValue === 'string' ? tagValue : undefined
+  const nestedMessage = nestedCause === undefined
+    ? undefined
+    : publicErrorMessage(nestedCause, fallback, seen)
 
   if (tag === 'ConfigError') {
     return 'PatchPlane server configuration is incomplete. Check CONVEX_URL or VITE_CONVEX_URL and WorkOS server environment variables.'

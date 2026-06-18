@@ -14,6 +14,8 @@
     "./membership": "./src/membership.ts",
     "./permission": "./src/permission.ts",
     "./prompt-request": "./src/prompt-request.ts",
+    "./runtime-event": "./src/runtime-event.ts",
+    "./sandbox-execution": "./src/sandbox-execution.ts",
     "./server-function": "./src/server-function.ts",
     "./start-workflow": "./src/start-workflow.ts",
     "./workflow-intake": "./src/workflow-intake.ts",
