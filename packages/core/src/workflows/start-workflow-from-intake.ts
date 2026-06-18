@@ -5,25 +5,6 @@ import { StorageService } from '../services/storage-service'
 
 export type StartWorkflowFromIntakeInput = WorkflowIntake
 
-function repositoryAccessInput(externalRef: WorkflowIntake['externalRef']) {
-  if (
-    externalRef?.repositoryProvider === undefined ||
-    externalRef.repositoryOwner === undefined ||
-    externalRef.repositoryName === undefined
-  ) {
-    return undefined
-  }
-
-  return {
-    provider: externalRef.repositoryProvider,
-    ...(externalRef.repositoryInstallationId === undefined
-      ? {}
-      : { installationId: externalRef.repositoryInstallationId }),
-    owner: externalRef.repositoryOwner,
-    name: externalRef.repositoryName,
-  }
-}
-
 export const StartWorkflowFromIntake = Effect.fn(
   '@patchplane/core/workflows/StartWorkflowFromIntake',
 )(function*(input: StartWorkflowFromIntakeInput) {
@@ -36,10 +17,20 @@ export const StartWorkflowFromIntake = Effect.fn(
     externalEventKind: input.externalRef?.eventKind,
   })
 
-  const accessInput = repositoryAccessInput(input.externalRef)
-  if (accessInput !== undefined) {
+  if (
+    input.externalRef?.repositoryProvider !== undefined &&
+    input.externalRef.repositoryOwner !== undefined &&
+    input.externalRef.repositoryName !== undefined
+  ) {
     const sourceControl = yield* SourceControlService
-    yield* sourceControl.verifyRepositoryAccess(accessInput)
+    yield* sourceControl.verifyRepositoryAccess({
+      provider: input.externalRef.repositoryProvider,
+      ...(input.externalRef.repositoryInstallationId === undefined
+        ? {}
+        : { installationId: input.externalRef.repositoryInstallationId }),
+      owner: input.externalRef.repositoryOwner,
+      name: input.externalRef.repositoryName,
+    })
   }
 
   const storage = yield* StorageService
