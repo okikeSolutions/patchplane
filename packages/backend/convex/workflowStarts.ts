@@ -113,6 +113,30 @@ const workflowStartArgs = {
   prompt: v.string(),
 }
 
+const runtimeEventReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  provider: v.string(),
+  type: v.string(),
+  occurredAt: v.number(),
+  summary: v.optional(v.string()),
+  payloadJson: v.optional(v.string()),
+})
+
+const sandboxExecutionReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  provider: v.string(),
+  sandboxId: v.string(),
+  command: v.string(),
+  status: v.union(v.literal('succeeded'), v.literal('failed')),
+  exitCode: v.optional(v.number()),
+  stdout: v.string(),
+  stderr: v.optional(v.string()),
+  startedAt: v.number(),
+  completedAt: v.number(),
+})
+
 const workflowStartReturn = v.object({
   promptRequest: v.object({
     id: v.string(),
@@ -392,6 +416,97 @@ export const createFromExternalIntake = mutation({
     })
 
     return workflowStart
+  },
+})
+
+export const recordRuntimeEvents = mutation({
+  args: {
+    systemSecret: v.string(),
+    events: v.array(v.object({
+      workflowRunId: v.id('workflowRuns'),
+      provider: v.string(),
+      type: v.string(),
+      occurredAt: v.number(),
+      summary: v.optional(v.string()),
+      payloadJson: v.optional(v.string()),
+    })),
+  },
+  returns: v.array(runtimeEventReturn),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const rows = []
+
+    for (const event of args.events) {
+      const workflowRun = await ctx.db.get('workflowRuns', event.workflowRunId)
+      if (workflowRun === null) {
+        throw new ConvexError('Workflow run not found')
+      }
+
+      const id = await ctx.db.insert('runtimeEvents', {
+        ...event,
+        createdAt: Date.now(),
+      })
+      rows.push({ id, ...event })
+    }
+
+    return rows
+  },
+})
+
+export const recordSandboxExecution = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    sandboxId: v.string(),
+    command: v.string(),
+    status: v.union(v.literal('succeeded'), v.literal('failed')),
+    exitCode: v.optional(v.number()),
+    stdout: v.string(),
+    stderr: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.number(),
+  },
+  returns: sandboxExecutionReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    const id = await ctx.db.insert('sandboxExecutions', {
+      workflowRunId: args.workflowRunId,
+      provider: args.provider,
+      sandboxId: args.sandboxId,
+      command: args.command,
+      status: args.status,
+      ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
+      stdout: args.stdout,
+      ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
+      startedAt: args.startedAt,
+      completedAt: args.completedAt,
+      createdAt: Date.now(),
+    })
+
+    if (workflowRun.status === 'queued') {
+      await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'reviewed' })
+    }
+
+    return {
+      id,
+      workflowRunId: args.workflowRunId,
+      provider: args.provider,
+      sandboxId: args.sandboxId,
+      command: args.command,
+      status: args.status,
+      ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
+      stdout: args.stdout,
+      ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
+      startedAt: args.startedAt,
+      completedAt: args.completedAt,
+    }
   },
 })
 

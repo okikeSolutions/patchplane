@@ -102,6 +102,32 @@ export default defineSchema({
     ])
     .index('by_comment', ['provider', 'commentExternalId']),
 
+  runtimeEvents: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    type: v.string(),
+    occurredAt: v.number(),
+    summary: v.optional(v.string()),
+    payloadJson: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_type', ['provider', 'type']),
+
+  sandboxExecutions: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    sandboxId: v.string(),
+    command: v.string(),
+    status: v.union(v.literal('succeeded'), v.literal('failed')),
+    exitCode: v.optional(v.number()),
+    stdout: v.string(),
+    stderr: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.number(),
+    createdAt: v.number(),
+  }).index('by_workflow_run', ['workflowRunId']),
+
   workflowRuns: defineTable({
     promptRequestId: v.id('promptRequests'),
     workspaceId: v.string(),

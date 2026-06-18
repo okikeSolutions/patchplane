@@ -2,6 +2,8 @@ import { Config, Effect, Layer, Option, Redacted } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
+import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
+import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
   decodeWorkflowStart,
   decodeWorkflowStarts,
@@ -10,6 +12,8 @@ import {
 import {
   StorageService,
   type CreateWorkflowFromPromptInput,
+  type RecordRuntimeEventInput,
+  type RecordSandboxExecutionInput,
   type StorageListRecentWorkflowStartsInput,
 } from '@patchplane/core/services/storage-service'
 import { ConvexConfig } from './ConvexConfig'
@@ -62,6 +66,40 @@ const createWorkflowStartFromExternalIntakeMutation = makeFunctionReference<
   unknown
 >('workflowStarts:createFromExternalIntake')
 
+const recordRuntimeEventsMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    events: ReadonlyArray<{
+      workflowRunId: string
+      provider: string
+      type: string
+      occurredAt: number
+      summary?: string
+      payloadJson?: string
+    }>
+  },
+  unknown
+>('workflowStarts:recordRuntimeEvents')
+
+const recordSandboxExecutionMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    provider: string
+    sandboxId: string
+    command: string
+    status: 'succeeded' | 'failed'
+    exitCode?: number
+    stdout: string
+    stderr?: string
+    startedAt: number
+    completedAt: number
+  },
+  unknown
+>('workflowStarts:recordSandboxExecution')
+
 const listRecentWorkflowStartsQuery = makeFunctionReference<
   'query',
   {
@@ -71,16 +109,12 @@ const listRecentWorkflowStartsQuery = makeFunctionReference<
   unknown
 >('workflowStarts:listRecent')
 
-function normalizeConvexUrl(url: { toString(): string }) {
-  return url.toString().replace(/\/$/, '')
-}
-
 export const ConvexStoragePlugin = {
   layer: Layer.effect(
     StorageService,
     Effect.gen(function* () {
       const config = yield* ConvexConfig
-      const convexUrl = normalizeConvexUrl(config.url)
+      const convexUrl = config.url.toString().replace(/\/$/, '')
       const systemIngestionSecret = Option.getOrUndefined(
         config.systemIngestionSecret,
       )
@@ -229,10 +263,119 @@ export const ConvexStoragePlugin = {
           }),
       )
 
+      const recordSandboxExecution = Effect.fn(
+        '@patchplane/plugins/convex/recordSandboxExecution',
+      )(
+        (input: RecordSandboxExecutionInput) =>
+          Effect.gen(function* () {
+            if (systemIngestionSecret === undefined) {
+              return yield* new StorageError({
+                operation: 'recordSandboxExecution.config',
+                message:
+                  'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record sandbox executions',
+                cause: undefined,
+              })
+            }
+
+            const value = yield* Effect.tryPromise({
+              try: () => {
+                const client = new ConvexHttpClient(convexUrl)
+                return client.mutation(recordSandboxExecutionMutation, {
+                  systemSecret: Redacted.value(systemIngestionSecret),
+                  workflowRunId: input.workflowRunId,
+                  provider: input.provider,
+                  sandboxId: input.sandboxId,
+                  command: input.command,
+                  status: input.status,
+                  ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
+                  stdout: input.stdout,
+                  ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
+                  startedAt: input.startedAt,
+                  completedAt: input.completedAt,
+                })
+              },
+              catch: (cause) =>
+                new StorageError({
+                  operation: 'recordSandboxExecution',
+                  message: 'Convex failed to record sandbox execution',
+                  cause,
+                }),
+            })
+
+            return yield* decodeSandboxExecution(value).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new StorageError({
+                    operation: 'recordSandboxExecution.decode',
+                    message: 'Convex returned an invalid sandbox execution',
+                    cause,
+                  }),
+              ),
+            )
+          }),
+      )
+
+      const recordRuntimeEvents = Effect.fn(
+        '@patchplane/plugins/convex/recordRuntimeEvents',
+      )(
+        (input: ReadonlyArray<RecordRuntimeEventInput>) =>
+          Effect.gen(function* () {
+            if (input.length === 0) {
+              return []
+            }
+            if (systemIngestionSecret === undefined) {
+              return yield* new StorageError({
+                operation: 'recordRuntimeEvents.config',
+                message:
+                  'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record runtime events',
+                cause: undefined,
+              })
+            }
+
+            const value = yield* Effect.tryPromise({
+              try: () => {
+                const client = new ConvexHttpClient(convexUrl)
+                return client.mutation(recordRuntimeEventsMutation, {
+                  systemSecret: Redacted.value(systemIngestionSecret),
+                  events: input.map((event) => ({
+                    workflowRunId: event.workflowRunId,
+                    provider: event.provider,
+                    type: event.type,
+                    occurredAt: event.occurredAt,
+                    ...(event.summary === undefined ? {} : { summary: event.summary }),
+                    ...(event.payloadJson === undefined
+                      ? {}
+                      : { payloadJson: event.payloadJson }),
+                  })),
+                })
+              },
+              catch: (cause) =>
+                new StorageError({
+                  operation: 'recordRuntimeEvents',
+                  message: 'Convex failed to record runtime events',
+                  cause,
+                }),
+            })
+
+            return yield* decodeRuntimeEvents(value).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new StorageError({
+                    operation: 'recordRuntimeEvents.decode',
+                    message: 'Convex returned invalid runtime events',
+                    cause,
+                  }),
+              ),
+            )
+          }),
+      )
+
       return StorageService.of({
         createWorkflowFromIntake: createWorkflowFromPrompt,
         createWorkflowFromPrompt,
         listRecentWorkflowStarts,
+        recordRuntimeEvents,
+        recordSandboxExecution,
       })
     }),
   ),
