@@ -4,13 +4,18 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "exports": {
     "./convex/config": "./src/convex/ConvexConfig.ts",
     "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts",
+    "./daytona/config": "./src/daytona/DaytonaConfig.ts",
+    "./daytona/sandbox-plugin": "./src/daytona/DaytonaSandboxPlugin.ts",
     "./github/config": "./src/github/GitHubConfig.ts",
     "./github/provider-plugin": "./src/github/GitHubProviderPlugin.ts",
+    "./pi/config": "./src/pi/PiAgentConfig.ts",
+    "./pi/runtime-plugin": "./src/pi/PiAgentRuntimePlugin.ts",
+    "./registry": "./src/registry.ts",
     "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",
     "./workos/config": "./src/workos/WorkOSConfig.ts",
     "./workos/session": "./src/workos/session.ts"
@@ -22,9 +27,13 @@
   "dependencies": {
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
-    "@workos-inc/node": "10.2.0",
+    "@daytona/sdk": "^0.186.0",
+    "@earendil-works/pi-agent-core": "0.79.6",
+    "@earendil-works/pi-ai": "0.79.6",
+    "@earendil-works/pi-coding-agent": "0.79.6",
+    "@workos-inc/node": "10.3.0",
     "convex": "^1.41.0",
-    "effect": "4.0.0-beta.79",
+    "effect": "4.0.0-beta.84",
     "octokit": "^5.0.5"
   },
   "devDependencies": {

@@ -15,54 +15,6 @@ function stripWorkOSNamespace(value: string, namespace: 'user' | 'org') {
   return value.startsWith(prefix) ? value.slice('workos:'.length) : undefined
 }
 
-const requireActor = Effect.fn('WorkOSAuthPlugin.requireActor')(
-  function*(operation: string) {
-    const request = yield* AuthRequestContext
-
-    if (!request.actor) {
-      return yield* new AuthError({
-        operation,
-        message: 'No authenticated actor is available for this request',
-        cause: null,
-      })
-    }
-
-    return request.actor
-  },
-)
-
-const requireAuthRequest = Effect.fn('WorkOSAuthPlugin.requireAuthRequest')(
-  function*(operation: string) {
-    const request = yield* AuthRequestContext
-
-    if (!request.actor) {
-      return yield* new AuthError({
-        operation,
-        message: 'No authenticated actor is available for this request',
-        cause: null,
-      })
-    }
-
-    return request
-  },
-)
-
-const requireWorkspace = Effect.fn('WorkOSAuthPlugin.requireWorkspace')(
-  function*(operation: string) {
-    const request = yield* AuthRequestContext
-
-    if (!request.workspace) {
-      return yield* new AuthError({
-        operation,
-        message: 'No active workspace is available for this request',
-        cause: null,
-      })
-    }
-
-    return request.workspace
-  },
-)
-
 export const WorkOSAuthPlugin = {
   layer: Layer.effect(
     AuthService,
@@ -78,14 +30,35 @@ export const WorkOSAuthPlugin = {
         clientId: workos.options.clientId,
       })
 
-      const resolveCurrentWorkspace = Effect.fn(
-        'WorkOSAuthPlugin.getCurrentWorkspace',
-      )(function*() {
-        const workspace = yield* requireWorkspace('getCurrentWorkspace')
-        const organizationId = stripWorkOSNamespace(workspace.id, 'org')
+      const getCurrentActor = Effect.gen(function* () {
+        const request = yield* AuthRequestContext
+
+        if (!request.actor) {
+          return yield* new AuthError({
+            operation: 'getCurrentActor',
+            message: 'No authenticated actor is available for this request',
+            cause: null,
+          })
+        }
+
+        return request.actor
+      })
+
+      const getCurrentWorkspace = Effect.gen(function* () {
+        const request = yield* AuthRequestContext
+
+        if (!request.workspace) {
+          return yield* new AuthError({
+            operation: 'getCurrentWorkspace',
+            message: 'No active workspace is available for this request',
+            cause: null,
+          })
+        }
+
+        const organizationId = stripWorkOSNamespace(request.workspace.id, 'org')
 
         if (organizationId === undefined) {
-          return workspace
+          return request.workspace
         }
 
         const organization = yield* Effect.tryPromise({
@@ -101,52 +74,73 @@ export const WorkOSAuthPlugin = {
         return mapWorkOSOrganizationToWorkspace(organization)
       })
 
-      const resolveMemberships = Effect.fn('WorkOSAuthPlugin.listMemberships')(
-        function*() {
-          const request = yield* requireAuthRequest('listMemberships')
-          const actor = yield* requireActor('listMemberships')
-          const userId = stripWorkOSNamespace(actor.id, 'user')
-          const organizationId = request.workspace
-            ? stripWorkOSNamespace(request.workspace.id, 'org')
-            : undefined
+      const listMemberships = Effect.gen(function* () {
+        const request = yield* AuthRequestContext
 
-          if (userId === undefined) {
-            return request.memberships
+        if (!request.actor) {
+          return yield* new AuthError({
+            operation: 'listMemberships',
+            message: 'No authenticated actor is available for this request',
+            cause: null,
+          })
+        }
+
+        const userId = stripWorkOSNamespace(request.actor.id, 'user')
+        const organizationId = request.workspace
+          ? stripWorkOSNamespace(request.workspace.id, 'org')
+          : undefined
+
+        if (userId === undefined) {
+          return request.memberships
+        }
+
+        const activeStatuses: Array<'active'> = ['active']
+        const options = organizationId === undefined
+          ? { userId, statuses: activeStatuses }
+          : { userId, organizationId, statuses: activeStatuses }
+
+        const memberships = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await workos.userManagement.listOrganizationMemberships(
+              options,
+            )
+            return organizationId === undefined
+              ? await result.autoPagination()
+              : result.data
+          },
+          catch: (cause) =>
+            new AuthError({
+              operation: 'listMemberships',
+              message: 'WorkOS failed to list organization memberships',
+              cause,
+            }),
+        })
+
+        return memberships.map(mapWorkOSMembershipToMembership)
+      })
+
+      const requirePermission = (permission: Permission) =>
+        Effect.gen(function* () {
+          const request = yield* AuthRequestContext
+
+          if (!request.actor) {
+            return yield* new AuthError({
+              operation: 'requirePermission',
+              message: 'No authenticated actor is available for this request',
+              cause: null,
+            })
           }
 
-          const activeStatuses: Array<'active'> = ['active']
-          const options =
-            organizationId === undefined
-              ? { userId, statuses: activeStatuses }
-              : { userId, organizationId, statuses: activeStatuses }
+          if (!request.workspace) {
+            return yield* new AuthError({
+              operation: 'requirePermission',
+              message: 'No active workspace is available for this request',
+              cause: null,
+            })
+          }
 
-          const memberships = yield* Effect.tryPromise({
-            try: async () => {
-              const result = await workos.userManagement.listOrganizationMemberships(
-                options,
-              )
-              return organizationId === undefined
-                ? await result.autoPagination()
-                : result.data
-            },
-            catch: (cause) =>
-              new AuthError({
-                operation: 'listMemberships',
-                message: 'WorkOS failed to list organization memberships',
-                cause,
-              }),
-          })
-
-          return memberships.map(mapWorkOSMembershipToMembership)
-        },
-      )
-
-      const requirePermission = Effect.fn('WorkOSAuthPlugin.requirePermission')(
-        function*(permission: Permission) {
-          const request = yield* requireAuthRequest('requirePermission')
-          const activeWorkspace = yield* requireWorkspace('requirePermission')
-          const memberships = yield* resolveMemberships()
-          const activeWorkspaceId = activeWorkspace.id
+          const memberships = yield* listMemberships
+          const activeWorkspaceId = request.workspace.id
           const hasActiveMembership = memberships.some(
             (membership) =>
               membership.workspaceId === activeWorkspaceId &&
@@ -158,11 +152,9 @@ export const WorkOSAuthPlugin = {
               membership.status === 'active' &&
               membership.permissions.includes(permission),
           )
-          const hasCanonicalSessionPermission =
-            hasActiveMembership &&
+          const hasCanonicalSessionPermission = hasActiveMembership &&
             (request.explicitPermissions ?? []).includes(permission)
-          const hasPermission =
-            hasMembershipPermission || hasCanonicalSessionPermission
+          const hasPermission = hasMembershipPermission || hasCanonicalSessionPermission
 
           if (!hasPermission) {
             return yield* new AuthError({
@@ -173,13 +165,12 @@ export const WorkOSAuthPlugin = {
           }
 
           return undefined
-        },
-      )
+        })
 
       return AuthService.of({
-        getCurrentActor: requireActor('getCurrentActor'),
-        getCurrentWorkspace: resolveCurrentWorkspace(),
-        listMemberships: resolveMemberships(),
+        getCurrentActor,
+        getCurrentWorkspace,
+        listMemberships,
         requirePermission,
       })
     }),

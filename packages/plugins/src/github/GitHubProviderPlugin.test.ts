@@ -54,6 +54,20 @@ function mockInstallationToken() {
     })
 }
 
+function mockScopedInstallationToken() {
+  nock('https://api.github.com')
+    .post('/app/installations/123/access_tokens', {
+      repository_ids: [456],
+      permissions: { contents: 'read' },
+    })
+    .reply(201, {
+      token: 'scoped-installation-token',
+      expires_at: '2026-01-01T00:00:00.000Z',
+      permissions: { contents: 'read' },
+      repository_selection: 'selected',
+    })
+}
+
 beforeEach(() => {
   MockDate.set('2026-01-01T00:00:00.000Z')
   nock.cleanAll()
@@ -128,6 +142,48 @@ describe('GitHubProviderPlugin', () => {
     )
 
     expect(nock.isDone()).toBe(true)
+  })
+
+  test('creates repository-scoped installation clone credentials for private repository clones', async () => {
+    mockScopedInstallationToken()
+
+    const credentials = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.createRepositoryCloneCredentials({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          repositoryExternalId: '456',
+        })
+      }),
+    )
+
+    expect(credentials).toEqual({
+      username: 'x-access-token',
+      password: 'scoped-installation-token',
+    })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test('rejects non-positive installation ids', async () => {
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.verifyRepositoryAccess({
+            provider: 'github',
+            installationId: '0',
+            owner: 'octokit',
+            name: 'octokit.js',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'GitHubProviderPlugin.parseGitHubInstallationId',
+    })
   })
 
   test('verifies a signed webhook event without dispatching handlers', async () => {

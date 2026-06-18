@@ -29,30 +29,14 @@ export interface WorkOSAuthSession {
   readonly accessToken?: string
 }
 
-function permissionsFromSession(session: WorkOSAuthSession) {
-  if (!session.user || !session.organizationId) {
-    return []
-  }
-
-  const role = normalizeWorkspaceRole(session.role)
-  const roles = session.roles?.map(normalizeWorkspaceRole) ?? []
-  const rolePermissions = mapWorkOSRolesToPermissions(role, roles)
-  const explicitPermissions = mapWorkOSPermissions(session.permissions)
-  return [...new Set([...rolePermissions, ...explicitPermissions])]
-}
-
-function mapWorkOSSessionUserToActor(user: WorkOSSessionUser): Actor {
-  return {
-    id: makeWorkOSActorId(user.id),
-    displayName: user.name ?? user.email,
-  }
-}
-
 export function mapWorkOSSessionToAuthRequest(
   session: WorkOSAuthSession,
 ): AuthRequest {
   const actor: Actor | null = session.user
-    ? mapWorkOSSessionUserToActor(session.user)
+    ? {
+      id: makeWorkOSActorId(session.user.id),
+      displayName: session.user.name ?? session.user.email,
+    }
     : null
   const workspace: Workspace | null = session.organizationId
     ? {
@@ -64,9 +48,16 @@ export function mapWorkOSSessionToAuthRequest(
     session.user && session.organizationId
       ? mapWorkOSPermissions(session.permissions)
       : []
-  const permissions = permissionsFromSession(session)
   const role = normalizeWorkspaceRole(session.role)
   const roles = [role, ...(session.roles?.map(normalizeWorkspaceRole) ?? [])]
+  const permissions = session.user && session.organizationId
+    ? [
+      ...new Set([
+        ...mapWorkOSRolesToPermissions(role, roles),
+        ...explicitPermissions,
+      ]),
+    ]
+    : []
   const memberships: ReadonlyArray<Membership> =
     actor && workspace && session.organizationId && session.user
       ? [

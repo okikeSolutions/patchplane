@@ -1,5 +1,4 @@
-import { Effect, Layer, Option, Redacted } from 'effect'
-import { App, Octokit, RequestError } from 'octokit'
+import { Effect, Layer } from 'effect'
 import { GitHubError, SourceControlError } from '@patchplane/domain/errors'
 import {
   decodeGitHubRepositoryRef,
@@ -8,84 +7,36 @@ import {
 import { GitHubWebhookService } from '@patchplane/core/services/github-webhook-service'
 import { SourceControlService } from '@patchplane/core/services/source-control-service'
 import { GitHubConfig } from './GitHubConfig'
+import { makeGitHubApp } from './github-app'
+import { parseGitHubInstallationId } from './github-installation'
 
-function githubCause(cause: unknown) {
-  if (cause instanceof RequestError) {
-    return {
-      name: cause.name,
-      message: cause.message,
-      status: cause.status,
-      request: {
-        method: cause.request.method,
-        url: cause.request.url,
-      },
-    }
-  }
-
-  return cause
-}
-
-function parseWebhookPayload(payload: string) {
-  return JSON.parse(payload) as unknown
-}
-
-function appFromConfig(config: GitHubConfig) {
-  const baseUrl = Option.getOrUndefined(config.baseUrl)
-  const OctokitForApp = baseUrl === undefined ? Octokit : Octokit.defaults({ baseUrl })
-  return {
-    baseUrl,
-    app: new App({
-      appId: config.appId,
-      privateKey: Redacted.value(config.privateKey),
-      webhooks: { secret: Redacted.value(config.webhookSecret) },
-      Octokit: OctokitForApp,
-    }),
-  }
-}
-
-function parseGitHubInstallationId(input: {
-  readonly provider: string
-  readonly installationId?: string
+function toGitHubRepositoryTokenScope(input: {
+  readonly name: string
+  readonly repositoryExternalId?: string | undefined
 }) {
-  if (input.provider !== 'github') {
+  if (input.repositoryExternalId === undefined) {
+    return Effect.succeed({ repositories: [input.name] })
+  }
+
+  const repositoryId = Number(input.repositoryExternalId)
+  if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
     return Effect.fail(
       new SourceControlError({
-        operation: 'GitHubProviderPlugin.parseGitHubInstallationId',
-        message: `Unsupported source-control provider: ${input.provider}`,
+        operation: 'GitHubProviderPlugin.parseGitHubRepositoryId',
+        message: 'GitHub clone credentials received an invalid repository id',
         cause: input,
       }),
     )
   }
 
-  if (input.installationId === undefined) {
-    return Effect.fail(
-      new SourceControlError({
-        operation: 'GitHubProviderPlugin.parseGitHubInstallationId',
-        message: 'GitHub operations require an installation id',
-        cause: input,
-      }),
-    )
-  }
-
-  const installationId = Number(input.installationId)
-  if (!Number.isSafeInteger(installationId)) {
-    return Effect.fail(
-      new SourceControlError({
-        operation: 'GitHubProviderPlugin.parseGitHubInstallationId',
-        message: 'GitHub operation received an invalid installation id',
-        cause: input,
-      }),
-    )
-  }
-
-  return Effect.succeed(installationId)
+  return Effect.succeed({ repository_ids: [repositoryId] })
 }
 
 const sourceControlLayer = Layer.effect(
   SourceControlService,
   Effect.gen(function* () {
     const config = yield* GitHubConfig
-    const { app, baseUrl } = appFromConfig(config)
+    const { app, baseUrl } = makeGitHubApp(config)
 
     yield* Effect.logInfo('Initialized GitHub source-control provider plugin', {
       appId: config.appId,
@@ -114,7 +65,7 @@ const sourceControlLayer = Layer.effect(
           new SourceControlError({
             operation: 'verifyRepositoryAccess.github',
             message: 'GitHub failed to verify repository access',
-            cause: githubCause(cause),
+            cause,
           }),
       })
 
@@ -169,14 +120,52 @@ const sourceControlLayer = Layer.effect(
           new SourceControlError({
             operation: 'createIssueComment.github',
             message: 'GitHub failed to create an issue comment',
-            cause: githubCause(cause),
+            cause,
           }),
       })
+    })
+
+    const createRepositoryCloneCredentials = Effect.fn(
+      'GitHubProviderPlugin.createRepositoryCloneCredentials',
+    )(function*(input: {
+      readonly provider: string
+      readonly installationId?: string
+      readonly owner: string
+      readonly name: string
+      readonly repositoryExternalId?: string | undefined
+    }) {
+      const installationId = yield* parseGitHubInstallationId(input)
+      const repositoryScope = yield* toGitHubRepositoryTokenScope(input)
+      const token = yield* Effect.tryPromise({
+        try: async () => {
+          const result = await app.octokit.request(
+            'POST /app/installations/{installation_id}/access_tokens',
+            {
+              installation_id: installationId,
+              ...repositoryScope,
+              permissions: { contents: 'read' },
+            },
+          )
+          return result.data.token
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation: 'createRepositoryCloneCredentials.github',
+            message: 'GitHub failed to create installation clone credentials',
+            cause,
+          }),
+      })
+
+      return {
+        username: 'x-access-token',
+        password: token,
+      }
     })
 
     return SourceControlService.of({
       verifyRepositoryAccess,
       createIssueComment,
+      createRepositoryCloneCredentials,
     })
   }),
 )
@@ -185,7 +174,7 @@ const githubWebhookLayer = Layer.effect(
   GitHubWebhookService,
   Effect.gen(function* () {
     const config = yield* GitHubConfig
-    const { app, baseUrl } = appFromConfig(config)
+    const { app, baseUrl } = makeGitHubApp(config)
 
     yield* Effect.logInfo('Initialized GitHub webhook provider plugin', {
       appId: config.appId,
@@ -211,7 +200,7 @@ const githubWebhookLayer = Layer.effect(
           new GitHubError({
             operation: 'verifyGitHubWebhook',
             message: 'GitHub failed to verify the webhook signature',
-            cause: githubCause(cause),
+            cause,
           }),
       })
 
@@ -224,7 +213,7 @@ const githubWebhookLayer = Layer.effect(
       }
 
       const payload = yield* Effect.try({
-        try: () => parseWebhookPayload(input.payload),
+        try: () => JSON.parse(input.payload) as unknown,
         catch: (cause) =>
           new GitHubError({
             operation: 'verifyGitHubWebhook.parse',
