@@ -32,12 +32,15 @@ bun run typecheck
 
 ## Runtime composition
 
-Current runtimes:
+Current runtime:
 
-- `src/effect/runtime.ts` — normal app runtime composed from WorkOS auth, Convex storage, and observability layers.
-- `src/effect/github-runtime.ts` — GitHub webhook runtime composed from GitHub provider, Convex storage, and observability layers. This keeps GitHub env requirements out of ordinary app startup.
+- `src/effect/runtime.ts` — the single PatchPlane `ManagedRuntime` for app/server route execution.
+- `src/effect/plugin-layers.ts` — builds plugin layers from surfaces selected in the root `patchplane.config.json`.
+- `src/effect/patchplane-config.ts` — loads non-secret PatchPlane project config.
 
-Server functions use `src/lib/effect-server-fn.ts`, which dynamically imports the server runtime only inside the server handler so WorkOS server SDK code does not enter the browser bundle.
+Server functions and API routes dynamically import the runtime only inside server handlers so server-only SDK code does not enter the browser bundle.
+
+`patchplane.config.json` is CLI-managed, user-visible project config. The `.patchplane/` directory is reserved for generated local artifacts such as logs, cache, and state.
 
 ## Routes of interest
 
@@ -90,7 +93,7 @@ The app uses Tailwind CSS and local UI components in `src/components/ui`. Do not
 After `bun run build`, server-only SDKs and secrets should not appear in client assets:
 
 ```bash
-rg "WORKOS_API_KEY|PATCHPLANE_SYSTEM_INGESTION_SECRET|GITHUB_PRIVATE_KEY|GITHUB_WEBHOOK_SECRET|octokit|github-runtime|workos-node|api.workos.com" dist/client
+rg "WORKOS_API_KEY|PATCHPLANE_SYSTEM_INGESTION_SECRET|GITHUB_PRIVATE_KEY|GITHUB_WEBHOOK_SECRET|octokit|workos-node|api.workos.com" dist/client
 ```
 
 No matches are expected.

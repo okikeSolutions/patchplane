@@ -12,20 +12,20 @@ This roadmap is based on the current `/vendor` submodules and the revised v2 spe
 
 | System | Vendor path | Current evidence | Roadmap impact |
 | --- | --- | --- | --- |
-| Effect v4 | `vendor/effect` | `Effect-TS/effect-smol`, checked out at `effect@4.0.0-beta.79`; includes `effect/unstable/httpapi` and `effect/unstable/http`. | Use `effect@4.0.0-beta.79`, isolate beta APIs in `packages/domain`, `packages/core`, and `packages/plugins`. `unstable` Effect modules are allowed when they are the right API surface. |
+| Effect v4 | `vendor/effect` | `Effect-TS/effect-smol`, checked out at `effect@4.0.0-beta.84`; includes `effect/unstable/httpapi` and `effect/unstable/http`. | Use `effect@4.0.0-beta.84`, isolate beta APIs in `packages/domain`, `packages/core`, and `packages/plugins`. `unstable` Effect modules are allowed when they are the right API surface. |
 | Daytona | `vendor/daytona` | TypeScript SDK is `@daytona/sdk`; SDK exposes `Daytona`, sandbox create/delete, process execution, fs, git, snapshots, resources, network controls, `ephemeral`, `autoStopInterval`, `autoDeleteInterval`. | Use `@daytona/sdk`, not `@daytonaio/sdk`. Model sandbox policies around explicit lifecycle and network controls. |
 | Octokit | `vendor/octokit.js` | `octokit` v5 line exposes `Octokit`, `App`, REST, GraphQL, GitHub App, and webhook verification APIs; package uses conditional exports. | GitHub plugin should wrap `App` and webhook verification. Use Node-compatible TS module settings in server/plugin packages that import Octokit. |
-| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.1` exposes `Agent`, `subscribe`, `prompt`, `continue`, `abort`, `waitForIdle`, steering/follow-up queues, and event stream types. | Runtime plugin should be `PiAgentRuntimePlugin`, not `PiMonoRuntimePlugin`; normalize Pi events into PatchPlane `RuntimeEvent`. |
-| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.2.0`; exports `WorkOS`, `userManagement`, `organizations`, membership models with `role` and optional `roles`; package declares Node >=22.11. | Auth plugin maps WorkOS `User`, `Organization`, and `OrganizationMembership` into PatchPlane domain schemas. Current repo engine guard is Node >=20; raise server/plugin execution guard to Node 22.19+ before Pi/runtime work because Pi requires it. |
-| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.79`; exports `NodeRuntime`, `NodeHttpServer`, `NodeHttpClient`, Node filesystem/path/crypto and other platform services. | Use when Node-specific Effect services are needed. Pin to `4.0.0-beta.79`. Do not replace TanStack Start unless a standalone Node service is intentionally introduced. |
+| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.6` exposes `Agent`, `subscribe`, `prompt`, `continue`, `abort`, `waitForIdle`, steering/follow-up queues, and event stream types. | Runtime plugin should be `PiAgentRuntimePlugin`, not `PiMonoRuntimePlugin`; normalize Pi events into PatchPlane `RuntimeEvent`. |
+| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.3.0`; exports `WorkOS`, `userManagement`, `organizations`, membership models with `role` and optional `roles`; package declares Node >=22.11. | Auth plugin maps WorkOS `User`, `Organization`, and `OrganizationMembership` into PatchPlane domain schemas. Server/plugin execution should target Node 22.19+ before Pi/runtime work because Pi requires it. |
+| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.84`; exports `NodeRuntime`, `NodeServices`, `NodeHttpServer`, `NodeHttpClient`, Node filesystem/path/terminal/stdio/crypto and other platform services. | Use when Node-specific Effect services are needed. Pin to `4.0.0-beta.84`. `packages/cli` uses `NodeServices.layer` with `effect/unstable/cli` and Effect `Terminal` prompts. Do not replace TanStack Start unless a standalone Node service is intentionally introduced. |
 
 Spec adjustments made from research:
 
 - renamed Pi Mono references to Pi Agent Core / Pi Agent Runtime Plugin,
-- clarified `effect-smol` / `effect@4.0.0-beta.79`,
+- clarified `effect-smol` / `effect@4.0.0-beta.84`,
 - decided Effect `unstable` modules are allowed, including `effect/unstable/httpapi` and `effect/unstable/http`,
 - clarified `@daytona/sdk` package name and sandbox lifecycle/network implications,
-- documented Node 22.19+ target for server/plugin runtime before Pi, while the current package guard remains Node >=20 for the foundation slice,
+- documented Node 22.19+ target for server/plugin runtime before Pi, while the package guards are moving to Node >=22.19.0 for the Daytona/Pi dogfood slice,
 - added Octokit conditional-export TypeScript constraints.
 
 ### 0.1 Ecosystem research refresh — June 17, 2026
@@ -121,17 +121,17 @@ UI strategy: do not fork or adopt a full dashboard starter. PatchPlane already h
 Tasks:
 
 - [x] Add vendor submodules under `/vendor`.
-- [x] Verify Effect submodule is `Effect-TS/effect-smol` at `effect@4.0.0-beta.79`.
+- [x] Verify Effect submodule is `Effect-TS/effect-smol` at `effect@4.0.0-beta.84`.
 - [x] Verify Daytona SDK package is `@daytona/sdk`.
-- [x] Verify Pi runtime package is `@earendil-works/pi-agent-core@0.79.1`.
+- [x] Verify Pi runtime package is `@earendil-works/pi-agent-core@0.79.6`.
 - [x] Verify WorkOS Node SDK runtime requirement.
 - [x] Decide migration path: keep `apps/client`; do not create `apps/app`.
 - [x] Decide Convex location: keep `packages/backend/convex` in place for now; do not move it into `apps/client`.
 - [x] Decide package timing: create `packages/domain`, `packages/core`, and `packages/plugins` immediately.
 - [x] Decide runtime/tooling split: Bun remains the package runner; server/plugin code executes under Node.
 - [x] Decide vendor usage: `/vendor` is research-only.
-- [x] Decide Effect policy: pin `effect@4.0.0-beta.79` everywhere Effect v4 is used.
-- [ ] Raise Node engine/tooling guard to Node 22.19+ before Pi/runtime code runs; current package guard remains Node >=20 for the foundation/GitHub slice.
+- [x] Decide Effect policy: pin `effect@4.0.0-beta.84` everywhere Effect v4 is used.
+- [x] Raise Node engine/tooling guard to Node 22.19+ before Pi/runtime code runs; package guards now use Node >=22.19.0 for the Daytona/Pi dogfood slice.
 - [x] Verify current package TS config can typecheck `octokit` conditional exports in `packages/plugins`; revisit Node16 module settings if runtime packaging changes.
 
 Acceptance criteria:
@@ -165,7 +165,7 @@ Tasks:
 - [x] Add explicit package subpath exports for each package; avoid root barrel files.
 - [x] Add package-level `typecheck` and `test` scripts.
 - [x] Update root typecheck scripts to include the new packages.
-- [x] Pin `effect@4.0.0-beta.79` everywhere Effect v4 is used.
+- [x] Pin `effect@4.0.0-beta.84` everywhere Effect v4 is used.
 - [x] Root lint covers new packages through `oxlint apps packages`.
 
 Acceptance criteria:
@@ -293,7 +293,7 @@ Acceptance criteria:
 
 ### M6 — App composition root and first vertical action
 
-**Status:** Runtime, AuthKit composition, and authenticated workflow path working
+**Status:** Runtime, AuthKit composition, authenticated workflow path, and CLI onboarding foundation working
 
 Tasks:
 
@@ -307,11 +307,13 @@ Tasks:
 - [x] Pass WorkOS access tokens into Convex storage write/read paths where needed.
 - [x] Productize the visible prompt/workflow UI for the current alpha shell.
 - [x] Add Effect observability layer with pretty terminal logs and JSONL file logs.
+- [x] Add `packages/cli` as an Effect CLI onboarding surface using `effect/unstable/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and PatchPlane-owned Context services.
 
 Acceptance criteria:
 
 - Authenticated WorkOS actor/workspace can create a `PromptRequest` and `WorkflowRun` in Convex via core workflow and Convex-side WorkOS authorization.
 - App route/server function talks to core through `ManagedRuntime`.
+- CLI commands run through a `ManagedRuntime` built from `NodeServices.layer` and PatchPlane CLI service layers.
 - No SDK-specific object leaks into core output.
 
 ---
@@ -361,6 +363,7 @@ Convex client with WorkOS AuthKit token
 
 Evidence:
 
+- `bun run --cwd packages/cli test` passes for Effect command-tree integration, non-interactive init, profile-specific env generation, structured CLI validation, and diagnostic failures.
 - `bun run --cwd packages/backend test` passes, including Convex tests for:
   - authenticated public workflow-start boundary,
   - actor/workspace/source anti-spoofing,
@@ -383,20 +386,7 @@ Current observability shape:
 - file: `Logger.formatJson.pipe(Logger.toFile("../../.patchplane/logs/effect.jsonl"))`
 - Convex: `console.log` in trusted workflow start mutation with `traceId`, `promptRequestId`, and `workflowRunId`
 
-Repeatable authenticated smoke command:
-
-```sh
-CONVEX_URL=... \
-PATCHPLANE_WORKOS_ACCESS_TOKEN=... \
-PATCHPLANE_WORKOS_USER_ID=... \
-PATCHPLANE_WORKOS_ORGANIZATION_ID=... \
-  bun run smoke:foundation "Prompt"
-```
-
-Documentation:
-
-- [docs/foundation-smoke.md](./docs/foundation-smoke.md)
-- [docs/workos-alpha-completion.md](./docs/workos-alpha-completion.md)
+Smoke-only WorkOS token scripts were removed from main OSS onboarding docs; `patchplane init`, `patchplane env template`, and `patchplane doctor` are now the supported setup path.
 
 Remaining manual smoke before external alpha:
 
@@ -415,7 +405,7 @@ M1–M6 are now the authenticated foundation. Continue with WorkOS hardening and
 
 Vendor facts respected:
 
-- SDK package: `@workos-inc/node@10.2.0`.
+- SDK package: `@workos-inc/node@10.3.0`.
 - Server SDK requires Node 22.11+.
 - `OrganizationMembership` has a primary `role` and optional `roles` array.
 - `User`, `Organization`, and `OrganizationMembership` must be mapped into PatchPlane domain types.
@@ -446,7 +436,7 @@ Tasks:
 
 ### M7 — GitHub Provider Plugin
 
-**Status:** Initial verified external intake complete; publication path remains
+**Status:** Initial verified external intake complete; Daytona/Pi dogfood loop now comes before publication
 
 Vendor facts:
 
@@ -486,7 +476,7 @@ Acceptance criteria:
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** Next alpha blocker after GitHub publication path
+**Status:** Next alpha blocker before GitHub publication path
 
 Vendor facts:
 
@@ -514,17 +504,18 @@ Acceptance criteria:
 
 ### M9 — Pi Agent Runtime Plugin
 
-**Status:** Next alpha runtime after sandbox execution exists
+**Status:** Next alpha runtime after minimal sandbox execution exists
 
 Vendor facts:
 
-- Use `@earendil-works/pi-agent-core@0.79.1`.
-- `Agent` supports event subscription, prompting, continuation, abort, idle waiting, steering, follow-up queues, tool hooks, and configurable tool execution.
+- Use `@earendil-works/pi-coding-agent@0.79.6` for coding-agent runtime behavior.
+- Do not instantiate low-level `@earendil-works/pi-agent-core` `Agent` alone for repository/runtime work; it is LLM-only unless the coding-agent SDK wires tools, resources, auth, sessions, and system prompts.
+- `AgentSession` supports event subscription, prompting, abort, steering, follow-up queues, tools, resource loading, and session cleanup.
 
 Tasks:
 
-- [ ] Add `PiAgentConfig`.
-- [ ] Instantiate `Agent` inside sandbox/runtime boundary.
+- [x] Add `PiAgentConfig`.
+- [x] Instantiate Pi coding-agent SDK session inside runtime boundary.
 - [ ] Map Pi events to PatchPlane `RuntimeEvent`:
   - [ ] `agent_start`
   - [ ] `turn_start`
@@ -666,7 +657,16 @@ Acceptance criteria:
 - [x] Convex and WorkOS plugin config loads through Effect Config.
 - [x] GitHub plugin config loads through Effect Config.
 - [x] WorkOS, GitHub, and signed Convex system-ingestion secrets are redacted where supported.
-- [ ] Add explicit startup/config smoke for all required alpha environment variables.
+- [x] Add a static plugin metadata registry with env requirements/defaults in `packages/plugins`.
+- [x] Add a local PatchPlane CLI for `plugins list`, `plugins explain`, `env template`, `env check`, `doctor`, and `init`.
+- [x] Build `packages/cli` on `effect/unstable/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and PatchPlane-owned Context services.
+- [x] Make `patchplane init` interactive when TTY and fully scriptable with `--profile`, `--yes`, `--dry-run`, `--force`, `--with-pi`, and `--non-interactive`.
+- [x] Use root `patchplane.config.json` as the CLI-managed non-secret project config.
+- [x] Reserve `.patchplane/{logs,cache,state}` for generated local artifacts only.
+- [x] Refactor runtime composition to select plugin layers from root `patchplane.config.json` instead of hard-coded layer lists.
+- [x] Move GitHub route-only env parsing into typed app/plugin config.
+- [x] Add CLI env template/check support for required alpha environment variables.
+- [ ] Add explicit app startup/config smoke for all required alpha environment variables.
 
 ### Observability
 
@@ -692,6 +692,7 @@ Acceptance criteria:
 - [x] Core tests cover GitHub webhook normalization, GitHub → generic intake mapping, and repository verification before external-intake storage.
 - [x] Backend Convex tests cover signed external intake creation and redelivery dedupe.
 - [x] Automate/document the authenticated Convex integration smoke test as `bun run smoke:foundation`.
+- [x] Add CLI integration tests using `@effect/vitest` and `CliLayer` for command parsing, init, env, plugin validation, and doctor failure paths.
 - [ ] Add true external browser/AuthKit/Convex E2E once stable WorkOS and Convex test credentials exist.
 - [ ] Later: test layers for pure core workflow transitions.
 

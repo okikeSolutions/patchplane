@@ -184,6 +184,21 @@ PatchPlane v2 uses this workspace shape:
 
 ```text
 packages/
+  cli/
+    src/
+      main.ts
+      runtime.ts
+      commands/
+        init.ts
+        doctor.ts
+        env.ts
+        plugins.ts
+      services/
+        config-file.ts
+        diagnostics.ts
+        env-file.ts
+        interactivity.ts
+
   domain/
     src/
       ids.ts
@@ -278,6 +293,7 @@ packages/backend/
 
 ```text
 domain → core → plugins → apps/client
+                         ↘ packages/cli
 ```
 
 More explicitly:
@@ -285,7 +301,8 @@ More explicitly:
 - `packages/domain` imports Effect Schema, but no PatchPlane package.
 - `packages/core` imports `domain` only.
 - `packages/plugins` imports `core`, `domain`, and external SDKs.
-- `apps/client` imports `core` and `plugins`, then composes the runtime.
+- `apps/client` imports `core` and `plugins`, then composes the app/runtime surfaces.
+- `packages/cli` imports plugin metadata and owns Node-only onboarding/config/env diagnostics; it must not become a runtime dependency of `core` or `apps/client`.
 
 ### 4.2 Dependency restrictions
 
@@ -312,7 +329,7 @@ PatchPlane v2 targets **Effect v4 beta / effect-smol** intentionally. Because v4
 Rules:
 
 - Pin exact Effect v4 beta package versions.
-- Use `effect@4.0.0-beta.79` as the current researched baseline.
+- Use `effect@4.0.0-beta.84` as the current researched baseline.
 - Use the `Effect-TS/effect-smol` repository for v4 research and vendored source.
 - Keep Effect ecosystem package versions aligned.
 - Keep migration notes in the repo when v4 APIs change.
@@ -322,14 +339,16 @@ Rules:
 - Use `Layer.provide` for explicit dependencies.
 - Use `Layer.unwrap` later for config-driven plugin selection.
 - Use `Effect.fn` for traceable service methods where useful.
-- Use `ManagedRuntime` at the app boundary.
+- Use `ManagedRuntime` at app and CLI process boundaries.
+- Use `effect/unstable/cli` for PatchPlane-owned CLI command parsing/composition.
+- Use Effect `Terminal` through `Prompt.run(...)` for interactive CLI prompts, gated by PatchPlane-owned interactivity policy.
 - Use Effect Config for plugin configuration.
 - Use Effect Schema for domain models and external decoding.
 - Use `Schema.TaggedErrorClass` for typed errors.
 - Effect v4 `unstable` modules are allowed when they are the correct API surface for the job.
 - Use `effect/unstable/httpapi` for PatchPlane-owned schema-first HTTP APIs when HTTP contracts are needed.
 - Use `effect/unstable/http` for Effect HTTP routing/client/server primitives.
-- Use `@effect/platform-node@4.0.0-beta.79` for Node-specific Effect runtime/platform services when server/plugin code needs them.
+- Use `@effect/platform-node@4.0.0-beta.84` for Node-specific Effect runtime/platform services when server/plugin code needs them.
 
 Plain TypeScript remains preferred for:
 
@@ -341,18 +360,18 @@ Plain TypeScript remains preferred for:
 
 ### 5.1 Researched vendor baselines
 
-The current `/vendor` research baseline is research-only. Vendored submodules are not application dependencies and should not be imported by PatchPlane packages. Runtime dependencies must be declared in package manifests with pinned versions, including `effect@4.0.0-beta.79` wherever Effect v4 is used.
+The current `/vendor` research baseline is research-only. Vendored submodules are not application dependencies and should not be imported by PatchPlane packages. Runtime dependencies must be declared in package manifests with pinned versions, including `effect@4.0.0-beta.84` wherever Effect v4 is used.
 
 Current baseline:
 
 | System | Vendor path | Baseline | Spec implication |
 | --- | --- | --- | --- |
-| Effect | `vendor/effect` | `effect-smol`, `effect@4.0.0-beta.79` | Use Effect v4 APIs from the consolidated `effect` package. `effect/unstable/httpapi` and `effect/unstable/http` are allowed for PatchPlane-owned HTTP contracts and HTTP runtime boundaries. Treat v4 as beta and isolate it in domain/core/plugins/app server code. |
+| Effect | `vendor/effect` | `effect-smol`, `effect@4.0.0-beta.84` | Use Effect v4 APIs from the consolidated `effect` package. `effect/unstable/httpapi` and `effect/unstable/http` are allowed for PatchPlane-owned HTTP contracts and HTTP runtime boundaries. Treat v4 as beta and isolate it in domain/core/plugins/app server code. |
 | Daytona | `vendor/daytona` | TypeScript SDK `@daytona/sdk` | Use `Daytona` from `@daytona/sdk`; config keys are `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and `DAYTONA_TARGET`. Sandbox creation supports `ephemeral`, `autoStopInterval`, `autoDeleteInterval`, `networkBlockAll`, `networkAllowList`, resources, snapshots, process execution, filesystem, and git operations. |
 | GitHub | `vendor/octokit.js` | `octokit` v5 line | Use `Octokit` and `App` from `octokit`; GitHub App webhook handling should verify signed payloads through Octokit webhook APIs before ingestion. |
-| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.1` | Runtime plugin should wrap `Agent`, event subscription, steering/follow-up queues, abort, and `waitForIdle`; normalize Pi events into PatchPlane `RuntimeEvent`. |
-| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.2.0` | Auth plugin should wrap `WorkOS`, `userManagement`, `organizations`, and organization membership data; WorkOS requires Node 22.11+, while Pi requires Node 22.19+, so PatchPlane server runtime should target Node 22.19+ where Node compatibility matters. |
-| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.79` | Use for Node-specific Effect services such as `NodeRuntime`, `NodeHttpServer`, `NodeHttpClient`, filesystem/path/crypto, and long-running worker/plugin processes. Do not use it to replace TanStack Start in `apps/client` unless a standalone Node service is intentionally introduced. |
+| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.6` | Runtime plugin should wrap `Agent`, event subscription, steering/follow-up queues, abort, and `waitForIdle`; normalize Pi events into PatchPlane `RuntimeEvent`. |
+| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.3.0` | Auth plugin should wrap `WorkOS`, `userManagement`, `organizations`, and organization membership data; WorkOS requires Node 22.11+, while Pi requires Node 22.19+, so PatchPlane server runtime should target Node 22.19+ where Node compatibility matters. |
+| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.84` | Use for Node-specific Effect services such as `NodeRuntime`, `NodeServices`, `NodeHttpServer`, `NodeHttpClient`, filesystem/path/terminal/stdio/crypto, CLI processes, and long-running worker/plugin processes. Do not use it to replace TanStack Start in `apps/client` unless a standalone Node service is intentionally introduced. |
 
 ---
 
@@ -679,29 +698,29 @@ It is responsible for:
 `apps/client` creates the PatchPlane runtime from composed plugin layers:
 
 ```text
-apps/client/src/effect/layers.ts
-- foundation: compose WorkOSAuthPlugin.layer
-- foundation: compose ConvexStoragePlugin.layer
+apps/client/src/effect/plugin-layers.ts
+- select plugin layers from root patchplane.config.json
+- compose WorkOSAuthPlugin.layer
+- compose ConvexStoragePlugin.layer
+- compose GitHubProviderPlugin.layer for webhook surfaces
+- compose DaytonaSandboxPlugin.layer and PiAgentRuntimePlugin.layer when selected
 
 apps/client/src/effect/runtime.ts
-- create ManagedRuntime from PatchPlaneLayer
+- create one ManagedRuntime from the composed PatchPlane layer
 - export helpers for server routes/functions
-
-apps/client/src/effect/github-runtime.ts
-- compose GitHubProviderPlugin.layer
-- compose ConvexStoragePlugin.layer
-- keep GitHub config out of normal app startup until GitHub webhook ingestion is enabled
-
-later:
-- compose PiAgentRuntimePlugin.layer
-- compose DaytonaSandboxPlugin.layer
 ```
 
-Route handlers and server functions call core workflows through this runtime.
+Route handlers and server functions call core workflows through this runtime. PatchPlane should not maintain separate app/GitHub managed runtimes for the same process unless a concrete isolation need appears.
 
 ---
 
 ## 12. Configuration
+
+PatchPlane has three configuration locations:
+
+- `patchplane.config.json`: root, user-visible, non-secret project config managed by the CLI.
+- `.patchplane/{logs,cache,state}`: generated local runtime artifacts only.
+- `.env.local` or deployment secret stores: secrets and environment values.
 
 Plugin configuration must use Effect Config.
 
@@ -719,6 +738,8 @@ Rules:
 - Plugin configuration is loaded through Effect Config and provided through plugin layers.
 - Secrets should use redacted config values where supported.
 - Configuration should fail at startup, not halfway through a workflow.
+- `patchplane.config.json` must not contain secrets.
+- `.patchplane/` must not contain user-managed project config.
 
 Important secret-bearing config includes:
 
@@ -1015,7 +1036,26 @@ Use Daytona as the first sandbox plugin. The Daytona plugin should use `@daytona
 
 ### 17.8 Runtime
 
-Use `@earendil-works/pi-agent-core` as the first runtime plugin. The runtime plugin should map Pi agent events such as `agent_start`, `turn_start`, `message_start`, `message_update`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end` into PatchPlane `RuntimeEvent` schemas.
+Use `@earendil-works/pi-coding-agent` as the first runtime plugin when PatchPlane needs an in-process coding agent. Do not use the low-level `@earendil-works/pi-agent-core` `Agent` alone for repository/runtime work, because that creates an LLM-only agent without Pi's coding tools, sessions, resource loading, and system prompt behavior. The runtime plugin should map Pi session events such as `agent_start`, `turn_start`, `message_start`, `message_update`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end` into PatchPlane `RuntimeEvent` schemas.
+
+### 17.8.1 Plugin metadata, CLI onboarding, and environment discovery
+
+PatchPlane plugins should expose static metadata in `packages/plugins/src/registry.ts` describing plugin id/name, layer export, provided services, runtime surfaces, dependencies/conflicts, and required/optional environment variables. This registry is the source for the local `packages/cli` plugin discovery, environment template/check commands, doctor diagnostics, and configurable runtime composition.
+
+`packages/cli` is the OSS onboarding surface. It uses `effect/unstable/cli` for command parsing/composition, `@effect/platform-node` `NodeServices.layer` for filesystem/path/stdio/terminal services, Effect `Terminal` via `Prompt.run(...)` for interactive prompts, and PatchPlane-owned Context services for config/env/diagnostics/interactivity policy. Interactive prompts are only entered when PatchPlane's interactivity service confirms both stdin and stdout are TTYs; all flows must remain scriptable through flags.
+
+CLI commands:
+
+```text
+patchplane init
+patchplane doctor
+patchplane env template
+patchplane env check
+patchplane plugins list
+patchplane plugins explain <id>
+```
+
+`patchplane init` writes `patchplane.config.json`, appends missing required keys to `.env.local`, and creates `.patchplane/{logs,cache,state}`. `--profile`, `--yes`, `--dry-run`, `--force`, `--with-pi`, and `--non-interactive` provide CI-safe non-interactive setup. Unknown plugin ids and invalid flag combinations should use structured `effect/unstable/cli` validation errors where possible.
 
 ### 17.9 Desktop
 
@@ -1164,7 +1204,7 @@ apps/client
 
 ### Step 2 — Add Effect v4 beta intentionally
 
-Pin `effect@4.0.0-beta.79` everywhere Effect v4 is used and keep Effect ecosystem package versions aligned. If `@effect/platform-node` is added, pin it to `4.0.0-beta.79` as well.
+Pin `effect@4.0.0-beta.84` everywhere Effect v4 is used and keep Effect ecosystem package versions aligned. If `@effect/platform-node` is added, pin it to `4.0.0-beta.84` as well.
 
 ### Step 3 — Build `packages/domain`
 
@@ -1224,10 +1264,11 @@ Implement:
 Create:
 
 ```text
-apps/client/src/effect/layers.ts
+apps/client/src/effect/plugin-layers.ts
 apps/client/src/effect/runtime.ts
-apps/client/src/effect/github-runtime.ts
 ```
+
+Use root `patchplane.config.json` to select plugin layers and create one composed `ManagedRuntime` for app/server route execution.
 
 Run one authenticated server-side action through the composed `ManagedRuntime`:
 
