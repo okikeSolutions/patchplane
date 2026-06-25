@@ -1,101 +1,84 @@
-# SPEC.md – PatchPlane v2 – Effect-Native AI Change Control Plane
+# SPEC.md – PatchPlane – AI Change Control Plane
 
-**Version:** 2.1
-**Date:** June 17, 2026
-**Status:** Authenticated foundation plus pre-CI trust-boundary scope for Effect v4 / effect-smol plugin-based MVP
-
----
-
-## 0. Execution Tracking
-
-`SPEC.md` is the stable reference for product thesis, architecture, scope, and success criteria.
-
-Day-to-day task tracking lives in [ROADMAP.md](./ROADMAP.md).
-
-Update `ROADMAP.md` when execution order, status, or evidence changes. Update `SPEC.md` only when product scope, architecture, package boundaries, or MVP success criteria change.
+**Version:** 2.2  
+**Date:** June 25, 2026  
+**Status:** Public OSS specification for the alpha trust-boundary loop
 
 ---
 
-## 1. Executive Summary
+## 0. Purpose of this document
+
+`SPEC.md` is the stable public reference for PatchPlane's product thesis, trust model, architecture boundaries, alpha scope, and success criteria.
+
+Day-to-day execution tracking lives in [`ROADMAP.md`](./ROADMAP.md).
+
+Update `SPEC.md` when product scope, architecture boundaries, package boundaries, or alpha success criteria change. Update `ROADMAP.md` when execution order, milestone status, or implementation evidence changes.
+
+This document is intentionally public and OSS-safe. It describes what PatchPlane is building and how the system is structured. It does not contain pricing strategy, customer notes, sales pipeline, company strategy, or private operational credentials.
+
+---
+
+## 1. Executive summary
 
 **PatchPlane** is an open-source AI change-control plane for coordinating humans and AI agents around software changes.
 
-PatchPlane sits at the **pre-CI trust boundary**. Every AI-generated patch, regardless of the agent or harness that produced it, is treated as untrusted until PatchPlane has executed it in an isolated sandbox, captured provenance, run validation/review, and recorded a human or policy decision before it enters normal GitHub, CI, or merge paths.
+PatchPlane sits at the **pre-CI trust boundary**. Every AI-generated patch is treated as untrusted until it has been:
 
-PatchPlane is not a Git replacement, a hosted LLM platform, or a thin GitHub bot. It is a control plane that coordinates:
+1. executed in an isolated sandbox,
+2. captured as evidence and provenance,
+3. validated by deterministic checks, review logic, or policy,
+4. reviewed through a human decision path,
+5. published back to the repository surface only after approval.
 
-1. prompt/request intake,
+PatchPlane is not a Git replacement, a hosted LLM platform, an agent runtime, a sandbox provider, or a thin GitHub bot. It is a control plane that coordinates:
+
+1. request intake,
 2. workflow orchestration,
 3. sandboxed runtime execution,
 4. normalized event capture,
-5. automated review,
-6. human approval or rejection,
-7. provenance, rollback paths, and publication.
+5. evidence artifact storage,
+6. automated review and policy checks,
+7. human approval or rejection,
+8. provenance and publication.
 
-PatchPlane v2 keeps the original product thesis but revises the implementation architecture around an Effect-native plugin model:
+PatchPlane uses an Effect-native plugin model:
 
 ```text
 PatchPlane core defines capabilities.
 Plugins provide capabilities.
-The app composes plugins.
+Applications compose plugins.
 ```
 
-The first v2 foundation milestone has advanced from a local storage smoke into two authenticated/control-plane intake paths:
+The alpha goal is one credible, end-to-end trust loop:
 
 ```text
-WorkOS AuthKit session
-→ TanStack Start server workflow
-→ WorkOSAuthPlugin live membership/permission check
-→ StorageService
-→ Convex public workflow mutation with WorkOS JWT
-→ Convex mirrored membership + `prompt:create` authorization
-→ PromptRequest + WorkflowRun
-→ authenticated Convex reads filtered by mirrored WorkOS membership/permissions
+GitHub/manual intake
+→ repository verification
+→ Daytona sandbox
+→ Pi runtime through configurable model access
+→ candidate patch
+→ logs/tests/browser evidence
+→ R2-backed evidence artifacts
+→ Convex-backed provenance timeline
+→ human approve/reject
+→ GitHub check/comment/draft PR publication
 ```
-
-```text
-GitHub webhook route
-→ raw body + GitHub headers
-→ GitHubWebhookService / Octokit signature verification
-→ GitHub-specific normalization
-→ generic WorkflowIntake + ExternalWorkflowRef
-→ StartWorkflowFromIntake
-→ generic SourceControlService repository-access verification
-→ StorageService.createWorkflowFromIntake
-→ Convex signed external-ingestion mutation
-→ PromptRequest + WorkflowRun + externalWorkflowRefs
-```
-
-WorkOS and Convex remain separate plugins composed at the app/client/server boundary. WorkOS is the identity, organization, membership, and permission source. Convex is the current realtime orchestration and UI read-model backend: it serves live reads and performs Convex-side authorization for public mutations/queries using mirrored WorkOS-derived membership data. PatchPlane workflows themselves are defined in `packages/core` against `StorageService`, so durable workflow state can later be written through another storage plugin such as Postgres, MySQL, SQLite, or D1 without replacing Convex's realtime/auth-mirroring role. Convex is therefore the alpha orchestrator/read-model backend, not the permanent durable workflow storage abstraction.
-
-The end-to-end hosted MVP expands this authenticated foundation with GitHub publication, Daytona, Pi Agent Core, runtime events, reviews, merge decisions, and publication.
-
-### 1.1 Current ecosystem context
-
-Research refreshed on June 17, 2026 confirms the market is moving toward background AI coding agents, cloud execution, and isolated sandboxes:
-
-- GitHub Copilot cloud agent works in a GitHub Actions-powered environment, can be started from issues and other entry points, and creates branches/PRs for review.
-- OpenAI Codex is positioned as a cloud coding agent that can work in isolated environments and propose pull requests.
-- Cursor Background Agents and similar tools are normalizing parallel remote coding sessions that clone repositories, push branches, and raise PRs.
-- Pi and Flue-style harnesses focus on agent runtime/harness behavior, durable agent execution, tools, extensions, and sessions.
-- Daytona, Modal, E2B, Northflank, Vercel Sandbox, Cloudflare Sandboxes, and related products validate sandboxed code execution as a separate infrastructure layer.
-
-PatchPlane's differentiation is the neutral governance layer between those agent/runtime/sandbox systems and trusted repository/CI/merge infrastructure. It is complementary to agent harnesses, sandboxes, hosted coding agents, and Git forges because it owns the policy, provenance, review, and approval boundary across them.
-
-Research sources:
-
-- [GitHub Copilot cloud agent docs](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent)
-- [GitHub Copilot coding agent announcement](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)
-- [OpenAI Codex announcement](https://openai.com/index/introducing-codex/)
-- [Daytona sandboxes docs](https://www.daytona.io/docs/en/sandboxes/)
-- [Daytona TypeScript SDK sandbox reference](https://www.daytona.io/docs/en/typescript-sdk/sandbox/)
-- [Pi repository](https://github.com/earendil-works/pi)
-- [Flue repository](https://github.com/withastro/flue)
-- [Modal sandbox comparison](https://modal.com/resources/best-code-execution-sandboxes-ai-agents)
 
 ---
 
-## 2. Product Thesis
+## 2. Product thesis
+
+AI coding agents are becoming better at generating code. The bottleneck shifts from generation to **verification, policy, provenance, and controlled publication**.
+
+PatchPlane focuses on the boundary between:
+
+```text
+untrusted agent output
+→ sandboxed execution and evidence
+→ trusted team workflow
+```
+
+The first product wedge is GitHub-compatible AI patch verification. GitHub remains the initial collaboration surface, but PatchPlane owns the trust loop before an agent-generated change is allowed to enter normal CI, review, or merge paths.
 
 ### 2.1 What PatchPlane is
 
@@ -103,84 +86,67 @@ PatchPlane is a collaborative execution, review, and merge-governance system for
 
 It gives teams:
 
-- multiple agents proposing changes in parallel,
-- durable workflow state for every request,
-- live operational visibility,
-- automated review before publication or merge,
-- explicit human interrupt and override paths,
-- provenance for who requested what, what the agent did, what passed, and why a decision was made,
-- replaceable runtime, sandbox, auth, storage, and repository infrastructure.
-
-PatchPlane's adoption wedge remains **GitHub compatibility without GitHub dependence**:
-
-- GitHub remains the initial repository, issue, PR, and community surface.
-- PatchPlane becomes the control plane for orchestration, execution, supervision, policy, review, and decision history.
-- GitHub Copilot cloud agent, Codex, Cursor Background Agents, Pi, Flue, OpenCode, Claude Code, and custom harnesses can all be treated as possible runtime/input sources rather than product dependencies.
-- Over time, PatchPlane may internalize more patch-governance and rollback behavior without forcing teams to abandon GitHub on day one.
-
-The strategic wedge is therefore:
-
-```text
-Agents generate patches.
-Sandboxes execute untrusted work.
-Git forges host collaboration.
-CI validates trusted branches.
-PatchPlane decides what is allowed to cross from untrusted agent output into trusted team workflows.
-```
+- a durable record for every AI-generated patch attempt,
+- sandbox execution before publication,
+- normalized runtime events,
+- evidence artifacts such as logs, diffs, screenshots, videos, and test reports,
+- explicit human approve/reject paths,
+- provenance for who requested what, what ran, what changed, what passed, and why a decision was made,
+- replaceable runtime, sandbox, auth, storage, artifact, model gateway, and repository infrastructure.
 
 ### 2.2 What PatchPlane is not
 
-For v2, PatchPlane is not:
+PatchPlane is not:
 
-- a universal Git replacement,
+- a Git replacement,
 - a generic issue tracker,
-- a project-management replacement,
-- a hosted LLM platform,
-- a fully offline local-first code editor,
-- an open multi-tenant SaaS platform,
-- a full semantic conflict-resolution engine,
-- an enterprise RBAC suite.
-- a competitor to Daytona, Modal, E2B, Northflank, Vercel Sandbox, or Cloudflare Sandboxes.
-- a competitor to Pi, Flue, Codex, Cursor Background Agents, Claude Code, or GitHub Copilot cloud agent.
+- a project-management tool,
+- a hosted LLM/model platform,
+- a code editor,
+- a sandbox provider,
+- an agent runtime,
+- an enterprise RBAC suite,
+- a generic observability platform,
+- a full semantic conflict-resolution engine.
 
-PatchPlane integrates with those systems through plugins when they are useful. It should avoid rebuilding their core runtime, sandbox, or editor/forge surfaces.
+PatchPlane integrates with coding agents, sandboxes, Git forges, and observability tools through plugins when useful. It should avoid rebuilding their core surfaces.
 
 ---
 
-## 3. Product Principles
+## 3. Product principles
 
 1. **Human-governed, agent-accelerated**  
-   Agents can propose and review; humans define criteria and can interrupt, redirect, approve, or reject.
+   Agents can propose and review changes. Humans define criteria and can interrupt, redirect, approve, or reject.
 
 2. **Deterministic before autonomous**  
-   Use explicit checks, workflow states, patch logs, and merge gates before attempting advanced semantic autonomy.
+   Use explicit checks, workflow states, evidence artifacts, and merge gates before attempting broader autonomy.
 
-3. **Real-time by default**  
-   Every request, run, review, event, and decision should be observable by connected clients.
+3. **Sandbox everything untrusted**  
+   Generated code, tool execution, third-party CLIs, runtime output, and review artifacts are untrusted until evaluated.
 
-4. **Sandbox everything untrusted**  
-   Generated code, tool execution, reviewer actions, runtime processes, and third-party CLIs run outside the trusted control plane. Sandboxes need explicit lifecycle, resource, credential, and network policy.
+4. **Evidence before trust**  
+   Trust reports must be backed by durable evidence artifacts, not only transient logs or external observability traces.
 
 5. **Plugins at the edge**  
-   Concrete systems such as WorkOS, Convex, GitHub, Daytona, Pi Agent Core, OpenCode, Codex, Postgres, MySQL, SQLite, or D1 must be accessed through PatchPlane-owned plugin boundaries. Convex is the first realtime orchestration/read-model backend, while durable workflow persistence is accessed through `StorageService` so another storage provider can implement that capability later.
+   WorkOS, Convex, GitHub, Daytona, Pi, Cloudflare, Sentry, PostHog, and future providers are accessed through PatchPlane-owned service boundaries.
 
-6. **Schemas at the boundary, Effect services in the core, plugins at the edge**  
-   External inputs are decoded through Effect Schema; core capabilities are defined as Effect services; real infrastructure is provided by plugins and composed by the app.
+6. **Schemas at the boundary, Effect services in the core**  
+   External inputs are decoded through Effect Schema. Core behavior is expressed through Effect services. Concrete infrastructure is provided by plugins.
 
-7. **Graph for provenance, not magic**  
-   The graph explains lineage and decision history. It does not replace rigorous merge semantics by itself.
+7. **Policy is explicit and serializable**  
+   Approval, sandbox, evaluation, and publication rules are auditable data, not hidden ad hoc logic.
 
-8. **Policy is explicit and serializable**  
-   Approval, sandbox, evaluation, and merge criteria are auditable artifacts, not hidden ad hoc business logic.
+8. **Complement existing tools**  
+   PatchPlane should consume outputs from coding agents and sandboxes through stable contracts instead of trying to outbuild them.
 
-9. **Complement hot tools, do not chase them**
-   PatchPlane should consume agent outputs and sandbox capabilities through stable contracts. The alpha should prove trust-boundary value without trying to outbuild coding agents, sandboxes, or Git forges.
+9. **Alpha proves the trust loop**  
+   The alpha is successful when one real AI-generated patch can be sandboxed, evidenced, reviewed, approved or rejected, and published back to GitHub.
 
 ---
 
-## 4. Package Architecture
+## 4. Package architecture
 
-PatchPlane v2 uses this workspace shape:
+PatchPlane uses a workspace structure that separates portable domain models, core workflows, infrastructure plugins, apps, backend deployment functions, and infrastructure provisioning.
 
 ```text
 packages/
@@ -189,32 +155,29 @@ packages/
       main.ts
       runtime.ts
       commands/
-        init.ts
-        doctor.ts
-        env.ts
-        plugins.ts
       services/
-        config-file.ts
-        diagnostics.ts
-        env-file.ts
-        interactivity.ts
 
   domain/
     src/
-      ids.ts
       actor.ts
       workspace.ts
+      membership.ts
+      permission.ts
       prompt-request.ts
       workflow-intake.ts
       external-workflow-ref.ts
-      github.ts
+      repository-connection.ts
       workflow-run.ts
       runtime-session.ts
       runtime-event.ts
       candidate-patch-set.ts
       review-run.ts
-      merge-decision.ts
+      review-finding.ts
       policy-bundle.ts
+      merge-decision.ts
+      evidence-artifact.ts
+      provenance-event.ts
+      publication-event.ts
       errors.ts
       index.ts
 
@@ -222,71 +185,52 @@ packages/
     src/
       services/
         auth-service.ts
-        auth-request-context.ts
         storage-service.ts
         source-control-service.ts
         github-webhook-service.ts
-        RuntimeService.ts
-        SandboxService.ts
-        ReviewService.ts
-        PolicyService.ts
-        TelemetryService.ts
+        runtime-service.ts
+        sandbox-service.ts
+        artifacts-service.ts
+        model-gateway-service.ts
+        review-service.ts
+        policy-service.ts
+        telemetry-service.ts
+        analytics-service.ts
       workflows/
         start-workflow-from-prompt.ts
         start-authenticated-workflow-from-prompt.ts
         start-workflow-from-intake.ts
         ingest-github-webhook.ts
         github-event-to-intake.ts
-        list-recent-workflow-starts.ts
-        IngestRuntimeEvent.ts
-        ProposeMergeDecision.ts
+        ingest-runtime-event.ts
+        capture-evidence-artifact.ts
+        propose-merge-decision.ts
       index.ts
 
   plugins/
     src/
       workos/
-        WorkOSAuthPlugin.ts
-        WorkOSConfig.ts
-        mapping.ts
-        errors.ts
-        index.ts
       convex/
-        ConvexStoragePlugin.ts
-        ConvexConfig.ts
-        schema.ts
-        mapping.ts
-        errors.ts
-        index.ts
       github/
-        GitHubProviderPlugin.ts
-        GitHubConfig.ts
-        mapping.ts
-        errors.ts
-        index.ts
-      pi/
-        PiAgentRuntimePlugin.ts
-        PiAgentConfig.ts
-        mapping.ts
-        errors.ts
-        index.ts
       daytona/
-        DaytonaSandboxPlugin.ts
-        DaytonaConfig.ts
-        mapping.ts
-        errors.ts
-        index.ts
+      pi/
+      cloudflare/
+      sentry/
+      posthog/
+      index.ts
+
+  backend/
+    convex/
 
 apps/
   client/
     src/
       effect/
-        layers.ts
-        runtime.ts
       routes/
       server/
 
-packages/backend/
-  convex/            -> Convex deployment functions stay here for now
+  infra/
+    alchemy.run.ts
 ```
 
 ### 4.1 Dependency direction
@@ -294,131 +238,95 @@ packages/backend/
 ```text
 domain → core → plugins → apps/client
                          ↘ packages/cli
+apps/infra is deployment/provisioning code and is not imported by runtime packages.
 ```
 
-More explicitly:
+Rules:
 
-- `packages/domain` imports Effect Schema, but no PatchPlane package.
+- `packages/domain` imports Effect Schema but no PatchPlane package.
 - `packages/core` imports `domain` only.
 - `packages/plugins` imports `core`, `domain`, and external SDKs.
-- `apps/client` imports `core` and `plugins`, then composes the app/runtime surfaces.
-- `packages/cli` imports plugin metadata and owns Node-only onboarding/config/env diagnostics; it must not become a runtime dependency of `core` or `apps/client`.
+- `apps/client` imports `core` and `plugins`, then composes runtime layers.
+- `packages/cli` owns onboarding, diagnostics, env templates, and local setup helpers.
+- `apps/infra` owns infrastructure provisioning and must not become runtime product code.
 
-### 4.2 Dependency restrictions
+### 4.2 Core dependency restrictions
 
 `packages/core` must not import:
 
 - WorkOS SDK,
 - Convex SDK,
-- GitHub SDK,
+- GitHub/Octokit SDK,
 - Daytona SDK,
-- Pi Agent Core SDK,
-- OpenCode SDK,
-- Codex SDK,
+- Pi SDKs,
+- Cloudflare SDKs,
+- Sentry SDK,
+- PostHog SDK,
+- Alchemy,
 - TanStack Start APIs,
 - framework route/server-function modules.
 
-Those dependencies belong in `packages/plugins` or `apps/client`.
+Those dependencies belong in `packages/plugins`, `apps/client`, or `apps/infra`.
 
 ---
 
-## 5. Effect v4 / effect-smol Implementation Rules
+## 5. Effect implementation rules
 
-PatchPlane v2 targets **Effect v4 beta / effect-smol** intentionally. Because v4 is still beta, Effect-heavy implementation should be isolated in `packages/core` and `packages/plugins`, not scattered through UI components.
+PatchPlane uses Effect for service definitions, plugin layers, typed errors, configuration, resource lifecycles, retries, cancellation, timeouts, and workflow orchestration.
 
 Rules:
 
-- Pin exact Effect v4 beta package versions.
-- Use `effect@4.0.0-beta.84` as the current researched baseline.
-- Use the `Effect-TS/effect-smol` repository for v4 research and vendored source.
-- Keep Effect ecosystem package versions aligned.
-- Keep migration notes in the repo when v4 APIs change.
-- Use `Context.Service` for core service definitions.
-- Use `Layer.effect` for plugin implementations.
-- Use `Layer.merge` for independent services.
-- Use `Layer.provide` for explicit dependencies.
-- Use `Layer.unwrap` later for config-driven plugin selection.
-- Use `Effect.fn` for traceable service methods where useful.
-- Use `ManagedRuntime` at app and CLI process boundaries.
-- Use `effect/unstable/cli` for PatchPlane-owned CLI command parsing/composition.
-- Use Effect `Terminal` through `Prompt.run(...)` for interactive CLI prompts, gated by PatchPlane-owned interactivity policy.
-- Use Effect Config for plugin configuration.
 - Use Effect Schema for domain models and external decoding.
-- Use `Schema.TaggedErrorClass` for typed errors.
-- Effect v4 `unstable` modules are allowed when they are the correct API surface for the job.
-- Use `effect/unstable/httpapi` for PatchPlane-owned schema-first HTTP APIs when HTTP contracts are needed.
-- Use `effect/unstable/http` for Effect HTTP routing/client/server primitives.
-- Use `@effect/platform-node@4.0.0-beta.84` for Node-specific Effect runtime/platform services when server/plugin code needs them.
-
-Plain TypeScript remains preferred for:
-
-- presentational React components,
-- simple UI view models,
-- small pure utilities,
-- app chrome and styling,
-- client-only interaction code that does not benefit from Effect.
-
-### 5.1 Researched vendor baselines
-
-The current `/vendor` research baseline is research-only. Vendored submodules are not application dependencies and should not be imported by PatchPlane packages. Runtime dependencies must be declared in package manifests with pinned versions, including `effect@4.0.0-beta.84` wherever Effect v4 is used.
-
-Current baseline:
-
-| System | Vendor path | Baseline | Spec implication |
-| --- | --- | --- | --- |
-| Effect | `vendor/effect` | `effect-smol`, `effect@4.0.0-beta.84` | Use Effect v4 APIs from the consolidated `effect` package. `effect/unstable/httpapi` and `effect/unstable/http` are allowed for PatchPlane-owned HTTP contracts and HTTP runtime boundaries. Treat v4 as beta and isolate it in domain/core/plugins/app server code. |
-| Daytona | `vendor/daytona` | TypeScript SDK `@daytona/sdk` | Use `Daytona` from `@daytona/sdk`; config keys are `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and `DAYTONA_TARGET`. Sandbox creation supports `ephemeral`, `autoStopInterval`, `autoDeleteInterval`, `networkBlockAll`, `networkAllowList`, resources, snapshots, process execution, filesystem, and git operations. |
-| GitHub | `vendor/octokit.js` | `octokit` v5 line | Use `Octokit` and `App` from `octokit`; GitHub App webhook handling should verify signed payloads through Octokit webhook APIs before ingestion. |
-| Pi | `vendor/pi` | `@earendil-works/pi-agent-core@0.79.6` | Runtime plugin should wrap `Agent`, event subscription, steering/follow-up queues, abort, and `waitForIdle`; normalize Pi events into PatchPlane `RuntimeEvent`. |
-| WorkOS | `vendor/workos-node` | `@workos-inc/node@10.3.0` | Auth plugin should wrap `WorkOS`, `userManagement`, `organizations`, and organization membership data; WorkOS requires Node 22.11+, while Pi requires Node 22.19+, so PatchPlane server runtime should target Node 22.19+ where Node compatibility matters. |
-| Effect Platform Node | `vendor/effect/packages/platform-node` | `@effect/platform-node@4.0.0-beta.84` | Use for Node-specific Effect services such as `NodeRuntime`, `NodeServices`, `NodeHttpServer`, `NodeHttpClient`, filesystem/path/terminal/stdio/crypto, CLI processes, and long-running worker/plugin processes. Do not use it to replace TanStack Start in `apps/client` unless a standalone Node service is intentionally introduced. |
+- Use Effect services for core capabilities.
+- Use layers for plugin implementations.
+- Use typed errors for expected failures.
+- Use Effect Config for plugin configuration.
+- Keep Effect-heavy code in `packages/domain`, `packages/core`, `packages/plugins`, and server/runtime boundaries.
+- Keep presentational React components mostly plain TypeScript/React.
+- Pin Effect versions in package manifests and keep migration notes when APIs change.
+- Treat experimental/unstable APIs as localized implementation details.
 
 ---
 
-## 6. Domain Package
+## 6. Domain model
 
 `packages/domain` owns PatchPlane's portable data model.
 
-Use Effect Schema from day one for runtime validation, serialization, JSON Schema generation, and TypeScript type inference.
+All external inputs must be decoded into PatchPlane domain schemas before entering core workflows.
 
-Rule:
-
-```text
-All external inputs must be decoded into PatchPlane domain schemas before entering core workflows. Provider-originated requests should become a generic `WorkflowIntake` with optional `ExternalWorkflowRef`; provider names and event kinds belong in `externalRef`, not in storage/workflow method names.
-```
-
-Provider-backed domain IDs should be namespaced opaque strings so provenance survives across plugins and ID systems:
-
-```text
-workos:<userId>
-workos:<organizationId>
-github:<userId>
-github-app:<installationId>
-agent:<sessionId>
-system:<identifier>
-```
-
-For local development smoke paths, actor/workspace IDs may use the `system:` namespace. The authenticated foundation uses `workos:<userId>` actor IDs and `workos:<organizationId>` workspace IDs.
-
-Initial schemas:
+Initial domain entities:
 
 - `Actor`
 - `Workspace`
 - `Membership`
 - `Permission`
 - `PromptRequest`
+- `WorkflowIntake`
+- `ExternalWorkflowRef`
+- `RepositoryConnection`
 - `WorkflowRun`
 - `RuntimeSession`
 - `RuntimeEvent`
 - `CandidatePatchSet`
 - `ReviewRun`
 - `ReviewFinding`
-- `MergeDecision`
 - `PolicyBundle`
-- `RepositoryConnection`
-- `ExternalWorkflowRef`
-- `WorkflowIntake`
-- GitHub normalized webhook event schemas, used only at the provider-normalization edge
+- `MergeDecision`
+- `EvidenceArtifact`
+- `ProvenanceEvent`
+- `PublicationEvent`
+
+Provider-backed IDs should be namespaced opaque strings so provenance survives across plugin boundaries.
+
+Examples:
+
+```text
+workos:...
+github:...
+github-app:...
+agent:...
+system:...
+```
 
 Important trust boundaries include:
 
@@ -428,6 +336,9 @@ Important trust boundaries include:
 - GitHub API responses,
 - runtime events,
 - sandbox outputs,
+- agent output,
+- artifact metadata,
+- evidence payloads,
 - review findings,
 - policy payloads,
 - UI inputs,
@@ -435,46 +346,9 @@ Important trust boundaries include:
 
 ---
 
-## 7. Typed Errors
-
-PatchPlane must model expected failures as typed errors, not raw SDK exceptions.
-
-Initial error families:
-
-- `AuthError`
-- `StorageError`
-- `SourceControlError`
-- `GitHubError` for GitHub webhook/normalization failures
-- `RuntimeError`
-- `SandboxError`
-- `ReviewError`
-- `PolicyError`
-- `DecisionError`
-- `WorkflowStateError`
-- `ValidationError`
-
-Expected failure modes include:
-
-- auth session missing,
-- workspace not selected,
-- permission denied,
-- GitHub installation missing,
-- repository not authorized,
-- sandbox provisioning failed,
-- runtime emitted invalid event,
-- review timed out,
-- policy blocked decision,
-- publication failed.
-
-Plugin-specific failures must be mapped into PatchPlane-owned typed errors before crossing into core workflows.
-
----
-
-## 8. Core Package
+## 7. Core services
 
 `packages/core` defines PatchPlane capabilities as Effect services and implements workflow behavior in terms of those capabilities.
-
-Core services:
 
 ### `AuthService`
 
@@ -485,13 +359,19 @@ Core services:
 
 ### `StorageService`
 
-- `createWorkflowFromPrompt` as the authenticated/app prompt write that creates both PromptRequest and WorkflowRun
-- `createWorkflowFromIntake` as the generic workflow-intake write used by provider-originated requests with optional `ExternalWorkflowRef` metadata
-- `listRecentWorkflowStarts` for the authenticated foundation read-back path
+- `createWorkflowFromPrompt`
+- `createWorkflowFromIntake`
+- `listRecentWorkflowStarts`
 - `appendRuntimeEvent`
+- `appendProvenanceEvent`
+- `recordEvidenceArtifact`
+- `createCandidatePatchSet`
 - `createReviewRun`
 - `createMergeDecision`
-- `readWorkflowTimeline` later, once runtime/review/decision events exist
+- `createPublicationEvent`
+- `readWorkflowTimeline`
+
+Convex is the first implementation for alpha workflow state and realtime read-models. Core must not assume Convex.
 
 ### `SourceControlService`
 
@@ -499,15 +379,20 @@ Generic source-control operations used after provider-specific normalization:
 
 - `verifyRepositoryAccess`
 - `createIssueComment`
-- later: `createBranch`, `createCommit`, `createDraftPullRequest`, `publishCheck`
+- `publishCheck`
+- `createBranch`
+- `createCommit`
+- `createDraftPullRequest`
+
+GitHub is the first implementation.
 
 ### `GitHubWebhookService`
 
 Provider-specific GitHub webhook edge capability:
 
-- `verifyWebhook` using Octokit's `app.webhooks.verify(rawPayload, signature)`
-
-GitHub webhook parsing and normalization may remain GitHub-specific, but once normalized it must map into generic `WorkflowIntake` / `ExternalWorkflowRef` before storage.
+- verify webhook signatures against the raw payload,
+- normalize GitHub event payloads,
+- map verified events into generic `WorkflowIntake` / `ExternalWorkflowRef`.
 
 ### `RuntimeService`
 
@@ -516,12 +401,34 @@ GitHub webhook parsing and normalization may remain GitHub-specific, but once no
 - `streamEvents`
 - `stopSession`
 
+Pi is the first runtime implementation.
+
 ### `SandboxService`
 
 - `provision`
 - `execute`
 - `collectArtifacts`
 - `destroy`
+
+Daytona is the first sandbox implementation.
+
+### `ArtifactsService`
+
+- `putArtifact`
+- `getArtifactMetadata`
+- `createSignedReadUrl`
+- `deleteArtifact`
+- `applyRetentionPolicy`
+
+Cloudflare R2 is the first artifact implementation.
+
+### `ModelGatewayService`
+
+- expose model provider configuration to runtime plugins,
+- validate configured provider/model values,
+- provide model gateway metadata for provenance.
+
+Cloudflare AI Gateway is the first model-access layer for the Pi runtime.
 
 ### `ReviewService`
 
@@ -536,210 +443,363 @@ GitHub webhook parsing and normalization may remain GitHub-specific, but once no
 
 ### `TelemetryService`
 
-- structured logging,
+Operational telemetry for debugging and reliability:
+
+- structured logs,
 - spans,
-- metrics,
+- errors,
 - contextual annotations.
 
-Current and planned core workflows:
+Sentry is the first implementation.
 
-- `StartWorkflowFromPrompt`
-- `StartAuthenticatedWorkflowFromPrompt`
-- `StartWorkflowFromIntake`
-- `IngestGitHubWebhook` for GitHub-specific verification/normalization
-- `IngestGitHubWebhookToWorkflowIntake` for the composed GitHub → generic intake path
-- `GitHubEventToWorkflowIntake`
-- `ListRecentWorkflowStarts`
-- `IngestRuntimeEvent` later
-- `ProposeMergeDecision` later
+### `AnalyticsService`
+
+Product analytics for usage and activation:
+
+- workflow started,
+- trust report viewed,
+- patch approved,
+- patch rejected,
+- artifact opened,
+- first workflow completed.
+
+PostHog is the first implementation. Analytics events must not contain raw code, raw diffs, secrets, or sensitive evidence payloads by default.
 
 ---
 
-## 9. Plugins Package
+## 8. Plugin model
 
 A PatchPlane plugin is a concrete implementation of a PatchPlane core service using an external system.
 
-Examples:
+Initial plugins:
 
 - WorkOS Auth Plugin,
 - Convex Storage Plugin,
 - GitHub Provider Plugin,
-- Pi Agent Runtime Plugin,
 - Daytona Sandbox Plugin,
-- OpenCode Runtime Plugin,
-- Codex Runtime Plugin,
+- Pi Runtime Plugin,
+- Cloudflare R2 Artifacts Plugin,
+- Cloudflare AI Gateway Model Gateway Plugin,
+- Sentry Telemetry Plugin,
+- PostHog Analytics Plugin.
+
+Later plugins may include:
+
 - Postgres Workflow Storage Plugin,
 - MySQL Workflow Storage Plugin,
 - SQLite Workflow Storage Plugin,
 - D1 Workflow Storage Plugin,
+- additional runtime plugins,
+- additional sandbox plugins,
 - GitLab Provider Plugin,
-- Kubernetes Sandbox Plugin.
+- ClickHouse trace analytics integration.
 
 Rule:
 
 ```text
-PatchPlane v2 uses real plugins from the start, but all real integrations must be accessed through PatchPlane-owned Effect services and layers.
+Real integrations are allowed from the start, but all external systems must be accessed through PatchPlane-owned service boundaries.
 ```
-
-For the alpha, Convex is the concrete realtime orchestration/read-model backend. It is allowed to own Convex-specific queries, indexes, auth mirroring, public authorization checks, and live UI integration. The portability boundary is `StorageService`: PatchPlane core workflows should not know whether durable workflow state is stored in Convex, Postgres, MySQL, SQLite, D1, or another backend. SQL storage plugins are not intended to replace Convex wholesale; they are alternatives for durable workflow persistence while Convex can continue to provide realtime projection and UI orchestration.
-
-### 9.1 Initial plugins
-
-Authenticated foundation:
-
-- WorkOS Auth Plugin,
-- Convex Storage Plugin.
-
-Current GitHub/external intake slice:
-
-- GitHub Provider Plugin implementing generic `SourceControlService` plus GitHub-specific `GitHubWebhookService`,
-- TanStack `/api/github/webhook` adapter,
-- generic `WorkflowIntake` and `externalWorkflowRefs` persistence.
-
-End-to-end MVP:
-
-- GitHub publication paths,
-- Daytona Sandbox Plugin,
-- Pi Agent Runtime Plugin.
-
-### 9.2 Later plugins
-
-- Postgres Workflow Storage Plugin,
-- MySQL Workflow Storage Plugin,
-- SQLite Workflow Storage Plugin,
-- D1 Workflow Storage Plugin,
-- OpenCode Runtime Plugin,
-- Codex Runtime Plugin,
-- GitLab Provider Plugin,
-- Kubernetes Sandbox Plugin.
 
 ---
 
-## 10. WorkOS Auth Model
+## 9. Infrastructure provisioning
 
-WorkOS is the first-class `AuthService` implementation, not merely a Convex detail.
+PatchPlane uses `apps/infra` for infrastructure provisioning.
 
-Conceptually:
+`apps/infra` is executable deployment code. It is not a runtime package and must not be imported by `packages/core`, `packages/domain`, or runtime application code.
 
-- WorkOS owns identity, organization membership, and source role/permission data.
-- PatchPlane owns workflow authorization decisions.
-- Convex may validate WorkOS JWTs and store PatchPlane records, but Convex is not the source identity model.
-- Convex may mirror WorkOS users and organization memberships for local query authorization, but mirrored rows are derived state.
-- TanStack server workflows perform live WorkOS permission checks before privileged writes; Convex public reads perform local mirrored-membership checks.
+Initial provisioning scope:
 
-Mapping:
+- Cloudflare R2 buckets for evidence artifacts,
+- Cloudflare AI Gateway for model access,
+- environment/stage-specific resource names,
+- optional PatchPlane-owned demo repository setup,
+- non-secret output needed by runtime configuration.
+
+Alchemy is the first infrastructure-provisioning tool.
+
+Rules:
+
+- Alchemy provisions PatchPlane-owned infrastructure.
+- Runtime product behavior remains in PatchPlane services and plugins.
+- Alchemy does not replace Octokit/GitHub App runtime behavior.
+- Alchemy does not manage customer repositories.
+- `apps/infra` does not introduce a Cloudflare Worker runtime unless explicitly added later.
+- Production secrets must remain in secret stores or environment-specific deployment settings, not in public repo files.
+
+---
+
+## 10. GitHub compatibility model
+
+GitHub is the first repository provider and publication surface.
+
+PatchPlane uses a GitHub App integration for:
+
+- installation and repository authorization,
+- webhook verification,
+- issue/comment/PR intake,
+- repository access checks,
+- check run publication,
+- PR comments,
+- draft PR or branch publication.
+
+GitHub-specific logic stays at the provider edge. After verification and normalization, GitHub events become generic `WorkflowIntake` values with provider metadata in `ExternalWorkflowRef`.
+
+Alchemy may be used to provision PatchPlane-owned demo repositories or repo settings, but runtime GitHub behavior uses GitHub App APIs through the GitHub provider plugin.
+
+Decision rule:
 
 ```text
-WorkOS User             → Actor
-WorkOS Organization     → Workspace
-WorkOS Membership       → Membership
-WorkOS Role/Permissions → WorkspaceRole / Permission[]
+Create/configure PatchPlane-owned resources → apps/infra.
+React to GitHub events or operate on PRs/checks/comments → GitHub provider plugin.
 ```
-
-Core must only know:
-
-- `Actor`,
-- `Workspace`,
-- `Membership`,
-- `Permission`.
-
-Core must not know:
-
-- `WorkOSUser`,
-- `WorkOSOrganization`,
-- `WorkOSOrganizationMembership`.
-
-### 10.1 Initial roles
-
-Keep the first role model simple:
-
-- `owner`
-- `admin`
-- `maintainer`
-- `reviewer`
-- `operator`
-- `viewer`
-
-Suggested first permission slugs:
-
-- `workspace:view`
-- `repo:connect`
-- `prompt:create`
-- `run:start`
-- `run:interrupt`
-- `review:create`
-- `decision:approve`
-- `decision:reject`
-- `publication:create`
-
-Do not overbuild enterprise RBAC in v2.
 
 ---
 
-## 11. App Composition Root
+## 11. Artifact and provenance model
 
-`apps/client` owns framework integration and deployment composition.
+PatchPlane-owned provenance is the product truth. External observability tools are supporting systems, not the audit trail.
 
-It is responsible for:
+### 11.1 Convex stores workflow truth and timeline metadata
 
-- TanStack Start routes,
-- Convex client wiring,
-- WorkOS AuthKit route/session helpers,
-- server functions,
-- HTTP route handlers,
-- UI rendering,
-- composing plugin layers,
-- constructing the PatchPlane `ManagedRuntime`.
+Convex is the alpha workflow state and realtime UI backend.
 
-`packages/core` must not depend on TanStack Start, Convex server functions, or WorkOS route helpers.
+It stores:
 
-### 11.1 ManagedRuntime bridge
+- workflow runs,
+- runtime sessions,
+- normalized runtime events,
+- provenance events,
+- evidence artifact metadata,
+- candidate patch metadata,
+- review results,
+- policy decisions,
+- publication events.
 
-`apps/client` creates the PatchPlane runtime from composed plugin layers:
+Convex should not store large raw artifacts directly.
+
+### 11.2 R2 stores raw evidence artifacts
+
+Cloudflare R2 stores large raw evidence payloads:
+
+- raw runtime trace JSON,
+- stdout/stderr logs,
+- patch diffs,
+- test reports,
+- screenshots,
+- browser videos,
+- policy result JSON,
+- trust report JSON.
+
+Convex stores the metadata and R2 pointer.
+
+Example:
+
+```ts
+type EvidenceArtifact = {
+  id: string
+  workflowRunId: string
+  kind:
+    | "raw-trace"
+    | "stdout"
+    | "stderr"
+    | "diff"
+    | "test-report"
+    | "screenshot"
+    | "video"
+    | "policy-result"
+    | "trust-report"
+  storageProvider: "cloudflare-r2"
+  storageKey: string
+  contentType: string
+  sizeBytes: number
+  sha256: string
+  createdAt: number
+}
+```
+
+### 11.3 Provenance timeline
+
+A `ProvenanceEvent` links workflow actions to evidence:
+
+```ts
+type ProvenanceEvent = {
+  id: string
+  workflowRunId: string
+  traceId: string
+  parentEventId?: string
+  sequence: number
+  type: string
+  operation: string
+  pluginName?: string
+  status: "started" | "succeeded" | "failed" | "blocked"
+  startedAt: number
+  completedAt?: number
+  summary?: string
+  artifactRefs: string[]
+  errorCategory?: string
+}
+```
+
+The timeline explains:
+
+- who requested the change,
+- which repository was targeted,
+- which sandbox ran,
+- which runtime produced output,
+- which evidence was captured,
+- which review/policy checks ran,
+- what the human decision was,
+- what was published back to GitHub.
+
+---
+
+## 12. Model access and runtime model
+
+Pi is the first coding-agent runtime.
+
+PatchPlane should use `@earendil-works/pi-coding-agent` for coding-agent behavior instead of directly building a low-level LLM-only agent.
+
+The Pi runtime plugin maps Pi lifecycle events into PatchPlane `RuntimeEvent` schemas.
+
+Example event types:
+
+- agent started,
+- turn started,
+- message started,
+- message updated,
+- tool execution started,
+- tool execution updated,
+- tool execution ended,
+- turn ended,
+- agent ended,
+- error emitted.
+
+### 12.1 Cloudflare AI Gateway
+
+Cloudflare AI Gateway is the first model-access layer for the Pi runtime.
+
+Alpha config should be provider/model-driven:
+
+```env
+PATCHPLANE_AGENT_PROVIDER=cloudflare-ai-gateway
+PATCHPLANE_AGENT_MODEL=...
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_GATEWAY_ID=...
+CLOUDFLARE_API_KEY=...
+```
+
+A direct provider fallback may be supported for local development:
+
+```env
+PATCHPLANE_AGENT_PROVIDER=openai
+PATCHPLANE_AGENT_MODEL=...
+OPENAI_API_KEY=...
+```
+
+PatchPlane should not build a model marketplace in alpha. Provider/model values are configuration, not a product surface yet.
+
+---
+
+## 13. Observability and analytics
+
+PatchPlane uses three separate concepts:
 
 ```text
-apps/client/src/effect/plugin-layers.ts
-- select plugin layers from root patchplane.config.json
-- compose WorkOSAuthPlugin.layer
-- compose ConvexStoragePlugin.layer
-- compose GitHubProviderPlugin.layer for webhook surfaces
-- compose DaytonaSandboxPlugin.layer and PiAgentRuntimePlugin.layer when selected
-
-apps/client/src/effect/runtime.ts
-- create one ManagedRuntime from the composed PatchPlane layer
-- export helpers for server routes/functions
+Telemetry  = operational debugging and reliability
+Analytics  = product usage and activation
+Provenance = product truth and evidence
 ```
 
-Route handlers and server functions call core workflows through this runtime. PatchPlane should not maintain separate app/GitHub managed runtimes for the same process unless a concrete isolation need appears.
+### 13.1 Telemetry
+
+Telemetry is for operational debugging.
+
+Initial implementation:
+
+- Sentry,
+- structured logs,
+- Effect spans where useful,
+- OpenTelemetry-compatible naming discipline.
+
+Initial span/event names:
+
+- `patchplane.workflow.start`
+- `patchplane.auth.require_permission`
+- `patchplane.git.verify_repo`
+- `patchplane.github.verify_webhook`
+- `patchplane.sandbox.provision`
+- `patchplane.runtime.start_session`
+- `patchplane.runtime.stream_event`
+- `patchplane.artifact.put`
+- `patchplane.review.run`
+- `patchplane.policy.evaluate`
+- `patchplane.decision.record`
+- `patchplane.publication.github`
+
+Sentry must not become the PatchPlane provenance store.
+
+### 13.2 Analytics
+
+Analytics is for product behavior.
+
+Initial events:
+
+- `workflow_started`
+- `first_workflow_completed`
+- `trust_report_viewed`
+- `artifact_opened`
+- `patch_approved`
+- `patch_rejected`
+- `publication_created`
+
+PostHog is the first analytics implementation.
+
+Analytics events should avoid raw code, raw prompts, raw diffs, secrets, and sensitive evidence payloads by default.
+
+### 13.3 OpenTelemetry and ClickHouse
+
+PatchPlane should use OpenTelemetry-compatible naming and trace/span semantics from the start.
+
+The alpha does not require:
+
+- OpenTelemetry collector,
+- ClickHouse,
+- HyperDX/ClickStack,
+- custom analytics warehouse,
+- PostHog AI observability.
+
+ClickHouse or another trace analytics backend may be added later when PatchPlane needs high-volume trace analytics, aggregate workflow analysis, cost analytics, failure-pattern queries, or long-term event search.
 
 ---
 
-## 12. Configuration
+## 14. Configuration
 
 PatchPlane has three configuration locations:
 
 - `patchplane.config.json`: root, user-visible, non-secret project config managed by the CLI.
 - `.patchplane/{logs,cache,state}`: generated local runtime artifacts only.
-- `.env.local` or deployment secret stores: secrets and environment values.
-
-Plugin configuration must use Effect Config.
+- environment variables or deployment secret stores: secrets and environment-specific values.
 
 Each plugin owns its config:
 
 - `WorkOSConfig`
 - `ConvexConfig`
 - `GitHubConfig`
-- `PiAgentConfig`
 - `DaytonaConfig`
+- `PiAgentConfig`
+- `CloudflareConfig`
+- `SentryConfig`
+- `PostHogConfig`
 
 Rules:
 
-- Plugins must not read raw environment variables from random files.
-- Plugin configuration is loaded through Effect Config and provided through plugin layers.
-- Secrets should use redacted config values where supported.
-- Configuration should fail at startup, not halfway through a workflow.
 - `patchplane.config.json` must not contain secrets.
 - `.patchplane/` must not contain user-managed project config.
+- Plugins must load configuration through Effect Config.
+- Secrets should use redacted config values where supported.
+- Configuration should fail at startup, not halfway through a workflow.
+- Public docs may mention environment variable names but must never include real values.
 
 Important secret-bearing config includes:
 
@@ -748,303 +808,210 @@ Important secret-bearing config includes:
 - Convex URLs and deployment credentials,
 - GitHub App IDs and private keys,
 - Daytona tokens,
-- runtime credentials.
+- Pi/model provider credentials,
+- Cloudflare API keys/account details,
+- Sentry DSN/auth tokens,
+- PostHog project keys where applicable.
 
 ---
 
-## 13. Observability
+## 15. Security model
 
-PatchPlane is an operational control plane, so observability is part of the core/plugin contract.
+### 15.1 Trusted control plane
 
-Every workflow and plugin operation should emit structured context where available:
+Trusted control-plane components:
 
-- `workspaceId`
-- `actorId`
-- `promptRequestId`
-- `workflowRunId`
-- `runtimeSessionId`
-- `reviewRunId`
-- `mergeDecisionId`
-- `pluginName`
-- `externalSystem`
+- core workflows,
+- plugin layers running in trusted server contexts,
+- WorkOS session validation,
+- Convex persistence and authorization checks,
+- policy definitions,
+- human decisions,
+- GitHub App private-key handling,
+- verified webhook state,
+- configuration profiles,
+- artifact metadata and signed-access paths.
 
-Initial spans:
+### 15.2 Semi-trusted clients
 
-- `patchplane.prompt.create`
-- `patchplane.workflow.start`
-- `patchplane.auth.resolve_actor`
-- `patchplane.storage.create_workflow_run`
-- `patchplane.git.verify_repo`
-- `patchplane.runtime.start_session`
-- `patchplane.sandbox.provision`
-- `patchplane.review.run`
-- `patchplane.decision.propose`
+Semi-trusted clients:
 
----
+- web dashboard,
+- future desktop shell,
+- CLI surfaces used by trusted operators.
 
-## 14. Core System Model
+### 15.3 Untrusted execution plane
 
-### 14.1 PromptRequest
+Untrusted execution plane:
 
-A user- or agent-created request containing:
+- generated code,
+- agent tool calls,
+- third-party CLI invocations,
+- sandbox output,
+- runtime output,
+- browser/test evidence,
+- raw artifact payloads.
 
-- intent or prompt,
-- source channel,
-- target scope,
-- expected outcome,
-- evaluation policy,
-- optional implementation hints,
-- initiator identity,
-- workspace identity.
+### 15.4 Rules
 
-### 14.2 WorkflowRun
+- Run generated code outside the control plane.
+- Do not expose long-lived production credentials to sandbox runs.
+- Verify GitHub webhook signatures against the raw request body before parsing or persistence.
+- Deduplicate webhook deliveries and external references.
+- Keep GitHub App private keys and installation-token minting in trusted server contexts.
+- Store raw logs and artifacts separately from privileged secrets.
+- Keep WorkOS SDK usage server-only.
+- Treat WorkOS/AuthKit access tokens as request-scoped credentials.
+- Do not allow public Convex mutations to bypass authorization for privileged user writes.
+- Keep external/system Convex ingestion behind a server-only authentication mechanism.
+- Make manual override and kill-switch behavior available.
+- Treat dependency changes as high-risk.
+- Validate workspaces, paths, permissions, and execution targets before runtime start.
+- Make approval policy explicit per runtime session.
+- Use short-lived signed URLs for private artifact access.
+- Avoid sending raw code, secrets, full diffs, or sensitive evidence to analytics tools by default.
 
-The durable orchestration record for one execution attempt containing:
-
-- prompt-request reference,
-- workspace reference,
-- repository connection reference when applicable,
-- selected execution target,
-- selected runtime and sandbox profile,
-- lifecycle state,
-- callback targets,
-- policy bundle reference.
-
-Workflow runs are control-plane truth for execution attempts.
-
-### 14.3 RuntimeSession
-
-The operational container for one agent execution context containing:
-
-- runtime plugin identifier,
-- sandbox identifier,
-- workspace root,
-- approval policy,
-- sandbox policy,
-- timeout budget,
-- current status,
-- resumability metadata.
-
-Runtime sessions are execution state, not product truth.
-
-### 14.4 RuntimeEvent
-
-A normalized event emitted by a runtime plugin, for example:
-
-- session started,
-- turn started,
-- tool call requested,
-- approval required,
-- artifact emitted,
-- turn completed,
-- turn failed,
-- session terminated.
-
-Runtime events are stored for observability and debugging, but they are not merge decisions.
-
-### 14.5 CandidatePatchSet
-
-The concrete output proposed by an agent run:
-
-- changed files or structured artifacts,
-- generated code or content,
-- metadata about tools used,
-- tests run,
-- dependency changes,
-- machine-readable diff summary,
-- runtime session reference.
-
-### 14.6 ReviewRun
-
-A sandboxed evaluation result produced by a reviewer or tool:
-
-- pass/fail,
-- numeric score,
-- comments,
-- structured findings,
-- execution logs,
-- artifact references.
-
-### 14.7 MergeDecision
-
-A durable decision containing:
-
-- final weighted score,
-- criteria evaluation result,
-- proposed state,
-- responsible workflow run,
-- related GitHub issue or PR reference,
-- policy bundle reference,
-- deciding actor or automated policy source.
-
-### 14.8 RepositoryConnection
-
-The durable repository authority record containing:
-
-- provider,
-- installation identity,
-- repository identity and permissions,
-- webhook routing metadata,
-- checkout or execution defaults,
-- bindings to issues, PRs, and prompt-request sources.
-
-### 14.9 Symbiosis Graph
-
-An append-only provenance graph that links:
-
-- prompt requests,
-- workflow runs,
-- repository connections,
-- runtime sessions,
-- candidate patch sets,
-- review runs,
-- merge decisions,
-- publication events,
-- rollback operations.
-
-The graph is the lineage model, not the merge algorithm.
+The alpha is intended for controlled, single-team or design-partner usage first. It is not an open multi-tenant SaaS without additional tenancy, sandbox, audit, and isolation hardening.
 
 ---
 
-## 15. GitHub Compatibility Model
+## 16. Alpha scope
 
-The end-to-end MVP uses a PatchPlane-primary, GitHub-compatible model:
+The alpha is scoped around one end-to-end trusted patch workflow.
 
-- PatchPlane is the system of record for prompt requests, workflow runs, runtime sessions, approvals, reviews, and decisions.
-- Candidate changes are materialized as git commits and branches inside a sandboxed repo workspace.
-- GitHub remains the initial repository and contribution surface for issues, PRs, comments, checks, and open-source collaboration.
-- Accepted outputs are published back to GitHub as comments, checks, and PR or draft PR updates.
-- Human review remains the default merge authority for the first vertical slice.
-- Direct transactional auto-merge and PatchPlane-owned rollback are follow-on steps.
-- Overlapping or ambiguous changes fall back to PR-based human arbitration, not semantic auto-resolution.
+### 16.1 In scope
 
----
+- Effect-native domain/core/plugin architecture,
+- WorkOS auth plugin,
+- Convex storage/realtime plugin,
+- GitHub provider plugin,
+- Daytona sandbox plugin,
+- Pi runtime plugin,
+- Cloudflare R2 artifacts plugin,
+- Cloudflare AI Gateway model gateway plugin,
+- Sentry telemetry plugin,
+- optional PostHog analytics plugin,
+- `apps/infra` with Alchemy for Cloudflare R2 and AI Gateway provisioning,
+- normalized runtime events,
+- evidence artifact capture,
+- provenance timeline,
+- candidate patch output,
+- deterministic policy/review result,
+- human approve/reject path,
+- GitHub check/comment/draft PR publication.
 
-## 16. MVP Scope
+### 16.2 Out of scope for alpha
 
-### 16.1 v2 Authenticated Foundation MVP
-
-In scope:
-
-- `packages/domain` with Effect Schema,
-- `packages/core` with Effect services and workflows,
-- `packages/plugins` created immediately,
-- `apps/client` composition root with TanStack Start and `ManagedRuntime`,
-- WorkOS Auth Plugin,
-- Convex Storage Plugin,
-- WorkOS AuthKit session integration,
-- Convex AuthKit client integration,
-- WorkOS user and organization membership sync into Convex,
-- trusted Convex workflow-start write boundary,
-- PromptRequest creation through core,
-- WorkflowRun creation through core,
-- authenticated read-back through Convex queries,
-- typed auth/storage errors,
-- structured logs.
-
-Out of scope for the first foundation slice:
-
-- Daytona,
-- Pi Agent Core,
-- GitHub PR publication,
-- reviewer fan-out,
-- weighted score aggregation,
-- React Flow provenance graph,
-- desktop shell,
-- enterprise RBAC.
-
-### 16.2 End-to-End Hosted MVP
-
-In scope after the foundation is stable:
-
-- GitHub Provider Plugin,
-- Daytona Sandbox Plugin,
-- Pi Agent Runtime Plugin,
-- normalized RuntimeEvent ingestion,
-- CandidatePatchSet creation,
-- ReviewRun creation,
-- MergeDecision proposal,
-- GitHub comment/check/draft PR publication,
-- operator dashboard,
-- human approval/rejection path.
-
-### 16.3 Explicitly out of scope for v2 MVP
-
-- Fully automatic semantic conflict resolution,
-- broad transactional auto-merge across overlapping patch sets,
+- multi-sandbox provider UI,
+- model marketplace,
+- plugin marketplace,
+- broad enterprise RBAC,
 - open multi-tenant SaaS hardening,
-- fine-grained enterprise RBAC and audit export,
-- background evolutionary remixing of prior successful changes,
-- full offline-first source-code editing,
-- deep desktop-native feature work,
-- built-in model serving,
+- full OpenTelemetry collector/backend,
+- ClickHouse trace analytics,
+- PostHog AI observability,
+- automatic semantic conflict resolution,
+- direct auto-merge without human approval,
 - mobile clients,
-- generic issue tracking or project management.
+- deep desktop-native feature work,
+- generic project management,
+- replacing GitHub as a forge,
+- replacing Pi as an agent runtime,
+- replacing Daytona as a sandbox provider.
 
 ---
 
-## 17. Technology Choices
+## 17. Technology choices
 
-### 17.1 Language
+### 17.1 Language and runtime
 
 Use TypeScript across the platform.
 
-Runtime and TypeScript constraints from vendored SDK research:
+Server/plugin contexts should use a Node runtime compatible with the selected SDKs. Bun may remain the workspace/package runner if validated for the relevant commands, but server/plugin runtime behavior should not assume Bun compatibility unless explicitly tested.
 
-- use Node 22.19+ for server/plugin contexts that execute WorkOS Node SDK and Pi Agent Core code,
-- Bun remains the workspace package runner,
-- server/plugin code executes under Node, not Bun, unless explicitly validated otherwise,
-- Octokit v5 uses conditional exports, so plugin package TypeScript configs must use a Node-compatible module mode where necessary (`moduleResolution: "node16"`/`"nodenext"` and matching module setting) instead of blindly relying on bundler resolution for server-only packages.
+### 17.2 Web framework
 
-### 17.2 Programming model
+Use the existing TanStack Start app in `apps/client` as the composition root. Framework-specific code stays in the app layer.
 
-Use Effect v4 / effect-smol for:
+### 17.3 Auth
 
-- schemas and boundary decoding,
-- core service definitions,
-- plugin layers,
-- typed errors,
-- configuration,
-- retries,
-- cancellation,
-- timeouts,
-- resource lifecycles,
-- workflow orchestration logic,
-- observability.
+WorkOS AuthKit is the first auth provider and source of human identity, organizations, memberships, roles, and permissions.
 
-### 17.3 Web framework
+Core domain values are:
 
-Use the existing `apps/client` TanStack Start app as the composition root, while isolating framework risk in the app layer. Do not create a separate `apps/app` package for v2.
+- `Actor`
+- `Workspace`
+- `Membership`
+- `Permission`
 
-### 17.4 Auth
+Core must not know WorkOS-specific SDK types.
 
-WorkOS AuthKit is the first auth plugin and source of human identity, organizations, memberships, roles, and permissions. The WorkOS Node SDK must remain server-only. Browser-safe session data is mapped separately from server-only SDK-backed authorization code.
+### 17.4 Storage and realtime
 
-`@convex-dev/workos` provides the client-side Convex/AuthKit bridge. `@convex-dev/workos-authkit` provides Convex backend webhook/action plumbing for WorkOS metadata, while PatchPlane remains responsible for app-specific authorization policy such as `prompt:create` and `workspace:view`.
+Convex is the first storage/realtime backend.
 
-### 17.5 Storage and realtime
+Convex may own:
 
-Use Convex as the first storage plugin and realtime backend. User workflow starts use Convex WorkOS JWT authorization and mirrored `prompt:create` checks. Provider/external workflow starts use a signed system-ingestion mutation and generic `externalWorkflowRefs` for idempotency and provenance.
+- realtime UI reads,
+- auth-mirrored membership checks,
+- workflow state for alpha,
+- provenance timeline metadata,
+- artifact metadata,
+- public/read model queries.
 
-### 17.6 Repository provider
+The portability boundary remains `StorageService`.
 
-Use GitHub App integration as the first repository provider plugin. GitHub webhook verification remains provider-specific and server-only; after verification and normalization, GitHub events become generic `WorkflowIntake` values with `source: "external"` and provider details in `ExternalWorkflowRef`. The alpha webhook route requires `PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES` to prevent globally configured GitHub App deliveries from entering the wrong workspace.
+### 17.5 Repository provider
 
-### 17.7 Sandbox
+GitHub App integration is the first repository provider.
 
-Use Daytona as the first sandbox plugin. The Daytona plugin should use `@daytona/sdk`, not the older `@daytonaio/sdk` package name. Initial implementation should prefer ephemeral or auto-deleting sandboxes, explicit `autoStopInterval`, and network controls (`networkBlockAll` / `networkAllowList`) when supported by the selected profile.
+Runtime operations use the GitHub provider plugin, backed by GitHub APIs/Octokit where appropriate.
 
-### 17.8 Runtime
+### 17.6 Sandbox
 
-Use `@earendil-works/pi-coding-agent` as the first runtime plugin when PatchPlane needs an in-process coding agent. Do not use the low-level `@earendil-works/pi-agent-core` `Agent` alone for repository/runtime work, because that creates an LLM-only agent without Pi's coding tools, sessions, resource loading, and system prompt behavior. The runtime plugin should map Pi session events such as `agent_start`, `turn_start`, `message_start`, `message_update`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `turn_end`, and `agent_end` into PatchPlane `RuntimeEvent` schemas.
+Daytona is the first sandbox provider.
 
-### 17.8.1 Plugin metadata, CLI onboarding, and environment discovery
+Initial implementation should prefer ephemeral or auto-deleting sandboxes, explicit lifecycle policy, and network controls where supported by the selected profile.
 
-PatchPlane plugins should expose static metadata in `packages/plugins/src/registry.ts` describing plugin id/name, layer export, provided services, runtime surfaces, dependencies/conflicts, and required/optional environment variables. This registry is the source for the local `packages/cli` plugin discovery, environment template/check commands, doctor diagnostics, and configurable runtime composition.
+### 17.7 Runtime
 
-`packages/cli` is the OSS onboarding surface. It uses `effect/unstable/cli` for command parsing/composition, `@effect/platform-node` `NodeServices.layer` for filesystem/path/stdio/terminal services, Effect `Terminal` via `Prompt.run(...)` for interactive prompts, and PatchPlane-owned Context services for config/env/diagnostics/interactivity policy. Interactive prompts are only entered when PatchPlane's interactivity service confirms both stdin and stdout are TTYs; all flows must remain scriptable through flags.
+Pi is the first runtime provider.
 
-CLI commands:
+Runtime events are normalized into PatchPlane `RuntimeEvent` records and linked to workflow/provenance state.
+
+### 17.8 Artifact storage
+
+Cloudflare R2 is the first evidence artifact store.
+
+R2 is accessed through `ArtifactsService` / Cloudflare plugin runtime code, not directly from core.
+
+### 17.9 Model gateway
+
+Cloudflare AI Gateway is the first model-access layer for Pi.
+
+Model provider and model name are configuration values for alpha.
+
+### 17.10 Infrastructure provisioning
+
+Alchemy is the first infra-provisioning tool and lives under `apps/infra`.
+
+It provisions PatchPlane-owned Cloudflare resources and optional demo infrastructure. It is not a runtime SDK replacement.
+
+### 17.11 Telemetry and analytics
+
+Sentry is the first telemetry implementation.
+
+PostHog is the first product analytics implementation.
+
+ClickHouse is deferred until PatchPlane needs high-volume trace analytics or custom analytical queries.
+
+---
+
+## 18. CLI and plugin metadata
+
+`packages/cli` is the OSS onboarding surface.
+
+CLI commands may include:
 
 ```text
 patchplane init
@@ -1052,37 +1019,41 @@ patchplane doctor
 patchplane env template
 patchplane env check
 patchplane plugins list
-patchplane plugins explain <id>
+patchplane plugins explain
 ```
 
-`patchplane init` writes `patchplane.config.json`, appends missing required keys to `.env.local`, and creates `.patchplane/{logs,cache,state}`. `--profile`, `--yes`, `--dry-run`, `--force`, `--with-pi`, and `--non-interactive` provide CI-safe non-interactive setup. Unknown plugin ids and invalid flag combinations should use structured `effect/unstable/cli` validation errors where possible.
+Plugins should expose static metadata for:
 
-### 17.9 Desktop
+- plugin id/name,
+- provided services,
+- required environment variables,
+- optional environment variables,
+- runtime surfaces,
+- dependencies/conflicts.
 
-A desktop shell remains post-foundation. Do not let desktop requirements shape the foundation MVP.
+CLI flows must remain scriptable through flags and non-interactive modes.
 
 ---
 
-## 18. Testing Strategy
+## 19. Testing strategy
 
-PatchPlane v2 validates real plugins first, but keeps service boundaries testable.
+PatchPlane should validate real plugin paths early while keeping service boundaries testable.
 
 Initial integration tests:
 
 - WorkOS session → PatchPlane Actor,
 - WorkOS organization → PatchPlane Workspace,
-- WorkOS organization membership → PatchPlane Membership,
-- WorkOS roles/permissions → PatchPlane permissions,
-- WorkOS user and membership webhook sync into Convex app tables,
+- WorkOS membership → PatchPlane Membership,
 - Convex authenticated workflow write through `StorageService`,
-- public workflow-start writes reject missing auth, spoofed actor/workspace/source, inactive membership, and missing `prompt:create`,
-- signed external workflow intake creates PromptRequest + WorkflowRun + `externalWorkflowRefs`,
-- external workflow intake deduplicates GitHub redelivery by comment, issue-event, and delivery keys,
-- authenticated Convex reads require mirrored active membership permissions,
-- create PromptRequest through core workflow,
-- create WorkflowRun through core workflow,
-- GitHub webhook verification/normalization maps into generic `WorkflowIntake`,
-- `StartWorkflowFromIntake` verifies repository access before storage when repository metadata is present.
+- public workflow writes reject missing auth and missing permissions,
+- signed external workflow intake creates PromptRequest + WorkflowRun,
+- GitHub webhook verification maps to generic `WorkflowIntake`,
+- repository access is checked before workflow execution,
+- Daytona sandbox can provision and execute a command,
+- Pi runtime can emit normalized runtime events,
+- R2 artifact upload stores metadata in Convex,
+- trust timeline can read back provenance events and artifact references,
+- GitHub publication can create a check/comment/draft PR output.
 
 Core tests after the first real path is proven:
 
@@ -1092,267 +1063,97 @@ Core tests after the first real path is proven:
 - retry behavior,
 - timeout behavior,
 - concurrent operations,
-- runtime-event validation.
-
-Test layers are allowed and expected later. The spec does not require fake plugins before the real Convex storage/core foundation is proven.
-
----
-
-## 19. Security Model
-
-### 19.1 Trust boundaries
-
-Trusted control plane:
-
-- core workflows,
-- plugin layers running in trusted server contexts,
-- WorkOS session validation,
-- Convex persistence,
-- policy definitions,
-- merge decisions,
-- GitHub App private key handling,
-- verified webhook delivery state,
-- configuration profiles.
-
-Semi-trusted clients:
-
-- web dashboard,
-- future desktop shell.
-
-Untrusted execution plane:
-
-- generated code,
-- agent tool calls,
-- reviewer agents,
-- third-party CLI invocations,
-- sandbox output,
-- runtime output.
-
-### 19.2 Rules
-
-- Run generated code outside the control plane.
-- Do not expose long-lived production credentials to sandbox runs.
-- Verify GitHub webhook signatures against the raw request body before parsing or persistence.
-- Deduplicate webhook deliveries and external references through generic `externalWorkflowRefs`.
-- Require explicit repository/workspace allowlisting for the alpha GitHub webhook route.
-- Keep GitHub App private keys and installation-token minting in trusted server contexts.
-- Store logs and artifacts separately from privileged secrets.
-- Keep WorkOS SDK usage server-only.
-- Treat WorkOS/AuthKit access tokens as request-scoped credentials.
-- Do not allow public Convex mutations to bypass Convex-side authorization for privileged user writes.
-- Keep external/system Convex ingestion behind a server-only shared secret until a stronger signed service-auth mechanism is introduced.
-- Make manual override and kill-switch behavior available from the UI.
-- Treat dependency changes as high-risk.
-- Validate workspaces, paths, permissions, and execution targets before runtime start.
-- Make approval policy explicit per runtime session.
-
-The v2 MVP is suitable for single-team internal usage first. It is not suitable for open multi-tenant SaaS without additional tenancy, sandbox, audit, and isolation hardening.
+- runtime-event validation,
+- artifact metadata validation,
+- policy decision validation.
 
 ---
 
-## 20. Data Model
+## 20. Success criteria
 
-Initial foundation entities:
+### 20.1 Foundation success
 
-- `users`
-- `memberships`
-- `actors`
-- `workspaces`
-- `permissions`
-- `promptRequests`
-- `workflowRuns`
-
-End-to-end MVP entities:
-
-- `repositoryConnections`
-- `githubInstallations`
-- `repositories`
-- `webhookDeliveries`
-- `runtimeSessions`
-- `runtimeEvents`
-- `candidatePatchSets`
-- `reviewRuns`
-- `reviewFindings`
-- `mergeDecisions`
-- `policyBundles`
-- `configProfiles`
-- `executionTargets`
-- `pendingApprovals`
-- `pendingInputs`
-- `publicationEvents`
-
-Notes:
-
-- WorkOS IDs may be stored as external IDs, but domain types remain PatchPlane-owned.
-- Convex document shapes must be mapped into domain schemas before entering core workflows.
-- Runtime events are normalized records for observability and replay.
-- Workflow runs are the durable orchestration unit.
-- Runtime sessions are execution state and must not become canonical merge truth.
-
----
-
-## 21. Immediate Work Plan
-
-### Step 1 — Create package structure
-
-```text
-packages/domain
-packages/core
-packages/plugins
-apps/client
-```
-
-### Step 2 — Add Effect v4 beta intentionally
-
-Pin `effect@4.0.0-beta.84` everywhere Effect v4 is used and keep Effect ecosystem package versions aligned. If `@effect/platform-node` is added, pin it to `4.0.0-beta.84` as well.
-
-### Step 3 — Build `packages/domain`
-
-Start with:
-
-- `Actor`
-- `Workspace`
-- `Membership`
-- `Permission`
-- `PromptRequest`
-- `WorkflowRun`
-- typed errors
-
-### Step 4 — Build `packages/core`
-
-Create:
-
-- `AuthService`
-- `StorageService`
-- `SourceControlService`
-- `GitHubWebhookService` for the GitHub edge verifier
-- `StartWorkflowFromPrompt`
-- `StartAuthenticatedWorkflowFromPrompt`
-- `StartWorkflowFromIntake`
-- GitHub webhook normalization and GitHub → generic intake mapping
-- authenticated workflow-start orchestration
-
-No WorkOS imports. No Convex imports. No Octokit imports.
-
-### Step 5 — Build `packages/plugins/convex`
-
-Implement:
-
-- Convex Storage Plugin,
-- `ConvexConfig`,
-- user-facing workflow-start write through Convex WorkOS JWT validation and mirrored `prompt:create` authorization,
-- signed external-intake workflow-start write through `workflowStarts:createFromExternalIntake`,
-- `externalWorkflowRefs` persistence and idempotency,
-- recent workflow read-back through Convex queries.
-
-Keep current Convex backend code in `packages/backend/convex` for now. Convex function location is separate from the Storage Plugin boundary; do not move Convex files until there is a concrete deployment reason.
-
-### Step 6 — Build `packages/plugins/workos`
-
-Implement:
-
-- WorkOS Auth Plugin,
-- `WorkOSConfig`,
-- WorkOS User → Actor mapping,
-- WorkOS Organization → Workspace mapping,
-- WorkOS Membership → Membership mapping,
-- WorkOS roles/permissions → PatchPlane permissions mapping,
-- server-only WorkOS SDK boundary.
-
-### Step 7 — Compose in `apps/client`
-
-Create:
-
-```text
-apps/client/src/effect/plugin-layers.ts
-apps/client/src/effect/runtime.ts
-```
-
-Use root `patchplane.config.json` to select plugin layers and create one composed `ManagedRuntime` for app/server route execution.
-
-Run one authenticated server-side action through the composed `ManagedRuntime`:
-
-```text
-WorkOS AuthKit session
-→ WorkOSAuthPlugin.requirePermission("prompt:create")
-→ create PromptRequest
-→ create WorkflowRun
-→ persist in Convex through StorageService with WorkOS JWT and Convex-side membership authorization
-```
-
----
-
-## 22. Success Criteria
-
-### 22.1 Authenticated foundation and external intake success
-
-The authenticated foundation plus initial external intake slice is successful when:
+The foundation is successful when:
 
 1. `packages/domain`, `packages/core`, and `packages/plugins` exist and typecheck.
-2. Existing Convex backend code remains in `packages/backend/convex` unless a concrete deployment reason requires moving it.
+2. Core contains no WorkOS, Convex, GitHub, Daytona, Pi, Cloudflare, Sentry, PostHog, Alchemy, or TanStack imports.
 3. WorkOS AuthKit can authenticate a user and selected organization.
 4. WorkOS user and organization membership data can be mapped into PatchPlane domain values.
-5. A server-side app action calls a core workflow through `ManagedRuntime`.
-6. The server-side workflow verifies `prompt:create` through `AuthService` before writing.
-7. The core workflow creates a PromptRequest through `StorageService`.
-8. The core workflow creates a WorkflowRun through `StorageService`.
-9. Convex persists user workflow records through the Convex Storage Plugin using WorkOS JWT validation and mirrored `prompt:create` authorization.
-10. Public Convex workflow-start writes reject unauthenticated calls, workspace/actor/source spoofing, inactive memberships, and missing `prompt:create`.
-11. Convex authenticated reads require WorkOS identity and mirrored active membership permissions.
-12. A signed GitHub webhook can be verified, normalized, converted into generic `WorkflowIntake`, repository-allowlisted, repository-access-checked, and persisted through `StorageService.createWorkflowFromIntake`.
-13. External refs persist in generic `externalWorkflowRefs`, not provider-specific storage tables.
-14. Core contains no WorkOS, Convex, TanStack Start, Octokit, Daytona, or Pi Agent Core imports.
-15. Typed auth/storage/source-control/GitHub errors and structured logs exist for the path.
+5. A server-side app action calls a core workflow through a composed runtime.
+6. The server-side workflow verifies permissions before writing.
+7. The core workflow creates a PromptRequest and WorkflowRun through `StorageService`.
+8. Convex persists workflow records through the Convex plugin.
+9. Authenticated reads require appropriate workspace membership/permissions.
+10. GitHub webhook intake can be verified, normalized, repository-checked, and persisted as generic workflow intake.
 
-### 22.2 End-to-end MVP success
+### 20.2 Alpha trust-loop success
 
-The hosted MVP is successful when:
+The alpha is successful when:
 
-1. A user can connect or allowlist a GitHub repository through a GitHub App installation.
+1. A user can connect or allowlist a GitHub repository.
 2. A verified GitHub webhook or app prompt can create a durable PromptRequest.
-3. PatchPlane can start a WorkflowRun for that request through generic `WorkflowIntake` / `StorageService` boundaries.
-4. Daytona can provision a sandbox through `SandboxService`.
-5. Pi Agent Core can run behind `RuntimeService`.
+3. PatchPlane can start a WorkflowRun for that request.
+4. Daytona can provision a sandbox.
+5. Pi can run through the configured model provider.
 6. Runtime events are normalized and persisted.
-7. A CandidatePatchSet can be produced.
-8. At least one ReviewRun can return structured results.
-9. A MergeDecision can be proposed.
-10. PatchPlane can publish comments, checks, or draft PRs back to GitHub.
-11. A human can approve, reject, interrupt, or force manual review.
-12. One team can run the loop against one repository end to end.
+7. At least one candidate patch can be produced.
+8. Logs, diff, test output, and optional browser evidence can be stored as R2-backed EvidenceArtifacts.
+9. Convex can read back a provenance timeline with artifact references.
+10. A deterministic policy/review result can be recorded.
+11. A human can approve or reject the patch.
+12. PatchPlane can publish a check/comment/draft PR result back to GitHub.
+13. One real repository can run the loop end to end.
+14. No generated patch is treated as trusted before sandbox evidence and a recorded decision exist.
 
 ---
 
-## 23. Risks and Mitigations
+## 21. Risks and mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-| --- | ---: | ---: | --- |
-| Effect v4 beta APIs change | Medium | Medium | Pin exact versions, isolate Effect usage in core/plugins, keep migration notes |
-| TanStack Start framework churn affects delivery | Medium | Medium | Keep TanStack code in `apps/client`; protect core from framework imports |
-| WorkOS auth assumptions leak into domain | Medium | High | Map WorkOS types into Actor/Workspace/Membership/Permission only |
-| Convex storage shapes leak into core | Medium | High | Decode Convex documents through domain schemas and StorageService mappings |
-| Plugin boundaries slow early implementation | Medium | Medium | Keep core service contracts narrow and compose WorkOS/Convex only at app/plugin boundaries |
-| GitHub App flow is more complex than expected | Medium | High | Keep GitHub-specific logic at the webhook/provider edge; route verified events through generic `WorkflowIntake` and require repository allowlisting |
-| Daytona integration becomes an engineering sink | Medium | High | Defer to end-to-end MVP and keep sandbox API narrow |
-| Runtime integration leaks behavior into product model | Medium | High | Normalize RuntimeEvent and keep RuntimeSession as execution state only |
-| Enterprise RBAC scope expands too early | Medium | Medium | Use simple roles and permission slugs for v2 |
-| Multi-tenant security assumptions are misunderstood | Medium | High | State single-team internal posture until hardening is complete |
+| Risk | Mitigation |
+| --- | --- |
+| Architecture expands beyond alpha | Keep alpha scoped to one trusted patch workflow. |
+| Core couples to vendor SDKs | Enforce dependency restrictions and plugin boundaries. |
+| Effect APIs change | Pin versions, localize Effect usage, keep migration notes. |
+| GitHub App flow is complex | Keep GitHub logic at provider edge and normalize to generic intake. |
+| Sandbox integration becomes a sink | Keep `SandboxService` narrow and Daytona-first. |
+| Runtime details leak into product truth | Normalize events; keep runtime sessions as execution state. |
+| Convex becomes overloaded with large artifacts | Store raw artifacts in R2 and only metadata in Convex. |
+| Observability tools become audit trail | Keep provenance in PatchPlane-owned data structures. |
+| Analytics leaks sensitive data | Do not send raw code/diffs/secrets/evidence to analytics by default. |
+| Multi-tenant security is misunderstood | State alpha posture clearly and avoid open SaaS assumptions. |
+| Infra provisioning leaks into runtime | Keep Alchemy isolated in `apps/infra`. |
+| GitHub resource provisioning is confused with runtime integration | Use Alchemy for owned infra only; use GitHub provider plugin for PR/check/comment behavior. |
 
 ---
 
-## 24. Final Recommendation
+## 22. Final recommendation
 
-Proceed with PatchPlane v2 as an Effect-native control-plane core with real infrastructure plugins.
+Proceed with PatchPlane as an Effect-native AI change-control plane with real infrastructure plugins and strict product boundaries.
 
-The revised direction is:
+The alpha should validate:
 
 ```text
-Real plugins first where they matter for the current slice.
-Stable core service boundaries always.
-Effect Schema in domain from day one.
-WorkOS as first Auth Plugin.
-Convex as first Storage Plugin and realtime backend.
-apps/client as composition root.
+real intake
+→ real sandbox
+→ real agent runtime
+→ real evidence
+→ real human decision
+→ real GitHub publication
 ```
 
-PatchPlane v2 should validate the authenticated WorkOS + Convex foundation first, then expand into GitHub, Daytona, Pi Agent Core, reviews, decisions, and publication while protecting the product core from hard coupling to WorkOS, Convex, GitHub, Pi Agent Core, Daytona, or any future agent harness.
+The implementation direction is:
+
+```text
+Effect Schema in domain.
+Effect services in core.
+Plugins at the edge.
+Convex for alpha workflow state and realtime UI.
+Cloudflare R2 for raw evidence artifacts.
+Cloudflare AI Gateway for Pi model access.
+Alchemy for PatchPlane-owned infra provisioning.
+Sentry for operational telemetry.
+PostHog for product analytics.
+ClickHouse later, only when analytical trace volume requires it.
+```
+
+The architecture is intentionally durable enough to avoid obvious rewrites, but narrow enough to keep alpha execution focused on shipping the first trusted patch loop.
