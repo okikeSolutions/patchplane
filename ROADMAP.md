@@ -135,9 +135,9 @@ Public goals:
 
 Acceptance criteria:
 
-- The repo structure supports `packages/domain`, `packages/core`, `packages/plugins`, `apps/client`, and `packages/backend/convex`.
-- `packages/core` imports only PatchPlane domain/core dependencies and Effect.
-- Vendor research does not leak into runtime imports.
+- [x] The repo structure supports `packages/domain`, `packages/core`, `packages/plugins`, `apps/client`, and `packages/backend/convex`.
+- [x] `packages/core` imports only PatchPlane domain/core dependencies and Effect.
+- [x] Vendor research does not leak into runtime imports.
 
 ---
 
@@ -168,9 +168,9 @@ Tasks:
 
 Acceptance criteria:
 
-- `bun install` succeeds.
-- `bun run typecheck` reaches the new packages.
-- `packages/core` does not import app/plugin/vendor SDKs.
+- [x] `bun install` succeeds.
+- [x] `bun run typecheck` reaches the new packages.
+- [x] `packages/core` does not import app/plugin/vendor SDKs.
 
 ---
 
@@ -189,15 +189,15 @@ Tasks:
 
 Acceptance criteria:
 
-- Domain schemas decode unknown input.
-- External/plugin data entering core has a decode path.
-- Typed errors are PatchPlane-owned and do not expose raw SDK error types.
+- [x] Domain schemas decode unknown input.
+- [x] External/plugin data entering core has a decode path.
+- [x] Typed errors are PatchPlane-owned and do not expose raw SDK error types.
 
 ---
 
 ### M3 — Core service contracts
 
-**Status:** Authenticated foundation slice working
+**Status:** Complete for alpha core service contracts
 
 Tasks:
 
@@ -205,18 +205,18 @@ Tasks:
 - [x] Define experimental `StorageService` with prompt and external-intake creation paths.
 - [x] Define generic `SourceControlService`.
 - [x] Define GitHub-specific `GitHubWebhookService`.
-- [ ] Define minimal `TelemetryService` interface.
-- [ ] Define `ArtifactsService` interface for evidence storage.
-- [ ] Define `ModelGatewayService` interface for agent model access configuration.
+- [x] Define minimal `TelemetryService` interface.
+- [x] Define `ArtifactsService` interface for evidence storage.
+- [x] Define `ModelGatewayService` interface for agent model access configuration.
 - [x] Implement `StartWorkflowFromPrompt`.
 - [x] Implement `StartWorkflowFromIntake` with repository verification before persistence.
 - [x] Add structured context fields with `traceId`.
 
 Acceptance criteria:
 
-- Core workflows depend only on services, not SDKs.
-- Storage/auth/source-control failures map to typed PatchPlane errors.
-- Full workflow timeline/event history remains deferred until `RuntimeEvent`, `ReviewRun`, and decision schemas exist.
+- [x] Core workflows depend only on services, not SDKs.
+- [x] Storage/auth/source-control failures map to typed PatchPlane errors.
+- [x] Full workflow timeline/event history remains deferred until `RuntimeEvent`, `ReviewRun`, and decision schemas exist.
 
 ---
 
@@ -236,9 +236,9 @@ Tasks:
 
 Acceptance criteria:
 
-- Convex backend code remains isolated under `packages/backend/convex`.
-- Convex generated API exposes public reads and the signed external-ingestion mutation.
-- Convex remains the alpha realtime read-model/orchestration implementation, not a product-truth shortcut.
+- [x] Convex backend code remains isolated under `packages/backend/convex`.
+- [x] Convex generated API exposes public reads and the signed external-ingestion mutation.
+- [x] Convex remains the alpha realtime read-model/orchestration implementation, not a product-truth shortcut.
 
 ---
 
@@ -257,9 +257,9 @@ Tasks:
 
 Acceptance criteria:
 
-- Foundation and external-intake records persist through `StorageService`.
-- Core does not import Convex APIs.
-- Convex access stays inside plugin/backend boundaries.
+- [x] Foundation and external-intake records persist through `StorageService`.
+- [x] Core does not import Convex APIs.
+- [x] Convex access stays inside plugin/backend boundaries.
 
 ---
 
@@ -278,9 +278,9 @@ Tasks:
 
 Acceptance criteria:
 
-- Authenticated WorkOS users can create `PromptRequest` and `WorkflowRun` records through the core workflow.
-- App routes/server functions talk to core through the managed runtime.
-- CLI commands run through PatchPlane-owned service layers.
+- [x] Authenticated WorkOS users can create `PromptRequest` and `WorkflowRun` records through the core workflow.
+- [x] App routes/server functions talk to core through the managed runtime.
+- [x] CLI commands run through PatchPlane-owned service layers.
 
 ---
 
@@ -345,8 +345,8 @@ Tasks:
 
 Acceptance criteria:
 
-- User-facing workflow starts are authorized by WorkOS/Convex identity and mirrored permissions.
-- WorkOS SDK objects do not cross into core.
+- [x] User-facing workflow starts are authorized by WorkOS/Convex identity and mirrored permissions.
+- [x] WorkOS SDK objects do not cross into core.
 
 ---
 
@@ -369,15 +369,15 @@ Tasks:
 
 Acceptance criteria:
 
-- GitHub App installation-token flow is isolated inside `packages/plugins`.
-- Verified GitHub events become generic `WorkflowIntake` values.
-- PatchPlane can publish an alpha result back to GitHub without leaking Octokit objects into core.
+- [x] GitHub App installation-token flow is isolated inside `packages/plugins`.
+- [x] Verified GitHub events become generic `WorkflowIntake` values.
+- [ ] PatchPlane can publish an alpha result back to GitHub without leaking Octokit objects into core.
 
 ---
 
 ### M7.5 — Minimal TelemetryService and operational visibility
 
-**Status:** Planned
+**Status:** Complete for alpha operational telemetry
 
 Scope:
 
@@ -389,39 +389,45 @@ Scope:
 
 Tasks:
 
-- [ ] Define `TelemetryService` in core contracts.
-- [ ] Add Sentry plugin/layer for captured exceptions and failed operations.
-- [ ] Add `traceId`, `workflowRunId`, `pluginName`, `operation`, and `runtimeSessionId` fields consistently across future plugins.
-- [ ] Ensure Sentry traces/logs are operational visibility only, not provenance truth.
+- [x] Define `TelemetryService` in core contracts.
+- [x] Add Sentry plugin/layer for captured exceptions and failed operations.
+- [x] Add `traceId`, `workflowRunId`, `pluginName`, `operation`, and `runtimeSessionId` fields consistently across future plugins.
+- [x] Ensure Sentry traces/logs are operational visibility only, not provenance truth.
+- [x] Capture server-function and webhook runtime failures through `TelemetryService.captureError`.
+- [x] Centralize Effect-native telemetry annotations and failure capture helpers.
+- [x] Add unit coverage for telemetry context helpers, Sentry no-DSN no-op behavior, and best-effort Sentry failure handling.
+- [x] Manually validate a `TelemetryService.captureError` test event reaches Sentry.
 
 Acceptance criteria:
 
-- Runtime failures can be diagnosed without reading only local logs.
-- Product provenance remains in PatchPlane-owned storage/timeline records.
-- No OpenTelemetry collector, ClickHouse, or observability platform is required for alpha.
+- [x] Runtime failures can be diagnosed without reading only local logs.
+- [x] Product provenance remains in PatchPlane-owned storage/timeline records.
+- [x] No OpenTelemetry collector, ClickHouse, or observability platform is required for alpha.
 
 ---
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** Next alpha blocker before agent runtime and publication loop
+**Status:** In progress; core Daytona execution path implemented, live smoke and policy metadata added
 
 Tasks:
 
-- [ ] Add `DaytonaConfig` with redacted API key handling.
-- [ ] Implement `SandboxService.provision`.
-- [ ] Prefer ephemeral or auto-deleting sandbox profiles for alpha.
-- [ ] Add explicit sandbox policy fields for lifecycle, resources, timeout, and network posture.
-- [ ] Implement checkout/clone support.
-- [ ] Implement command execution.
-- [ ] Collect basic command logs/artifacts.
-- [ ] Stop/destroy sandboxes on cancellation/failure where possible.
+- [x] Add `DaytonaConfig` with redacted API key handling.
+- [x] Implement alpha-safe scoped sandbox execution via `SandboxService.runRepositoryCommand` / `runRepositoryAgent`.
+- [x] Prefer ephemeral or auto-deleting sandbox profiles for alpha.
+- [x] Add explicit sandbox policy fields for lifecycle, resources, timeout, and network posture.
+- [x] Implement checkout/clone support.
+- [x] Implement command execution.
+- [x] Collect basic command logs in workflow storage; R2-backed artifact capture remains in the artifact slice.
+- [x] Stop/destroy sandboxes on cancellation/failure where possible after acquisition succeeds.
+- [x] Add live Daytona smoke script with redacted API-key handling and cleanup polling.
 
 Acceptance criteria:
 
-- A workflow can provision a sandbox, check out a GitHub repository ref, run at least one command, collect logs/artifacts, and tear down the sandbox.
-- Sandboxes never receive long-lived WorkOS, Convex, or GitHub App credentials.
-- Sandbox lifecycle and network policy are visible in stored workflow provenance.
+- [x] A workflow can provision a sandbox, check out a GitHub repository ref, run at least one command, collect command logs, and tear down the sandbox.
+- [x] Sandboxes never receive long-lived WorkOS, Convex, or GitHub App credentials.
+- [x] Sandbox lifecycle and network policy are visible in stored workflow metadata.
+- [ ] Durable raw artifact capture is backed by R2 rather than Convex stdout/stderr columns.
 
 ---
 
