@@ -52,6 +52,31 @@ export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()(
   },
 ) {}
 
+export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
+  'ArtifactsError',
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class ModelGatewayError
+  extends Schema.TaggedErrorClass<ModelGatewayError>()('ModelGatewayError', {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  }) {}
+
+export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
+  'TelemetryError',
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
 export class WorkflowStateError
   extends Schema.TaggedErrorClass<WorkflowStateError>()('WorkflowStateError', {
     message: Schema.String,

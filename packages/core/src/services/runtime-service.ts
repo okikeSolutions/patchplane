@@ -1,5 +1,6 @@
 import { Context, Effect } from 'effect'
 import type { RuntimeError } from '@patchplane/domain/errors'
+import type { TelemetryContextFields } from './telemetry-service'
 
 export interface RuntimeEvent {
   readonly type: string
@@ -8,7 +9,7 @@ export interface RuntimeEvent {
   readonly payload?: unknown
 }
 
-export interface RuntimePromptInput {
+export interface RuntimePromptInput extends TelemetryContextFields {
   readonly prompt: string
   readonly traceId: string
 }
@@ -19,7 +20,7 @@ export interface RuntimePromptResult {
   readonly summary: string
 }
 
-export interface RuntimeControlInput {
+export interface RuntimeControlInput extends TelemetryContextFields {
   readonly traceId: string
 }
 

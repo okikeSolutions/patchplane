@@ -1,7 +1,9 @@
 import { Context, Effect } from 'effect'
 import type { SandboxError } from '@patchplane/domain/errors'
+import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import type { TelemetryContextFields } from './telemetry-service'
 
-export interface SandboxCommandInput {
+export interface SandboxCommandInput extends TelemetryContextFields {
   readonly repositoryUrl: string
   readonly repositoryFullName: string
   readonly branch?: string | undefined
@@ -14,12 +16,13 @@ export interface SandboxCommandInput {
   readonly traceId: string
 }
 
-export interface SandboxAgentInput {
+export interface SandboxAgentInput extends TelemetryContextFields {
   readonly repositoryUrl: string
   readonly repositoryFullName: string
   readonly prompt: string
   readonly provider: string
   readonly model: string
+  readonly thinking?: string | undefined
   readonly apiKey?: string | undefined
   readonly branch?: string | undefined
   readonly commitId?: string | undefined
@@ -36,6 +39,7 @@ export interface SandboxCommandResult {
   readonly exitCode: number | undefined
   readonly stdout: string
   readonly stderr?: string | undefined
+  readonly policy?: SandboxPolicy | undefined
   readonly startedAt: number
   readonly completedAt: number
 }

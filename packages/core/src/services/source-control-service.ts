@@ -1,7 +1,8 @@
 import { Context, Effect } from 'effect'
 import type { SourceControlError } from '@patchplane/domain/errors'
+import type { TelemetryContextFields } from './telemetry-service'
 
-export interface VerifyRepositoryAccessInput {
+export interface VerifyRepositoryAccessInput extends TelemetryContextFields {
   readonly provider: string
   readonly installationId?: string
   readonly owner: string
@@ -16,7 +17,7 @@ export interface RepositoryRef {
   readonly fullName: string
 }
 
-export interface CreateIssueCommentInput {
+export interface CreateIssueCommentInput extends TelemetryContextFields {
   readonly provider: string
   readonly installationId?: string
   readonly owner: string
@@ -25,7 +26,7 @@ export interface CreateIssueCommentInput {
   readonly body: string
 }
 
-export interface CreateRepositoryCloneCredentialsInput {
+export interface CreateRepositoryCloneCredentialsInput extends TelemetryContextFields {
   readonly provider: string
   readonly installationId?: string
   readonly owner: string

@@ -7,17 +7,19 @@ import type { ListRecentWorkflowStartsInput } from '@patchplane/domain/list-rece
 import type { PromptRequestSource } from '@patchplane/domain/prompt-request'
 import type { RuntimeEvent as StoredRuntimeEvent } from '@patchplane/domain/runtime-event'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
+import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type { WorkflowIntake } from '@patchplane/domain/workflow-intake'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
+import type { TelemetryContextFields } from './telemetry-service'
 
 export type { ListRecentWorkflowStartsInput }
 
 export interface StorageListRecentWorkflowStartsInput
-  extends ListRecentWorkflowStartsInput {
+  extends ListRecentWorkflowStartsInput, TelemetryContextFields {
   readonly authToken?: string
 }
 
-export interface CreateWorkflowFromPromptInput {
+export interface CreateWorkflowFromPromptInput extends TelemetryContextFields {
   readonly actor: Actor
   readonly workspaceId: WorkspaceId
   readonly source: PromptRequestSource
@@ -27,7 +29,7 @@ export interface CreateWorkflowFromPromptInput {
   readonly authToken?: string
 }
 
-export interface RecordSandboxExecutionInput {
+export interface RecordSandboxExecutionInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly provider: string
   readonly sandboxId: string
@@ -36,11 +38,12 @@ export interface RecordSandboxExecutionInput {
   readonly exitCode?: number | undefined
   readonly stdout: string
   readonly stderr?: string | undefined
+  readonly policy?: SandboxPolicy | undefined
   readonly startedAt: number
   readonly completedAt: number
 }
 
-export interface RecordRuntimeEventInput {
+export interface RecordRuntimeEventInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly provider: string
   readonly type: string
