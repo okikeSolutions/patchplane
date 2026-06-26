@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { Effect, FileSystem, Path } from 'effect'
 import {
   patchPlaneDefaultSurfaces,
   patchPlanePlugins,
@@ -10,7 +9,7 @@ import {
   DAYTONA_DEFAULT_COMMAND,
   DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
 } from '@patchplane/plugins/daytona/config'
-import { PI_DEFAULT_MODEL, PI_DEFAULT_PROVIDER } from '@patchplane/plugins/pi/config'
+import { PI_DEFAULT_MODEL, PI_DEFAULT_PROVIDER, PI_DEFAULT_THINKING } from '@patchplane/plugins/pi/config'
 import { makeWorkspaceId, makeWorkOSWorkspaceId, type WorkspaceId } from '@patchplane/domain/ids'
 
 export type GitHubWebhookExecutionMode = 'daytona-command' | 'daytona-pi'
@@ -35,6 +34,7 @@ export interface GitHubWebhookRouteConfig {
       readonly mode: 'daytona-pi'
       readonly provider: string
       readonly model: string
+      readonly thinking?: string | undefined
       readonly apiKey?: string | undefined
       readonly timeoutSeconds?: number | undefined
     }
@@ -105,23 +105,59 @@ function parseConfigJson(value: unknown): PatchPlaneConfig {
   }
 }
 
-export function loadPatchPlaneConfig(path = 'patchplane.config.json'): PatchPlaneConfig {
-  const absolutePath = resolve(path)
-  if (existsSync(absolutePath)) {
-    return parseConfigJson(JSON.parse(readFileSync(absolutePath, 'utf8')))
-  }
+function findConfigPath(file: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
 
-  const legacyPath = resolve('.patchplane/config.json')
-  if (path === 'patchplane.config.json' && existsSync(legacyPath)) {
-    console.warn('Using legacy .patchplane/config.json. Move this file to patchplane.config.json; .patchplane is reserved for generated local state.')
-    return parseConfigJson(JSON.parse(readFileSync(legacyPath, 'utf8')))
-  }
+    if (path.isAbsolute(file)) {
+      return (yield* fs.exists(file)) ? file : undefined
+    }
 
-  return defaultConfig
+    const candidates = [process.cwd(), process.env.INIT_CWD]
+      .filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0)
+      .map((candidate) => path.resolve(candidate))
+
+    for (const start of candidates) {
+      let current = start
+      while (true) {
+        const candidate = path.join(current, file)
+        if (yield* fs.exists(candidate)) {
+          return candidate
+        }
+
+        const parent = path.dirname(current)
+        if (parent === current) {
+          break
+        }
+        current = parent
+      }
+    }
+
+    return undefined
+  })
+}
+
+export function loadPatchPlaneConfig(file = 'patchplane.config.json') {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const configPath = yield* findConfigPath(file)
+    if (configPath !== undefined) {
+      return parseConfigJson(JSON.parse(yield* fs.readFileString(configPath)))
+    }
+
+    const legacyPath = yield* findConfigPath('.patchplane/config.json')
+    if (file === 'patchplane.config.json' && legacyPath !== undefined) {
+      console.warn('Using legacy .patchplane/config.json. Move this file to patchplane.config.json; .patchplane is reserved for generated local state.')
+      return parseConfigJson(JSON.parse(yield* fs.readFileString(legacyPath)))
+    }
+
+    return defaultConfig
+  })
 }
 
 export function getSurfacePluginIds(surface: PatchPlaneRuntimeSurface) {
-  return loadPatchPlaneConfig().plugins[surface] ?? patchPlaneDefaultSurfaces[surface]
+  return Effect.map(loadPatchPlaneConfig(), (config) => config.plugins[surface] ?? patchPlaneDefaultSurfaces[surface])
 }
 
 function parseRepositoryAllowlist(value: string | undefined) {
@@ -168,32 +204,35 @@ function providerApiKeyEnvName(provider: string) {
   return names[provider] ?? 'OPENAI_API_KEY'
 }
 
-export function loadGitHubWebhookRouteConfig(): GitHubWebhookRouteConfig {
-  const config = loadPatchPlaneConfig()
-  const mode = config.runtime.githubWebhookExecution
+export function loadGitHubWebhookRouteConfig() {
+  return Effect.gen(function* () {
+    const config = yield* loadPatchPlaneConfig()
+    const mode = config.runtime.githubWebhookExecution
 
-  if (mode === 'daytona-pi') {
-    const provider = PI_DEFAULT_PROVIDER
+    if (mode === 'daytona-pi') {
+      const provider = PI_DEFAULT_PROVIDER
+      return {
+        workspaceId: parseGitHubWorkspaceId(),
+        repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+        execution: {
+          mode,
+          provider,
+          model: PI_DEFAULT_MODEL,
+          thinking: process.env.PATCHPLANE_PI_THINKING ?? PI_DEFAULT_THINKING,
+          apiKey: process.env[providerApiKeyEnvName(provider)],
+          timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        },
+      } satisfies GitHubWebhookRouteConfig
+    }
+
     return {
       workspaceId: parseGitHubWorkspaceId(),
       repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
       execution: {
         mode,
-        provider,
-        model: PI_DEFAULT_MODEL,
-        apiKey: process.env[providerApiKeyEnvName(provider)],
+        command: DAYTONA_DEFAULT_COMMAND,
         timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
       },
-    }
-  }
-
-  return {
-    workspaceId: parseGitHubWorkspaceId(),
-    repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
-    execution: {
-      mode,
-      command: DAYTONA_DEFAULT_COMMAND,
-      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    },
-  }
+    } satisfies GitHubWebhookRouteConfig
+  })
 }

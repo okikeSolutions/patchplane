@@ -165,7 +165,47 @@ export const patchPlanePlugins = {
         required: false,
         description: 'Optional Daytona target/region.',
       },
+      {
+        name: 'DAYTONA_NETWORK_BLOCK_ALL',
+        required: false,
+        description: 'Optional sandbox network posture. When true, blocks all outbound network access unless Daytona allow-list behavior permits exceptions.',
+      },
+      {
+        name: 'DAYTONA_NETWORK_ALLOW_LIST',
+        required: false,
+        description: 'Optional comma-separated CIDR allow-list recorded in normalized sandbox policy metadata.',
+      },
+      {
+        name: 'DAYTONA_RESOURCE_CPU',
+        required: false,
+        description: 'Optional requested sandbox CPU count recorded in normalized sandbox policy metadata.',
+      },
+      {
+        name: 'DAYTONA_RESOURCE_MEMORY',
+        required: false,
+        description: 'Optional requested sandbox memory in GiB recorded in normalized sandbox policy metadata.',
+      },
+      {
+        name: 'DAYTONA_RESOURCE_DISK',
+        required: false,
+        description: 'Optional requested sandbox disk in GiB recorded in normalized sandbox policy metadata.',
+      },
+      {
+        name: 'DAYTONA_RETAIN_SANDBOXES',
+        required: false,
+        defaultValue: 'false',
+        description: 'Set to true only for manual debugging. Alpha workflow sandboxes are ephemeral by default.',
+      },
     ],
+  },
+  observability: {
+    id: 'observability',
+    name: 'Local Effect observability',
+    description: 'Writes local Effect logs to the console and .patchplane JSONL log file.',
+    layerExport: '@patchplane/plugins/observability/local-plugin#LocalObservabilityPlugin.layer',
+    provides: ['LocalEffectLogs'],
+    surfaces: ['app', 'githubWebhook'],
+    env: [],
   },
   pi: {
     id: 'pi',
@@ -183,13 +223,71 @@ export const patchPlanePlugins = {
       },
     ],
   },
+  sentry: {
+    id: 'sentry',
+    name: 'Sentry telemetry',
+    description: 'Captures operational errors, Effect logs, spans, and metrics in Sentry when configured.',
+    layerExport: '@patchplane/plugins/sentry/telemetry-plugin#SentryTelemetryPlugin.layer',
+    provides: ['TelemetryService'],
+    surfaces: ['app', 'githubWebhook'],
+    env: [
+      {
+        name: 'SENTRY_DSN',
+        required: false,
+        secret: true,
+        description: 'Optional Sentry DSN. When omitted, the telemetry plugin runs as a no-op service.',
+      },
+      {
+        name: 'SENTRY_ENABLED',
+        required: false,
+        defaultValue: 'true',
+        description: 'Set to false to disable Sentry telemetry even when SENTRY_DSN is present.',
+      },
+      {
+        name: 'SENTRY_ENVIRONMENT',
+        required: false,
+        defaultValue: 'development outside NODE_ENV=production, otherwise production',
+        description: 'Sentry environment name. PatchPlane currently supports development and production.',
+      },
+      {
+        name: 'SENTRY_LOG_LEVEL',
+        required: false,
+        defaultValue: 'Debug in development, Warn in production',
+        description: 'Minimum Effect log level for runtime observability. Accepted values include Debug, Info, Warn, Error, Fatal.',
+      },
+      {
+        name: 'SENTRY_ENABLE_LOGS',
+        required: false,
+        defaultValue: 'false',
+        description: 'Whether Effect logs are forwarded to Sentry logs. Defaults off to keep routine operational events local unless explicitly enabled.',
+      },
+      {
+        name: 'SENTRY_ENABLE_TRACING',
+        required: false,
+        defaultValue: 'true',
+        description: 'Whether Effect spans are registered with the Sentry Effect tracer.',
+      },
+      {
+        name: 'SENTRY_ENABLE_METRICS',
+        required: false,
+        defaultValue: 'false in development, true in production',
+        description: 'Whether Effect metrics are periodically flushed to Sentry. Defaults off in development to avoid noisy telemetry.',
+      },
+      {
+        name: 'SENTRY_TRACES_SAMPLE_RATE',
+        required: false,
+        defaultValue: '1.0 in development, 0.2 in production',
+        description: 'Sentry trace sample rate for Effect spans.',
+      },
+    ],
+  },
 } as const satisfies Record<string, PatchPlanePluginMetadata>
 
 export type PatchPlanePluginId = keyof typeof patchPlanePlugins
 
 export const patchPlaneDefaultSurfaces = {
-  app: ['convex', 'workos'],
-  githubWebhook: ['github', 'convex', 'daytona'],
+  app: ['convex', 'workos', 'observability'],
+  githubWebhook: ['github', 'convex', 'daytona', 'observability'],
 } as const satisfies Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>
 
 export function getPatchPlanePluginsForSurface(surface: PatchPlaneRuntimeSurface) {

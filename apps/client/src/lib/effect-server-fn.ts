@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { Cause, Effect, Exit, Schema } from 'effect'
 import { AuthService } from '@patchplane/core/services/auth-service'
 import { StorageService } from '@patchplane/core/services/storage-service'
+import { captureTelemetryCause, TelemetryService, withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
 import { publicErrorMessage, ValidationError } from '@patchplane/domain/errors'
 import type {
   ServerFunctionContext,
@@ -9,9 +10,9 @@ import type {
 } from '@patchplane/domain/server-function'
 
 type ServerFnMethod = 'GET' | 'POST'
-type RuntimeRequirements = AuthService | StorageService
+type RuntimeRequirements = AuthService | StorageService | TelemetryService
 
-type EffectServerFnBaseOptions<S extends Schema.Decoder<any>, A, E> = {
+type EffectServerFnBaseOptions<S extends Schema.ConstraintDecoder<any>, A, E> = {
   readonly method?: ServerFnMethod
   readonly input: S
   readonly operation: string
@@ -27,7 +28,7 @@ type EffectServerFnBaseOptions<S extends Schema.Decoder<any>, A, E> = {
 }
 
 type EffectServerFnOptions<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   A,
   E,
   Success extends object,
@@ -38,7 +39,7 @@ type EffectServerFnOptions<
 }
 
 type EffectServerFn<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   Success extends object,
   Failure extends object,
 > = (input: {
@@ -48,11 +49,11 @@ type EffectServerFn<
   readonly fetch?: typeof fetch
 }) => Promise<ServerFunctionResult<Success, Failure>>
 
-export function effectServerFn<S extends Schema.Decoder<any>, A, E>(
+export function effectServerFn<S extends Schema.ConstraintDecoder<any>, A, E>(
   options: EffectServerFnBaseOptions<S, A, E>,
 ): EffectServerFn<S, { readonly data: A }, { readonly error: string }>
 export function effectServerFn<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   A,
   E,
   Success extends object,
@@ -62,7 +63,7 @@ export function effectServerFn<
   },
 ): EffectServerFn<S, Success, { readonly error: string }>
 export function effectServerFn<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   A,
   E,
   Failure extends object,
@@ -72,7 +73,7 @@ export function effectServerFn<
   },
 ): EffectServerFn<S, { readonly data: A }, Failure>
 export function effectServerFn<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   A,
   E,
   Success extends object,
@@ -84,7 +85,7 @@ export function effectServerFn<
   },
 ): EffectServerFn<S, Success, Failure>
 export function effectServerFn<
-  S extends Schema.Decoder<any>,
+  S extends Schema.ConstraintDecoder<any>,
   A,
   E,
   Success extends object,
@@ -107,8 +108,10 @@ export function effectServerFn<
       return result.value
     })
     .handler(async ({ data }: { readonly data: S['Type'] }) => {
+      const { patchPlaneRuntime, randomTraceId } = await import('@/effect/runtime')
+      const traceId = await randomTraceId()
       const context: ServerFunctionContext = {
-        traceId: crypto.randomUUID(),
+        traceId,
         operation: options.operation,
       }
       const fallback = `${context.operation} failed`
@@ -119,24 +122,26 @@ export function effectServerFn<
           ? baseEffect
           : options.provide(baseEffect, data, context)
       }).pipe(
-        Effect.annotateLogs({
+        (effect) => withTelemetrySpan({
           traceId: context.traceId,
-          entrypoint: context.operation,
-        }),
-        Effect.annotateSpans({
-          traceId: context.traceId,
-          entrypoint: context.operation,
-        }),
+          operation: context.operation,
+          name: context.operation,
+        }, effect),
         Effect.withLogSpan(context.operation),
-        Effect.withSpan(context.operation, {
-          attributes: { traceId: context.traceId },
-        }),
         Effect.tapCause((cause) =>
-          Effect.logError(`${context.operation} failed`, {
-            traceId: context.traceId,
-            error: publicErrorMessage(Cause.squash(cause), fallback),
-            cause: Cause.pretty(cause),
-          }),
+          Effect.all([
+            Effect.logError(`${context.operation} failed`, {
+              traceId: context.traceId,
+              error: publicErrorMessage(Cause.squash(cause), fallback),
+              cause: Cause.pretty(cause),
+            }),
+            captureTelemetryCause({
+              traceId: context.traceId,
+              operation: context.operation,
+              cause,
+              message: `${context.operation} failed`,
+            }),
+          ], { concurrency: 'unbounded', discard: true }),
         ),
       )
 
@@ -148,7 +153,6 @@ export function effectServerFn<
         }
       }
 
-      const { patchPlaneRuntime } = await import('@/effect/runtime')
       const exit = await patchPlaneRuntime.runPromiseExit(program)
 
       if (Exit.isSuccess(exit)) {
