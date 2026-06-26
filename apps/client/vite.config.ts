@@ -7,6 +7,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { translatedPathnames } from './src/lib/translated-pathnames.ts'
 
 const config = defineConfig({
+  server: {
+    allowedHosts: ['.ngrok-free.app'],
+  },
   plugins: [
     devtools(),
     tailwindcss(),

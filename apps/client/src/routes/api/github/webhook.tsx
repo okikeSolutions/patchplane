@@ -15,6 +15,14 @@ function requiredHeader(request: Request, name: string) {
   return value === null || value.length === 0 ? undefined : value
 }
 
+function isPatchPlaneResultComment(input: {
+  readonly eventKind?: string | undefined
+  readonly prompt: string
+}) {
+  return input.eventKind === 'github.issue_comment.created' &&
+    input.prompt.trimStart().startsWith('PatchPlane sandbox run ')
+}
+
 export const Route = createFileRoute('/api/github/webhook')({
   server: {
     handlers: {
@@ -54,6 +62,7 @@ export const Route = createFileRoute('/api/github/webhook')({
           publishModule,
           runtimeModule,
           configModule,
+          telemetryModule,
           errorsModule,
         ] = await Promise.all([
           import('effect'),
@@ -64,6 +73,7 @@ export const Route = createFileRoute('/api/github/webhook')({
           import('@patchplane/core/workflows/publish-sandbox-result-to-source'),
           import('@/effect/runtime'),
           import('@/effect/patchplane-config'),
+          import('@patchplane/core/services/telemetry-service'),
           import('@patchplane/domain/errors'),
         ])
         const { Cause, Effect, Exit } = effectModule
@@ -72,15 +82,16 @@ export const Route = createFileRoute('/api/github/webhook')({
         const { RunSandboxCommandForWorkflow } = sandboxModule
         const { RunSandboxAgentForWorkflow } = sandboxAgentModule
         const { PublishSandboxResultToSource } = publishModule
-        const { patchPlaneRuntime } = runtimeModule
+        const { patchPlaneRuntime, randomTraceId } = runtimeModule
         const { loadGitHubWebhookRouteConfig } = configModule
+        const { captureTelemetryCause, withTelemetrySpan } = telemetryModule
         const { publicErrorMessage } = errorsModule
 
-        const traceId = crypto.randomUUID()
+        const traceId = await randomTraceId()
         const payload = await request.text()
-        const routeConfig = (() => {
+        const routeConfig = await (async () => {
           try {
-            return loadGitHubWebhookRouteConfig()
+            return await patchPlaneRuntime.runPromise(loadGitHubWebhookRouteConfig())
           } catch (error) {
             return error instanceof Error ? error : new Error(String(error))
           }
@@ -102,6 +113,17 @@ export const Route = createFileRoute('/api/github/webhook')({
             workspaceId: routeConfig.workspaceId,
             traceId,
           })
+          if (isPatchPlaneResultComment({
+            eventKind: intake.externalRef?.eventKind,
+            prompt: intake.prompt,
+          })) {
+            yield* Effect.logInfo('Ignoring PatchPlane result comment webhook', {
+              deliveryId,
+              repository: intake.externalRef?.repositoryFullName,
+            })
+            return { intake, workflowStart: undefined, sandboxExecution: undefined, publication: undefined }
+          }
+
           const repositoryFullName = intake.externalRef?.repositoryFullName
           if (
             repositoryFullName === undefined ||
@@ -120,6 +142,7 @@ export const Route = createFileRoute('/api/github/webhook')({
                 workflowStart,
                 provider: routeConfig.execution.provider,
                 model: routeConfig.execution.model,
+                thinking: routeConfig.execution.thinking,
                 apiKey: routeConfig.execution.apiKey,
                 timeoutSeconds: routeConfig.execution.timeoutSeconds,
               })
@@ -136,18 +159,13 @@ export const Route = createFileRoute('/api/github/webhook')({
 
           return { intake, workflowStart, sandboxExecution, publication }
         }).pipe(
-          Effect.annotateLogs({
+          (effect) => withTelemetrySpan({
             traceId,
-            entrypoint: 'githubWebhookRoute',
-          }),
-          Effect.annotateSpans({
-            traceId,
-            entrypoint: 'githubWebhookRoute',
-          }),
+            operation: 'githubWebhookRoute',
+            name: 'githubWebhookRoute',
+            attributes: { deliveryId, eventName },
+          }, effect),
           Effect.withLogSpan('githubWebhookRoute'),
-          Effect.withSpan('githubWebhookRoute', {
-            attributes: { traceId, deliveryId, eventName },
-          }),
         )
 
         const exit = await patchPlaneRuntime.runPromiseExit(program)
@@ -157,8 +175,9 @@ export const Route = createFileRoute('/api/github/webhook')({
             {
               ok: true,
               traceId,
-              workflowRunId: exit.value.workflowStart.workflowRun.id,
-              promptRequestId: exit.value.workflowStart.promptRequest.id,
+              ignored: exit.value.workflowStart === undefined,
+              workflowRunId: exit.value.workflowStart?.workflowRun.id,
+              promptRequestId: exit.value.workflowStart?.promptRequest.id,
               externalProvider: exit.value.intake.externalRef?.provider,
               externalEventKind: exit.value.intake.externalRef?.eventKind,
               sandboxExecutionId: exit.value.sandboxExecution?.id,
@@ -172,6 +191,17 @@ export const Route = createFileRoute('/api/github/webhook')({
 
         const cause = Cause.squash(exit.cause)
         const error = publicErrorMessage(cause, 'GitHub webhook ingestion failed')
+
+        await patchPlaneRuntime.runPromise(
+          captureTelemetryCause({
+            traceId,
+            operation: 'githubWebhookRoute',
+            cause: exit.cause,
+            message: 'GitHub webhook ingestion failed',
+            attributes: { deliveryId, eventName },
+          }),
+        )
+
         console.error('githubWebhookRoute failed', {
           traceId,
           deliveryId,

@@ -1,10 +1,10 @@
 {
-  "$schema": "./node_modules/@patchplane/cli/schema/patchplane.schema.json",
+  "$schema": "https://unpkg.com/patchplane/schema/patchplane.schema.json",
   "plugins": {
     "app": ["convex", "workos"],
-    "githubWebhook": ["github", "convex", "daytona"]
+    "githubWebhook": ["github", "convex", "daytona", "pi"]
   },
   "runtime": {
-    "githubWebhookExecution": "daytona-command"
+    "githubWebhookExecution": "daytona-pi"
   }
 }
