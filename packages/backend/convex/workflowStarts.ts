@@ -133,6 +133,7 @@ const sandboxExecutionReturn = v.object({
   exitCode: v.optional(v.number()),
   stdout: v.string(),
   stderr: v.optional(v.string()),
+  policyJson: v.optional(v.string()),
   startedAt: v.number(),
   completedAt: v.number(),
 })
@@ -464,6 +465,7 @@ export const recordSandboxExecution = mutation({
     exitCode: v.optional(v.number()),
     stdout: v.string(),
     stderr: v.optional(v.string()),
+    policyJson: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.number(),
   },
@@ -485,6 +487,7 @@ export const recordSandboxExecution = mutation({
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
       stdout: args.stdout,
       ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
+      ...(args.policyJson === undefined ? {} : { policyJson: args.policyJson }),
       startedAt: args.startedAt,
       completedAt: args.completedAt,
       createdAt: Date.now(),
@@ -504,6 +507,7 @@ export const recordSandboxExecution = mutation({
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
       stdout: args.stdout,
       ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
+      ...(args.policyJson === undefined ? {} : { policyJson: args.policyJson }),
       startedAt: args.startedAt,
       completedAt: args.completedAt,
     }

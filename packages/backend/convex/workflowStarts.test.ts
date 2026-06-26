@@ -23,6 +23,9 @@ interface WorkflowStartResult {
     source: string
     prompt: string
   }
+  workflowRun: {
+    id: string
+  }
 }
 
 const createWorkflowStart = makeFunctionReference<
@@ -42,6 +45,12 @@ const createWorkflowStartFromExternalIntake = makeFunctionReference<
   Record<string, unknown>,
   unknown
 >('workflowStarts:createFromExternalIntake')
+
+const recordSandboxExecution = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:recordSandboxExecution')
 
 function createArgs(overrides: Partial<CreateWorkflowStartArgs> = {}) {
   return {
@@ -247,6 +256,47 @@ describe('workflowStarts trusted boundary and authz', () => {
     const result = await t.mutation(createWorkflowStart, createArgs())
 
     expect(isWorkflowStartResult(result)).toBe(true)
+  })
+
+  test('recordSandboxExecution persists normalized sandbox policy metadata', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+    const policy = {
+      lifecycle: {
+        ephemeral: true,
+        retainAfterRun: false,
+        autoStopMinutes: 5,
+        autoArchiveMinutes: 0,
+        autoDeleteMinutes: 0,
+      },
+      network: { blockAll: false, allowList: '0.0.0.0/0' },
+      resources: { cpu: 2, memoryGb: 4, diskGb: 8 },
+      timeoutSeconds: 120,
+    }
+
+    const result = await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'daytona',
+      sandboxId: 'sandbox-1',
+      command: 'bun test',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'ok',
+      policyJson: JSON.stringify(policy),
+      startedAt: 1,
+      completedAt: 2,
+    })
+
+    expect(result).toMatchObject({
+      provider: 'daytona',
+      sandboxId: 'sandbox-1',
+      policyJson: JSON.stringify(policy),
+    })
+
+    const rows = await t.run((ctx) => ctx.db.query('sandboxExecutions').collect())
+    expect(rows[0]?.policyJson).toBe(JSON.stringify(policy))
   })
 
   test('listRecent requires active WorkOS organization access', async () => {

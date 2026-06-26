@@ -9,11 +9,12 @@ Convex currently provides:
 - authenticated workflow-start mutations,
 - authenticated/restricted read models for the app UI,
 - signed external-ingestion workflow starts,
-- generic external workflow reference persistence and idempotency.
+- generic external workflow reference persistence and idempotency,
+- sandbox execution rows with normalized PatchPlane sandbox policy metadata.
 
 ## Important files
 
-- `schema.ts` — app tables for users, memberships, prompt requests, workflow runs, and `externalWorkflowRefs`.
+- `schema.ts` — app tables for users, memberships, prompt requests, workflow runs, `externalWorkflowRefs`, runtime events, and sandbox executions.
 - `workflowStarts.ts` — transactional workflow-start creation for user and external intake paths.
 - `auth.ts` / `http.ts` / `auth.config.ts` — WorkOS AuthKit and Convex auth plumbing.
 - `viewer.ts`, `requests.ts` — authenticated read-model functions used by the app.

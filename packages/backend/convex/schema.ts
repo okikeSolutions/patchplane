@@ -123,6 +123,7 @@ export default defineSchema({
     exitCode: v.optional(v.number()),
     stdout: v.string(),
     stderr: v.optional(v.string()),
+    policyJson: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.number(),
     createdAt: v.number(),

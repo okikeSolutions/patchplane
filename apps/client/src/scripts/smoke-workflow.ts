@@ -1,7 +1,8 @@
 import { makeWorkOSActorId, makeWorkOSWorkspaceId } from '@patchplane/domain/ids'
 import { StorageService } from '@patchplane/core/services/storage-service'
+import { withTelemetryContext } from '@patchplane/core/services/telemetry-service'
 import { Effect } from 'effect'
-import { patchPlaneRuntime } from '../effect/runtime'
+import { patchPlaneRuntime, randomTraceId } from '../effect/runtime'
 
 const accessToken = process.env.PATCHPLANE_WORKOS_ACCESS_TOKEN
 const userId = process.env.PATCHPLANE_WORKOS_USER_ID
@@ -37,7 +38,7 @@ function printInspectCommands() {
 }
 
 async function startWorkflow(prompt: string) {
-  const traceId = crypto.randomUUID()
+  const traceId = await randomTraceId()
 
   const result = await patchPlaneRuntime.runPromise(
     Effect.gen(function* () {
@@ -51,8 +52,7 @@ async function startWorkflow(prompt: string) {
         authToken: accessToken,
       })
     }).pipe(
-      Effect.annotateLogs({ traceId, entrypoint: 'smoke-workflow:start' }),
-      Effect.annotateSpans({ traceId, entrypoint: 'smoke-workflow:start' }),
+      (effect) => withTelemetryContext({ traceId, operation: 'smoke-workflow:start' }, effect),
       Effect.withLogSpan('smoke-workflow:start'),
     ),
   )
@@ -67,7 +67,7 @@ async function startWorkflow(prompt: string) {
 }
 
 async function listWorkflowStarts(limit: number) {
-  const traceId = crypto.randomUUID()
+  const traceId = await randomTraceId()
 
   const workflowStarts = await patchPlaneRuntime.runPromise(
     Effect.gen(function* () {
@@ -78,8 +78,7 @@ async function listWorkflowStarts(limit: number) {
         authToken: accessToken,
       })
     }).pipe(
-      Effect.annotateLogs({ traceId, entrypoint: 'smoke-workflow:list' }),
-      Effect.annotateSpans({ traceId, entrypoint: 'smoke-workflow:list' }),
+      (effect) => withTelemetryContext({ traceId, operation: 'smoke-workflow:list' }, effect),
       Effect.withLogSpan('smoke-workflow:list'),
     ),
   )

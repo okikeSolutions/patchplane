@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
 import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
+import { decodeSandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import {
   decodeWorkflowStart,
   decodeWorkflowStarts,
@@ -94,6 +95,7 @@ const recordSandboxExecutionMutation = makeFunctionReference<
     exitCode?: number
     stdout: string
     stderr?: string
+    policyJson?: string
     startedAt: number
     completedAt: number
   },
@@ -108,6 +110,32 @@ const listRecentWorkflowStartsQuery = makeFunctionReference<
   },
   unknown
 >('workflowStarts:listRecent')
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function sandboxExecutionWithDecodedPolicy(value: unknown) {
+  return Effect.gen(function* () {
+    if (!isObjectRecord(value) || typeof value.policyJson !== 'string') {
+      return value
+    }
+
+    const rawPolicyJson = value.policyJson
+    const policyJson = yield* Effect.try({
+      try: () => JSON.parse(rawPolicyJson) as unknown,
+      catch: (cause) =>
+        new StorageError({
+          operation: 'recordSandboxExecution.decodePolicyJson',
+          message: 'Convex returned malformed sandbox policy JSON',
+          cause,
+        }),
+    })
+    const policy = yield* decodeSandboxPolicy(policyJson)
+    const { policyJson: _policyJson, ...rest } = value
+    return { ...rest, policy }
+  })
+}
 
 export const ConvexStoragePlugin = {
   layer: Layer.effect(
@@ -290,6 +318,7 @@ export const ConvexStoragePlugin = {
                   ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
                   stdout: input.stdout,
                   ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
+                  ...(input.policy === undefined ? {} : { policyJson: JSON.stringify(input.policy) }),
                   startedAt: input.startedAt,
                   completedAt: input.completedAt,
                 })
@@ -302,7 +331,18 @@ export const ConvexStoragePlugin = {
                 }),
             })
 
-            return yield* decodeSandboxExecution(value).pipe(
+            const decodedValue = yield* sandboxExecutionWithDecodedPolicy(value).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new StorageError({
+                    operation: 'recordSandboxExecution.decodePolicy',
+                    message: 'Convex returned an invalid sandbox policy',
+                    cause,
+                  }),
+              ),
+            )
+
+            return yield* decodeSandboxExecution(decodedValue).pipe(
               Effect.mapError(
                 (cause) =>
                   new StorageError({

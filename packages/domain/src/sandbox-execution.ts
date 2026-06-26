@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { WorkflowRunId } from './ids'
+import { SandboxPolicy } from './sandbox-policy'
 
 export const SandboxExecutionStatus = Schema.Literals([
   'succeeded',
@@ -26,6 +27,7 @@ export const SandboxExecution = Schema.Struct({
   exitCode: Schema.optional(Schema.Number),
   stdout: Schema.String,
   stderr: Schema.optional(Schema.String),
+  policy: Schema.optional(SandboxPolicy),
   startedAt: Schema.Number,
   completedAt: Schema.Number,
 })

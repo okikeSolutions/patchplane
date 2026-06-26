@@ -10,6 +10,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   readonly workflowStart: WorkflowStart
   readonly provider: string
   readonly model: string
+  readonly thinking?: string | undefined
   readonly apiKey?: string | undefined
   readonly timeoutSeconds?: number | undefined
 }) {
@@ -26,6 +27,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     prompt: input.workflowStart.promptRequest.prompt,
     provider: input.provider,
     model: input.model,
+    thinking: input.thinking,
     apiKey: input.apiKey,
     timeoutSeconds: input.timeoutSeconds,
     traceId: input.workflowStart.workflowRun.traceId,
@@ -40,6 +42,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
     stdout: result.stdout,
     ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+    ...(result.policy === undefined ? {} : { policy: result.policy }),
     startedAt: result.startedAt,
     completedAt: result.completedAt,
   })

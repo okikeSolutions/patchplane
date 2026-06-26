@@ -41,6 +41,7 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
     stdout: result.stdout,
     ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+    ...(result.policy === undefined ? {} : { policy: result.policy }),
     startedAt: result.startedAt,
     completedAt: result.completedAt,
   })
