@@ -1,6 +1,6 @@
-# `@patchplane/cli`
+# `patchplane`
 
-PatchPlane CLI for interactive OSS onboarding, project config generation, plugin discovery, environment setup, and diagnostics.
+Publishable PatchPlane CLI for interactive OSS onboarding, project config generation, plugin discovery, environment setup, and diagnostics.
 
 The CLI is built with `effect/unstable/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and PatchPlane-owned Effect services. It is interactive when both stdin and stdout are TTYs, and fully scriptable for CI and automation.
 

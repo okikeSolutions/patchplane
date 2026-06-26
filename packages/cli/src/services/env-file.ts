@@ -145,7 +145,7 @@ export class CliEnvFile extends Context.Service<CliEnvFile, {
   readonly loadKnownEnvFiles: Effect.Effect<Map<string, string>, PlatformError>
   readonly collectEnvCheck: (selection: EnvSelection) => Effect.Effect<EnvCheckResults, PlatformError>
   readonly updateEnvForInit: (options: ResolvedInitOptions) => Effect.Effect<string, PlatformError>
-}>()('@patchplane/cli/CliEnvFile') {
+}>()('patchplane/CliEnvFile') {
   static readonly Live = Layer.effect(this)(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

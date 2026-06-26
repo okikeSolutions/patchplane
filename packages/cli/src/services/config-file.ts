@@ -42,7 +42,7 @@ export function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 
       : { app: ['convex', 'workos'], githubWebhook: githubPlugins }
 
   return `${JSON.stringify({
-    $schema: './node_modules/@patchplane/cli/schema/patchplane.schema.json',
+    $schema: 'https://unpkg.com/patchplane/schema/patchplane.schema.json',
     plugins,
     runtime: {
       githubWebhookExecution: options.withPi ? 'daytona-pi' : 'daytona-command',
@@ -55,7 +55,7 @@ export class CliConfigFile extends Context.Service<CliConfigFile, {
   readonly writeProjectConfig: (options: ResolvedInitOptions) => Effect.Effect<string, PlatformError>
   readonly ensureStateDirectories: (options: Pick<ResolvedInitOptions, 'dryRun'>) => Effect.Effect<string, PlatformError>
   readonly readProjectConfigFile: Effect.Effect<ProjectConfigFile | undefined, PlatformError>
-}>()('@patchplane/cli/CliConfigFile') {
+}>()('patchplane/CliConfigFile') {
   static readonly Live = Layer.effect(this)(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

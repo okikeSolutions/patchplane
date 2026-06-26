@@ -1,7 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Effect, Exit } from 'effect'
+import { Effect, Exit, FileSystem, Path } from 'effect'
+import type { PlatformError } from 'effect/PlatformError'
 import { TestConsole } from 'effect/testing'
 import { CliLayer } from './runtime'
 import { afterEach, describe, expect, it, layer } from '@effect/vitest'
@@ -30,16 +28,54 @@ function captureConsole<A, E, R>(effect: Effect.Effect<A, E, R>) {
   })
 }
 
-function inTempProject<A, E, R>(fn: (dir: string) => Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+function projectPath(dir: string, file: string) {
+  return Effect.map(Path.Path, (path) => path.join(dir, file))
+}
+
+function readProjectFile(dir: string, file: string) {
   return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* projectPath(dir, file)
+    return yield* fs.readFileString(path)
+  })
+}
+
+function writeProjectFile(dir: string, file: string, content: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* projectPath(dir, file)
+    yield* fs.writeFileString(path, content)
+  })
+}
+
+function projectPathExists(dir: string, file: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* projectPath(dir, file)
+    return yield* fs.exists(path)
+  })
+}
+
+function projectPathIsDirectory(dir: string, file: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* projectPath(dir, file)
+    const stat = yield* fs.stat(path)
+    return stat.type === 'Directory'
+  })
+}
+
+function inTempProject<A, E, R>(fn: (dir: string) => Effect.Effect<A, E, R>): Effect.Effect<A, E | PlatformError, R | FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
     const previousCwd = process.cwd()
-    const dir = mkdtempSync(join(tmpdir(), 'patchplane-cli-'))
+    const dir = yield* fs.makeTempDirectory({ prefix: 'patchplane-cli-' })
     process.chdir(dir)
     try {
       return yield* fn(dir)
     } finally {
       process.chdir(previousCwd)
-      rmSync(dir, { recursive: true, force: true })
+      yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore)
     }
   })
 }
@@ -54,6 +90,7 @@ describe('patchplane cli parsing', () => {
       'github',
       'convex',
       'daytona',
+      'observability',
     ])
   })
 
@@ -95,16 +132,16 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
           runPatchPlane(['init', '--profile', 'app', '--yes']),
         )
 
-        const config = JSON.parse(readFileSync(join(dir, 'patchplane.config.json'), 'utf8'))
+        const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
         expect(config.plugins).toEqual({ app: ['convex', 'workos'] })
         expect(config.runtime.githubWebhookExecution).toBe('daytona-command')
 
-        const env = readFileSync(join(dir, '.env.local'), 'utf8')
+        const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('CONVEX_URL=')
         expect(env).toContain('WORKOS_API_KEY=')
-        expect(statSync(join(dir, '.patchplane/logs')).isDirectory()).toBe(true)
-        expect(statSync(join(dir, '.patchplane/cache')).isDirectory()).toBe(true)
-        expect(statSync(join(dir, '.patchplane/state')).isDirectory()).toBe(true)
+        expect(yield* projectPathIsDirectory(dir, '.patchplane/logs')).toBe(true)
+        expect(yield* projectPathIsDirectory(dir, '.patchplane/cache')).toBe(true)
+        expect(yield* projectPathIsDirectory(dir, '.patchplane/state')).toBe(true)
         expect(output.stdout).toContain('created patchplane.config.json')
         expect(output.stdout).toContain('Next: patchplane doctor')
       }),
@@ -114,7 +151,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
     inTempProject((dir) =>
       Effect.gen(function* () {
         yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--yes']))
-        const env = readFileSync(join(dir, '.env.local'), 'utf8')
+        const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('CONVEX_URL=')
         expect(env).toContain('WORKOS_API_KEY=')
         expect(env).not.toContain('GITHUB_APP_ID=')
@@ -126,7 +163,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
     inTempProject((dir) =>
       Effect.gen(function* () {
         yield* captureConsole(runPatchPlane(['init', '--profile', 'githubWebhook', '--yes']))
-        const env = readFileSync(join(dir, '.env.local'), 'utf8')
+        const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('GITHUB_APP_ID=')
         expect(env).toContain('GITHUB_PRIVATE_KEY=')
         expect(env).toContain('DAYTONA_API_KEY=')
@@ -139,7 +176,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
     inTempProject((dir) =>
       Effect.gen(function* () {
         yield* captureConsole(runPatchPlane(['init', '--profile', 'githubWebhook', '--with-pi', '--yes']))
-        const config = JSON.parse(readFileSync(join(dir, 'patchplane.config.json'), 'utf8'))
+        const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
         expect(config.plugins.githubWebhook).toContain('pi')
         expect(config.runtime.githubWebhookExecution).toBe('daytona-pi')
       }),
@@ -148,9 +185,9 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('preserves existing .env.local values', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        writeFileSync(join(dir, '.env.local'), 'WORKOS_API_KEY=keep-me\n')
+        yield* writeProjectFile(dir, '.env.local', 'WORKOS_API_KEY=keep-me\n')
         yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--yes']))
-        const env = readFileSync(join(dir, '.env.local'), 'utf8')
+        const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('WORKOS_API_KEY=keep-me')
         expect((env.match(/WORKOS_API_KEY=/g) ?? []).length).toBe(1)
       }),
@@ -161,20 +198,20 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
       Effect.gen(function* () {
         const output = yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--dry-run', '--yes']))
         expect(output.stdout).toContain('would write patchplane.config.json')
-        expect(existsSync(join(dir, 'patchplane.config.json'))).toBe(false)
-        expect(existsSync(join(dir, '.env.local'))).toBe(false)
-        expect(existsSync(join(dir, '.patchplane'))).toBe(false)
+        expect(yield* projectPathExists(dir, 'patchplane.config.json')).toBe(false)
+        expect(yield* projectPathExists(dir, '.env.local')).toBe(false)
+        expect(yield* projectPathExists(dir, '.patchplane')).toBe(false)
       }),
     ))
 
   effectIt.effect('--force overwrites config but does not erase non-empty secrets', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        writeFileSync(join(dir, 'patchplane.config.json'), '{"old":true}\n')
-        writeFileSync(join(dir, '.env.local'), 'WORKOS_API_KEY=keep-me\n')
+        yield* writeProjectFile(dir, 'patchplane.config.json', '{"old":true}\n')
+        yield* writeProjectFile(dir, '.env.local', 'WORKOS_API_KEY=keep-me\n')
         yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--force', '--yes']))
-        const config = JSON.parse(readFileSync(join(dir, 'patchplane.config.json'), 'utf8'))
-        const env = readFileSync(join(dir, '.env.local'), 'utf8')
+        const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
+        const env = yield* readProjectFile(dir, '.env.local')
         expect(config.plugins).toEqual({ app: ['convex', 'workos'] })
         expect(env).toContain('WORKOS_API_KEY=keep-me')
       }),

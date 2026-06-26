@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { Effect, Runtime } from 'effect'
 import { CliError, Command } from 'effect/unstable/cli'
 import { doctorCommand } from './commands/doctor'
@@ -46,6 +46,7 @@ export async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const entrypoint = process.argv[1]?.split(/[\\/]/).at(-1)
+if (entrypoint === 'main.ts' || entrypoint === 'main.js' || entrypoint === 'patchplane') {
   await main()
 }

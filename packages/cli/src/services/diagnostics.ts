@@ -24,7 +24,7 @@ export interface DoctorResult {
 /** Aggregates CLI doctor diagnostics across config files and selected env vars. */
 export class CliDiagnostics extends Context.Service<CliDiagnostics, {
   readonly collectDoctorLines: (input: DoctorInput) => Effect.Effect<DoctorResult, PlatformError>
-}>()('@patchplane/cli/CliDiagnostics') {
+}>()('patchplane/CliDiagnostics') {
   static readonly Live = Layer.effect(this)(
     Effect.gen(function* () {
       const configFile = yield* CliConfigFile
