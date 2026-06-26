@@ -16,6 +16,7 @@
     "./prompt-request": "./src/prompt-request.ts",
     "./runtime-event": "./src/runtime-event.ts",
     "./sandbox-execution": "./src/sandbox-execution.ts",
+    "./sandbox-policy": "./src/sandbox-policy.ts",
     "./server-function": "./src/server-function.ts",
     "./start-workflow": "./src/start-workflow.ts",
     "./workflow-intake": "./src/workflow-intake.ts",
@@ -28,7 +29,7 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "effect": "4.0.0-beta.84"
+    "effect": "4.0.0-beta.90"
   },
   "devDependencies": {
     "@patchplane/typescript-config": "workspace:*",

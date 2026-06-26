@@ -13,3 +13,9 @@
 [submodule "vendor/effect"]
 	path = vendor/effect
 	url = https://github.com/Effect-TS/effect-smol.git
+[submodule "vendor/alchemy"]
+	path = vendor/alchemy
+	url = https://github.com/alchemy-run/alchemy-effect.git
+[submodule "vendor/sentry-javascript"]
+	path = vendor/sentry-javascript
+	url = https://github.com/getsentry/sentry-javascript.git

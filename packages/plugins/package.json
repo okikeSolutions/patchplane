@@ -13,27 +13,33 @@
     "./daytona/sandbox-plugin": "./src/daytona/DaytonaSandboxPlugin.ts",
     "./github/config": "./src/github/GitHubConfig.ts",
     "./github/provider-plugin": "./src/github/GitHubProviderPlugin.ts",
+    "./observability/local-plugin": "./src/observability/LocalObservabilityPlugin.ts",
     "./pi/config": "./src/pi/PiAgentConfig.ts",
     "./pi/runtime-plugin": "./src/pi/PiAgentRuntimePlugin.ts",
     "./registry": "./src/registry.ts",
+    "./sentry/config": "./src/sentry/SentryConfig.ts",
+    "./sentry/telemetry-plugin": "./src/sentry/SentryTelemetryPlugin.ts",
     "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",
     "./workos/config": "./src/workos/WorkOSConfig.ts",
     "./workos/session": "./src/workos/session.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "smoke:daytona": "bun src/daytona/live-smoke.ts"
   },
   "dependencies": {
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
     "@daytona/sdk": "^0.186.0",
+    "@effect/platform-node": "4.0.0-beta.90",
+    "@sentry/effect": "^10.62.0",
     "@earendil-works/pi-agent-core": "0.79.6",
     "@earendil-works/pi-ai": "0.79.6",
     "@earendil-works/pi-coding-agent": "0.79.6",
     "@workos-inc/node": "10.3.0",
     "convex": "^1.41.0",
-    "effect": "4.0.0-beta.84",
+    "effect": "4.0.0-beta.90",
     "octokit": "^5.0.5"
   },
   "devDependencies": {
