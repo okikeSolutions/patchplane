@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/patchplane/schema/patchplane.schema.json",
   "plugins": {
     "app": ["convex", "workos"],
-    "githubWebhook": ["github", "convex", "daytona", "pi"]
+    "githubWebhook": ["github", "convex", "daytona", "observability"]
   },
   "runtime": {
     "githubWebhookExecution": "daytona-pi"

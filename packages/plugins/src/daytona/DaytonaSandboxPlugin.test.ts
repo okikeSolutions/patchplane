@@ -1,11 +1,14 @@
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vitest'
-import { Effect, Option, Redacted } from 'effect'
+import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Redacted } from 'effect'
+import { SandboxService } from '@patchplane/core/services/sandbox-service'
 import type { DaytonaConfig } from './DaytonaConfig'
+import { makeDaytonaSandboxLayer, type DaytonaClientLike, type DaytonaSandboxLike } from './DaytonaSandboxPlugin'
 import { toDaytonaCreateSandboxParams, toSandboxPolicy } from './daytona-adapter'
 import { executeSandboxCommand } from './daytona-process'
-import { buildPiCommand, buildRedactedPiCommand } from './pi-command'
-import { piProviderApiKeyEnv } from './pi-provider-env'
+import { buildPiCommand, buildRedactedPiCommand } from '../sandbox-runtime/pi/command'
+import { piRuntimeEnvironment } from '../sandbox-runtime/pi/environment'
+import { parsePiJsonRuntimeEvents } from '../sandbox-runtime/pi/events'
 
 function config(overrides: Partial<DaytonaConfig> = {}): DaytonaConfig {
   return {
@@ -20,6 +23,52 @@ function config(overrides: Partial<DaytonaConfig> = {}): DaytonaConfig {
     retainSandboxes: Option.none(),
     ...overrides,
   }
+}
+
+function fakeSandbox(overrides: Partial<DaytonaSandboxLike> = {}) {
+  const sandbox: DaytonaSandboxLike = {
+    id: 'sandbox-1',
+    name: 'patchplane-test',
+    target: 'test-target',
+    state: 'started',
+    git: {
+      clone: vi.fn(async () => undefined),
+    },
+    process: {
+      createSession: vi.fn(async () => undefined),
+      executeSessionCommand: vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '' })),
+      deleteSession: vi.fn(async () => undefined),
+    },
+    waitUntilStarted: vi.fn(async () => undefined),
+    delete: vi.fn(async () => undefined),
+    ...overrides,
+  }
+  return sandbox
+}
+
+function fakeClient(sandbox: DaytonaSandboxLike, overrides: Partial<DaytonaClientLike> = {}) {
+  const client: DaytonaClientLike = {
+    create: vi.fn(async () => sandbox),
+    delete: vi.fn(async () => undefined),
+    [Symbol.asyncDispose]: vi.fn(async () => undefined),
+    ...overrides,
+  }
+  return client
+}
+
+function testLayer(client: DaytonaClientLike, env: Record<string, string> = {}) {
+  return makeDaytonaSandboxLayer(() => client).pipe(
+    Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+      env: { DAYTONA_API_KEY: 'daytona-key', ...env },
+    }))),
+  )
+}
+
+const commandInput = {
+  traceId: 'trace-1',
+  repositoryUrl: 'https://github.com/okikeSolutions/guerillaglass.git',
+  repositoryFullName: 'okikeSolutions/guerillaglass',
+  command: 'bun test',
 }
 
 describe('Daytona sandbox boundary adapters', () => {
@@ -107,6 +156,165 @@ describe('Daytona sandbox boundary adapters', () => {
     }),
   )
 
+  it.effect('deletes sandbox when repository clone fails', () => {
+    const sandbox = fakeSandbox({
+      git: { clone: vi.fn(async () => { throw new Error('clone failed') }) },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const exit = yield* service.runRepositoryCommand(commandInput).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(sandbox.git.clone).toHaveBeenCalledWith(
+        commandInput.repositoryUrl,
+        'workspace/repo',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      )
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('deletes sandbox and command session when command execution throws', () => {
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(async () => { throw new Error('command failed') }),
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const exit = yield* service.runRepositoryCommand(commandInput).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(sandbox.process.deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('records non-zero command exits and still deletes sandbox', () => {
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(async () => ({ exitCode: 42, stdout: 'out', stderr: 'err' })),
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.runRepositoryCommand(commandInput)
+
+      expect(result.exitCode).toBe(42)
+      expect(result.stdout).toBe('out')
+      expect(result.stderr).toBe('err')
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('runs Pi in JSON mode and returns normalized runtime events', () => {
+    const stdout = [
+      JSON.stringify({ type: 'agent_start' }),
+      JSON.stringify({ type: 'tool_execution_start', toolName: 'bash' }),
+    ].join('\n')
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(async () => ({ exitCode: 0, stdout, stderr: '' })),
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.runRepositoryAgent({
+        traceId: 'trace-1',
+        repositoryUrl: 'https://github.com/okikeSolutions/guerillaglass.git',
+        repositoryFullName: 'okikeSolutions/guerillaglass',
+        prompt: 'review patch',
+        provider: 'openai',
+        model: 'gpt-5.5',
+        apiKey: 'openai-key',
+      })
+
+      expect(result.command).toContain('--mode json')
+      expect(result.command).toContain('<prompt redacted>')
+      expect(result.runtimeEvents).toEqual([
+        expect.objectContaining({ provider: 'pi', type: 'pi.agent_start', summary: 'Pi agent started' }),
+        expect.objectContaining({ provider: 'pi', type: 'pi.tool_execution_start', summary: 'Pi tool started: bash' }),
+      ])
+      expect(client.create).toHaveBeenCalledWith(
+        expect.objectContaining({ envVars: { OPENAI_API_KEY: 'openai-key' } }),
+        expect.anything(),
+      )
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('deletes sandbox when repository command is interrupted', () =>
+    Effect.promise(async () => {
+      const sandbox = fakeSandbox({
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand: vi.fn((): Promise<{ exitCode: number; stdout: string; stderr: string }> =>
+            new Promise((resolve) => {
+              setTimeout(() => resolve({ exitCode: 0, stdout: 'late', stderr: '' }), 50)
+            })
+          ),
+          deleteSession: vi.fn(async () => undefined),
+        },
+      })
+      const client = fakeClient(sandbox)
+      const program = Effect.gen(function* () {
+        const service = yield* SandboxService
+        return yield* service.runRepositoryCommand(commandInput)
+      }).pipe(Effect.provide(testLayer(client)))
+      const fiber = Effect.runFork(program)
+
+      await Effect.runPromise(Fiber.interrupt(fiber))
+
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+    }),
+  )
+
+  it.effect('retains sandbox instead of deleting when retain mode is enabled', () => {
+    const sandbox = fakeSandbox()
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      yield* service.runRepositoryCommand(commandInput)
+
+      expect(client.delete).not.toHaveBeenCalled()
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
+    }).pipe(Effect.provide(testLayer(client, { DAYTONA_RETAIN_SANDBOXES: 'true' })))
+  })
+
+  it.effect('retries Daytona sandbox deletion before giving up', () => {
+    const sandbox = fakeSandbox()
+    const deleteSandbox = vi.fn()
+      .mockRejectedValueOnce(new Error('delete failed 1'))
+      .mockRejectedValueOnce(new Error('delete failed 2'))
+      .mockResolvedValueOnce(undefined)
+    const client = fakeClient(sandbox, { delete: deleteSandbox })
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      yield* service.runRepositoryCommand(commandInput)
+
+      expect(deleteSandbox).toHaveBeenCalledTimes(3)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
   it.effect('uses Daytona session execution so stdout and stderr are captured', () =>
     Effect.promise(async () => {
       const createSession = vi.fn(async () => undefined)
@@ -170,6 +378,7 @@ describe('Daytona sandbox boundary adapters', () => {
       })
 
       expect(command).toContain('@earendil-works/pi-coding-agent@0.79.6')
+      expect(command).toContain('--mode json')
       expect(command.split(' ')).toContain('--no-approve')
       expect(command.split(' ')).not.toContain('--approve')
       expect(command).toContain("--provider 'openai'")
@@ -194,15 +403,58 @@ describe('Daytona sandbox boundary adapters', () => {
     }),
   )
 
+  it.effect('parses Pi JSON output into normalized runtime events', () =>
+    Effect.sync(() => {
+      const output = [
+        JSON.stringify({ type: 'session', id: 'session-1', timestamp: '2026-06-28T00:00:00.000Z' }),
+        JSON.stringify({ type: 'tool_execution_start', toolName: 'bash' }),
+        JSON.stringify({ type: 'message_end', message: { content: [{ text: 'All checks passed.' }] } }),
+        'not-json',
+      ].join('\n')
+      const parsed = parsePiJsonRuntimeEvents(output, { now: () => 123 })
+
+      expect(parsed.events).toEqual([
+        expect.objectContaining({
+          provider: 'pi',
+          type: 'pi.session',
+          occurredAt: 1782604800000,
+          summary: 'Pi session session-1',
+        }),
+        expect.objectContaining({
+          provider: 'pi',
+          type: 'pi.tool_execution_start',
+          occurredAt: 123,
+          summary: 'Pi tool started: bash',
+        }),
+        expect.objectContaining({
+          provider: 'pi',
+          type: 'pi.message_end',
+          occurredAt: 123,
+          summary: 'Pi message: All checks passed.',
+        }),
+      ])
+      expect(parsed.parseErrors).toHaveLength(1)
+    }),
+  )
+
   it.effect('maps provider API keys to Pi environment variables', () =>
     Effect.sync(() => {
-      expect(piProviderApiKeyEnv('anthropic', 'key')).toEqual({
+      expect(piRuntimeEnvironment({ provider: 'anthropic', apiKey: 'key' })).toEqual({
         ANTHROPIC_API_KEY: 'key',
       })
-      expect(piProviderApiKeyEnv('github-copilot', 'key')).toEqual({
+      expect(piRuntimeEnvironment({ provider: 'github-copilot', apiKey: 'key' })).toEqual({
         COPILOT_GITHUB_TOKEN: 'key',
       })
-      expect(piProviderApiKeyEnv('openai', undefined)).toBeUndefined()
+      expect(piRuntimeEnvironment({
+        provider: 'cloudflare-ai-gateway',
+        apiKey: 'key',
+        env: { CLOUDFLARE_ACCOUNT_ID: 'acct', CLOUDFLARE_GATEWAY_ID: 'gateway' },
+      })).toEqual({
+        CLOUDFLARE_API_KEY: 'key',
+        CLOUDFLARE_ACCOUNT_ID: 'acct',
+        CLOUDFLARE_GATEWAY_ID: 'gateway',
+      })
+      expect(piRuntimeEnvironment({ provider: 'openai' })).toBeUndefined()
     }),
   )
 })

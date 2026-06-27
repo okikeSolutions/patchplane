@@ -68,9 +68,7 @@ export function selectedPluginIdsForInit(options: {
   readonly profile: 'app' | 'githubWebhook' | 'full'
   readonly withPi: boolean
 }) {
-  const githubPlugins = options.withPi
-    ? ['github', 'convex', 'daytona', 'pi']
-    : ['github', 'convex', 'daytona']
+  const githubPlugins = ['github', 'convex', 'daytona']
 
   if (options.profile === 'app') return ['convex', 'workos']
   if (options.profile === 'githubWebhook') return githubPlugins

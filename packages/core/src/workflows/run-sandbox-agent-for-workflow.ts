@@ -12,6 +12,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   readonly model: string
   readonly thinking?: string | undefined
   readonly apiKey?: string | undefined
+  readonly env?: Readonly<Record<string, string>> | undefined
   readonly timeoutSeconds?: number | undefined
 }) {
   const clone = yield* PrepareRepositoryClone(input.workflowStart)
@@ -29,9 +30,22 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     model: input.model,
     thinking: input.thinking,
     apiKey: input.apiKey,
+    env: input.env,
     timeoutSeconds: input.timeoutSeconds,
     traceId: input.workflowStart.workflowRun.traceId,
   })
+
+  if (result.runtimeEvents !== undefined && result.runtimeEvents.length > 0) {
+    yield* storage.recordRuntimeEvents(result.runtimeEvents.map((event) => ({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      provider: event.provider,
+      type: event.type,
+      occurredAt: event.occurredAt,
+      ...(event.summary === undefined ? {} : { summary: event.summary }),
+      ...(event.payloadJson === undefined ? {} : { payloadJson: event.payloadJson }),
+      traceId: input.workflowStart.workflowRun.traceId,
+    })))
+  }
 
   return yield* storage.recordSandboxExecution({
     workflowRunId: input.workflowStart.workflowRun.id,

@@ -49,7 +49,7 @@ Profiles:
 - `githubWebhook`: `github`, `convex`, `daytona`
 - `full`: app + GitHub webhook plugins
 
-`--with-pi` is only valid for `githubWebhook` and `full`; it adds `pi` and sets `runtime.githubWebhookExecution` to `daytona-pi`.
+`--with-pi` is only valid for `githubWebhook` and `full`; it sets `runtime.githubWebhookExecution` to `daytona-pi`. Pi runs inside the Daytona sandbox for the alpha path; the experimental in-process `pi` plugin is not added to generated web/runtime config.
 
 `init` writes non-secret config to `patchplane.config.json`, appends missing required keys to `.env.local`, and creates `.patchplane/{logs,cache,state}`. Existing `.env.local` values are preserved.
 
@@ -58,7 +58,7 @@ Profiles:
 ```bash
 bun run patchplane env template --surface app
 bun run patchplane env template --surface githubWebhook
-bun run patchplane env template --plugins github,convex,daytona,pi
+bun run patchplane env template --plugins github,convex,daytona
 bun run patchplane env template --surface githubWebhook --include-optional
 bun run patchplane env check --surface githubWebhook
 ```

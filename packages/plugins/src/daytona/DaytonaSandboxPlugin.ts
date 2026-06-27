@@ -1,4 +1,4 @@
-import { Config, Effect, Exit, Layer } from 'effect'
+import { Config, Effect, Exit, Layer, Schedule } from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { SandboxError } from '@patchplane/domain/errors'
 import { SandboxService } from '@patchplane/core/services/sandbox-service'
@@ -20,11 +20,55 @@ import {
 } from './daytona-adapter'
 import { executeSandboxCommand } from './daytona-process'
 import { sanitizeDaytonaCause } from './daytona-redaction'
-import { buildPiCommand, buildRedactedPiCommand } from './pi-command'
-import { piProviderApiKeyEnv } from './pi-provider-env'
+import { buildPiCommand, buildRedactedPiCommand } from '../sandbox-runtime/pi/command'
+import { piRuntimeEnvironment } from '../sandbox-runtime/pi/environment'
+import { parsePiJsonRuntimeEvents } from '../sandbox-runtime/pi/events'
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+export interface DaytonaClientLike {
+  readonly create: (
+    params: ReturnType<typeof toDaytonaCreateSandboxParams>,
+    options?: { readonly timeout?: number },
+  ) => Promise<DaytonaSandboxLike>
+  readonly delete: (sandbox: DaytonaSandboxLike, timeout?: number) => Promise<void>
+  readonly [Symbol.asyncDispose]?: () => Promise<void>
+}
+
+export interface DaytonaSandboxLike {
+  readonly id: string
+  readonly name?: string | undefined
+  readonly target?: string | undefined
+  readonly state?: string | undefined
+  readonly git: {
+    readonly clone: (
+      url: string,
+      path: string,
+      branch?: string,
+      commitId?: string,
+      username?: string,
+      password?: string,
+      insecureSkipTls?: boolean,
+    ) => Promise<void>
+  }
+  readonly process: {
+    readonly createSession: (sessionId: string) => Promise<void>
+    readonly executeSessionCommand: (
+      sessionId: string,
+      request: {
+        readonly command: string
+        readonly runAsync?: boolean
+        readonly suppressInputEcho?: boolean
+      },
+      timeout?: number,
+    ) => Promise<{
+      readonly exitCode?: number | undefined
+      readonly output?: string | undefined
+      readonly stdout?: string | undefined
+      readonly stderr?: string | undefined
+    }>
+    readonly deleteSession: (sessionId: string) => Promise<void>
+  }
+  readonly waitUntilStarted: (timeout?: number) => Promise<void>
+  readonly delete: (timeout?: number) => Promise<void>
 }
 
 function sandboxBoundaryError(operation: string, message: string) {
@@ -35,42 +79,47 @@ function sandboxBoundaryError(operation: string, message: string) {
   })
 }
 
-async function deleteSandboxWithRetries(input: {
-  readonly daytona: Daytona
-  readonly sandbox: Awaited<ReturnType<Daytona['create']>>
+function deleteSandboxWithRetries(input: {
+  readonly daytona: DaytonaClientLike
+  readonly sandbox: DaytonaSandboxLike
   readonly traceId: string
   readonly timeoutSeconds: number
   readonly retryAttempts: number
 }) {
-  const totalAttempts = Math.max(1, Math.floor(input.retryAttempts) + 1)
-  let lastCause: unknown
+  const totalRetries = Math.max(0, Math.floor(input.retryAttempts))
+  let attempt = 0
 
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    try {
-      await input.daytona.delete(input.sandbox, input.timeoutSeconds)
-      return
-    } catch (cause) {
-      lastCause = cause
-      await Effect.runPromise(Effect.logWarning('Failed to delete Daytona sandbox', {
+  return Effect.tryPromise({
+    try: () => input.daytona.delete(input.sandbox, input.timeoutSeconds),
+    catch: (cause) => ({ cause, attempt: ++attempt }),
+  }).pipe(
+    Effect.tapError(({ cause, attempt: loggedAttempt }) =>
+      Effect.logWarning('Failed to delete Daytona sandbox', {
         traceId: input.traceId,
         sandboxId: input.sandbox.id,
-        attempt,
-        totalAttempts,
+        attempt: loggedAttempt,
+        totalAttempts: totalRetries + 1,
         cause: sanitizeDaytonaCause(cause),
-      }))
-      if (attempt < totalAttempts) {
-        await sleep(250 * attempt)
-      }
-    }
-  }
-
-  throw lastCause
+      })
+    ),
+    Effect.mapError(({ cause }) => cause),
+    Effect.retry(Schedule.recurs(totalRetries)),
+  )
 }
 
-type DaytonaSandbox = Awaited<ReturnType<Daytona['create']>>
+function makeDefaultDaytonaClient(config: DaytonaConfig): DaytonaClientLike {
+  const daytona = new Daytona(toDaytonaClientConfig(config))
+  return {
+    create: (params, options) => daytona.create(params, options),
+    delete: (sandbox, timeout) => sandbox.delete(timeout),
+    [Symbol.asyncDispose]: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
+  }
+}
 
-export const DaytonaSandboxPlugin = {
-  layer: Layer.effect(
+export function makeDaytonaSandboxLayer(
+  makeClient: (config: DaytonaConfig) => DaytonaClientLike = makeDefaultDaytonaClient,
+) {
+  return Layer.effect(
     SandboxService,
     Effect.gen(function* () {
       const config = yield* DaytonaConfig
@@ -79,10 +128,10 @@ export const DaytonaSandboxPlugin = {
         readonly traceId: string
         readonly repositoryFullName: string
         readonly envVars?: Record<string, string> | undefined
-      }, use: (sandbox: DaytonaSandbox) => Effect.Effect<A, unknown>) =>
+      }, use: (sandbox: DaytonaSandboxLike) => Effect.Effect<A, unknown>) =>
         Effect.acquireUseRelease(
           Effect.gen(function* () {
-            const daytona = new Daytona(toDaytonaClientConfig(config))
+            const daytona = makeClient(config)
             const retainSandboxes = shouldRetainDaytonaSandboxes(config)
             const sandbox = yield* Effect.tryPromise({
               try: () => daytona.create(
@@ -122,16 +171,16 @@ export const DaytonaSandboxPlugin = {
                   sandboxId: sandbox.id,
                 })
               } else {
-                const deleteExit = yield* Effect.tryPromise({
-                  try: () => deleteSandboxWithRetries({
-                    daytona,
-                    sandbox,
-                    traceId: input.traceId,
-                    timeoutSeconds: DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS,
-                    retryAttempts: DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS,
-                  }),
-                  catch: sandboxBoundaryError('daytona.deleteSandbox', 'Daytona failed to delete sandbox'),
-                }).pipe(Effect.exit)
+                const deleteExit = yield* deleteSandboxWithRetries({
+                  daytona,
+                  sandbox,
+                  traceId: input.traceId,
+                  timeoutSeconds: DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS,
+                  retryAttempts: DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS,
+                }).pipe(
+                  Effect.mapError(sandboxBoundaryError('daytona.deleteSandbox', 'Daytona failed to delete sandbox')),
+                  Effect.exit,
+                )
 
                 if (Exit.isSuccess(deleteExit)) {
                   yield* Effect.logInfo('Deleted Daytona sandbox', {
@@ -153,7 +202,7 @@ export const DaytonaSandboxPlugin = {
             }),
         )
 
-      const cloneRepository = (sandbox: DaytonaSandbox, input: {
+      const cloneRepository = (sandbox: DaytonaSandboxLike, input: {
         readonly repositoryUrl: string
         readonly branch?: string | undefined
         readonly commitId?: string | undefined
@@ -177,7 +226,7 @@ export const DaytonaSandboxPlugin = {
           Effect.gen(function* () {
             const startedAt = Date.now()
             return yield* runWithSandbox(
-              { ...input, envVars: piProviderApiKeyEnv(input.provider, input.apiKey) },
+              { ...input, envVars: piRuntimeEnvironment({ provider: input.provider, apiKey: input.apiKey, env: input.env }) },
               (sandbox) => Effect.gen(function* () {
                 yield* cloneRepository(sandbox, input)
                 const command = buildPiCommand({
@@ -193,6 +242,15 @@ export const DaytonaSandboxPlugin = {
                   timeoutSeconds,
                   traceId: input.traceId,
                 })
+                const parsedRuntimeEvents = parsePiJsonRuntimeEvents(response.stdout)
+
+                if (parsedRuntimeEvents.parseErrors.length > 0) {
+                  yield* Effect.logWarning('Pi JSON event parsing skipped malformed output lines', {
+                    traceId: input.traceId,
+                    sandboxId: sandbox.id,
+                    parseErrors: parsedRuntimeEvents.parseErrors,
+                  })
+                }
 
                 return {
                   provider: 'daytona:pi',
@@ -207,6 +265,7 @@ export const DaytonaSandboxPlugin = {
                   stdout: response.stdout,
                   stderr: response.stderr,
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
+                  runtimeEvents: parsedRuntimeEvents.events,
                   startedAt,
                   completedAt: Date.now(),
                 }
@@ -262,7 +321,11 @@ export const DaytonaSandboxPlugin = {
           ),
       })
     }),
-  ),
+  )
+}
+
+export const DaytonaSandboxPlugin = {
+  layer: makeDaytonaSandboxLayer(),
   config: DaytonaConfig,
 } satisfies {
   readonly layer: Layer.Layer<SandboxService, Config.ConfigError>

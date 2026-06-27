@@ -31,9 +31,7 @@ export const initApprovalMessage = 'patchplane init in non-interactive mode requ
 
 /** Builds the non-secret root `patchplane.config.json` content for an init profile. */
 export function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 'withPi'>) {
-  const githubPlugins = options.withPi
-    ? ['github', 'convex', 'daytona', 'pi']
-    : ['github', 'convex', 'daytona']
+  const githubPlugins = ['github', 'convex', 'daytona']
 
   const plugins = options.profile === 'app'
     ? { app: ['convex', 'workos'] }

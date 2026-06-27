@@ -91,6 +91,7 @@ describe('patchplane cli parsing', () => {
       'convex',
       'daytona',
       'observability',
+      'sentry',
     ])
   })
 
@@ -172,12 +173,13 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
       }),
     ))
 
-  effectIt.effect('init --profile githubWebhook --with-pi --yes includes pi and daytona-pi runtime', () =>
+  effectIt.effect('init --profile githubWebhook --with-pi --yes enables Daytona Pi mode without loading the in-process pi plugin', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
         yield* captureConsole(runPatchPlane(['init', '--profile', 'githubWebhook', '--with-pi', '--yes']))
         const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
-        expect(config.plugins.githubWebhook).toContain('pi')
+        expect(config.plugins.githubWebhook).toEqual(['github', 'convex', 'daytona'])
+        expect(config.plugins.githubWebhook).not.toContain('pi')
         expect(config.runtime.githubWebhookExecution).toBe('daytona-pi')
       }),
     ))

@@ -196,6 +196,35 @@ export const patchPlanePlugins = {
         defaultValue: 'false',
         description: 'Set to true only for manual debugging. Alpha workflow sandboxes are ephemeral by default.',
       },
+      {
+        name: 'PATCHPLANE_PI_PROVIDER',
+        required: false,
+        defaultValue: 'openai',
+        description: 'Optional Pi provider for Daytona Pi mode. Cloudflare AI Gateway is selected automatically when its required env vars are configured.',
+      },
+      {
+        name: 'PATCHPLANE_PI_MODEL',
+        required: false,
+        defaultValue: 'gpt-5.5',
+        description: 'Optional Pi model for Daytona Pi mode.',
+      },
+      {
+        name: 'PATCHPLANE_PI_THINKING',
+        required: false,
+        defaultValue: 'low',
+        description: 'Optional Pi thinking level for models that support it.',
+      },
+      {
+        name: 'PATCHPLANE_AI_GATEWAY_ID',
+        required: false,
+        description: 'Optional Cloudflare AI Gateway id/slug. Mapped to CLOUDFLARE_GATEWAY_ID inside Pi sandboxes when Cloudflare AI Gateway is selected.',
+      },
+      {
+        name: 'CLOUDFLARE_API_KEY',
+        required: false,
+        secret: true,
+        description: 'Optional Cloudflare AI Gateway API key for Pi sandbox model access.',
+      },
     ],
   },
   observability: {
@@ -206,22 +235,6 @@ export const patchPlanePlugins = {
     provides: ['LocalEffectLogs'],
     surfaces: ['app', 'githubWebhook'],
     env: [],
-  },
-  pi: {
-    id: 'pi',
-    name: 'Pi coding-agent runtime',
-    description: 'Runs the Pi coding-agent SDK as an in-process runtime service.',
-    layerExport: '@patchplane/plugins/pi/runtime-plugin#PiAgentRuntimePlugin.layer',
-    provides: ['RuntimeService'],
-    surfaces: ['githubWebhook'],
-    env: [
-      {
-        name: 'OPENAI_API_KEY',
-        required: false,
-        secret: true,
-        description: 'Provider API key when using the default openai provider. Other providers use their own vendor env names.',
-      },
-    ],
   },
   sentry: {
     id: 'sentry',
@@ -246,7 +259,7 @@ export const patchPlanePlugins = {
       {
         name: 'SENTRY_ENVIRONMENT',
         required: false,
-        defaultValue: 'development outside NODE_ENV=production, otherwise production',
+        defaultValue: 'development',
         description: 'Sentry environment name. PatchPlane currently supports development and production.',
       },
       {
@@ -286,8 +299,8 @@ export const patchPlanePlugins = {
 export type PatchPlanePluginId = keyof typeof patchPlanePlugins
 
 export const patchPlaneDefaultSurfaces = {
-  app: ['convex', 'workos', 'observability'],
-  githubWebhook: ['github', 'convex', 'daytona', 'observability'],
+  app: ['convex', 'workos', 'observability', 'sentry'],
+  githubWebhook: ['github', 'convex', 'daytona', 'observability', 'sentry'],
 } as const satisfies Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>
 
 export function getPatchPlanePluginsForSurface(surface: PatchPlaneRuntimeSurface) {

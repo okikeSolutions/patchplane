@@ -1,4 +1,4 @@
-const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
+export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'anthropic': 'ANTHROPIC_API_KEY',
   'ant-ling': 'ANT_LING_API_KEY',
   'openai': 'OPENAI_API_KEY',
@@ -34,10 +34,16 @@ const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'github-copilot': 'COPILOT_GITHUB_TOKEN',
 }
 
-export function piProviderApiKeyEnv(provider: string, apiKey: string | undefined) {
-  if (apiKey === undefined) {
-    return undefined
+export function piRuntimeEnvironment(input: {
+  readonly provider: string
+  readonly apiKey?: string | undefined
+  readonly env?: Readonly<Record<string, string>> | undefined
+}) {
+  const env = input.env === undefined ? {} : { ...input.env }
+
+  if (input.apiKey !== undefined) {
+    env[piProviderApiKeyEnvNames[input.provider] ?? 'OPENAI_API_KEY'] = input.apiKey
   }
 
-  return { [piProviderApiKeyEnvNames[provider] ?? 'OPENAI_API_KEY']: apiKey }
+  return Object.keys(env).length === 0 ? undefined : env
 }

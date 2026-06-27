@@ -89,6 +89,30 @@ describe('architecture boundaries', () => {
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
+  it.effect('keeps Alchemy provisioning isolated to apps/infra', () =>
+    Effect.gen(function* () {
+      const imports = yield* importsForFiles([
+        ...yield* sourceFilesUnder('apps'),
+        ...yield* sourceFilesUnder('packages'),
+      ])
+      const violations = imports.filter(({ file, specifier }) => {
+        const alchemyOrCloudflareProvisioningImport = specifier === 'alchemy' ||
+          (specifier.startsWith('alchemy/') && specifier !== 'alchemy/Cloudflare/Bridge') ||
+          specifier === 'cloudflare' ||
+          specifier.startsWith('cloudflare/') ||
+          specifier.startsWith('@cloudflare/')
+
+        if (!alchemyOrCloudflareProvisioningImport) {
+          return false
+        }
+
+        return !file.startsWith('apps/infra/')
+      })
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
   it.effect('keeps Convex imports inside backend, Convex plugin, and app read-model boundaries', () =>
     Effect.gen(function* () {
       const imports = yield* importsForFiles([
@@ -110,6 +134,7 @@ describe('architecture boundaries', () => {
           file.startsWith('packages/backend/convex/') ||
           file.startsWith('packages/plugins/src/convex/') ||
           file.startsWith('apps/client/') ||
+          file.startsWith('apps/source-control/') ||
           file.endsWith('.test.ts') ||
           file.endsWith('.test.tsx')
         )
@@ -208,8 +233,9 @@ describe('architecture boundaries', () => {
       expect(effectServerFn).toContain('patchPlaneRuntime.runPromiseExit(program)')
 
       const githubWebhookRoute = yield* fileText('apps/client/src/routes/api/github/webhook.tsx')
-      expect(githubWebhookRoute).toContain("import('@/effect/runtime')")
-      expect(githubWebhookRoute).toContain('patchPlaneRuntime.runPromiseExit(program)')
+      expect(githubWebhookRoute).toContain('dedicated source-control Worker')
+      expect(githubWebhookRoute).not.toContain("import('@/effect/webhook-runtime')")
+      expect(githubWebhookRoute).not.toContain('patchPlaneRuntime.runPromiseExit(program)')
 
       const startWorkflow = yield* fileText('apps/client/src/lib/start-workflow.ts')
       expect(startWorkflow).toContain('effectServerFn({')
@@ -226,6 +252,84 @@ describe('architecture boundaries', () => {
         )
 
       expect(directCoreWorkflowImports).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect('keeps hosted GitHub install and webhook routes wired across client and source-control Workers', () =>
+    Effect.gen(function* () {
+      const clientCallback = yield* fileText('apps/client/src/routes/api/github/install/callback.tsx')
+      const clientWebhook = yield* fileText('apps/client/src/routes/api/github/webhook.tsx')
+      const sourceControlWorker = yield* fileText('apps/source-control/src/worker.ts')
+      const sourceControlGitHubRoutes = yield* fileText('apps/source-control/src/github/routes.ts')
+      const infra = yield* fileText('apps/infra/alchemy.run.ts')
+
+      expect(clientCallback).toContain('env.SOURCE_CONTROL_WORKER')
+      expect(clientCallback).toContain('Cloudflare.fromCloudflareFetcher')
+      expect(clientCallback).toContain('https://source-control-worker/internal/github/install/sync')
+      expect(clientCallback).toContain('authorization: `Bearer ${internalWorkerToken()}`')
+
+      expect(sourceControlWorker).toContain("url.pathname === '/internal/github/install/sync'")
+      expect(sourceControlWorker).toContain('syncGitHubInstallation(request)')
+      expect(sourceControlWorker).toContain("url.pathname === '/api/github/webhook'")
+      expect(sourceControlWorker).toContain('handleGitHubWebhook(request)')
+
+      expect(sourceControlGitHubRoutes).toContain('export async function syncGitHubInstallation')
+      expect(sourceControlGitHubRoutes).toContain('export async function handleGitHubWebhook')
+      expect(sourceControlGitHubRoutes).toContain('assertInternalAuthorization(request)')
+      expect(sourceControlGitHubRoutes).toContain('IngestGitHubWebhook')
+      expect(sourceControlGitHubRoutes).toContain('GitHubEventToWorkflowIntake')
+      expect(sourceControlGitHubRoutes).toContain('RunSandboxAgentForWorkflow')
+      expect(sourceControlGitHubRoutes).toContain('PublishSandboxResultToSource')
+
+      expect(clientWebhook).toContain('GitHub webhooks are handled by the dedicated source-control Worker')
+      expect(infra).toContain('SourceControlWorker')
+      expect(infra).toContain('SOURCE_CONTROL_WORKER: sourceControlWorker')
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect('keeps Pi and Flue agent runtimes out of the web/control-plane composition', () =>
+    Effect.gen(function* () {
+      const appImports = yield* importsForFiles(yield* sourceFilesUnder('apps/client/src'))
+      const violations = appImports.filter(({ specifier }) =>
+        specifier === '@patchplane/plugins/pi/runtime-plugin' ||
+        specifier === '@earendil-works/pi-coding-agent' ||
+        specifier === '@earendil-works/pi-ai' ||
+        specifier.startsWith('@earendil-works/pi-coding-agent/') ||
+        specifier.startsWith('@earendil-works/pi-ai/') ||
+        specifier === '@flue/runtime' ||
+        specifier.startsWith('@flue/')
+      )
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect('keeps sandbox control-plane credentials out of core sandbox inputs and Daytona env injection', () =>
+    Effect.gen(function* () {
+      const sandboxService = yield* fileText('packages/core/src/services/sandbox-service.ts')
+      const daytonaPlugin = yield* fileText('packages/plugins/src/daytona/DaytonaSandboxPlugin.ts')
+      const forbidden = [
+        'workos',
+        'convex',
+        'systemIngestionSecret',
+        'PATCHPLANE_SYSTEM_INGESTION_SECRET',
+        'GITHUB_PRIVATE_KEY',
+        'githubPrivateKey',
+        'appPrivateKey',
+        'WORKOS_API_KEY',
+        'CONVEX_URL',
+      ]
+
+      for (const value of forbidden) {
+        expect(sandboxService.toLowerCase()).not.toContain(value.toLowerCase())
+      }
+
+      expect(daytonaPlugin).toContain('envVars: piRuntimeEnvironment({ provider: input.provider, apiKey: input.apiKey, env: input.env })')
+      expect(daytonaPlugin).toContain('envVars: input.env === undefined ? undefined : { ...input.env }')
+      expect(daytonaPlugin).not.toContain('process.env')
+      for (const value of forbidden) {
+        expect(daytonaPlugin).not.toContain(value)
+      }
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
@@ -252,7 +356,7 @@ describe('architecture boundaries', () => {
       expect(Object.keys(core.exports ?? {})).toEqual(expect.arrayContaining([
         './services/telemetry-service',
         './services/artifacts-service',
-        './services/model-gateway-service',
+        './services/storage-service',
         './workflows/start-workflow-from-intake',
       ]))
       expect(core.scripts?.typecheck).toBeTruthy()
@@ -265,8 +369,8 @@ describe('architecture boundaries', () => {
         './sentry/telemetry-plugin',
         './github/provider-plugin',
         './daytona/sandbox-plugin',
-        './pi/runtime-plugin',
       ]))
+      expect(Object.keys(plugins.exports ?? {})).not.toContain('./pi/config')
       expect(plugins.scripts?.typecheck).toBeTruthy()
       expect(plugins.scripts?.test).toBeTruthy()
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),

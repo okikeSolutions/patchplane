@@ -43,15 +43,6 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
   },
 ) {}
 
-export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()(
-  'RuntimeError',
-  {
-    operation: Schema.String,
-    message: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {}
-
 export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
   'ArtifactsError',
   {
@@ -60,13 +51,6 @@ export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
     cause: Schema.Defect(),
   },
 ) {}
-
-export class ModelGatewayError
-  extends Schema.TaggedErrorClass<ModelGatewayError>()('ModelGatewayError', {
-    operation: Schema.String,
-    message: Schema.String,
-    cause: Schema.Defect(),
-  }) {}
 
 export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
   'TelemetryError',

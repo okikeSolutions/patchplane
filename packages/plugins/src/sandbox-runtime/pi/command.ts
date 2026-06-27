@@ -1,7 +1,10 @@
-import { shellQuote } from './daytona-shell'
+function shellQuote(value: string) {
+  return `'${value.replaceAll(`'`, `'"'"'`)}'`
+}
 
 const piNonInteractiveIsolationFlags = [
-  '-p',
+  '--mode',
+  'json',
   '--no-session',
   '--no-approve',
   '--no-extensions',

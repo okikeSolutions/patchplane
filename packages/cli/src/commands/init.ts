@@ -82,7 +82,7 @@ export const initCommand = Command.make('init', {
     Flag.withDescription('Print planned changes without writing files'),
   ),
   withPi: Flag.boolean('with-pi').pipe(
-    Flag.withDescription('Include Pi runtime for githubWebhook/full profiles'),
+    Flag.withDescription('Enable Daytona Pi execution for githubWebhook/full profiles'),
   ),
   nonInteractive: Flag.boolean('non-interactive').pipe(
     Flag.withDescription('Never prompt; require explicit flags'),
@@ -116,6 +116,6 @@ export const initCommand = Command.make('init', {
   Command.withExamples([
     { command: 'patchplane init', description: 'Run the interactive installer in a TTY' },
     { command: 'patchplane init --profile app --yes', description: 'Initialize app-only config without prompts' },
-    { command: 'patchplane init --profile full --with-pi --yes', description: 'Initialize full local alpha with Pi runtime' },
+    { command: 'patchplane init --profile full --with-pi --yes', description: 'Initialize full local alpha with Daytona Pi execution' },
   ]),
 )

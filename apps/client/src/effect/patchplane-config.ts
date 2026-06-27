@@ -9,10 +9,13 @@ import {
   DAYTONA_DEFAULT_COMMAND,
   DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
 } from '@patchplane/plugins/daytona/config'
-import { PI_DEFAULT_MODEL, PI_DEFAULT_PROVIDER, PI_DEFAULT_THINKING } from '@patchplane/plugins/pi/config'
 import { makeWorkspaceId, makeWorkOSWorkspaceId, type WorkspaceId } from '@patchplane/domain/ids'
 
 export type GitHubWebhookExecutionMode = 'daytona-command' | 'daytona-pi'
+
+const PATCHPLANE_DEFAULT_AGENT_PROVIDER = 'openai'
+const PATCHPLANE_DEFAULT_AGENT_MODEL = 'gpt-5.5'
+const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
 
 export interface PatchPlaneConfig {
   readonly plugins: Partial<Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>>
@@ -36,6 +39,7 @@ export interface GitHubWebhookRouteConfig {
       readonly model: string
       readonly thinking?: string | undefined
       readonly apiKey?: string | undefined
+      readonly env?: Readonly<Record<string, string>> | undefined
       readonly timeoutSeconds?: number | undefined
     }
 }
@@ -204,23 +208,48 @@ function providerApiKeyEnvName(provider: string) {
   return names[provider] ?? 'OPENAI_API_KEY'
 }
 
+function resolvePiExecutionConfig() {
+  const cloudflareApiKey = process.env.CLOUDFLARE_API_KEY
+  const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID
+  const cloudflareGatewayId = process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID
+
+  if (cloudflareApiKey !== undefined && cloudflareAccountId !== undefined && cloudflareGatewayId !== undefined) {
+    return {
+      provider: 'cloudflare-ai-gateway',
+      model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
+      thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
+      apiKey: cloudflareApiKey,
+      env: {
+        CLOUDFLARE_ACCOUNT_ID: cloudflareAccountId,
+        CLOUDFLARE_GATEWAY_ID: cloudflareGatewayId,
+      },
+      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    } as const
+  }
+
+  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? PATCHPLANE_DEFAULT_AGENT_PROVIDER
+  return {
+    provider,
+    model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
+    thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
+    apiKey: process.env[providerApiKeyEnvName(provider)],
+    env: undefined,
+    timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  } as const
+}
+
 export function loadGitHubWebhookRouteConfig() {
   return Effect.gen(function* () {
     const config = yield* loadPatchPlaneConfig()
     const mode = config.runtime.githubWebhookExecution
 
     if (mode === 'daytona-pi') {
-      const provider = PI_DEFAULT_PROVIDER
       return {
         workspaceId: parseGitHubWorkspaceId(),
         repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
         execution: {
           mode,
-          provider,
-          model: PI_DEFAULT_MODEL,
-          thinking: process.env.PATCHPLANE_PI_THINKING ?? PI_DEFAULT_THINKING,
-          apiKey: process.env[providerApiKeyEnvName(provider)],
-          timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+          ...resolvePiExecutionConfig(),
         },
       } satisfies GitHubWebhookRouteConfig
     }

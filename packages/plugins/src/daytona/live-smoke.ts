@@ -1,6 +1,7 @@
 import { NodeCrypto, NodeFileSystem, NodePath } from '@effect/platform-node'
 import { Daytona } from '@daytona/sdk'
 import { Crypto, Effect, FileSystem, Layer, Path, Redacted } from 'effect'
+import { LocalTestObservabilityPlugin } from '../observability/LocalObservabilityPlugin'
 
 function parseEnvFile(source: string) {
   const env: Record<string, string> = {}
@@ -89,6 +90,7 @@ const PlatformLayer = Layer.mergeAll(
   NodeCrypto.layer,
   NodeFileSystem.layer,
   NodePath.layer,
+  LocalTestObservabilityPlugin.layer,
 )
 
 const program = Effect.gen(function* () {
@@ -116,11 +118,13 @@ const program = Effect.gen(function* () {
   let deleteAttempted = false
   let deleted = false
 
-  console.log(JSON.stringify({
+  const startEvent = {
     event: 'daytona-smoke.start',
     traceId,
     keyRedacted: '<redacted>',
-  }))
+  }
+  console.log(JSON.stringify(startEvent))
+  yield* Effect.logInfo('Daytona live smoke started', startEvent)
 
   try {
     sandbox = yield* Effect.promise(() =>
@@ -132,17 +136,35 @@ const program = Effect.gen(function* () {
       }, { timeout: 120 })
     )
 
-    console.log(JSON.stringify({
+    const createdEvent = {
       event: 'daytona-smoke.created',
       traceId,
       sandboxId: sandbox.id,
       state: sandbox.state,
       autoDeleteInterval: sandbox.autoDeleteInterval,
-    }))
+    }
+    console.log(JSON.stringify(createdEvent))
+    yield* Effect.logInfo('Daytona live smoke created sandbox', createdEvent)
+
+    yield* Effect.promise(() =>
+      sandbox!.git.clone(
+        'https://github.com/okikeSolutions/guerillaglass.git',
+        'workspace/repo',
+      )
+    )
+
+    const clonedEvent = {
+      event: 'daytona-smoke.cloned',
+      traceId,
+      sandboxId: sandbox.id,
+      repository: 'okikeSolutions/guerillaglass',
+    }
+    console.log(JSON.stringify(clonedEvent))
+    yield* Effect.logInfo('Daytona live smoke cloned repository', clonedEvent)
 
     const response = yield* Effect.promise(() =>
       sandbox!.process.executeCommand(
-        'echo patchplane-daytona-live-smoke',
+        "cd workspace/repo && test -d .git && git rev-parse --is-inside-work-tree && echo patchplane-daytona-live-smoke",
         undefined,
         undefined,
         30,
@@ -150,13 +172,15 @@ const program = Effect.gen(function* () {
     )
     const output = response.result ?? response.artifacts?.stdout ?? ''
 
-    console.log(JSON.stringify({
+    const commandEvent = {
       event: 'daytona-smoke.command',
       traceId,
       sandboxId: sandbox.id,
       exitCode: response.exitCode,
       outputIncludesMarker: output.includes('patchplane-daytona-live-smoke'),
-    }))
+    }
+    console.log(JSON.stringify(commandEvent))
+    yield* Effect.logInfo('Daytona live smoke command completed', commandEvent)
 
     if (response.exitCode !== 0 || !output.includes('patchplane-daytona-live-smoke')) {
       throw new Error('Daytona smoke command did not return the expected output')
@@ -179,13 +203,15 @@ const program = Effect.gen(function* () {
   )
   yield* Effect.promise(() => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve())
 
-  console.log(JSON.stringify({
+  const completeEvent = {
     event: 'daytona-smoke.complete',
     traceId,
     deleteAttempted,
     deleted,
     survivors,
-  }))
+  }
+  console.log(JSON.stringify(completeEvent))
+  yield* Effect.logInfo('Daytona live smoke completed', completeEvent)
 
   if (survivors.length > 0) {
     process.exitCode = 1
