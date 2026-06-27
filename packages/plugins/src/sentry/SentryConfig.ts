@@ -3,8 +3,9 @@ import type * as LogLevel from 'effect/LogLevel'
 
 export type SentryEnvironment = 'development' | 'production'
 
-export const SENTRY_DEFAULT_ENVIRONMENT: SentryEnvironment =
-  process.env.NODE_ENV === 'production' ? 'production' : 'development'
+export const SENTRY_DEFAULT_ENVIRONMENT: SentryEnvironment = normalizeEnvironment(
+  process.env.SENTRY_ENVIRONMENT ?? 'development',
+)
 export const SENTRY_DEFAULT_ENABLE_LOGS = false
 export const SENTRY_DEFAULT_ENABLE_TRACING = true
 export const SENTRY_DEFAULT_ENABLE_METRICS = SENTRY_DEFAULT_ENVIRONMENT === 'production'

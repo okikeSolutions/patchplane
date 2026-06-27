@@ -8,6 +8,8 @@ const SourceControlTestLayer = Layer.succeed(
   SourceControlService,
   SourceControlService.of({
     verifyRepositoryAccess: () => Effect.die('unused'),
+    getInstallationAccount: () => Effect.die('unused'),
+    listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
     createRepositoryCloneCredentials: (input) =>
       Effect.succeed({

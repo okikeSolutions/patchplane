@@ -60,6 +60,8 @@ const TestSourceControlLayer = Layer.succeed(
           fullName: `${input.owner}/${input.name}`,
         }
       }),
+    getInstallationAccount: () => Effect.die('unused'),
+    listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
     createRepositoryCloneCredentials: () => Effect.die('unused'),
   }),
