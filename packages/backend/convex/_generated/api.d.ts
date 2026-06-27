@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as connectedRepositories from "../connectedRepositories.js";
 import type * as http from "../http.js";
 import type * as promptRequests from "../promptRequests.js";
 import type * as requests from "../requests.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  connectedRepositories: typeof connectedRepositories;
   http: typeof http;
   promptRequests: typeof promptRequests;
   requests: typeof requests;

@@ -14,6 +14,7 @@
     "./membership": "./src/membership.ts",
     "./permission": "./src/permission.ts",
     "./prompt-request": "./src/prompt-request.ts",
+    "./repository-connection": "./src/repository-connection.ts",
     "./runtime-event": "./src/runtime-event.ts",
     "./sandbox-execution": "./src/sandbox-execution.ts",
     "./sandbox-policy": "./src/sandbox-policy.ts",

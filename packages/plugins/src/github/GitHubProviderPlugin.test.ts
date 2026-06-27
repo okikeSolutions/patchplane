@@ -92,8 +92,10 @@ describe('GitHubProviderPlugin', () => {
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js')
       .reply(200, {
+        id: 456,
         name: 'octokit.js',
         full_name: 'octokit/octokit.js',
+        private: false,
         owner: { login: 'octokit' },
       })
 
@@ -115,8 +117,140 @@ describe('GitHubProviderPlugin', () => {
       owner: 'octokit',
       name: 'octokit.js',
       fullName: 'octokit/octokit.js',
+      repositoryExternalId: '456',
+      private: false,
     })
     expect(nock.isDone()).toBe(true)
+  })
+
+  test('gets GitHub App installation account metadata', async () => {
+    nock('https://api.github.com')
+      .get('/app/installations/123')
+      .reply(200, {
+        id: 123,
+        account: {
+          id: 999,
+          login: 'octokit',
+          type: 'Organization',
+        },
+      })
+
+    const account = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.getInstallationAccount({
+          provider: 'github',
+          installationId: '123',
+        })
+      }),
+    )
+
+    expect(account).toEqual({
+      provider: 'github',
+      installationId: '123',
+      accountExternalId: '999',
+      accountLogin: 'octokit',
+      accountType: 'Organization',
+    })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test('lists repositories accessible to an installation', async () => {
+    mockInstallationToken()
+    nock('https://api.github.com')
+      .get('/installation/repositories')
+      .query({ per_page: '100' })
+      .reply(200, {
+        total_count: 1,
+        repositories: [
+          {
+            id: 456,
+            name: 'octokit.js',
+            full_name: 'octokit/octokit.js',
+            private: true,
+            owner: { login: 'octokit' },
+          },
+        ],
+      })
+
+    const repositories = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.listInstallationRepositories({
+          provider: 'github',
+          installationId: '123',
+        })
+      }),
+    )
+
+    expect(repositories).toEqual([
+      {
+        provider: 'github',
+        installationId: '123',
+        owner: 'octokit',
+        name: 'octokit.js',
+        fullName: 'octokit/octokit.js',
+        repositoryExternalId: '456',
+        private: true,
+      },
+    ])
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test('wraps installation repository listing API failures as SourceControlError', async () => {
+    mockInstallationToken()
+    nock('https://api.github.com')
+      .get('/installation/repositories')
+      .query({ per_page: '100' })
+      .reply(403, { message: 'Resource not accessible by integration' })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.listInstallationRepositories({
+            provider: 'github',
+            installationId: '123',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'listInstallationRepositories.github',
+    })
+  })
+
+  test('rejects invalid installation repository metadata from GitHub', async () => {
+    mockInstallationToken()
+    nock('https://api.github.com')
+      .get('/installation/repositories')
+      .query({ per_page: '100' })
+      .reply(200, {
+        total_count: 1,
+        repositories: [
+          {
+            id: 456,
+            name: 'octokit.js',
+            private: true,
+            owner: {},
+          },
+        ],
+      })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.listInstallationRepositories({
+            provider: 'github',
+            installationId: '123',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'listInstallationRepositories.decode',
+    })
   })
 
   test('creates an issue comment through an installation client', async () => {

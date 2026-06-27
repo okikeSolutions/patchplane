@@ -15,6 +15,26 @@ export interface RepositoryRef {
   readonly owner: string
   readonly name: string
   readonly fullName: string
+  readonly repositoryExternalId?: string | undefined
+  readonly private?: boolean | undefined
+}
+
+export interface InstallationAccountRef {
+  readonly provider: string
+  readonly installationId: string
+  readonly accountExternalId: string
+  readonly accountLogin: string
+  readonly accountType?: string | undefined
+}
+
+export interface GetInstallationAccountInput extends TelemetryContextFields {
+  readonly provider: string
+  readonly installationId?: string
+}
+
+export interface ListInstallationRepositoriesInput extends TelemetryContextFields {
+  readonly provider: string
+  readonly installationId?: string
 }
 
 export interface CreateIssueCommentInput extends TelemetryContextFields {
@@ -43,6 +63,12 @@ export class SourceControlService extends Context.Service<SourceControlService, 
   readonly verifyRepositoryAccess: (
     input: VerifyRepositoryAccessInput,
   ) => Effect.Effect<RepositoryRef, SourceControlError>
+  readonly getInstallationAccount: (
+    input: GetInstallationAccountInput,
+  ) => Effect.Effect<InstallationAccountRef, SourceControlError>
+  readonly listInstallationRepositories: (
+    input: ListInstallationRepositoriesInput,
+  ) => Effect.Effect<ReadonlyArray<RepositoryRef>, SourceControlError>
   readonly createIssueComment: (
     input: CreateIssueCommentInput,
   ) => Effect.Effect<void, SourceControlError>

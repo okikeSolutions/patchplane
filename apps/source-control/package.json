@@ -1,0 +1,20 @@
+{
+  "name": "@patchplane/source-control-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.90",
+    "@patchplane/core": "workspace:*",
+    "@patchplane/domain": "workspace:*",
+    "@patchplane/plugins": "workspace:*",
+    "convex": "^1.41.0",
+    "effect": "4.0.0-beta.90"
+  },
+  "devDependencies": {
+    "@patchplane/typescript-config": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

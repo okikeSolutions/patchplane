@@ -296,6 +296,46 @@ export const ensureCurrentUser = mutation({
   },
 })
 
+export const grantMembershipPermissions = mutation({
+  args: {
+    secret: v.string(),
+    authId: v.string(),
+    organizationId: v.string(),
+    permissions: v.array(v.string()),
+  },
+  returns: v.object({ updated: v.number() }),
+  handler: async (ctx, args) => {
+    const expected = process.env.PATCHPLANE_SYSTEM_INGESTION_SECRET
+
+    if (expected === undefined || expected.length === 0 || args.secret !== expected) {
+      throw new ConvexError('System ingestion secret required')
+    }
+
+    const memberships = await ctx.db
+      .query('memberships')
+      .withIndex('by_auth_and_org', (q) =>
+        q.eq('authId', args.authId).eq('organizationId', args.organizationId),
+      )
+      .collect()
+    const now = Date.now()
+    let updated = 0
+
+    for (const membership of memberships) {
+      if (membership.status !== 'active') {
+        continue
+      }
+
+      await ctx.db.patch('memberships', membership['_id'], {
+        permissions: [...new Set([...membership.permissions, ...args.permissions])],
+        updatedAt: now,
+      })
+      updated += 1
+    }
+
+    return { updated }
+  },
+})
+
 export const { backfillUsers } = authKit.utils()
 
 export const { authKitAction } = authKit.actions({

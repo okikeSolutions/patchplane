@@ -11,6 +11,8 @@ export const GitHubRepositoryRef = Schema.Struct({
   owner: Schema.String,
   name: Schema.String,
   fullName: Schema.String,
+  repositoryExternalId: Schema.optional(Schema.String),
+  private: Schema.optional(Schema.Boolean),
 })
 export type GitHubRepositoryRef = Schema.Schema.Type<
   typeof GitHubRepositoryRef
@@ -59,6 +61,26 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
     issueNumber: Schema.Number,
     commentId: Schema.Number,
     prompt: Schema.String,
+    url: Schema.optional(Schema.String),
+    sender: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literals([
+      'github.pull_request.opened',
+      'github.pull_request.synchronize',
+    ]),
+    deliveryId: Schema.String,
+    installationId: GitHubInstallationId,
+    owner: Schema.String,
+    repo: Schema.String,
+    repositoryId: Schema.Number,
+    pullRequestId: Schema.Number,
+    pullRequestNumber: Schema.Number,
+    title: Schema.String,
+    prompt: Schema.String,
+    headSha: Schema.String,
+    headRef: Schema.String,
+    baseRef: Schema.String,
     url: Schema.optional(Schema.String),
     sender: Schema.optional(Schema.String),
   }),

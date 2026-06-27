@@ -48,4 +48,49 @@ describe('GitHubEventToWorkflowIntake', () => {
       })
     }),
   )
+
+  it.effect('maps GitHub pull request events to workflow intake with PR provenance', () =>
+    Effect.gen(function* () {
+      const intake = yield* GitHubEventToWorkflowIntake(
+        {
+          kind: 'github.pull_request.synchronize',
+          deliveryId: 'delivery-pr-1',
+          installationId: 123,
+          owner: 'patchplane',
+          repo: 'demo',
+          repositoryId: 456,
+          pullRequestId: 987,
+          pullRequestNumber: 12,
+          title: 'Fix auth callback',
+          prompt: 'Fix auth callback\n\nUpdated branch.',
+          headSha: 'abc123',
+          headRef: 'feature/auth-callback',
+          baseRef: 'main',
+          url: 'https://github.com/patchplane/demo/pull/12',
+          sender: 'octocat',
+        },
+        {
+          actor: {
+            id: makeGitHubAppActorId('123'),
+            displayName: 'GitHub App installation 123',
+          },
+          workspaceId: makeSystemWorkspaceId('workspace-1'),
+          traceId: 'trace-pr-1',
+        },
+      )
+
+      expect(intake.externalRef).toMatchObject({
+        provider: 'github',
+        eventKind: 'github.pull_request.synchronize',
+        repositoryExternalId: '456',
+        issueNumber: 12,
+        pullRequestExternalId: '987',
+        pullRequestNumber: 12,
+        pullRequestHeadSha: 'abc123',
+        pullRequestHeadRef: 'feature/auth-callback',
+        pullRequestBaseRef: 'main',
+        senderLogin: 'octocat',
+      })
+    }),
+  )
 })

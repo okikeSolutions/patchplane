@@ -75,6 +75,8 @@ const sourceControlLayer = Layer.effect(
         owner: repository.owner.login,
         name: repository.name,
         fullName: repository.full_name,
+        repositoryExternalId: String(repository.id),
+        private: repository.private,
       }).pipe(
         Effect.mapError(
           (cause) =>
@@ -92,7 +94,111 @@ const sourceControlLayer = Layer.effect(
         owner: decoded.owner,
         name: decoded.name,
         fullName: decoded.fullName,
+        repositoryExternalId: decoded.repositoryExternalId,
+        private: decoded.private,
       }
+    })
+
+    const getInstallationAccount = Effect.fn(
+      'GitHubProviderPlugin.getInstallationAccount',
+    )(function*(input: {
+      readonly provider: string
+      readonly installationId?: string
+    }) {
+      const installationId = yield* parseGitHubInstallationId(input)
+      const installation = yield* Effect.tryPromise({
+        try: async () => {
+          const result = await app.octokit.request(
+            'GET /app/installations/{installation_id}',
+            { installation_id: installationId },
+          )
+          return result.data
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation: 'getInstallationAccount.github',
+            message: 'GitHub failed to get installation account',
+            cause,
+          }),
+      })
+
+      const account = installation.account
+      if (account === null) {
+        return yield* new SourceControlError({
+          operation: 'getInstallationAccount.github',
+          message: 'GitHub installation has no account',
+          cause: installation,
+        })
+      }
+
+      return {
+        provider: 'github',
+        installationId: String(installationId),
+        accountExternalId: String(account.id),
+        accountLogin: 'login' in account ? account.login : account.slug,
+        accountType: 'type' in account ? account.type : 'Enterprise',
+      }
+    })
+
+    const listInstallationRepositories = Effect.fn(
+      'GitHubProviderPlugin.listInstallationRepositories',
+    )(function*(input: {
+      readonly provider: string
+      readonly installationId?: string
+    }) {
+      const installationId = yield* parseGitHubInstallationId(input)
+      const repositories = yield* Effect.tryPromise({
+        try: async () => {
+          const octokit = await app.getInstallationOctokit(installationId)
+          return await octokit.paginate(
+            octokit.rest.apps.listReposAccessibleToInstallation,
+            { per_page: 100 },
+          )
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation: 'listInstallationRepositories.github',
+            message: 'GitHub failed to list installation repositories',
+            cause,
+          }),
+      })
+
+      return yield* Effect.forEach(repositories, (repository) => {
+        const ownerLogin = typeof repository.owner === 'object' &&
+          repository.owner !== null &&
+          'login' in repository.owner &&
+          typeof repository.owner.login === 'string'
+          ? repository.owner.login
+          : undefined
+
+        return decodeGitHubRepositoryRef({
+          provider: 'github',
+          installationId,
+          owner: ownerLogin,
+          name: repository.name,
+          fullName: repository.full_name,
+          repositoryExternalId: String(repository.id),
+          private: repository.private,
+        }).pipe(
+          Effect.map((decoded) => ({
+            provider: decoded.provider,
+            installationId: String(decoded.installationId),
+            owner: decoded.owner,
+            name: decoded.name,
+            fullName: decoded.fullName,
+            repositoryExternalId: decoded.repositoryExternalId,
+            private: decoded.private,
+          })),
+          Effect.mapError(
+            (cause) =>
+              new SourceControlError({
+                operation: 'listInstallationRepositories.decode',
+                message: 'GitHub returned an invalid installation repository reference',
+                cause,
+              }),
+          ),
+        )
+      })
     })
 
     const createIssueComment = Effect.fn(
@@ -164,6 +270,8 @@ const sourceControlLayer = Layer.effect(
 
     return SourceControlService.of({
       verifyRepositoryAccess,
+      getInstallationAccount,
+      listInstallationRepositories,
       createIssueComment,
       createRepositoryCloneCredentials,
     })

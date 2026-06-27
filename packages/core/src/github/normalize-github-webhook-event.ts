@@ -23,6 +23,31 @@ const GitHubIssueOpenedPayload = Schema.Struct({
   }),
 })
 
+const GitHubPullRequestPayload = Schema.Struct({
+  action: Schema.Literals(['opened', 'synchronize']),
+  installation: Schema.Struct({ id: Schema.Number }),
+  repository: Schema.Struct({
+    id: Schema.Number,
+    name: Schema.String,
+    owner: Schema.Struct({ login: Schema.String }),
+  }),
+  sender: Schema.optional(Schema.Struct({ login: Schema.String })),
+  pull_request: Schema.Struct({
+    id: Schema.Number,
+    number: Schema.Number,
+    title: Schema.String,
+    body: Schema.optional(Schema.NullOr(Schema.String)),
+    html_url: Schema.optional(Schema.String),
+    head: Schema.Struct({
+      ref: Schema.String,
+      sha: Schema.String,
+    }),
+    base: Schema.Struct({
+      ref: Schema.String,
+    }),
+  }),
+})
+
 const GitHubIssueCommentCreatedPayload = Schema.Struct({
   action: Schema.Literal('created'),
   installation: Schema.Struct({ id: Schema.Number }),
@@ -80,6 +105,50 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
           new GitHubError({
             operation: 'normalizeGitHubWebhookEvent.decode',
             message: 'Normalized GitHub issue event is invalid',
+            cause,
+          }),
+      ),
+    )
+  }
+
+  if (input.eventName === 'pull_request') {
+    const payload = yield* Schema.decodeUnknownEffect(GitHubPullRequestPayload)(
+      input.payload,
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitHubError({
+            operation: 'normalizeGitHubWebhookEvent.pull_request',
+            message: 'GitHub pull request webhook payload is missing pull request data',
+            cause,
+          }),
+      ),
+    )
+
+    return yield* decodeGitHubNormalizedWorkflowEvent({
+      kind: payload.action === 'opened'
+        ? 'github.pull_request.opened'
+        : 'github.pull_request.synchronize',
+      deliveryId: input.deliveryId,
+      installationId: payload.installation.id,
+      owner: payload.repository.owner.login,
+      repo: payload.repository.name,
+      repositoryId: payload.repository.id,
+      pullRequestId: payload.pull_request.id,
+      pullRequestNumber: payload.pull_request.number,
+      title: payload.pull_request.title,
+      prompt: [payload.pull_request.title, payload.pull_request.body ?? ''].filter(Boolean).join('\n\n'),
+      headSha: payload.pull_request.head.sha,
+      headRef: payload.pull_request.head.ref,
+      baseRef: payload.pull_request.base.ref,
+      ...(payload.pull_request.html_url === undefined ? {} : { url: payload.pull_request.html_url }),
+      ...(payload.sender?.login === undefined ? {} : { sender: payload.sender.login }),
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitHubError({
+            operation: 'normalizeGitHubWebhookEvent.decode',
+            message: 'Normalized GitHub pull request event is invalid',
             cause,
           }),
       ),
