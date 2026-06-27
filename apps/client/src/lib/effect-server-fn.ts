@@ -1,9 +1,9 @@
 import { createServerFn } from '@tanstack/react-start'
 import { Cause, Effect, Exit, Schema } from 'effect'
-import { AuthService } from '@patchplane/core/services/auth-service'
-import { StorageService } from '@patchplane/core/services/storage-service'
-import { captureTelemetryCause, TelemetryService, withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
-import { publicErrorMessage, ValidationError } from '@patchplane/domain/errors'
+import type { AuthService } from '@patchplane/core/services/auth-service'
+import type { StorageService } from '@patchplane/core/services/storage-service'
+import type { TelemetryService } from '@patchplane/core/services/telemetry-service'
+import { ValidationError } from '@patchplane/domain/errors'
 import type {
   ServerFunctionContext,
   ServerFunctionResult,
@@ -108,7 +108,22 @@ export function effectServerFn<
       return result.value
     })
     .handler(async ({ data }: { readonly data: S['Type'] }) => {
-      const { patchPlaneRuntime, randomTraceId } = await import('@/effect/runtime')
+      if (!import.meta.env.SSR) {
+        return {
+          ok: false as const,
+          traceId: globalThis.crypto?.randomUUID?.() ?? 'client',
+          error: 'Server functions must run on the server',
+        }
+      }
+
+      const [telemetryModule, errorsModule, runtimeModule] = await Promise.all([
+        import('@patchplane/core/services/telemetry-service'),
+        import('@patchplane/domain/errors'),
+        import('@/effect/runtime'),
+      ])
+      const { captureTelemetryCause, withTelemetrySpan } = telemetryModule
+      const { publicErrorMessage } = errorsModule
+      const { patchPlaneRuntime, randomTraceId } = runtimeModule
       const traceId = await randomTraceId()
       const context: ServerFunctionContext = {
         traceId,
@@ -144,14 +159,6 @@ export function effectServerFn<
           ], { concurrency: 'unbounded', discard: true }),
         ),
       )
-
-      if (!import.meta.env.SSR) {
-        return {
-          ok: false as const,
-          traceId: context.traceId,
-          error: 'Server functions must run on the server',
-        }
-      }
 
       const exit = await patchPlaneRuntime.runPromiseExit(program)
 

@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "test": "bun run i18n:compile && vitest run",
     "smoke": "bun src/scripts/smoke-workflow.ts",
+    "smoke:github-hosted": "bun src/scripts/smoke-github-hosted.ts",
     "typecheck": "bun run i18n:compile && tsc --project tsconfig.json --noEmit",
     "i18n:compile": "bun src/scripts/compile-paraglide.ts"
   },
@@ -15,6 +16,7 @@
     "@base-ui/react": "^1.5.0",
     "@convex-dev/react-query": "^0.1.0",
     "@convex-dev/workos": "^0.0.3",
+    "@effect/platform-browser": "4.0.0-beta.90",
     "@effect/platform-node": "4.0.0-beta.90",
     "@fontsource-variable/geist": "^5.2.9",
     "@inlang/paraglide-js": "^2.19.0",
@@ -30,9 +32,11 @@
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-router-with-query": "^1.130.17",
     "@tanstack/react-start": "latest",
+    "@tanstack/react-table": "^8.21.3",
     "@tanstack/router-core": "1.171.13",
     "@tanstack/router-plugin": "^1.168.18",
     "@workos/authkit-tanstack-react-start": "^0.8.6",
+    "alchemy": "^2.0.0-beta.58",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -56,6 +60,7 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260627.1",
     "@inlang/plugin-m-function-matcher": "^2.2.7",
     "@inlang/plugin-message-format": "^4.4.0",
     "@tailwindcss/typography": "^0.5.20",

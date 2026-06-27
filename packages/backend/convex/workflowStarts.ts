@@ -93,6 +93,11 @@ const externalWorkflowRefArg = v.object({
   issueExternalId: v.optional(v.string()),
   issueNumber: v.optional(v.number()),
   issueTitle: v.optional(v.string()),
+  pullRequestExternalId: v.optional(v.string()),
+  pullRequestNumber: v.optional(v.number()),
+  pullRequestHeadSha: v.optional(v.string()),
+  pullRequestHeadRef: v.optional(v.string()),
+  pullRequestBaseRef: v.optional(v.string()),
   commentExternalId: v.optional(v.string()),
   url: v.optional(v.string()),
   senderProvider: v.optional(v.string()),
@@ -111,6 +116,45 @@ const workflowStartArgs = {
   ),
   traceId: v.string(),
   prompt: v.string(),
+}
+
+const sandboxPolicyArg = v.object({
+  lifecycle: v.object({
+    ephemeral: v.boolean(),
+    retainAfterRun: v.boolean(),
+    autoStopMinutes: v.optional(v.number()),
+    autoArchiveMinutes: v.optional(v.number()),
+    autoDeleteMinutes: v.optional(v.number()),
+  }),
+  network: v.object({
+    blockAll: v.optional(v.boolean()),
+    allowList: v.optional(v.string()),
+  }),
+  resources: v.object({
+    cpu: v.optional(v.number()),
+    memoryGb: v.optional(v.number()),
+    diskGb: v.optional(v.number()),
+  }),
+  timeoutSeconds: v.optional(v.number()),
+})
+
+function sortedByNumber<A>(
+  items: ReadonlyArray<A>,
+  value: (item: A) => number,
+): Array<A> {
+  return items.reduce<Array<A>>((sorted, item) => {
+    const insertAt = sorted.findIndex((candidate) => value(item) < value(candidate))
+
+    if (insertAt === -1) {
+      return [...sorted, item]
+    }
+
+    return [
+      ...sorted.slice(0, insertAt),
+      item,
+      ...sorted.slice(insertAt),
+    ]
+  }, [])
 }
 
 const runtimeEventReturn = v.object({
@@ -133,9 +177,41 @@ const sandboxExecutionReturn = v.object({
   exitCode: v.optional(v.number()),
   stdout: v.string(),
   stderr: v.optional(v.string()),
-  policyJson: v.optional(v.string()),
+  policy: v.optional(sandboxPolicyArg),
   startedAt: v.number(),
   completedAt: v.number(),
+})
+
+const workflowDetailReturn = v.object({
+  promptRequest: v.object({
+    id: v.string(),
+    workspaceId: v.string(),
+    actorId: v.string(),
+    traceId: v.string(),
+    source: v.union(
+      v.literal('dev'),
+      v.literal('app'),
+      v.literal('external'),
+    ),
+    prompt: v.string(),
+    externalRef: v.optional(externalWorkflowRefArg),
+    status: v.literal('created'),
+    createdAt: v.number(),
+  }),
+  workflowRun: v.object({
+    id: v.string(),
+    promptRequestId: v.string(),
+    workspaceId: v.string(),
+    traceId: v.string(),
+    status: v.union(
+      v.literal('queued'),
+      v.literal('running'),
+      v.literal('reviewed'),
+    ),
+    createdAt: v.number(),
+  }),
+  runtimeEvents: v.array(runtimeEventReturn),
+  sandboxExecutions: v.array(sandboxExecutionReturn),
 })
 
 const workflowStartReturn = v.object({
@@ -190,6 +266,11 @@ async function createWorkflowStartRecord(
       issueExternalId?: string
       issueNumber?: number
       issueTitle?: string
+      pullRequestExternalId?: string
+      pullRequestNumber?: number
+      pullRequestHeadSha?: string
+      pullRequestHeadRef?: string
+      pullRequestBaseRef?: string
       commentExternalId?: string
       url?: string
       senderProvider?: string
@@ -465,7 +546,7 @@ export const recordSandboxExecution = mutation({
     exitCode: v.optional(v.number()),
     stdout: v.string(),
     stderr: v.optional(v.string()),
-    policyJson: v.optional(v.string()),
+    policy: v.optional(sandboxPolicyArg),
     startedAt: v.number(),
     completedAt: v.number(),
   },
@@ -487,7 +568,7 @@ export const recordSandboxExecution = mutation({
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
       stdout: args.stdout,
       ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
-      ...(args.policyJson === undefined ? {} : { policyJson: args.policyJson }),
+      ...(args.policy === undefined ? {} : { policy: args.policy }),
       startedAt: args.startedAt,
       completedAt: args.completedAt,
       createdAt: Date.now(),
@@ -507,9 +588,96 @@ export const recordSandboxExecution = mutation({
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
       stdout: args.stdout,
       ...(args.stderr === undefined ? {} : { stderr: args.stderr }),
-      ...(args.policyJson === undefined ? {} : { policyJson: args.policyJson }),
+      ...(args.policy === undefined ? {} : { policy: args.policy }),
       startedAt: args.startedAt,
       completedAt: args.completedAt,
+    }
+  },
+})
+
+export const getDetail = query({
+  args: {
+    workflowRunId: v.id('workflowRuns'),
+  },
+  returns: workflowDetailReturn,
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    requireWorkOSWorkspace(identity, workflowRun.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      workflowRun.workspaceId,
+      'workspace:view',
+    )
+
+    const promptRequest = await ctx.db.get('promptRequests', workflowRun.promptRequestId)
+    if (promptRequest === null) {
+      throw new ConvexError('Workflow prompt request not found')
+    }
+
+    const runtimeEvents = await ctx.db
+      .query('runtimeEvents')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const sandboxExecutions = await ctx.db
+      .query('sandboxExecutions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    return {
+      promptRequest: {
+        id: promptRequest['_id'],
+        workspaceId: promptRequest.workspaceId,
+        actorId: promptRequest.actorId,
+        traceId: promptRequest.traceId ?? 'legacy',
+        source: promptRequest.source,
+        prompt: promptRequest.prompt,
+        ...(promptRequest.externalRef === undefined
+          ? {}
+          : { externalRef: promptRequest.externalRef }),
+        status: promptRequest.status,
+        createdAt: promptRequest.createdAt,
+      },
+      workflowRun: {
+        id: workflowRun['_id'],
+        promptRequestId: workflowRun.promptRequestId,
+        workspaceId: workflowRun.workspaceId,
+        traceId: workflowRun.traceId ?? 'legacy',
+        status: workflowRun.status,
+        createdAt: workflowRun.createdAt,
+      },
+      runtimeEvents: sortedByNumber(runtimeEvents, (event) => event.occurredAt)
+        .map((event) => ({
+          id: event['_id'],
+          workflowRunId: event.workflowRunId,
+          provider: event.provider,
+          type: event.type,
+          occurredAt: event.occurredAt,
+          ...(event.summary === undefined ? {} : { summary: event.summary }),
+          ...(event.payloadJson === undefined ? {} : { payloadJson: event.payloadJson }),
+        })),
+      sandboxExecutions: sortedByNumber(sandboxExecutions, (execution) => execution.startedAt)
+        .map((execution) => ({
+          id: execution['_id'],
+          workflowRunId: execution.workflowRunId,
+          provider: execution.provider,
+          sandboxId: execution.sandboxId,
+          command: execution.command,
+          status: execution.status,
+          ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
+          stdout: execution.stdout,
+          ...(execution.stderr === undefined ? {} : { stderr: execution.stderr }),
+          ...(execution.policy === undefined ? {} : { policy: execution.policy }),
+          startedAt: execution.startedAt,
+          completedAt: execution.completedAt,
+        })),
     }
   },
 })

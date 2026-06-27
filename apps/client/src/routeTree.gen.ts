@@ -15,6 +15,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api/github/webhook'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
+import { Route as ApiGithubInstallStartRouteImport } from './routes/api/github/install/start'
+import { Route as ApiGithubInstallCallbackRouteImport } from './routes/api/github/install/callback'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -46,6 +48,17 @@ const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
   path: '/api/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGithubInstallStartRoute = ApiGithubInstallStartRouteImport.update({
+  id: '/api/github/install/start',
+  path: '/api/github/install/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubInstallCallbackRoute =
+  ApiGithubInstallCallbackRouteImport.update({
+    id: '/api/github/install/callback',
+    path: '/api/github/install/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +67,8 @@ export interface FileRoutesByFullPath {
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
+  '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +77,8 @@ export interface FileRoutesByTo {
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
+  '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +88,8 @@ export interface FileRoutesById {
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
+  '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +100,8 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/api/github/install/callback'
+    | '/api/github/install/start'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +110,8 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/api/github/install/callback'
+    | '/api/github/install/start'
   id:
     | '__root__'
     | '/'
@@ -97,6 +120,8 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/api/github/install/callback'
+    | '/api/github/install/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +131,8 @@ export interface RootRouteChildren {
   ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiAuthSignInRoute: typeof ApiAuthSignInRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
+  ApiGithubInstallCallbackRoute: typeof ApiGithubInstallCallbackRoute
+  ApiGithubInstallStartRoute: typeof ApiGithubInstallStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -152,6 +179,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/github/install/start': {
+      id: '/api/github/install/start'
+      path: '/api/github/install/start'
+      fullPath: '/api/github/install/start'
+      preLoaderRoute: typeof ApiGithubInstallStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/install/callback': {
+      id: '/api/github/install/callback'
+      path: '/api/github/install/callback'
+      fullPath: '/api/github/install/callback'
+      preLoaderRoute: typeof ApiGithubInstallCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,6 +203,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiAuthSignInRoute: ApiAuthSignInRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
+  ApiGithubInstallCallbackRoute: ApiGithubInstallCallbackRoute,
+  ApiGithubInstallStartRoute: ApiGithubInstallStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AppDashboardPage } from '@/components/app-shell/app-dashboard-page'
+import { AppWorkflowConsolePage } from '@/components/app-shell/app-workflow-console-page'
 
 export const Route = createFileRoute('/app')({
-  component: AppDashboardPage,
+  component: AppWorkflowConsolePage,
 })

@@ -3,9 +3,10 @@ import {
   BoxesIcon,
   ClipboardCheckIcon,
   GitBranchIcon,
-  LayoutDashboardIcon,
   LifeBuoyIcon,
+  ScrollTextIcon,
   Settings2Icon,
+  ShieldCheckIcon,
   WorkflowIcon,
 } from 'lucide-react'
 import * as m from '@/paraglide/messages'
@@ -24,19 +25,20 @@ import {
 
 const navMain = [
   {
-    title: 'Dashboard',
+    title: 'Workflows',
     href: '#overview',
-    icon: LayoutDashboardIcon,
+    icon: WorkflowIcon,
     isActive: true,
   },
-  { title: 'Workflows', href: '#workflows', icon: WorkflowIcon },
-  { title: 'Repositories', href: '#repositories', icon: GitBranchIcon },
   { title: 'Reviews', href: '#reviews', icon: ClipboardCheckIcon },
+  { title: 'Sources', href: '#repositories', icon: GitBranchIcon },
   { title: 'Sandboxes', href: '#sandboxes', icon: BoxesIcon },
+  { title: 'Logs', href: '#logs', icon: ScrollTextIcon },
 ]
 
 const navSecondary = [
-  { title: 'Architecture', href: '/about', icon: LifeBuoyIcon },
+  { title: 'Trust model', href: '/about', icon: ShieldCheckIcon },
+  { title: 'Support', href: '#support', icon: LifeBuoyIcon },
   { title: 'Settings', href: '#settings', icon: Settings2Icon },
 ]
 
@@ -45,7 +47,7 @@ export function AppSidebar() {
   const displayName = user?.firstName ?? user?.email ?? m.app_operator_fallback()
 
   return (
-    <Sidebar variant="inset" collapsible="icon">
+    <Sidebar className="border-sidebar-border/60" collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -53,12 +55,12 @@ export function AppSidebar() {
               size="lg"
               render={<a href="#overview" aria-label="PatchPlane overview" />}
             >
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg border border-white/8 bg-sidebar-primary/10 shadow-[0_0_24px_rgb(255_169_72/0.22)]">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg border border-sidebar-border/40 bg-sidebar-primary/10 shadow-[0_0_24px_rgb(255_169_72/0.22)]">
                 <span className="size-3 rounded-full bg-[linear-gradient(135deg,rgb(255_144_52),rgb(255_209_122))] shadow-[0_0_18px_rgb(255_169_72/0.6)]" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">PatchPlane</span>
-                <span className="truncate text-xs">Trust boundary</span>
+                <span className="truncate text-xs">Workflow review</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

@@ -40,6 +40,12 @@ const listRecentWorkflowStarts = makeFunctionReference<
   Array<unknown>
 >('workflowStarts:listRecent')
 
+const getWorkflowDetail = makeFunctionReference<
+  'query',
+  { workflowRunId: string },
+  unknown
+>('workflowStarts:getDetail')
+
 const createWorkflowStartFromExternalIntake = makeFunctionReference<
   'mutation',
   Record<string, unknown>,
@@ -284,7 +290,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       status: 'succeeded',
       exitCode: 0,
       stdout: 'ok',
-      policyJson: JSON.stringify(policy),
+      policy,
       startedAt: 1,
       completedAt: 2,
     })
@@ -292,11 +298,67 @@ describe('workflowStarts trusted boundary and authz', () => {
     expect(result).toMatchObject({
       provider: 'daytona',
       sandboxId: 'sandbox-1',
-      policyJson: JSON.stringify(policy),
+      policy,
     })
 
     const rows = await t.run((ctx) => ctx.db.query('sandboxExecutions').collect())
-    expect(rows[0]?.policyJson).toBe(JSON.stringify(policy))
+    expect(rows[0]?.policy).toEqual(policy)
+  })
+
+  test('getDetail returns workflow context, runtime events, and sandbox executions', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'daytona',
+      sandboxId: 'sandbox-1',
+      command: 'bun test',
+      status: 'failed',
+      exitCode: 1,
+      stdout: 'failing test output',
+      stderr: 'expected true to be false',
+      startedAt: 10,
+      completedAt: 20,
+    })
+
+    await t.mutation(makeFunctionReference<'mutation', Record<string, unknown>, unknown>('workflowStarts:recordRuntimeEvents'), {
+      systemSecret: 'system_test',
+      events: [
+        {
+          workflowRunId: workflowStart.workflowRun.id,
+          provider: 'pi',
+          type: 'agent.started',
+          occurredAt: 5,
+          summary: 'Agent started',
+        },
+      ],
+    })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+
+    expect(detail).toMatchObject({
+      promptRequest: { prompt: 'Ship it' },
+      workflowRun: { id: workflowStart.workflowRun.id, status: 'reviewed' },
+      runtimeEvents: [{ provider: 'pi', type: 'agent.started' }],
+      sandboxExecutions: [{ provider: 'daytona', status: 'failed' }],
+    })
+  })
+
+  test('getDetail requires active organization access', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await expect(
+      convexTest(schema, modules).query(getWorkflowDetail, {
+        workflowRunId: workflowStart.workflowRun.id,
+      }),
+    ).rejects.toThrow('Authentication required')
   })
 
   test('listRecent requires active WorkOS organization access', async () => {

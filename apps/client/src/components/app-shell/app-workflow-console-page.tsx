@@ -4,27 +4,27 @@ import {
   Unauthenticated,
 } from 'convex/react'
 import { AppSidebar } from './app-sidebar'
-import { DashboardContent } from './dashboard-content'
-import { DashboardHero } from './dashboard-hero'
-import { LoadingDashboard } from './loading-dashboard'
-import { SignedOutDashboard } from './signed-out-dashboard'
+import { LoadingWorkflowConsole } from './loading-workflow-console'
+import { SignedOutWorkflowConsole } from './signed-out-workflow-console'
+import { WorkflowConsoleContent } from './workflow-console-content'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 
-export function AppDashboardPage() {
+export function AppWorkflowConsolePage() {
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <main className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
-          <DashboardHero />
+        <main className="flex flex-1 flex-col">
           <Authenticated>
-            <DashboardContent />
+            <WorkflowConsoleContent />
           </Authenticated>
           <AuthLoading>
-            <LoadingDashboard />
+            <LoadingWorkflowConsole />
           </AuthLoading>
           <Unauthenticated>
-            <SignedOutDashboard />
+            <div className="p-4 md:p-6">
+              <SignedOutWorkflowConsole />
+            </div>
           </Unauthenticated>
         </main>
       </SidebarInset>

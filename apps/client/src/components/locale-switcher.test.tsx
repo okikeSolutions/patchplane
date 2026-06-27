@@ -56,6 +56,8 @@ vi.mock('@/paraglide/runtime', () => ({
 }))
 
 vi.mock('@/paraglide/messages', () => ({
+  header_locale_de: () => 'DE',
+  header_locale_en: () => 'EN',
   header_locale_switcher: () => 'Language',
 }))
 
