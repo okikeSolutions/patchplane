@@ -7,7 +7,7 @@ This app owns framework integration:
 - TanStack Router/Start routes and server functions,
 - WorkOS AuthKit UI/session integration,
 - Convex client/AuthKit integration,
-- `/api/github/webhook`,
+- lightweight GitHub install callback handoff to the dedicated source-control Worker,
 - Effect `ManagedRuntime` composition,
 - UI shell and workflow prompt/read-model surfaces.
 
@@ -34,8 +34,8 @@ bun run typecheck
 
 Current runtime:
 
-- `src/effect/runtime.ts` — the single PatchPlane `ManagedRuntime` for app/server route execution.
-- `src/effect/plugin-layers.ts` — builds plugin layers from surfaces selected in the root `patchplane.config.json`.
+- `src/effect/runtime.ts` — the PatchPlane `ManagedRuntime` for app/server route execution.
+- `src/effect/app-layer.ts` — app runtime layer for WorkOS, Convex, telemetry, and web crypto.
 - `src/effect/patchplane-config.ts` — loads non-secret PatchPlane project config.
 
 Server functions and API routes dynamically import the runtime only inside server handlers so server-only SDK code does not enter the browser bundle.
@@ -47,7 +47,9 @@ Server functions and API routes dynamically import the runtime only inside serve
 - `/` — landing page.
 - `/app` — authenticated alpha workflow prompt/read-model shell.
 - `/api/auth/sign-in` and `/api/auth/callback` — WorkOS AuthKit hosted sign-in flow.
-- `/api/github/webhook` — GitHub App webhook intake.
+- `/api/github/install/start` — hosted GitHub App installation start.
+- `/api/github/install/callback` — hosted GitHub App installation callback.
+- `/api/github/webhook` — compatibility stub; hosted GitHub webhook intake runs in `apps/source-control`.
 
 ## GitHub webhook intake
 
@@ -67,19 +69,35 @@ GITHUB_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 CONVEX_URL or VITE_CONVEX_URL
 PATCHPLANE_SYSTEM_INGESTION_SECRET
-PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo
+PATCHPLANE_GITHUB_APP_SLUG or PATCHPLANE_GITHUB_APP_INSTALL_URL
+PATCHPLANE_PUBLIC_APP_URL=https://<id>.ngrok-free.app
+PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo # local/self-host fallback
 PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 ```
 
-Flow:
+Hosted flow:
 
 ```text
-raw request body
+/api/github/install/start
+→ Convex pending GitHub connection intent
+→ GitHub App installation screen
+→ /api/github/install/callback
+→ Octokit installation repository listing
+→ Convex connected repositories
+→ source-control Worker /api/github/webhook
 → GitHubWebhookService.verifyWebhook
-→ IngestGitHubWebhookToWorkflowIntake
-→ repository allowlist
+→ Convex connected repository lookup by installation/repository id
 → StartWorkflowFromIntake
-→ StorageService.createWorkflowFromIntake
+→ sandbox verification
+→ GitHub PR trust report comment
+```
+
+Local/self-host fallback can still route through `PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES` and `PATCHPLANE_GITHUB_WORKSPACE_ID` / `PATCHPLANE_WORKOS_ORGANIZATION_ID`.
+
+Run the hosted smoke checklist with:
+
+```bash
+bun run --cwd apps/client smoke:github-hosted -- --base-url=https://<id>.ngrok-free.app
 ```
 
 The success response is intentionally compact and returns IDs/provider metadata rather than echoing full webhook payloads.

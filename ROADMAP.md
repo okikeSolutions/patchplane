@@ -60,7 +60,7 @@ AuthService              -> WorkOS AuthKit
 StorageService           -> Convex workflow state/read model
 SourceControlService     -> GitHub App / Octokit
 SandboxService           -> Daytona
-RuntimeService           -> Pi coding-agent runtime
+RuntimeService           -> Pi coding-agent runtime (sandbox-backed for alpha)
 ModelGatewayService      -> Cloudflare AI Gateway
 ArtifactsService         -> Cloudflare R2
 TelemetryService         -> Sentry + Effect logs/spans
@@ -127,7 +127,7 @@ Public goals:
 - [x] Use normal package dependencies in PatchPlane packages.
 - [x] Pin Effect v4 / effect-smol consistently where used.
 - [x] Use `@daytona/sdk` for Daytona integration.
-- [x] Use Pi coding-agent packages behind a runtime plugin boundary.
+- [x] Use Pi coding-agent behavior behind a runtime boundary. For alpha, Pi executes inside Daytona rather than being bundled into the web/control-plane Worker.
 - [x] Use Octokit/GitHub App APIs behind a GitHub plugin boundary.
 - [x] Keep `apps/client` as the TanStack Start composition root.
 - [x] Keep Convex deployment functions under `packages/backend/convex` for now.
@@ -408,7 +408,7 @@ Acceptance criteria:
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** In progress; core Daytona execution path implemented, live smoke and policy metadata added
+**Status:** Complete for Daytona lifecycle/policy/live-smoke scope; durable R2 raw artifact capture remains in the artifact slice
 
 Tasks:
 
@@ -420,7 +420,13 @@ Tasks:
 - [x] Implement command execution.
 - [x] Collect basic command logs in workflow storage; R2-backed artifact capture remains in the artifact slice.
 - [x] Stop/destroy sandboxes on cancellation/failure where possible after acquisition succeeds.
-- [x] Add live Daytona smoke script with redacted API-key handling and cleanup polling.
+- [x] Add live Daytona smoke script with redacted API-key handling, public repository clone, command execution, and cleanup polling.
+- [x] Persist normalized sandbox policy as typed Convex metadata rather than JSON glue.
+- [x] Add safe fake Daytona lifecycle tests for clone failure, command failure, non-zero exit, interruption, retain mode, and delete retry.
+
+Implementation note:
+
+- M8 currently includes the pragmatic `daytona-pi` command adapter: Daytona provisions the sandbox and invokes the Pi CLI inside it. This is the alpha bridge, not the final RuntimeService split. The web/control-plane runtime must not load the in-process Pi SDK plugin for this path.
 
 Acceptance criteria:
 
@@ -433,7 +439,7 @@ Acceptance criteria:
 
 ### M8.25 — Minimal Cloudflare infra provisioning
 
-**Status:** Planned, alpha-supporting only
+**Status:** Complete for minimal alpha R2 + AI Gateway provisioning; runtime artifact plugin remains in the later artifact slice
 
 Purpose:
 
@@ -456,44 +462,133 @@ Explicit non-goals:
 
 Tasks:
 
-- [ ] Add `apps/infra/alchemy.run.ts`.
-- [ ] Add dev/prod stage naming for PatchPlane-owned infrastructure.
-- [ ] Provision R2 bucket(s) for evidence artifacts.
-- [ ] Provision AI Gateway for Pi model access.
-- [ ] Document required env vars and generated config values.
-- [ ] Add deployment scripts for local/CI usage.
+- [x] Add `apps/infra/alchemy.run.ts`.
+- [x] Add dev/prod stage naming for PatchPlane-owned infrastructure.
+- [x] Provision R2 bucket(s) for evidence artifacts.
+- [x] Provision AI Gateway for Pi model access.
+- [x] Document required env vars and generated config values.
+- [x] Add deployment scripts for local/CI usage.
 
 Acceptance criteria:
 
-- Running the infra deployment for a dev stage creates the R2 bucket and AI Gateway.
-- PatchPlane runtime code does not import Alchemy.
-- `packages/core` imports no Alchemy or Cloudflare SDK types.
+- [x] Running the infra deployment for a dev stage creates the R2 bucket and AI Gateway.
+  - Verified with `CI=1 bun run infra:deploy -- --env-file ../../.env.local --stage dev --yes`.
+  - Created `patchplane-dev-evidence-artifacts` and `patchplane-dev-model-gateway`.
+- [x] PatchPlane runtime code does not import Alchemy.
+- [x] `packages/core` imports no Alchemy or Cloudflare SDK types.
 
 ---
 
 ### M8.5 — Alpha Workflow Visibility Slice
 
-**Status:** Planned after GitHub and initial sandbox data are present
+**Status:** Implemented for the current Convex workflow read model; durable R2 artifact capture remains deferred to the artifact slice
 
 Scope:
 
 - Make the trust loop visible early, before a polished dashboard.
 - Use simple tables, cards, and vertical timelines.
-- Show workflow status, source, repository, sandbox state, runtime state, artifact references, and decision state.
+- Show workflow status, source, repository, sandbox state, runtime state, artifact references when present, and decision state.
 
 Tasks:
 
-- [ ] Add workflow detail view or side panel.
-- [ ] Show prompt/intake summary.
-- [ ] Show repository and sandbox status.
-- [ ] Show command/log placeholders backed by real records where available.
-- [ ] Show provenance timeline events.
-- [ ] Keep complex graph UI deferred.
+- [x] Add workflow detail view or side panel.
+- [x] Show prompt/intake summary.
+- [x] Show repository and sandbox status.
+- [x] Show command/log placeholders backed by real records where available.
+- [x] Show provenance timeline events.
+- [x] Keep complex graph UI deferred.
+- [x] Use TanStack Table with the shared table primitive for the workflow queue.
+- [x] Use TanStack Form with Effect Standard Schema validation for workflow-start input.
+- [x] Add direct M8.5 hardening coverage for workflow queue filtering/selection and workflow-start form validation.
 
 Acceptance criteria:
 
-- A real GitHub/Daytona-backed workflow is understandable from the UI without reading server logs.
-- The UI communicates why a patch is still untrusted, pending review, approved, or rejected.
+- [x] A real GitHub/Daytona-backed workflow is understandable from the UI without reading server logs.
+- [x] The UI communicates why a patch is still untrusted, pending review, approved, or rejected.
+
+Evidence:
+
+- Authenticated `/app` now renders a workflow review console instead of dashboard cards.
+- Auth loading uses the same workflow-console skeleton instead of the old metric-card dashboard.
+- The console shows workflow status, source/repository, trust state, selected workflow inspector, sandbox/log/decision evidence, detail tabs, timeline, and artifact-reference state.
+- The selected queue row and inspector share the same detail-backed trust state, so sandbox failure is not hidden behind a generic reviewed/needs-review row.
+- Workflow rows open an object-specific detail sheet directly while keeping the selected inspector state in sync.
+- Convex `workflowStarts.getDetail` returns prompt, workflow run, runtime events, and sandbox executions for the detail surface.
+- `apps/client/src/components/app-shell/workflow-console.test.tsx` covers queue rendering, search/trust-state filtering, inspector evidence, row-open behavior, detail tabs, and artifact-reference display.
+- `apps/client/src/components/app-shell/start-workflow-panel.test.tsx` covers TanStack Form submission behavior, authenticated-workspace gating, and Effect Standard Schema validation blocking invalid prompts.
+- `apps/client/src/components/app-shell/loading-workflow-console.test.tsx` guards against the old metric-card loading dashboard returning.
+
+---
+
+### M8.6 — Hosted GitHub Repo Connection Slice
+
+**Status:** Implemented and live-smoke verified for the hosted GitHub App connection path
+
+Goal:
+Make the hosted PatchPlane alpha usable without CLI setup and without asking users to manually install/configure their own GitHub App.
+
+User-facing flow:
+1. User signs in to PatchPlane.
+2. User clicks "Connect GitHub".
+3. GitHub shows the standard account/org and repository access screen.
+4. User selects one or more repositories.
+5. PatchPlane stores the GitHub installation/account/repository mapping.
+6. Dashboard shows connected repositories and connection status.
+7. Developer opens or updates a PR.
+8. PatchPlane receives the PR event.
+9. PatchPlane runs verification.
+10. PatchPlane posts a trust report as a PR comment.
+11. Dashboard shows the run result, logs, and decision state.
+
+Implementation notes:
+- Hosted PatchPlane uses a PatchPlane-owned GitHub App.
+- Use Octokit for GitHub App authentication, installation access tokens, webhook handling, repository listing, PR comments, and check/status updates.
+- Users should not see GitHub App terminology unless GitHub itself displays it during authorization.
+- Store installation ID, account/org ID, selected repositories, and permission state.
+- Treat missing repo access as a reconnect/configuration issue, not a developer setup task.
+
+Completed implementation:
+- [x] Added provider-owned repository connection domain schemas in `packages/domain/src/repository-connection.ts`.
+- [x] Added Convex `connectedRepositoryAccounts`, `connectedRepositories`, and `githubConnectionIntents` tables with indexes for workspace listing, pending install state, and GitHub webhook routing.
+- [x] Added authenticated Convex repository connection mutations/queries plus system-secret webhook route lookup in `packages/backend/convex/connectedRepositories.ts`.
+- [x] Extended `SourceControlService` with installation account and installation repository listing contracts.
+- [x] Implemented GitHub App installation account/repository listing in `GitHubProviderPlugin` via Octokit installation auth, including API failure and malformed metadata coverage.
+- [x] Added normalized `pull_request.opened` and `pull_request.synchronize` event support with PR provenance fields.
+- [x] Added `/api/github/install/start` to create a pending connection intent and redirect to the GitHub App installation URL.
+- [x] Added `/api/github/install/callback` to consume the install intent, list installation repositories, and store connected repositories in Convex.
+- [x] Added connected GitHub repository UI in the authenticated app shell with a Connect GitHub button and connected repository status list.
+- [x] Updated `/api/github/webhook` to route hosted webhooks through Convex connected repository lookup, while preserving the env allowlist fallback for OSS/local self-hosted routing.
+- [x] PR opened/synchronize events now start the existing verification path and publish the sandbox trust report through the existing GitHub issue-comment publication path.
+- [x] Added tests for Convex repository connection storage/routing/intents, PR webhook normalization/intake mapping, PR trust-report publication, Octokit installation listing/failures, install flow helpers, and webhook route workspace resolution.
+- [x] Live-smoked hosted GitHub App install/callback against a real selected repository, storing the installation account and selected repository in Convex.
+- [x] Live-smoked PR `synchronize` webhook routing through Convex connected repository lookup, Daytona/Pi sandbox execution, Convex `sandboxExecutions` persistence, and GitHub PR trust-report comment publication.
+- [x] Added a PatchPlane bot-comment feedback-loop guard for generated trust-report comments.
+- [x] Live-smoked the direct Convex-backed Daytona/Pi path from `StartWorkflowFromIntake` through `workflowStarts:createFromExternalIntake`, `RunSandboxAgentForWorkflow`, and `workflowStarts:recordSandboxExecution`.
+
+Remaining hardening:
+- [ ] Add a reusable `smoke:convex-sandbox` script for the live Convex + Daytona/Pi path instead of relying on an inline command.
+- [ ] Add browser E2E for Connect GitHub once stable hosted credentials are available.
+- [ ] Add richer dashboard aggregation for latest verification status per connected repository.
+
+Acceptance criteria:
+- [x] No CLI required for hosted onboarding.
+- [x] No manual GitHub App creation required.
+- [x] No webhook URL copy/paste required.
+- [x] User can connect GitHub through PatchPlane.
+- [x] User can select repositories on GitHub's screens.
+- [x] PatchPlane can list connected repositories.
+- [x] PatchPlane reacts to PR opened/synchronize events.
+- [x] PatchPlane posts a clear PR trust report.
+- [ ] Dashboard shows connected repo, latest verification run, and status.
+
+Goal:
+```
+Hosted:
+Sign in → Connect GitHub → Select repo on GitHub screen → Open PR → PatchPlane verifies → PR trust report + dashboard run
+
+OSS:
+CLI/self-host setup → configure GitHub/App manually if needed → run PatchPlane locally/self-hosted
+```
 
 ---
 
@@ -528,28 +623,38 @@ Acceptance criteria:
 
 ---
 
-### M9 — Pi Agent Runtime Plugin
+### M9 — Remote Sandbox Agent Runtime Adapter
 
-**Status:** Next alpha runtime after minimal sandbox execution exists
+**Status:** In progress — sandbox-backed Pi command path exists; runtime adapter extraction and event normalization remain
+
+Intent:
+
+PatchPlane does not run coding-agent runtimes in-process in the trusted control plane. Pi now, and Flue later, execute only inside remote sandbox environments. The control plane provisions the sandbox, launches the runtime process, captures untrusted output/events, normalizes them into PatchPlane schemas, and persists them through Convex/R2.
 
 Tasks:
 
-- [x] Add initial `PiAgentConfig`.
-- [x] Instantiate Pi coding-agent SDK session inside runtime boundary.
-- [ ] Replace OpenAI-only runtime assumptions with configurable provider/model settings.
-- [ ] Default alpha model access to Cloudflare AI Gateway where configured.
-- [ ] Keep direct OpenAI or other direct providers as local/debug fallback options.
-- [ ] Map Pi events to PatchPlane `RuntimeEvent` records.
-- [ ] Map `agent.abort()` to `RuntimeService.stopSession`.
-- [ ] Map steering/follow-up to human interrupt/redirect primitives.
-- [ ] Preserve enough raw event metadata for debugging while storing normalized events as product truth.
+- [x] Add initial Pi provider/model defaults for the sandbox-backed CLI path.
+- [x] Prove Pi can be invoked inside Daytona through the M8 `daytona-pi` command adapter.
+- [x] Remove the unused in-process Pi SDK plugin from `packages/plugins` exports/registry/dependencies.
+- [x] Remove the leftover `packages/plugins/src/pi` config shim and unused premature core `RuntimeService`/`ModelGatewayService` abstractions.
+- [x] Move Pi command construction, provider env mapping, and output parsing out of the Daytona plugin into a sandbox-backed runtime adapter module.
+- [x] Use `pi --mode json` or `pi --mode rpc` for structured runtime output where practical.
+- [x] Replace OpenAI-only runtime assumptions with configurable provider/model settings.
+- [x] Default alpha model access to Cloudflare AI Gateway where configured.
+- [x] Keep direct OpenAI or other direct providers as local/debug fallback options.
+- [x] Map Pi events to PatchPlane `RuntimeEvent` records.
+- [ ] Map cancellation to remote sandbox process/session control.
+- [ ] Map steering/follow-up to human interrupt/redirect primitives only when the remote sandbox runtime mode supports it.
+- [x] Preserve enough raw event metadata for debugging while storing normalized events as product truth.
+- [ ] Keep future Flue integration sandbox-backed under the same control-plane/runtime boundary.
 
 Acceptance criteria:
 
-- PatchPlane can start one Pi coding-agent session inside a sandbox-backed workflow.
+- PatchPlane can start one Pi coding-agent session inside a remote sandbox-backed workflow.
+- The hosted web/control-plane Worker does not bundle `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@flue/runtime`, or provider SDKs solely for agent runtime execution.
 - Pi uses configured provider/model access rather than a hardcoded single provider.
 - Pi events are normalized into PatchPlane-owned `RuntimeEvent` records.
-- Pi-specific objects do not cross into core/UI.
+- Pi/Flue-specific runtime objects do not cross into core/UI.
 
 ---
 
@@ -704,6 +809,8 @@ Acceptance criteria:
 - [ ] Add Cloudflare R2 config to plugin metadata.
 - [ ] Add Cloudflare AI Gateway config to plugin metadata.
 - [ ] Add app startup/config smoke for all required alpha environment variables.
+- [ ] Add a bundle-boundary regression check that the hosted web app does not include the in-process Pi SDK runtime.
+- [ ] Add a Daytona Pi smoke/eval that runs `pi --mode json` or `pi --mode rpc` in a sandbox and validates parseable normalized runtime output.
 
 ### Observability
 
@@ -735,7 +842,7 @@ Acceptance criteria:
 - [x] Backend Convex tests cover authenticated and external-ingestion paths.
 - [x] GitHub plugin tests cover repository access, comments, and webhook signatures.
 - [x] CLI integration tests cover command parsing, init, env, plugin validation, and doctor failures.
-- [ ] Add Daytona sandbox plugin tests with safe mocks/fakes.
+- [x] Add Daytona sandbox plugin tests with safe mocks/fakes.
 - [ ] Add R2 artifact plugin tests.
 - [ ] Add Pi runtime event normalization tests.
 - [ ] Add true external browser/AuthKit/Convex E2E once stable test credentials exist.
@@ -745,9 +852,9 @@ Acceptance criteria:
 - [x] GitHub webhook signatures are verified before ingestion.
 - [x] User-facing workflow starts require WorkOS JWT validation and mirrored permission checks.
 - [x] Convex reads require WorkOS identity and mirrored membership permissions.
-- [ ] No long-lived credentials in sandboxes.
+- [x] No long-lived credentials in sandboxes.
 - [ ] Treat every runtime-produced patch and artifact as untrusted until sandbox review and approval complete.
-- [ ] Sandbox profiles have explicit network and lifecycle policy.
+- [x] Sandbox profiles have explicit network and lifecycle policy.
 - [ ] Artifact access is authenticated or signed.
 - [ ] Replace shared-secret ingestion with HMAC or equivalent request signing before production exposure if needed.
 - [ ] Add resource-scoped authorization when repository/project resources are introduced.
@@ -782,4 +889,3 @@ When implementation and spec disagree:
 3. Update this `ROADMAP.md` if milestone order, task status, acceptance criteria, or implementation evidence changes.
 4. Keep SDK-specific knowledge inside plugins and app composition code, never in core.
 5. Keep public docs focused on product and engineering direction; keep commercial strategy, customer notes, and private operations outside the OSS repo.
-

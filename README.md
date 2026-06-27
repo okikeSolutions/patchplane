@@ -99,22 +99,23 @@ GitHub webhook
 → promptRequests + workflowRuns + externalWorkflowRefs
 ```
 
-GitHub, WorkOS, Convex, Daytona, and Pi SDK usage is server/plugin-side only. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
+GitHub, WorkOS, Convex, and Daytona SDK usage is server/plugin-side only. For the alpha `daytona-pi` path, Pi runs inside the Daytona sandbox rather than being bundled into the web/control-plane runtime. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
 
 ## Workspace
 
 This repository is a Bun monorepo:
 
-- `apps/client`: TanStack Start app, WorkOS/AuthKit UI integration, Convex client integration, API routes, and Effect runtime composition
+- `apps/client`: TanStack Start app, WorkOS/AuthKit UI integration, Convex client integration, app routes, and app Effect runtime composition
+- `apps/source-control`: Cloudflare Worker for source-control provider webhooks, GitHub installation sync, Daytona/Pi orchestration, and repository publication
 - `packages/backend`: Convex-backed control-plane backend and deployment functions
 - `packages/domain`: shared Effect schemas and PatchPlane-owned domain types
 - `packages/core`: Effect service contracts and workflow logic; no provider SDK imports
-- `packages/plugins`: infrastructure plugins for WorkOS, Convex, GitHub, Daytona, Pi, and plugin metadata
+- `packages/plugins`: infrastructure plugins for WorkOS, Convex, GitHub, Daytona, experimental Pi runtime adapters, and plugin metadata
 - `packages/cli`: Effect-powered CLI for OSS onboarding, project config generation, plugin discovery, env templates/checks, and diagnostics
 
 ## GitHub webhook intake
 
-The alpha GitHub webhook route is:
+The hosted alpha GitHub webhook route is served by the dedicated source-control Worker:
 
 ```text
 POST /api/github/webhook
@@ -162,5 +163,5 @@ Effect is used for the control-plane core:
 - `packages/domain` uses `effect/Schema` for shared models
 - `packages/core` defines Effect service contracts and workflows
 - `packages/plugins` provides Effect layers for real infrastructure
-- `apps/client` composes app and GitHub surfaces with one `ManagedRuntime`
+- `apps/client` composes the app runtime; hosted source-control webhook/control-plane execution runs in `apps/source-control`
 - `packages/cli` uses `effect/unstable/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and a `ManagedRuntime` for CLI services

@@ -401,7 +401,7 @@ Provider-specific GitHub webhook edge capability:
 - `streamEvents`
 - `stopSession`
 
-Pi is the first runtime implementation.
+Pi is the first runtime implementation, and Flue may become a future runtime. Coding-agent runtime execution must run inside the sandbox execution plane, not inside the web/control-plane Worker. `RuntimeService` may orchestrate a Pi or Flue CLI/RPC process through `SandboxService`, normalize events, and manage cancellation, but it must not require bundling the agent runtime SDK into the trusted web app runtime.
 
 ### `SandboxService`
 
@@ -410,7 +410,7 @@ Pi is the first runtime implementation.
 - `collectArtifacts`
 - `destroy`
 
-Daytona is the first sandbox implementation.
+Daytona is the first sandbox implementation. Daytona owns sandbox lifecycle, repository checkout, and process/session execution. Pi owns agent semantics, model interaction, and runtime event normalization.
 
 ### `ArtifactsService`
 
@@ -656,11 +656,11 @@ The timeline explains:
 
 ## 12. Model access and runtime model
 
-Pi is the first coding-agent runtime.
+Pi is the first coding-agent runtime. Flue may become a future agent framework/runtime integration.
 
-PatchPlane should use `@earendil-works/pi-coding-agent` for coding-agent behavior instead of directly building a low-level LLM-only agent.
+PatchPlane should consume coding-agent runtimes through remote sandbox process boundaries instead of directly building a low-level LLM-only agent or embedding agent SDKs in the trusted control plane.
 
-The Pi runtime plugin maps Pi lifecycle events into PatchPlane `RuntimeEvent` schemas.
+For alpha, the Pi integration is sandbox-backed: the trusted control plane launches Pi inside Daytona using CLI/RPC/process-session primitives and treats Pi output as untrusted runtime output until normalized. The web/control-plane Worker must not bundle the in-process Pi SDK runtime for the hosted Cloudflare path. Future Flue integration follows the same rule: Flue agents execute in remote sandboxes, and PatchPlane maps runtime lifecycle events into PatchPlane `RuntimeEvent` schemas.
 
 Example event types:
 
@@ -886,7 +886,7 @@ The alpha is scoped around one end-to-end trusted patch workflow.
 - Convex storage/realtime plugin,
 - GitHub provider plugin,
 - Daytona sandbox plugin,
-- Pi runtime plugin,
+- sandbox-backed Pi runtime adapter,
 - Cloudflare R2 artifacts plugin,
 - Cloudflare AI Gateway model gateway plugin,
 - Sentry telemetry plugin,
@@ -975,9 +975,9 @@ Initial implementation should prefer ephemeral or auto-deleting sandboxes, expli
 
 ### 17.7 Runtime
 
-Pi is the first runtime provider.
+Pi is the first runtime provider; Flue may be added later as another sandbox-executed agent runtime.
 
-Runtime events are normalized into PatchPlane `RuntimeEvent` records and linked to workflow/provenance state.
+Runtime events are normalized into PatchPlane `RuntimeEvent` records and linked to workflow/provenance state. In the alpha hosted path, Pi runs inside Daytona. In-process Pi or Flue SDK execution is not part of the hosted architecture and must not be part of the Cloudflare web Worker bundle.
 
 ### 17.8 Artifact storage
 
