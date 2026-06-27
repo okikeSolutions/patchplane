@@ -1,0 +1,25 @@
+{
+  "name": "@patchplane/infra",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "sh -c 'if [ -f ../../.env.local ]; then alchemy dev --env-file ../../.env.local \"$@\"; else alchemy dev \"$@\"; fi' --",
+    "plan": "sh -c 'if [ -f ../../.env.local ]; then alchemy deploy --dry-run --env-file ../../.env.local \"$@\"; else alchemy deploy --dry-run \"$@\"; fi' --",
+    "deploy": "sh -c 'if [ -f ../../.env.local ]; then alchemy deploy --env-file ../../.env.local \"$@\"; else alchemy deploy \"$@\"; fi' --",
+    "destroy": "sh -c 'if [ -f ../../.env.local ]; then alchemy destroy --env-file ../../.env.local \"$@\"; else alchemy destroy \"$@\"; fi' --",
+    "test": "vitest run",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-beta.90",
+    "alchemy": "^2.0.0-beta.58",
+    "effect": "4.0.0-beta.90"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.90",
+    "@patchplane/typescript-config": "workspace:*",
+    "@types/bun": "^1.3.14",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "extends": "../../packages/typescript-config/base.json",
+  "include": ["alchemy.run.ts", "alchemy.run.test.ts", "utils.ts", "utils.test.ts"],
+  "exclude": ["node_modules"],
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true
+  }
+}
