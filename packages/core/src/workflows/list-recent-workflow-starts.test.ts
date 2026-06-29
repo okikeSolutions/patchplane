@@ -16,6 +16,9 @@ const TestStorageLayer = Layer.succeed(
     createWorkflowFromPrompt: () => Effect.die('unused'),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
+    recordRuntimeSessionStarted: () => Effect.die('unused'),
+    markRuntimeSessionStatus: () => Effect.die('unused'),
+    getActiveRuntimeSession: () => Effect.die('unused'),
     listRecentWorkflowStarts: (input) =>
       Effect.succeed([
         {

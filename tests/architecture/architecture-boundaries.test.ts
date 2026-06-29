@@ -89,6 +89,43 @@ describe('architecture boundaries', () => {
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
+  it.effect('keeps agent runtime packages out of trusted control-plane dependencies', () =>
+    Effect.gen(function* () {
+      const packageManifestPaths = [
+        'package.json',
+        'apps/client/package.json',
+        'apps/source-control/package.json',
+        'packages/backend/package.json',
+        'packages/cli/package.json',
+        'packages/core/package.json',
+        'packages/domain/package.json',
+        'packages/plugins/package.json',
+      ]
+      const forbidden = new Set([
+        '@earendil-works/pi-coding-agent',
+        '@earendil-works/pi-ai',
+      ])
+
+      const packageManifests = yield* Effect.all(
+        packageManifestPaths.map((path) =>
+          Effect.map(packageJson(path), (manifest) => ({ path, manifest }))
+        ),
+      )
+
+      const violations = packageManifests.flatMap(({ path, manifest }) =>
+        Object.keys({
+          ...manifest.dependencies,
+          ...manifest.devDependencies,
+          ...manifest.optionalDependencies,
+          ...manifest.peerDependencies,
+        }).filter((dependency) => forbidden.has(dependency))
+          .map((dependency) => ({ file: path, dependency }))
+      )
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
   it.effect('keeps Alchemy provisioning isolated to apps/infra', () =>
     Effect.gen(function* () {
       const imports = yield* importsForFiles([
@@ -241,6 +278,16 @@ describe('architecture boundaries', () => {
       expect(startWorkflow).toContain('effectServerFn({')
       expect(startWorkflow).not.toContain('createServerFn')
 
+      const runtimeControl = yield* fileText('apps/client/src/lib/control-runtime-session.ts')
+      expect(runtimeControl).toContain('effectServerFn({')
+      expect(runtimeControl).toContain('authorizeRuntimeControl')
+      expect(runtimeControl).toContain('/internal/runtime/control')
+      expect(runtimeControl).not.toContain('DaytonaSandboxPlugin')
+      expect(runtimeControl).not.toContain('SandboxService')
+      expect(runtimeControl).not.toContain('sandboxId')
+      expect(runtimeControl).not.toContain('sessionId')
+      expect(runtimeControl).not.toContain('commandId')
+
       const directCoreWorkflowImports = (yield* sourceImportsUnder('apps/client/src'))
         .filter(({ file, specifier }) =>
           specifier.startsWith('@patchplane/core/workflows/') &&
@@ -263,7 +310,7 @@ describe('architecture boundaries', () => {
       const sourceControlGitHubRoutes = yield* fileText('apps/source-control/src/github/routes.ts')
       const infra = yield* fileText('apps/infra/alchemy.run.ts')
 
-      expect(clientCallback).toContain('env.SOURCE_CONTROL_WORKER')
+      expect(clientCallback).toContain('getSourceControlWorker')
       expect(clientCallback).toContain('Cloudflare.fromCloudflareFetcher')
       expect(clientCallback).toContain('https://source-control-worker/internal/github/install/sync')
       expect(clientCallback).toContain('authorization: `Bearer ${internalWorkerToken()}`')
@@ -272,10 +319,13 @@ describe('architecture boundaries', () => {
       expect(sourceControlWorker).toContain('syncGitHubInstallation(request)')
       expect(sourceControlWorker).toContain("url.pathname === '/api/github/webhook'")
       expect(sourceControlWorker).toContain('handleGitHubWebhook(request)')
+      expect(sourceControlWorker).toContain("url.pathname === '/internal/runtime/control'")
+      expect(sourceControlWorker).toContain('controlRuntimeSession(request)')
 
       expect(sourceControlGitHubRoutes).toContain('export async function syncGitHubInstallation')
       expect(sourceControlGitHubRoutes).toContain('export async function handleGitHubWebhook')
       expect(sourceControlGitHubRoutes).toContain('assertInternalAuthorization(request)')
+      expect(sourceControlGitHubRoutes).toContain('ControlRuntimeSession')
       expect(sourceControlGitHubRoutes).toContain('IngestGitHubWebhook')
       expect(sourceControlGitHubRoutes).toContain('GitHubEventToWorkflowIntake')
       expect(sourceControlGitHubRoutes).toContain('RunSandboxAgentForWorkflow')
@@ -287,7 +337,7 @@ describe('architecture boundaries', () => {
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
-  it.effect('keeps Pi and Flue agent runtimes out of the web/control-plane composition', () =>
+  it.effect('keeps Pi agent runtimes out of the web/control-plane composition', () =>
     Effect.gen(function* () {
       const appImports = yield* importsForFiles(yield* sourceFilesUnder('apps/client/src'))
       const violations = appImports.filter(({ specifier }) =>
@@ -295,9 +345,7 @@ describe('architecture boundaries', () => {
         specifier === '@earendil-works/pi-coding-agent' ||
         specifier === '@earendil-works/pi-ai' ||
         specifier.startsWith('@earendil-works/pi-coding-agent/') ||
-        specifier.startsWith('@earendil-works/pi-ai/') ||
-        specifier === '@flue/runtime' ||
-        specifier.startsWith('@flue/')
+        specifier.startsWith('@earendil-works/pi-ai/')
       )
 
       expect(violations).toEqual([])
@@ -324,7 +372,7 @@ describe('architecture boundaries', () => {
         expect(sandboxService.toLowerCase()).not.toContain(value.toLowerCase())
       }
 
-      expect(daytonaPlugin).toContain('envVars: piRuntimeEnvironment({ provider: input.provider, apiKey: input.apiKey, env: input.env })')
+      expect(daytonaPlugin).toContain('piRuntimeEnvironment({ provider: input.provider })')
       expect(daytonaPlugin).toContain('envVars: input.env === undefined ? undefined : { ...input.env }')
       expect(daytonaPlugin).not.toContain('process.env')
       for (const value of forbidden) {

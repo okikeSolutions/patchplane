@@ -148,4 +148,6 @@ apps/client/.output
 apps/client/dist
 
 # Alchemy
+apps/infra/.alchemy
+apps/source-control/.alchemy
 .alchemy/state/
