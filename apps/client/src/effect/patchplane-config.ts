@@ -38,8 +38,7 @@ export interface GitHubWebhookRouteConfig {
       readonly provider: string
       readonly model: string
       readonly thinking?: string | undefined
-      readonly apiKey?: string | undefined
-      readonly env?: Readonly<Record<string, string>> | undefined
+      readonly piMode?: 'json' | 'rpc' | undefined
       readonly timeoutSeconds?: number | undefined
     }
 }
@@ -197,43 +196,20 @@ function parseGitHubWorkspaceId() {
   )
 }
 
-function providerApiKeyEnvName(provider: string) {
-  const names: Readonly<Record<string, string>> = {
-    anthropic: 'ANTHROPIC_API_KEY',
-    openai: 'OPENAI_API_KEY',
-    google: 'GEMINI_API_KEY',
-    'github-copilot': 'COPILOT_GITHUB_TOKEN',
-    openrouter: 'OPENROUTER_API_KEY',
-  }
-  return names[provider] ?? 'OPENAI_API_KEY'
-}
-
 function resolvePiExecutionConfig() {
-  const cloudflareApiKey = process.env.CLOUDFLARE_API_KEY
-  const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID
-  const cloudflareGatewayId = process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID
+  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? (
+    process.env.CLOUDFLARE_API_KEY !== undefined &&
+      process.env.CLOUDFLARE_ACCOUNT_ID !== undefined &&
+      (process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID) !== undefined
+      ? 'cloudflare-ai-gateway'
+      : PATCHPLANE_DEFAULT_AGENT_PROVIDER
+  )
 
-  if (cloudflareApiKey !== undefined && cloudflareAccountId !== undefined && cloudflareGatewayId !== undefined) {
-    return {
-      provider: 'cloudflare-ai-gateway',
-      model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
-      thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-      apiKey: cloudflareApiKey,
-      env: {
-        CLOUDFLARE_ACCOUNT_ID: cloudflareAccountId,
-        CLOUDFLARE_GATEWAY_ID: cloudflareGatewayId,
-      },
-      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    } as const
-  }
-
-  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? PATCHPLANE_DEFAULT_AGENT_PROVIDER
   return {
     provider,
     model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
     thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-    apiKey: process.env[providerApiKeyEnvName(provider)],
-    env: undefined,
+    piMode: process.env.PATCHPLANE_PI_MODE === 'rpc' ? 'rpc' : 'json',
     timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
   } as const
 }

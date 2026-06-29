@@ -5,7 +5,7 @@ import * as Cloudflare from 'alchemy/Cloudflare/Bridge'
 import { Effect, Schema } from 'effect'
 import * as HttpBody from 'effect/unstable/http/HttpBody'
 import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
-import { env } from '@/env'
+import { getSourceControlWorker } from '@/env'
 import { createGitHubInstallCallbackResponse } from './-install-flow'
 
 const consumeGitHubConnectionIntent = makeFunctionReference<
@@ -86,7 +86,7 @@ async function syncGitHubInstallation(input: {
   readonly workspaceId: string
 }) {
   const client = Cloudflare.toHttpClient(
-    Cloudflare.fromCloudflareFetcher(env.SOURCE_CONTROL_WORKER),
+    Cloudflare.fromCloudflareFetcher(await getSourceControlWorker()),
   )
 
   const { patchPlaneRuntime } = await import('@/effect/runtime')

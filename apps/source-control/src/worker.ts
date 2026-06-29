@@ -1,4 +1,4 @@
-import { handleGitHubWebhook, syncGitHubInstallation } from './github/routes'
+import { controlRuntimeSession, handleGitHubWebhook, syncGitHubInstallation } from './github/routes'
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
@@ -12,6 +12,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/internal/github/install/sync') {
       return await syncGitHubInstallation(request)
+    }
+
+    if (request.method === 'POST' && url.pathname === '/internal/runtime/control') {
+      return await controlRuntimeSession(request)
     }
 
     if (request.method === 'POST' && url.pathname === '/api/github/webhook') {

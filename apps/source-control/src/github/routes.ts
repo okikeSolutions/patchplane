@@ -9,6 +9,7 @@ import { makeFunctionReference } from 'convex/server'
 import { Cause, Crypto, Effect, Exit, Layer, ManagedRuntime, Schema } from 'effect'
 import { GitHubEventToWorkflowIntake } from '@patchplane/core/workflows/github-event-to-intake'
 import { IngestGitHubWebhook } from '@patchplane/core/workflows/ingest-github-webhook'
+import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
 import { PublishSandboxResultToSource } from '@patchplane/core/workflows/publish-sandbox-result-to-source'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
 import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-sandbox-command-for-workflow'
@@ -46,6 +47,12 @@ class SourceControlWorkerRequestError extends Schema.ErrorClass<SourceControlWor
 const syncInstallationRequestSchema = Schema.Struct({
   installationId: Schema.String,
   workspaceId: Schema.String,
+})
+
+const runtimeControlRequestSchema = Schema.Struct({
+  workflowRunId: Schema.String,
+  operation: Schema.Literals(['abort', 'steer', 'followUp', 'terminate']),
+  message: Schema.optional(Schema.String),
 })
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -121,43 +128,20 @@ function parseGitHubWorkspaceId() {
   )
 }
 
-function providerApiKeyEnvName(provider: string) {
-  const names: Readonly<Record<string, string>> = {
-    anthropic: 'ANTHROPIC_API_KEY',
-    openai: 'OPENAI_API_KEY',
-    google: 'GEMINI_API_KEY',
-    'github-copilot': 'COPILOT_GITHUB_TOKEN',
-    openrouter: 'OPENROUTER_API_KEY',
-  }
-  return names[provider] ?? 'OPENAI_API_KEY'
-}
-
 function resolvePiExecutionConfig() {
-  const cloudflareApiKey = process.env.CLOUDFLARE_API_KEY
-  const cloudflareAccountId = process.env.CLOUDFLARE_ACCOUNT_ID
-  const cloudflareGatewayId = process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID
+  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? (
+    process.env.CLOUDFLARE_API_KEY !== undefined &&
+      process.env.CLOUDFLARE_ACCOUNT_ID !== undefined &&
+      (process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID) !== undefined
+      ? 'cloudflare-ai-gateway'
+      : PATCHPLANE_DEFAULT_AGENT_PROVIDER
+  )
 
-  if (cloudflareApiKey !== undefined && cloudflareAccountId !== undefined && cloudflareGatewayId !== undefined) {
-    return {
-      provider: 'cloudflare-ai-gateway',
-      model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
-      thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-      apiKey: cloudflareApiKey,
-      env: {
-        CLOUDFLARE_ACCOUNT_ID: cloudflareAccountId,
-        CLOUDFLARE_GATEWAY_ID: cloudflareGatewayId,
-      },
-      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    } as const
-  }
-
-  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? PATCHPLANE_DEFAULT_AGENT_PROVIDER
   return {
     provider,
     model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
     thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-    apiKey: process.env[providerApiKeyEnvName(provider)],
-    env: undefined,
+    piMode: process.env.PATCHPLANE_PI_MODE === 'rpc' ? 'rpc' : 'json',
     timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
   } as const
 }
@@ -289,6 +273,55 @@ export async function syncGitHubInstallation(request: Request) {
   })
 }
 
+export async function controlRuntimeSession(request: Request) {
+  const unauthorized = assertInternalAuthorization(request)
+  if (unauthorized !== undefined) return unauthorized
+
+  const traceId = await randomTraceId()
+
+  const inputExit = await runtime.runPromiseExit(
+    Effect.tryPromise({
+      try: () => request.json(),
+      catch: (cause) => new SourceControlWorkerRequestError({ message: `Invalid JSON body: ${String(cause)}` }),
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(runtimeControlRequestSchema))),
+  )
+
+  if (Exit.isFailure(inputExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Invalid runtime control request' }, { status: 400 })
+  }
+
+  const input = inputExit.value
+  const controlExit = await runtime.runPromiseExit(
+    ControlRuntimeSession({
+      workflowRunId: input.workflowRunId,
+      operation: input.operation,
+      ...(input.message === undefined ? {} : { message: input.message }),
+      traceId,
+    }).pipe(
+      (effect) => withTelemetrySpan({
+        traceId,
+        workflowRunId: input.workflowRunId,
+        operation: 'runtime.control',
+        name: 'runtime.control',
+      }, effect),
+    ),
+  )
+
+  if (Exit.isFailure(controlExit)) {
+    const error = publicErrorMessage(Cause.squash(controlExit.cause), 'Runtime control failed')
+    await runtime.runPromise(Effect.logError('Runtime control failed', {
+      traceId,
+      workflowRunId: input.workflowRunId,
+      operation: input.operation,
+      cause: Cause.pretty(controlExit.cause),
+      error,
+    }))
+    return jsonResponse({ ok: false, traceId, error }, { status: 500 })
+  }
+
+  return jsonResponse({ ok: true, traceId, status: controlExit.value.status })
+}
+
 export async function handleGitHubWebhook(request: Request) {
   const deliveryId = requiredHeader(request, 'x-github-delivery')
   const eventName = requiredHeader(request, 'x-github-event')
@@ -392,8 +425,7 @@ export async function handleGitHubWebhook(request: Request) {
           provider: routeConfig.execution.provider,
           model: routeConfig.execution.model,
           thinking: routeConfig.execution.thinking,
-          apiKey: routeConfig.execution.apiKey,
-          env: routeConfig.execution.env,
+          mode: routeConfig.execution.piMode,
           timeoutSeconds: routeConfig.execution.timeoutSeconds,
         })
       : yield* RunSandboxCommandForWorkflow({

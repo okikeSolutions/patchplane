@@ -21,7 +21,7 @@ export default Alchemy.Stack(
     const rateLimitPerMinute = Math.max(1, Math.floor(aiGatewayRateLimitPerMinute))
     const collectAiGatewayLogs = aiGatewayCollectLogs
 
-    const evidenceBucket = yield* Cloudflare.R2Bucket('EvidenceArtifacts', {
+    const evidenceBucket = yield* Cloudflare.R2.Bucket('EvidenceArtifacts', {
       name: createPhysicalName({
         id: 'evidence-artifacts',
         stage,
@@ -47,7 +47,7 @@ export default Alchemy.Stack(
       ],
     })
 
-    const modelGateway = yield* Cloudflare.AiGateway('ModelGateway', {
+    const modelGateway = yield* Cloudflare.AI.Gateway('ModelGateway', {
       id: createPhysicalName({ id: 'model-gateway', stage, maxLength: 64 }),
       cacheTtl: null,
       collectLogs: collectAiGatewayLogs,
@@ -60,6 +60,9 @@ export default Alchemy.Stack(
     const sourceControlWorker = yield* Cloudflare.Worker('SourceControlWorker', {
       main: '../source-control/src/worker.ts',
       compatibility: { flags: ['nodejs_compat'] },
+      build: {
+        bundleAnalyzer: true,
+      },
       env: {
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
@@ -67,7 +70,7 @@ export default Alchemy.Stack(
       },
     })
 
-    const client = yield* Cloudflare.Vite('Client', {
+    const client = yield* Cloudflare.Website.Vite('Client', {
       rootDir: '../client',
       compatibility: { flags: ['nodejs_compat'] },
       env: {
@@ -77,6 +80,10 @@ export default Alchemy.Stack(
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
       assets: { runWorkerFirst: true },
+      // Alchemy's proxied Cloudflare Vite dev path currently fails TanStack Start's
+      // module-runner WebSocket upgrade locally. Keep infra dev healthy and run the
+      // client with `bun run dev:client`.
+      dev: { mode: 'external', url: 'http://localhost:3000' },
     })
 
     return {
