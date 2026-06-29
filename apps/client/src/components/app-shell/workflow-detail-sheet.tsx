@@ -3,6 +3,7 @@ import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import { useQuery } from 'convex/react'
 import { AlertCircleIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -11,8 +12,6 @@ import type { WorkflowDetail } from './types'
 import { WorkflowArtifactReferences } from './workflow-artifact-references'
 import { sourceLabel } from './workflow-console-model'
 import { WorkflowDetailOverview } from './workflow-detail-overview'
-import { WorkflowLogViewer } from './workflow-log-viewer'
-import { WorkflowSandboxEvidence } from './workflow-sandbox-evidence'
 import { WorkflowTimeline } from './workflow-timeline'
 import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-trust-state'
 
@@ -54,42 +53,41 @@ export function WorkflowDetailSheet({
       </SheetHeader>
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-4">
-          {detail === undefined ? <WorkflowDetailSkeleton /> : <WorkflowDetailTabs detail={detail} />}
+          {detail === undefined ? <WorkflowDetailSkeleton /> : <WorkflowDetailPreview detail={detail} />}
         </div>
       </ScrollArea>
     </SheetContent>
   )
 }
 
-function WorkflowDetailTabs({ detail }: { readonly detail: WorkflowDetail }) {
+function WorkflowDetailPreview({ detail }: { readonly detail: WorkflowDetail }) {
   return (
-    <Tabs defaultValue="overview" className="gap-4">
-      <TabsList variant="line">
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="timeline">Timeline</TabsTrigger>
-        <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
-        <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-        <TabsTrigger value="logs">Logs</TabsTrigger>
-      </TabsList>
-      <TabsContent value="overview">
-        <WorkflowDetailOverview detail={detail} />
-      </TabsContent>
-      <TabsContent value="timeline">
-        <WorkflowTimeline detail={detail} />
-      </TabsContent>
-      <TabsContent value="sandbox">
-        <WorkflowSandboxEvidence executions={detail.sandboxExecutions} />
-      </TabsContent>
-      <TabsContent value="artifacts">
-        <WorkflowArtifactReferences detail={detail} />
-      </TabsContent>
-      <TabsContent value="logs">
-        <WorkflowLogViewer
-          runtimeEvents={detail.runtimeEvents}
-          sandboxExecutions={detail.sandboxExecutions}
-        />
-      </TabsContent>
-    </Tabs>
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          render={<a aria-label="Open full workflow" href={`/app/workflows/${detail.workflowRun.id}`} />}
+        >
+          Open full workflow
+        </Button>
+      </div>
+      <Tabs defaultValue="overview" className="gap-4">
+        <TabsList variant="line">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview">
+          <WorkflowDetailOverview detail={detail} />
+        </TabsContent>
+        <TabsContent value="timeline">
+          <WorkflowTimeline detail={detail} />
+        </TabsContent>
+        <TabsContent value="artifacts">
+          <WorkflowArtifactReferences detail={detail} />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
 

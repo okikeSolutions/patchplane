@@ -12,6 +12,7 @@ import {
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { WorkflowDetail, WorkflowStartRow } from './types'
 import { WorkflowConsole } from './workflow-console'
+import { WorkflowDetailPage } from './workflow-detail-page'
 
 vi.mock('convex/react', () => ({
   useQuery: () => undefined,
@@ -72,6 +73,20 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
         payloadJson: JSON.stringify({
           artifactRefs: ['r2://patchplane-dev-evidence-artifacts/run_reviewed/diff.patch'],
         }),
+      },
+    ],
+    runtimeSessions: [
+      {
+        id: 'runtime_session_1',
+        workflowRunId: row.workflowRun.id,
+        provider: 'daytona:pi-rpc',
+        sandboxId: 'sandbox_123',
+        sessionId: 'session_123',
+        commandId: 'command_123',
+        status: 'completed',
+        startedAt: 1_778_000_150_000,
+        updatedAt: 1_778_000_310_000,
+        completedAt: 1_778_000_310_000,
       },
     ],
     sandboxExecutions: [
@@ -181,7 +196,7 @@ describe('WorkflowConsole', () => {
     expect(within(table).getByText('Review the recent authentication foundation')).toBeTruthy()
   })
 
-  test('opens workflow detail from the queue row with M8.5 evidence tabs', async () => {
+  test('opens workflow preview from the queue row with M9.5 full-page handoff', async () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
@@ -212,14 +227,51 @@ describe('WorkflowConsole', () => {
     expect(within(dialog).getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
     expect(within(dialog).getByText('okikeSolutions/guerillaglass · Sandbox failed · run_reviewed')).toBeTruthy()
 
+    expect(within(dialog).getByRole('link', { name: 'Open full workflow' }).getAttribute('href')).toBe('/app/workflows/run_reviewed')
     expect(within(dialog).getByRole('tab', { name: 'Overview' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'Timeline' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'Sandbox' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'Artifacts' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'Logs' })).toBeTruthy()
+    expect(within(dialog).queryByRole('tab', { name: 'Logs' })).toBeNull()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: 'Artifacts' }))
 
     expect(await screen.findByText('r2://patchplane-dev-evidence-artifacts/run_reviewed/diff.patch')).toBeTruthy()
+  })
+
+  test('renders the full M9.5 workflow investigation page with runtime and review tabs', () => {
+    const reviewed = workflowRow(
+      reviewedRunId,
+      'reviewed',
+      'PatchPlane smoke retry after GitHub App PEM fix',
+    )
+
+    render(
+      <WorkflowDetailPage
+        detailOverride={workflowDetail(reviewed)}
+        workflowRunId={reviewedRunId}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Runtime' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Review' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
+    expect(screen.getByText('daytona:pi-rpc')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(screen.getByLabelText('Required comment')).toBeTruthy()
+    const approveButton = screen.getByRole('button', { name: 'Approve' })
+    expect(approveButton).toBeInstanceOf(HTMLButtonElement)
+    if (!(approveButton instanceof HTMLButtonElement)) {
+      throw new Error('Approve control should render as a button')
+    }
+    expect(approveButton.disabled).toBe(true)
+
+    fireEvent.change(screen.getByLabelText('Required comment'), {
+      target: { value: 'Looks safe enough for dogfooding.' },
+    })
+    expect(approveButton.disabled).toBe(false)
   })
 })

@@ -63,4 +63,8 @@ export const translatedPathnames = createTranslatedPathnames({
     en: '/app',
     de: '/app',
   },
+  '/app/workflows/$workflowRunId': {
+    en: '/app/workflows/$workflowRunId',
+    de: '/app/workflows/$workflowRunId',
+  },
 })

@@ -34,12 +34,10 @@ import { deriveWorkflowTrustState, workflowTrustStateDetail } from './workflow-t
 
 export function WorkflowInspector({
   detailOverride,
-  onOpenWorkflow,
   workflowRunId,
   row,
 }: {
   readonly detailOverride?: WorkflowDetail
-  readonly onOpenWorkflow: (id: Id<'workflowRuns'>) => void
   readonly workflowRunId: Id<'workflowRuns'> | undefined
   readonly row: WorkflowStartRow | undefined
 }) {
@@ -85,7 +83,7 @@ export function WorkflowInspector({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => onOpenWorkflow(workflowRunId)}
+              render={<a aria-label="Open workflow" href={`/app/workflows/${workflowRunId}`} />}
             >
               Open
               <ChevronRightIcon data-icon="inline-end" />

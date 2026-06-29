@@ -114,7 +114,6 @@ export function WorkflowConsole({
           detailOverride={selectedDetail}
           workflowRunId={selectedWorkflowRunId}
           row={selectedRow}
-          onOpenWorkflow={openWorkflow}
         />
       </div>
       <Sheet

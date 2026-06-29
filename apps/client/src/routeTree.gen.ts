@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppWorkflowsWorkflowRunIdRouteImport } from './routes/app.workflows.$workflowRunId'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api/github/webhook'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
@@ -33,6 +34,12 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppWorkflowsWorkflowRunIdRoute =
+  AppWorkflowsWorkflowRunIdRouteImport.update({
+    id: '/workflows/$workflowRunId',
+    path: '/workflows/$workflowRunId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const ApiGithubWebhookRoute = ApiGithubWebhookRouteImport.update({
   id: '/api/github/webhook',
   path: '/api/github/webhook',
@@ -63,20 +70,22 @@ const ApiGithubInstallCallbackRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/app': typeof AppRoute
+  '/app': typeof AppRouteWithChildren
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/app/workflows/$workflowRunId': typeof AppWorkflowsWorkflowRunIdRoute
   '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
   '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/app': typeof AppRoute
+  '/app': typeof AppRouteWithChildren
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/app/workflows/$workflowRunId': typeof AppWorkflowsWorkflowRunIdRoute
   '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
   '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
@@ -84,10 +93,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/app': typeof AppRoute
+  '/app': typeof AppRouteWithChildren
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
+  '/app/workflows/$workflowRunId': typeof AppWorkflowsWorkflowRunIdRoute
   '/api/github/install/callback': typeof ApiGithubInstallCallbackRoute
   '/api/github/install/start': typeof ApiGithubInstallStartRoute
 }
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/app/workflows/$workflowRunId'
     | '/api/github/install/callback'
     | '/api/github/install/start'
   fileRoutesByTo: FileRoutesByTo
@@ -110,6 +121,7 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/app/workflows/$workflowRunId'
     | '/api/github/install/callback'
     | '/api/github/install/start'
   id:
@@ -120,6 +132,7 @@ export interface FileRouteTypes {
     | '/api/auth/callback'
     | '/api/auth/sign-in'
     | '/api/github/webhook'
+    | '/app/workflows/$workflowRunId'
     | '/api/github/install/callback'
     | '/api/github/install/start'
   fileRoutesById: FileRoutesById
@@ -127,7 +140,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
-  AppRoute: typeof AppRoute
+  AppRoute: typeof AppRouteWithChildren
   ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
   ApiAuthSignInRoute: typeof ApiAuthSignInRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
@@ -157,6 +170,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/app/workflows/$workflowRunId': {
+      id: '/app/workflows/$workflowRunId'
+      path: '/workflows/$workflowRunId'
+      fullPath: '/app/workflows/$workflowRunId'
+      preLoaderRoute: typeof AppWorkflowsWorkflowRunIdRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/github/webhook': {
       id: '/api/github/webhook'
@@ -196,10 +216,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppRouteChildren {
+  AppWorkflowsWorkflowRunIdRoute: typeof AppWorkflowsWorkflowRunIdRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppWorkflowsWorkflowRunIdRoute: AppWorkflowsWorkflowRunIdRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
-  AppRoute: AppRoute,
+  AppRoute: AppRouteWithChildren,
   ApiAuthCallbackRoute: ApiAuthCallbackRoute,
   ApiAuthSignInRoute: ApiAuthSignInRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,

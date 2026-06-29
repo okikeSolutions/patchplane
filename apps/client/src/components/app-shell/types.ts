@@ -65,6 +65,25 @@ export interface RuntimeEventRow {
   occurredAt: number
   summary?: string
   payloadJson?: string
+  idempotencyKey?: string
+  sourceSessionId?: string
+  sourceCommandId?: string
+  sourceStream?: 'stdout' | 'stderr'
+  sourceLine?: number
+  sourceOffset?: number
+}
+
+export interface RuntimeSessionRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  provider: string
+  sandboxId: string
+  sessionId: string
+  commandId: string
+  status: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled'
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
 }
 
 export interface SandboxPolicyRow {
@@ -104,5 +123,6 @@ export interface SandboxExecutionRow {
 
 export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
+  runtimeSessions: ReadonlyArray<RuntimeSessionRow>
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
 }
