@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import * as Sentry from '@sentry/effect/server'
+import * as Sentry from '@sentry/effect'
 import { TelemetryService } from '@patchplane/core/services/telemetry-service'
 import { ConfigProvider, Effect, Exit, Layer } from 'effect'
 import { afterEach, vi } from 'vitest'
@@ -9,8 +9,8 @@ const sentryMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
 }))
 
-vi.mock('@sentry/effect/server', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@sentry/effect/server')>()
+vi.mock('@sentry/effect', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@sentry/effect')>()
   return {
     ...original,
     captureException: sentryMocks.captureException,
