@@ -9,6 +9,7 @@ Core docs:
 - [SPEC.md](./SPEC.md): product thesis, architecture, and MVP success criteria
 - [ROADMAP.md](./ROADMAP.md): active and completed delivery work
 - [packages/cli/README.md](./packages/cli/README.md): CLI onboarding, env templates, and diagnostics
+- [packages/plugins/README.md](./packages/plugins/README.md): infrastructure plugin and sandbox-backed Pi runtime architecture
 - [CONTRIBUTING.md](./CONTRIBUTING.md): development and contribution guide
 - [SECURITY.md](./SECURITY.md): security reporting and secret-handling policy
 
@@ -101,6 +102,8 @@ GitHub webhook
 
 GitHub, WorkOS, Convex, and Daytona SDK usage is server/plugin-side only. For the alpha `daytona-pi` path, Pi runs inside the Daytona sandbox rather than being bundled into the web/control-plane runtime. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
 
+The Pi runtime adapter is Effect-native at the PatchPlane boundary: `packages/plugins/src/sandbox-runtime/pi/contract.ts` defines the Effect RPC command contract, `runtime-session.ts` exposes a session facade, `transport.ts` translates typed commands to Pi JSONL, and `jsonl.ts`/`ingestion.ts` decode Daytona stdout streams into normalized runtime events. Raw Pi JSONL does not cross into core or UI state.
+
 ## Workspace
 
 This repository is a Bun monorepo:
@@ -135,6 +138,43 @@ DAYTONA_API_KEY
 ```
 
 The route verifies GitHub signatures against the raw request body, maps supported events into generic `WorkflowIntake`, verifies repository access through the GitHub App installation, and persists generic external refs in Convex.
+
+## Live Daytona/Pi RPC smoke
+
+To run the live Daytona/Pi RPC smoke locally, load `.env.local` and pass a public repository. The smoke starts Pi in a Daytona RPC session, validates `get_state`, `prompt`, `steer`, `follow_up`, `abort`, runtime events, session termination, and final Daytona sandbox deletion.
+
+```bash
+set -a
+source .env.local
+set +a
+
+PATCHPLANE_SMOKE_REPOSITORY_URL=https://github.com/octocat/Hello-World \
+PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME=octocat/Hello-World \
+PATCHPLANE_PI_PROVIDER=openai \
+PATCHPLANE_PI_MODEL=gpt-4o-mini \
+PATCHPLANE_SMOKE_TIMEOUT_SECONDS=180 \
+bun run --cwd packages/plugins smoke:daytona-rpc
+```
+
+Expected final summary fields include:
+
+```json
+{
+  "getStateResponse": true,
+  "promptResponse": true,
+  "steerResponse": true,
+  "followUpResponse": true,
+  "abortResponse": true,
+  "terminated": true,
+  "sandboxDeleted": true
+}
+```
+
+Use `tee` if you want a raw smoke transcript:
+
+```bash
+bun run --cwd packages/plugins smoke:daytona-rpc | tee .patchplane/logs/daytona-rpc-smoke.jsonl
+```
 
 ## Validation
 

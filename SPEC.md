@@ -401,7 +401,9 @@ Provider-specific GitHub webhook edge capability:
 - `streamEvents`
 - `stopSession`
 
-Pi is the first runtime implementation, and Flue may become a future runtime. Coding-agent runtime execution must run inside the sandbox execution plane, not inside the web/control-plane Worker. `RuntimeService` may orchestrate a Pi or Flue CLI/RPC process through `SandboxService`, normalize events, and manage cancellation, but it must not require bundling the agent runtime SDK into the trusted web app runtime.
+Pi is the runtime implementation. Coding-agent runtime execution must run inside the sandbox execution plane, not inside the web/control-plane Worker. `RuntimeService` may orchestrate a Pi CLI/RPC process through `SandboxService`, normalize events, and manage cancellation, but it must not require bundling the agent runtime SDK into the trusted web app runtime.
+
+The alpha Pi adapter is Effect-native at the PatchPlane boundary: Pi command semantics are described by an Effect RPC contract, command delivery is implemented by a transport adapter that writes Pi JSONL into the remote session, and runtime output is consumed as Effect `Stream`s before normalization into PatchPlane-owned `RuntimeEvent` records. Raw Pi JSONL commands and Pi-specific objects are implementation details of the plugin runtime adapter and must not cross into `packages/core`, Convex read models, or UI-facing domain state.
 
 ### `SandboxService`
 
@@ -656,11 +658,24 @@ The timeline explains:
 
 ## 12. Model access and runtime model
 
-Pi is the first coding-agent runtime. Flue may become a future agent framework/runtime integration.
+Pi is the coding-agent runtime.
 
 PatchPlane should consume coding-agent runtimes through remote sandbox process boundaries instead of directly building a low-level LLM-only agent or embedding agent SDKs in the trusted control plane.
 
-For alpha, the Pi integration is sandbox-backed: the trusted control plane launches Pi inside Daytona using CLI/RPC/process-session primitives and treats Pi output as untrusted runtime output until normalized. The web/control-plane Worker must not bundle the in-process Pi SDK runtime for the hosted Cloudflare path. Future Flue integration follows the same rule: Flue agents execute in remote sandboxes, and PatchPlane maps runtime lifecycle events into PatchPlane `RuntimeEvent` schemas.
+For alpha, the Pi integration is sandbox-backed: the trusted control plane launches Pi inside Daytona using CLI/RPC/process-session primitives and treats Pi output as untrusted runtime output until normalized. The web/control-plane Worker must not bundle the in-process Pi SDK runtime for the hosted Cloudflare path.
+
+The runtime adapter shape is:
+
+```text
+DaytonaSandboxPlugin
+→ PiRuntimeSession facade
+→ Effect RPC Pi command contract
+→ Pi JSONL transport over Daytona session stdin
+→ strict LF JSONL stream decoding from Daytona stdout
+→ normalized RuntimeEvent stream
+```
+
+The adapter intentionally separates command acknowledgements from runtime events. Pi RPC command responses such as `get_state`, `prompt`, `steer`, `follow_up`, and `abort` are normalized as runtime events, while the long-running Pi process remains controlled through the sandbox session lifecycle.
 
 Example event types:
 
@@ -975,9 +990,11 @@ Initial implementation should prefer ephemeral or auto-deleting sandboxes, expli
 
 ### 17.7 Runtime
 
-Pi is the first runtime provider; Flue may be added later as another sandbox-executed agent runtime.
+Pi is the runtime provider.
 
-Runtime events are normalized into PatchPlane `RuntimeEvent` records and linked to workflow/provenance state. In the alpha hosted path, Pi runs inside Daytona. In-process Pi or Flue SDK execution is not part of the hosted architecture and must not be part of the Cloudflare web Worker bundle.
+Runtime events are normalized into PatchPlane `RuntimeEvent` records and linked to workflow/provenance state. In the alpha hosted path, Pi runs inside Daytona. In-process Pi SDK execution is not part of the hosted architecture and must not be part of the Cloudflare web Worker bundle.
+
+The Pi runtime adapter must expose Effect/Stream-facing runtime primitives to plugin code and keep raw Pi JSONL private to the transport layer. Live smoke tests for RPC mode must terminate the runtime session and delete the retained Daytona sandbox before reporting success.
 
 ### 17.8 Artifact storage
 

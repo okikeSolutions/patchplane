@@ -408,7 +408,7 @@ Acceptance criteria:
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** Complete for Daytona lifecycle/policy/live-smoke scope; durable R2 raw artifact capture remains in the artifact slice
+**Status:** Complete for Daytona lifecycle/policy scope; durable R2 raw artifact capture remains in the artifact slice. The old Daytona-SDK-only live smoke has been removed in favor of the PatchPlane Daytona/Pi RPC smoke.
 
 Tasks:
 
@@ -592,44 +592,13 @@ CLI/self-host setup → configure GitHub/App manually if needed → run PatchPla
 
 ---
 
-### M8.75 — Minimal Landing Page Packaging Slice
-
-**Status:** Planned, public alpha packaging only
-
-Purpose:
-
-Make the public product message understandable before broader alpha demos.
-
-Scope:
-
-- Keep language product-focused and developer-facing.
-- Avoid heavy architecture-first copy.
-- Explain the trust loop clearly.
-- Link to the OSS repo/docs.
-- Avoid pricing/commercial details in OSS docs.
-
-Suggested minimal sections:
-
-- Hero: what PatchPlane does in one sentence.
-- Trust loop: agent patch → sandbox → evidence → human decision → publication.
-- Why it exists: AI coding output needs verification and provenance before entering trusted workflows.
-- Alpha status: focused on one GitHub/Daytona/Pi loop.
-- OSS/developer section: inspect, run, contribute, or follow development.
-
-Acceptance criteria:
-
-- A developer can understand the alpha promise quickly.
-- The landing page does not overpromise broad platform capabilities before alpha proof.
-
----
-
 ### M9 — Remote Sandbox Agent Runtime Adapter
 
-**Status:** In progress — sandbox-backed Pi command path exists; runtime adapter extraction and event normalization remain
+**Status:** Complete for the alpha runtime architecture — Pi JSON-mode and RPC-mode paths are sandbox-backed, Effect-native at the runtime boundary, unit-tested, and live-smoked against Daytona. Remaining future work is provider breadth and deeper long-running session reconciliation hardening, not a blocking architecture gap.
 
 Intent:
 
-PatchPlane does not run coding-agent runtimes in-process in the trusted control plane. Pi now, and Flue later, execute only inside remote sandbox environments. The control plane provisions the sandbox, launches the runtime process, captures untrusted output/events, normalizes them into PatchPlane schemas, and persists them through Convex/R2.
+PatchPlane does not run coding-agent runtimes in-process in the trusted control plane. Pi executes only inside remote sandbox environments. The control plane provisions the sandbox, launches the runtime process, captures untrusted output/events, normalizes them into PatchPlane schemas, and persists them through Convex/R2.
 
 Tasks:
 
@@ -637,30 +606,41 @@ Tasks:
 - [x] Prove Pi can be invoked inside Daytona through the M8 `daytona-pi` command adapter.
 - [x] Remove the unused in-process Pi SDK plugin from `packages/plugins` exports/registry/dependencies.
 - [x] Remove the leftover `packages/plugins/src/pi` config shim and unused premature core `RuntimeService`/`ModelGatewayService` abstractions.
-- [x] Move Pi command construction, provider env mapping, and output parsing out of the Daytona plugin into a sandbox-backed runtime adapter module.
+- [x] Move Pi command construction, provider env mapping, and output parsing out of the Daytona plugin into sandbox-backed runtime adapter modules.
+- [x] Replace the legacy `runtime/pi/rpc.ts` helper facade with an Effect RPC contract (`contract.ts`), runtime-session facade (`runtime-session.ts`), transport adapter (`transport.ts`), stream JSONL decoder (`jsonl.ts`), protocol parser (`protocol.ts`), and normalized event stream (`ingestion.ts`).
 - [x] Use `pi --mode json` or `pi --mode rpc` for structured runtime output where practical.
 - [x] Replace OpenAI-only runtime assumptions with configurable provider/model settings.
 - [x] Default alpha model access to Cloudflare AI Gateway where configured.
 - [x] Keep direct OpenAI or other direct providers as local/debug fallback options.
 - [x] Map Pi events to PatchPlane `RuntimeEvent` records.
-- [ ] Map cancellation to remote sandbox process/session control.
-- [ ] Map steering/follow-up to human interrupt/redirect primitives only when the remote sandbox runtime mode supports it.
+- [x] Map cancellation to remote sandbox process/session control.
+- [x] Map steering/follow-up to human interrupt/redirect primitives only when the remote sandbox runtime mode supports it.
+- [x] Persist `RuntimeSession` lifecycle state in Convex for RPC-capable remote runtime sessions.
+- [x] Persist RPC runtime sessions immediately after Daytona returns `sessionId`/`commandId`, before sending control input.
+- [x] Add unit coverage for Pi RPC command encoding/parsing, Daytona async session handles, control workflows, hard-terminate idempotency, and Convex runtime session lifecycle.
+- [x] Add a Pi-specific strict LF JSONL stream decoder that preserves standalone `\r`, `U+2028`, and `U+2029` instead of relying on generic line splitting.
+- [x] Wrap Daytona streaming log callbacks as typed Effect `Stream`s and feed them through the Pi runtime-session event stream for incremental event persistence.
 - [x] Preserve enough raw event metadata for debugging while storing normalized events as product truth.
-- [ ] Keep future Flue integration sandbox-backed under the same control-plane/runtime boundary.
+- [x] Expose abort/steer/follow-up/terminate through authenticated hosted app/API surfaces with workflow-run authorization checks; client input is `workflowRunId` plus operation/message, never raw sandbox/session IDs.
+- [x] Integrate Daytona log streaming/polling into incremental runtime-event persistence for active RPC sessions, including disconnect reconciliation via buffered logs and idempotent Convex dedupe.
+- [x] Add a reusable Daytona/Pi RPC smoke script entrypoint with RPC event collection and steer/follow-up/abort/terminate assertions.
+- [x] Run the live Daytona/Pi RPC smoke against real credentials and validate `get_state`, command responses, streamed runtime events, steer/follow-up acceptance, abort, terminate/delete-session behavior, and final Daytona sandbox deletion.
+- [x] Add architecture coverage preventing Pi runtime packages from becoming trusted control-plane dependencies.
 
 Acceptance criteria:
 
 - PatchPlane can start one Pi coding-agent session inside a remote sandbox-backed workflow.
-- The hosted web/control-plane Worker does not bundle `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@flue/runtime`, or provider SDKs solely for agent runtime execution.
+- The hosted web/control-plane Worker does not bundle `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, or provider SDKs solely for agent runtime execution.
 - Pi uses configured provider/model access rather than a hardcoded single provider.
-- Pi events are normalized into PatchPlane-owned `RuntimeEvent` records.
-- Pi/Flue-specific runtime objects do not cross into core/UI.
+- Pi events are normalized into PatchPlane-owned `RuntimeEvent` records through an Effect `Stream` boundary.
+- Pi-specific runtime objects and raw JSONL commands do not cross into core/UI.
+- Daytona plugin code consumes `makePiRuntimeSession` rather than raw push/end parser state or legacy command helper functions.
 
 ---
 
 ### M9.5 — Dashboard and workflow visibility pass
 
-**Status:** Planned after Pi produces real runtime events
+**Status:** In progress — M8.5 sheet detail is being split into queue/inspector triage plus a full workflow investigation route
 
 Timing:
 
@@ -674,14 +654,20 @@ Rules:
 - Build from local UI components in `apps/client/src/components/ui`.
 - Keep complex provenance graph UI deferred.
 - Make raw patch/diff, logs, artifacts, and provenance easy to inspect.
+- Use the sheet only as quick preview/triage; serious investigation belongs on the full workflow page.
 
 First dashboard scope:
 
-- [ ] Recent workflows table.
-- [ ] Workflow detail page or side panel.
-- [ ] Timeline with runtime/sandbox/provenance events.
+- [x] Recent workflows table exists from M8.5 and remains the queue surface.
+- [x] Right inspector exists from M8.5 and remains the fast triage surface.
+- [x] Add full workflow detail route for investigation (`/app/workflows/$workflowRunId`).
+- [x] Keep sheet as compact preview with an “Open full workflow” handoff.
+- [x] Timeline with runtime/sandbox/provenance events.
+- [x] Runtime session section backed by Convex `runtimeSessions` read-model data.
+- [x] Full-page logs, sandbox evidence, artifacts, review, and raw evidence tabs.
 - [ ] Review split view once candidate patches exist.
-- [ ] Approve/reject/request-changes controls with required comment.
+- [x] Approve/reject/request-changes controls with required comment UI.
+- [ ] Persist minimal review decisions, or defer durable review-run persistence explicitly to M10.
 
 Acceptance criteria:
 
@@ -775,6 +761,37 @@ Acceptance criteria:
 - A SQL plugin can implement the `StorageService` workflow-start methods without changing `packages/core`.
 - SQL plugin failures map to PatchPlane `StorageError`.
 - Convex can remain enabled for realtime UI projection even when durable persistence is SQL-backed.
+
+---
+
+### M10.75 — Minimal Landing Page Packaging Slice
+
+**Status:** Planned, public alpha packaging only
+
+Purpose:
+
+Make the public product message understandable before broader alpha demos.
+
+Scope:
+
+- Keep language product-focused and developer-facing.
+- Avoid heavy architecture-first copy.
+- Explain the trust loop clearly.
+- Link to the OSS repo/docs.
+- Avoid pricing/commercial details in OSS docs.
+
+Suggested minimal sections:
+
+- Hero: what PatchPlane does in one sentence.
+- Trust loop: agent patch → sandbox → evidence → human decision → publication.
+- Why it exists: AI coding output needs verification and provenance before entering trusted workflows.
+- Alpha status: focused on one GitHub/Daytona/Pi loop.
+- OSS/developer section: inspect, run, contribute, or follow development.
+
+Acceptance criteria:
+
+- A developer can understand the alpha promise quickly.
+- The landing page does not overpromise broad platform capabilities before alpha proof.
 
 ---
 
