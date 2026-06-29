@@ -139,10 +139,39 @@ export default defineSchema({
     occurredAt: v.number(),
     summary: v.optional(v.string()),
     payloadJson: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
+    sourceSessionId: v.optional(v.string()),
+    sourceCommandId: v.optional(v.string()),
+    sourceStream: v.optional(v.union(v.literal('stdout'), v.literal('stderr'))),
+    sourceLine: v.optional(v.number()),
+    sourceOffset: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_event_key', ['workflowRunId', 'idempotencyKey'])
     .index('by_type', ['provider', 'type']),
+
+  runtimeSessions: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    sandboxId: v.string(),
+    sessionId: v.string(),
+    commandId: v.string(),
+    status: v.union(
+      v.literal('starting'),
+      v.literal('running'),
+      v.literal('completed'),
+      v.literal('failed'),
+      v.literal('cancelled'),
+    ),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_status', ['status'])
+    .index('by_sandbox_session', ['sandboxId', 'sessionId']),
 
   sandboxExecutions: defineTable({
     workflowRunId: v.id('workflowRuns'),

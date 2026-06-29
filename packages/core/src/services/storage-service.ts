@@ -6,6 +6,7 @@ import type { WorkspaceId } from '@patchplane/domain/ids'
 import type { ListRecentWorkflowStartsInput } from '@patchplane/domain/list-recent-workflow-starts'
 import type { PromptRequestSource } from '@patchplane/domain/prompt-request'
 import type { RuntimeEvent as StoredRuntimeEvent } from '@patchplane/domain/runtime-event'
+import type { RuntimeSession, RuntimeSessionStatus } from '@patchplane/domain/runtime-session'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type { WorkflowIntake } from '@patchplane/domain/workflow-intake'
@@ -43,6 +44,25 @@ export interface RecordSandboxExecutionInput extends TelemetryContextFields {
   readonly completedAt: number
 }
 
+export interface RecordRuntimeSessionStartedInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly provider: string
+  readonly sandboxId: string
+  readonly sessionId: string
+  readonly commandId: string
+  readonly startedAt: number
+}
+
+export interface MarkRuntimeSessionStatusInput extends TelemetryContextFields {
+  readonly runtimeSessionId: string
+  readonly status: RuntimeSessionStatus
+  readonly completedAt?: number | undefined
+}
+
+export interface GetActiveRuntimeSessionInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+}
+
 export interface RecordRuntimeEventInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly provider: string
@@ -50,6 +70,12 @@ export interface RecordRuntimeEventInput extends TelemetryContextFields {
   readonly occurredAt: number
   readonly summary?: string | undefined
   readonly payloadJson?: string | undefined
+  readonly idempotencyKey?: string | undefined
+  readonly sourceSessionId?: string | undefined
+  readonly sourceCommandId?: string | undefined
+  readonly sourceStream?: 'stdout' | 'stderr' | undefined
+  readonly sourceLine?: number | undefined
+  readonly sourceOffset?: number | undefined
 }
 
 export class StorageService extends Context.Service<StorageService, {
@@ -68,4 +94,13 @@ export class StorageService extends Context.Service<StorageService, {
   readonly recordRuntimeEvents: (
     input: ReadonlyArray<RecordRuntimeEventInput>,
   ) => Effect.Effect<ReadonlyArray<StoredRuntimeEvent>, StorageError>
+  readonly recordRuntimeSessionStarted: (
+    input: RecordRuntimeSessionStartedInput,
+  ) => Effect.Effect<RuntimeSession, StorageError>
+  readonly markRuntimeSessionStatus: (
+    input: MarkRuntimeSessionStatusInput,
+  ) => Effect.Effect<RuntimeSession, StorageError>
+  readonly getActiveRuntimeSession: (
+    input: GetActiveRuntimeSessionInput,
+  ) => Effect.Effect<RuntimeSession | undefined, StorageError>
 }>()('@patchplane/core/services/StorageService') {}

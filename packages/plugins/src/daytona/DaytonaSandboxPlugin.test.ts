@@ -1,14 +1,14 @@
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vitest'
-import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Redacted } from 'effect'
+import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from 'effect'
 import { SandboxService } from '@patchplane/core/services/sandbox-service'
 import type { DaytonaConfig } from './DaytonaConfig'
 import { makeDaytonaSandboxLayer, type DaytonaClientLike, type DaytonaSandboxLike } from './DaytonaSandboxPlugin'
 import { toDaytonaCreateSandboxParams, toSandboxPolicy } from './daytona-adapter'
-import { executeSandboxCommand } from './daytona-process'
-import { buildPiCommand, buildRedactedPiCommand } from '../sandbox-runtime/pi/command'
-import { piRuntimeEnvironment } from '../sandbox-runtime/pi/environment'
-import { parsePiJsonRuntimeEvents } from '../sandbox-runtime/pi/events'
+import { executeSandboxCommand, startSandboxSessionCommand, streamSandboxSessionCommandLogs, type DaytonaCommandSandbox } from './daytona-process'
+import { buildPiCommandSpec, buildRedactedPiCommandSpec, renderShellCommand } from '../sandbox-runtime/pi/command'
+import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
+import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
 
 function config(overrides: Partial<DaytonaConfig> = {}): DaytonaConfig {
   return {
@@ -62,6 +62,23 @@ function testLayer(client: DaytonaClientLike, env: Record<string, string> = {}) 
       env: { DAYTONA_API_KEY: 'daytona-key', ...env },
     }))),
   )
+}
+
+function streamingLogsFixture(sessionId: string, commandId: string): Promise<{ readonly stdout: string; readonly stderr: string }>
+function streamingLogsFixture(sessionId: string, commandId: string, onStdout: (chunk: string) => void, onStderr: (chunk: string) => void): Promise<void>
+async function streamingLogsFixture(
+  _sessionId: string,
+  _commandId: string,
+  onStdout?: (chunk: string) => void,
+  onStderr?: (chunk: string) => void,
+): Promise<void | { readonly stdout: string; readonly stderr: string }> {
+  if (onStdout !== undefined && onStderr !== undefined) {
+    onStdout('{"type":"agent_')
+    onStderr('warning')
+    onStdout('start"}\n')
+    return
+  }
+  return { stdout: '', stderr: '' }
 }
 
 const commandInput = {
@@ -244,10 +261,9 @@ describe('Daytona sandbox boundary adapters', () => {
         prompt: 'review patch',
         provider: 'openai',
         model: 'gpt-5.5',
-        apiKey: 'openai-key',
       })
 
-      expect(result.command).toContain('--mode json')
+      expect(result.command).toContain("'--mode' 'json'")
       expect(result.command).toContain('<prompt redacted>')
       expect(result.runtimeEvents).toEqual([
         expect.objectContaining({ provider: 'pi', type: 'pi.agent_start', summary: 'Pi agent started' }),
@@ -257,7 +273,14 @@ describe('Daytona sandbox boundary adapters', () => {
         expect.objectContaining({ envVars: { OPENAI_API_KEY: 'openai-key' } }),
         expect.anything(),
       )
-    }).pipe(Effect.provide(testLayer(client)))
+    }).pipe(Effect.provide(
+      Layer.merge(
+        testLayer(client),
+        ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: { DAYTONA_API_KEY: 'daytona-key', OPENAI_API_KEY: 'openai-key' },
+        })),
+      ),
+    ))
   })
 
   it.effect('deletes sandbox when repository command is interrupted', () =>
@@ -369,49 +392,49 @@ describe('Daytona sandbox boundary adapters', () => {
 
   it.effect('constructs a quoted untrusted Pi-in-Daytona command', () =>
     Effect.sync(() => {
-      const command = buildPiCommand({
+      const command = renderShellCommand(buildPiCommandSpec({
         provider: 'openai',
         model: 'gpt-5.5',
         prompt: "review Bob's patch",
         version: '0.79.6',
         thinking: 'low',
-      })
+      }))
 
       expect(command).toContain('@earendil-works/pi-coding-agent@0.79.6')
-      expect(command).toContain('--mode json')
-      expect(command.split(' ')).toContain('--no-approve')
-      expect(command.split(' ')).not.toContain('--approve')
-      expect(command).toContain("--provider 'openai'")
-      expect(command).toContain("--model 'gpt-5.5'")
-      expect(command).toContain("--thinking 'low'")
+      expect(command).toContain("'--mode' 'json'")
+      expect(command.split(' ')).toContain("'--no-approve'")
+      expect(command.split(' ')).not.toContain("'--approve'")
+      expect(command).toContain("'--provider' 'openai'")
+      expect(command).toContain("'--model' 'gpt-5.5'")
+      expect(command).toContain("'--thinking' 'low'")
       expect(command).toContain("'review Bob'\"'\"'s patch'")
     }),
   )
 
   it.effect('redacts prompts from persisted Pi command', () =>
     Effect.sync(() => {
-      const command = buildRedactedPiCommand({
+      const command = renderShellCommand(buildRedactedPiCommandSpec({
         provider: 'openai',
         model: 'gpt-5.5',
         version: '0.79.6',
         thinking: 'medium',
-      })
+      }))
 
-      expect(command).toContain("--thinking 'medium'")
+      expect(command).toContain("'--thinking' 'medium'")
       expect(command).toContain('<prompt redacted>')
       expect(command).not.toContain('review')
     }),
   )
 
   it.effect('parses Pi JSON output into normalized runtime events', () =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const output = [
         JSON.stringify({ type: 'session', id: 'session-1', timestamp: '2026-06-28T00:00:00.000Z' }),
         JSON.stringify({ type: 'tool_execution_start', toolName: 'bash' }),
         JSON.stringify({ type: 'message_end', message: { content: [{ text: 'All checks passed.' }] } }),
         'not-json',
       ].join('\n')
-      const parsed = parsePiJsonRuntimeEvents(output, { now: () => 123 })
+      const parsed = yield* parsePiJsonRuntimeEventsEffect(output, { now: () => 123 })
 
       expect(parsed.events).toEqual([
         expect.objectContaining({
@@ -437,24 +460,146 @@ describe('Daytona sandbox boundary adapters', () => {
     }),
   )
 
-  it.effect('maps provider API keys to Pi environment variables', () =>
-    Effect.sync(() => {
-      expect(piRuntimeEnvironment({ provider: 'anthropic', apiKey: 'key' })).toEqual({
-        ANTHROPIC_API_KEY: 'key',
+  it.effect('treats missing runtime session during hard terminate as already terminated', () => {
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+        deleteSession: vi.fn(async () => { throw new Error('404 not found') }),
+      },
+    })
+    const client = fakeClient(sandbox, { get: vi.fn(async () => sandbox) })
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.terminateRuntimeSession({
+        sandboxId: 'sandbox-1',
+        sessionId: 'session-1',
+        commandId: 'cmd-1',
+        traceId: 'trace-1',
       })
-      expect(piRuntimeEnvironment({ provider: 'github-copilot', apiKey: 'key' })).toEqual({
-        COPILOT_GITHUB_TOKEN: 'key',
+
+      expect(result.status).toBe('terminated')
+      expect(sandbox.process.deleteSession).toHaveBeenCalledWith('session-1')
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('wraps Daytona streaming log callbacks as an Effect stream', () =>
+    Effect.gen(function* () {
+      const sandbox: DaytonaCommandSandbox = {
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand: vi.fn(async () => ({ cmdId: 'cmd-1' })),
+          getSessionCommandLogs: streamingLogsFixture,
+          deleteSession: vi.fn(async () => undefined),
+        },
+      }
+
+      const chunks = yield* streamSandboxSessionCommandLogs(sandbox, 'session-1', 'cmd-1').pipe(Stream.runCollect)
+      expect(Array.from(chunks)).toEqual([
+        { stream: 'stdout', chunk: '{"type":"agent_' },
+        { stream: 'stderr', chunk: 'warning' },
+        { stream: 'stdout', chunk: 'start"}\n' },
+      ])
+    }),
+  )
+
+  it.effect('starts an async Daytona session command handle', () =>
+    Effect.gen(function* () {
+      const createSession = vi.fn(async () => undefined)
+      const executeSessionCommand = vi.fn(async () => ({ cmdId: 'cmd-1' }))
+      const sendSessionCommandInput = vi.fn(async () => undefined)
+      const getSessionCommand = vi.fn(async () => ({ exitCode: undefined }))
+      const getSessionCommandLogsSpy = vi.fn(async (_sessionId: string, _commandId: string) => ({ stdout: '{"type":"agent_start"}\n', stderr: '' }))
+      function getSessionCommandLogs(sessionId: string, commandId: string): Promise<{ readonly stdout: string; readonly stderr: string }>
+      function getSessionCommandLogs(sessionId: string, commandId: string, onStdout: (chunk: string) => void, onStderr: (chunk: string) => void): Promise<void>
+      function getSessionCommandLogs(sessionId: string, commandId: string, onStdout?: (chunk: string) => void, onStderr?: (chunk: string) => void) {
+        if (onStdout !== undefined && onStderr !== undefined) return Promise.resolve()
+        return getSessionCommandLogsSpy(sessionId, commandId)
+      }
+      const deleteSession = vi.fn(async () => undefined)
+      const sandbox: DaytonaCommandSandbox = { process: { createSession, executeSessionCommand, sendSessionCommandInput, getSessionCommand, getSessionCommandLogs, deleteSession } }
+
+      const handle = yield* startSandboxSessionCommand(sandbox, {
+        command: 'pi --mode rpc',
+        timeoutSeconds: 9,
+        traceId: 'trace-1',
       })
-      expect(piRuntimeEnvironment({
-        provider: 'cloudflare-ai-gateway',
-        apiKey: 'key',
-        env: { CLOUDFLARE_ACCOUNT_ID: 'acct', CLOUDFLARE_GATEWAY_ID: 'gateway' },
-      })).toEqual({
+      yield* handle.sendInput('{"type":"get_state"}\n')
+      const command = yield* handle.getCommand()
+      const logs = yield* handle.getLogs()
+      yield* handle.deleteSession()
+
+      expect(handle.sessionId).toBe('patchplane-trace-1')
+      expect(handle.commandId).toBe('cmd-1')
+      expect(executeSessionCommand).toHaveBeenCalledWith(
+        'patchplane-trace-1',
+        {
+          command: "cd 'workspace/repo' && pi --mode rpc",
+          runAsync: true,
+          suppressInputEcho: true,
+        },
+        9,
+      )
+      expect(sendSessionCommandInput).toHaveBeenCalledWith('patchplane-trace-1', 'cmd-1', '{"type":"get_state"}\n')
+      expect(command).toEqual({ exitCode: undefined })
+      expect(logs).toEqual({ stdout: '{"type":"agent_start"}\n', stderr: '' })
+      expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
+    }),
+  )
+
+  it.effect('fails async Daytona session startup when command id is missing', () =>
+    Effect.gen(function* () {
+      const sandbox = {
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand: vi.fn(async () => ({})),
+          deleteSession: vi.fn(async () => undefined),
+        },
+      }
+
+      const exit = yield* startSandboxSessionCommand(sandbox, {
+        command: 'pi --mode rpc',
+        timeoutSeconds: 9,
+        traceId: 'trace-1',
+      }).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+  )
+
+  it.effect('maps provider API keys from Effect Config to Pi environment variables', () =>
+    Effect.gen(function* () {
+      const anthropic = yield* piRuntimeEnvironment({ provider: 'anthropic' }).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { ANTHROPIC_API_KEY: 'key' } }))),
+      )
+      expect(anthropic).toEqual({ ANTHROPIC_API_KEY: 'key' })
+
+      const copilot = yield* piRuntimeEnvironment({ provider: 'github-copilot' }).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { COPILOT_GITHUB_TOKEN: 'key' } }))),
+      )
+      expect(copilot).toEqual({ COPILOT_GITHUB_TOKEN: 'key' })
+
+      const cloudflare = yield* piRuntimeEnvironment({ provider: 'cloudflare-ai-gateway' }).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            CLOUDFLARE_API_KEY: 'key',
+            CLOUDFLARE_ACCOUNT_ID: 'acct',
+            CLOUDFLARE_GATEWAY_ID: 'gateway',
+          },
+        }))),
+      )
+      expect(cloudflare).toEqual({
         CLOUDFLARE_API_KEY: 'key',
         CLOUDFLARE_ACCOUNT_ID: 'acct',
         CLOUDFLARE_GATEWAY_ID: 'gateway',
       })
-      expect(piRuntimeEnvironment({ provider: 'openai' })).toBeUndefined()
+
+      const missingOpenAi = yield* piRuntimeEnvironment({ provider: 'openai' }).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+        Effect.exit,
+      )
+      expect(Exit.isFailure(missingOpenAi)).toBe(true)
     }),
   )
 })

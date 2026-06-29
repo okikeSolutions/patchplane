@@ -1,4 +1,15 @@
+import { Effect, Exit, Schema } from 'effect'
 import type { SandboxRuntimeEvent } from '@patchplane/core/services/sandbox-service'
+
+const PiEventHeader = Schema.Struct({
+  type: Schema.String,
+})
+
+export interface PiRuntimeParseError {
+  readonly line: number
+  readonly message: string
+  readonly raw: string
+}
 
 function compactWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim()
@@ -20,12 +31,6 @@ function textFromMessageContent(content: unknown) {
   return text.length === 0 ? undefined : text
 }
 
-function piEventType(event: unknown) {
-  if (typeof event !== 'object' || event === null) return 'unknown'
-  const type = Reflect.get(event, 'type')
-  return typeof type === 'string' && type.length > 0 ? type : 'unknown'
-}
-
 function piEventTimestamp(event: unknown, fallback: number) {
   if (typeof event !== 'object' || event === null) return fallback
   const timestamp = Reflect.get(event, 'timestamp')
@@ -39,7 +44,8 @@ export function summarizePiEvent(event: unknown) {
     return 'Pi event: unknown'
   }
 
-  const type = piEventType(event)
+  const eventType = Reflect.get(event, 'type')
+  const type = typeof eventType === 'string' ? eventType : 'unknown'
   switch (type) {
     case 'session': {
       const id = Reflect.get(event, 'id')
@@ -72,39 +78,70 @@ export function summarizePiEvent(event: unknown) {
   }
 }
 
-export function parsePiJsonRuntimeEvents(stdout: string, options: {
-  readonly now?: () => number
-} = {}): {
-  readonly events: ReadonlyArray<SandboxRuntimeEvent>
-  readonly parseErrors: ReadonlyArray<{ readonly line: number; readonly message: string; readonly raw: string }>
-} {
-  const now = options.now ?? Date.now
-  const events: SandboxRuntimeEvent[] = []
-  const parseErrors: Array<{ line: number; message: string; raw: string }> = []
-
-  for (const [index, rawLine] of stdout.split(/\r?\n/).entries()) {
-    const line = rawLine.trim()
-    if (line.length === 0) continue
-
-    try {
-      const event: unknown = JSON.parse(line)
-      const occurredAt = piEventTimestamp(event, now())
-      const type = piEventType(event)
-      events.push({
-        provider: 'pi',
-        type: `pi.${type}`,
-        occurredAt,
-        summary: summarizePiEvent(event),
-        payloadJson: JSON.stringify(event),
-      })
-    } catch (error) {
-      parseErrors.push({
-        line: index + 1,
+function parsePiJsonRuntimeEventLine(input: {
+  readonly line: string
+  readonly lineNumber: number
+  readonly now: () => number
+}): Effect.Effect<SandboxRuntimeEvent, PiRuntimeParseError> {
+  return Effect.gen(function* () {
+    const event = yield* Effect.try({
+      try: () => JSON.parse(input.line) as unknown,
+      catch: (error): PiRuntimeParseError => ({
+        line: input.lineNumber,
         message: error instanceof Error ? error.message : String(error),
-        raw: line.slice(0, 500),
-      })
-    }
-  }
+        raw: input.line.slice(0, 500),
+      }),
+    })
+    const header = yield* Schema.decodeUnknownEffect(PiEventHeader)(event).pipe(
+      Effect.mapError((error): PiRuntimeParseError => ({
+        line: input.lineNumber,
+        message: String(error),
+        raw: input.line.slice(0, 500),
+      })),
+    )
 
-  return { events, parseErrors }
+    return {
+      provider: 'pi',
+      type: `pi.${header.type}`,
+      occurredAt: piEventTimestamp(event, input.now()),
+      summary: summarizePiEvent(event),
+      payloadJson: JSON.stringify(event),
+    } satisfies SandboxRuntimeEvent
+  })
+}
+
+export function parsePiJsonRuntimeEventsEffect(stdout: string, options: {
+  readonly now?: () => number
+} = {}): Effect.Effect<{
+  readonly events: ReadonlyArray<SandboxRuntimeEvent>
+  readonly parseErrors: ReadonlyArray<PiRuntimeParseError>
+}> {
+  const now = options.now ?? Date.now
+  return Effect.gen(function* () {
+    const events: SandboxRuntimeEvent[] = []
+    const parseErrors: PiRuntimeParseError[] = []
+
+    for (const [index, rawLine] of stdout.split(/\r?\n/).entries()) {
+      const line = rawLine.trim()
+      if (line.length === 0) continue
+
+      const result = yield* parsePiJsonRuntimeEventLine({
+        line,
+        lineNumber: index + 1,
+        now,
+      }).pipe(Effect.exit)
+
+      if (Exit.isSuccess(result)) {
+        events.push(result.value)
+      } else {
+        parseErrors.push({
+          line: index + 1,
+          message: 'Failed to parse Pi JSON event line',
+          raw: line.slice(0, 500),
+        })
+      }
+    }
+
+    return { events, parseErrors } as const
+  })
 }

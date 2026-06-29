@@ -13,6 +13,7 @@
     "./services/sandbox-service": "./src/services/sandbox-service.ts",
     "./services/source-control-service": "./src/services/source-control-service.ts",
     "./services/telemetry-service": "./src/services/telemetry-service.ts",
+    "./workflows/control-runtime-session": "./src/workflows/control-runtime-session.ts",
     "./workflows/github-event-to-intake": "./src/workflows/github-event-to-intake.ts",
     "./workflows/ingest-github-webhook": "./src/workflows/ingest-github-webhook.ts",
     "./workflows/list-recent-workflow-starts": "./src/workflows/list-recent-workflow-starts.ts",

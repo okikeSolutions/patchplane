@@ -24,7 +24,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "smoke:daytona": "bun src/daytona/live-smoke.ts"
+    "smoke:daytona-rpc": "bun src/daytona/live-rpc-smoke.ts"
   },
   "dependencies": {
     "@patchplane/core": "workspace:*",

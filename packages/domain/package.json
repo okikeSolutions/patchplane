@@ -16,6 +16,8 @@
     "./prompt-request": "./src/prompt-request.ts",
     "./repository-connection": "./src/repository-connection.ts",
     "./runtime-event": "./src/runtime-event.ts",
+    "./runtime-control": "./src/runtime-control.ts",
+    "./runtime-session": "./src/runtime-session.ts",
     "./sandbox-execution": "./src/sandbox-execution.ts",
     "./sandbox-policy": "./src/sandbox-policy.ts",
     "./server-function": "./src/server-function.ts",

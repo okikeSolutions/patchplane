@@ -215,6 +215,12 @@ export const patchPlanePlugins = {
         description: 'Optional Pi thinking level for models that support it.',
       },
       {
+        name: 'PATCHPLANE_PI_MODE',
+        required: false,
+        defaultValue: 'json',
+        description: 'Optional Pi execution mode. json is the one-shot alpha default; rpc enables experimental remote steering/follow-up/control.',
+      },
+      {
         name: 'PATCHPLANE_AI_GATEWAY_ID',
         required: false,
         description: 'Optional Cloudflare AI Gateway id/slug. Mapped to CLOUDFLARE_GATEWAY_ID inside Pi sandboxes when Cloudflare AI Gateway is selected.',

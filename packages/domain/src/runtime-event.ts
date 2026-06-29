@@ -16,6 +16,12 @@ export const RuntimeEvent = Schema.Struct({
   occurredAt: Schema.Number,
   summary: Schema.optional(Schema.String),
   payloadJson: Schema.optional(Schema.String),
+  idempotencyKey: Schema.optional(Schema.String),
+  sourceSessionId: Schema.optional(Schema.String),
+  sourceCommandId: Schema.optional(Schema.String),
+  sourceStream: Schema.optional(Schema.Literals(['stdout', 'stderr'])),
+  sourceLine: Schema.optional(Schema.Number),
+  sourceOffset: Schema.optional(Schema.Number),
 })
 export type RuntimeEvent = Schema.Schema.Type<typeof RuntimeEvent>
 

@@ -3,6 +3,7 @@ import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
+import { decodeRuntimeSession } from '@patchplane/domain/runtime-session'
 import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
   decodeWorkflowStart,
@@ -12,7 +13,10 @@ import {
 import {
   StorageService,
   type CreateWorkflowFromPromptInput,
+  type GetActiveRuntimeSessionInput,
+  type MarkRuntimeSessionStatusInput,
   type RecordRuntimeEventInput,
+  type RecordRuntimeSessionStartedInput,
   type RecordSandboxExecutionInput,
   type StorageListRecentWorkflowStartsInput,
 } from '@patchplane/core/services/storage-service'
@@ -82,10 +86,50 @@ const recordRuntimeEventsMutation = makeFunctionReference<
       occurredAt: number
       summary?: string
       payloadJson?: string
+      idempotencyKey?: string
+      sourceSessionId?: string
+      sourceCommandId?: string
+      sourceStream?: 'stdout' | 'stderr'
+      sourceLine?: number
+      sourceOffset?: number
     }>
   },
   unknown
 >('workflowStarts:recordRuntimeEvents')
+
+const recordRuntimeSessionStartedMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    provider: string
+    sandboxId: string
+    sessionId: string
+    commandId: string
+    startedAt: number
+  },
+  unknown
+>('workflowStarts:recordRuntimeSessionStarted')
+
+const markRuntimeSessionStatusMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    runtimeSessionId: string
+    status: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled'
+    completedAt?: number
+  },
+  unknown
+>('workflowStarts:markRuntimeSessionStatus')
+
+const getActiveRuntimeSessionQuery = makeFunctionReference<
+  'query',
+  {
+    systemSecret: string
+    workflowRunId: string
+  },
+  unknown
+>('workflowStarts:getActiveRuntimeSession')
 
 const recordSandboxExecutionMutation = makeFunctionReference<
   'mutation',
@@ -353,6 +397,12 @@ export const ConvexStoragePlugin = {
                     ...(event.payloadJson === undefined
                       ? {}
                       : { payloadJson: event.payloadJson }),
+                    ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
+                    ...(event.sourceSessionId === undefined ? {} : { sourceSessionId: event.sourceSessionId }),
+                    ...(event.sourceCommandId === undefined ? {} : { sourceCommandId: event.sourceCommandId }),
+                    ...(event.sourceStream === undefined ? {} : { sourceStream: event.sourceStream }),
+                    ...(event.sourceLine === undefined ? {} : { sourceLine: event.sourceLine }),
+                    ...(event.sourceOffset === undefined ? {} : { sourceOffset: event.sourceOffset }),
                   })),
                 })
               },
@@ -377,11 +427,133 @@ export const ConvexStoragePlugin = {
           }),
       )
 
+      const recordRuntimeSessionStarted = Effect.fn(
+        '@patchplane/plugins/convex/recordRuntimeSessionStarted',
+      )((input: RecordRuntimeSessionStartedInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordRuntimeSessionStarted.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record runtime sessions',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordRuntimeSessionStartedMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                provider: input.provider,
+                sandboxId: input.sandboxId,
+                sessionId: input.sessionId,
+                commandId: input.commandId,
+                startedAt: input.startedAt,
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordRuntimeSessionStarted',
+                message: 'Convex failed to record runtime session',
+                cause,
+              }),
+          })
+          return yield* decodeRuntimeSession(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordRuntimeSessionStarted.decode',
+                message: 'Convex returned invalid runtime session',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const markRuntimeSessionStatus = Effect.fn(
+        '@patchplane/plugins/convex/markRuntimeSessionStatus',
+      )((input: MarkRuntimeSessionStatusInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'markRuntimeSessionStatus.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to update runtime sessions',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(markRuntimeSessionStatusMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                runtimeSessionId: input.runtimeSessionId,
+                status: input.status,
+                ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'markRuntimeSessionStatus',
+                message: 'Convex failed to update runtime session',
+                cause,
+              }),
+          })
+          return yield* decodeRuntimeSession(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'markRuntimeSessionStatus.decode',
+                message: 'Convex returned invalid runtime session',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const getActiveRuntimeSession = Effect.fn(
+        '@patchplane/plugins/convex/getActiveRuntimeSession',
+      )((input: GetActiveRuntimeSessionInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'getActiveRuntimeSession.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to read runtime sessions',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.query(getActiveRuntimeSessionQuery, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'getActiveRuntimeSession',
+                message: 'Convex failed to read runtime session',
+                cause,
+              }),
+          })
+          if (value === null) return undefined
+          return yield* decodeRuntimeSession(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'getActiveRuntimeSession.decode',
+                message: 'Convex returned invalid runtime session',
+                cause,
+              })
+            ),
+          )
+        }))
+
       return StorageService.of({
         createWorkflowFromIntake: createWorkflowFromPrompt,
         createWorkflowFromPrompt,
         listRecentWorkflowStarts,
         recordRuntimeEvents,
+        recordRuntimeSessionStarted,
+        markRuntimeSessionStatus,
+        getActiveRuntimeSession,
         recordSandboxExecution,
       })
     }),

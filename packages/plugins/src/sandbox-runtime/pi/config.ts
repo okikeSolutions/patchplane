@@ -1,3 +1,5 @@
+import { Config, Effect, Redacted } from 'effect'
+
 export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'anthropic': 'ANTHROPIC_API_KEY',
   'ant-ling': 'ANT_LING_API_KEY',
@@ -34,16 +36,33 @@ export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'github-copilot': 'COPILOT_GITHUB_TOKEN',
 }
 
+export function piProviderApiKeyEnvName(provider: string) {
+  return piProviderApiKeyEnvNames[provider] ?? 'OPENAI_API_KEY'
+}
+
+const cloudflareGatewayId = Config.string('CLOUDFLARE_GATEWAY_ID').pipe(
+  Config.orElse(() => Config.string('PATCHPLANE_AI_GATEWAY_ID')),
+)
+
 export function piRuntimeEnvironment(input: {
   readonly provider: string
-  readonly apiKey?: string | undefined
-  readonly env?: Readonly<Record<string, string>> | undefined
-}) {
-  const env = input.env === undefined ? {} : { ...input.env }
+}): Effect.Effect<Readonly<Record<string, string>>, Config.ConfigError> {
+  return Effect.gen(function* () {
+    const apiKeyEnvName = piProviderApiKeyEnvName(input.provider)
+    const apiKey = yield* Config.redacted(apiKeyEnvName)
 
-  if (input.apiKey !== undefined) {
-    env[piProviderApiKeyEnvNames[input.provider] ?? 'OPENAI_API_KEY'] = input.apiKey
-  }
+    if (input.provider === 'cloudflare-ai-gateway') {
+      const cloudflareConfig = yield* Config.all({
+        accountId: Config.string('CLOUDFLARE_ACCOUNT_ID'),
+        gatewayId: cloudflareGatewayId,
+      })
+      return {
+        CLOUDFLARE_API_KEY: Redacted.value(apiKey),
+        CLOUDFLARE_ACCOUNT_ID: cloudflareConfig.accountId,
+        CLOUDFLARE_GATEWAY_ID: cloudflareConfig.gatewayId,
+      }
+    }
 
-  return Object.keys(env).length === 0 ? undefined : env
+    return { [apiKeyEnvName]: Redacted.value(apiKey) }
+  })
 }

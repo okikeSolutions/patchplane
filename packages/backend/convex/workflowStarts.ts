@@ -165,6 +165,33 @@ const runtimeEventReturn = v.object({
   occurredAt: v.number(),
   summary: v.optional(v.string()),
   payloadJson: v.optional(v.string()),
+  idempotencyKey: v.optional(v.string()),
+  sourceSessionId: v.optional(v.string()),
+  sourceCommandId: v.optional(v.string()),
+  sourceStream: v.optional(v.union(v.literal('stdout'), v.literal('stderr'))),
+  sourceLine: v.optional(v.number()),
+  sourceOffset: v.optional(v.number()),
+})
+
+const runtimeSessionStatusArg = v.union(
+  v.literal('starting'),
+  v.literal('running'),
+  v.literal('completed'),
+  v.literal('failed'),
+  v.literal('cancelled'),
+)
+
+const runtimeSessionReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  provider: v.string(),
+  sandboxId: v.string(),
+  sessionId: v.string(),
+  commandId: v.string(),
+  status: runtimeSessionStatusArg,
+  startedAt: v.number(),
+  updatedAt: v.number(),
+  completedAt: v.optional(v.number()),
 })
 
 const sandboxExecutionReturn = v.object({
@@ -211,6 +238,7 @@ const workflowDetailReturn = v.object({
     createdAt: v.number(),
   }),
   runtimeEvents: v.array(runtimeEventReturn),
+  runtimeSessions: v.array(runtimeSessionReturn),
   sandboxExecutions: v.array(sandboxExecutionReturn),
 })
 
@@ -511,6 +539,12 @@ export const recordRuntimeEvents = mutation({
       occurredAt: v.number(),
       summary: v.optional(v.string()),
       payloadJson: v.optional(v.string()),
+      idempotencyKey: v.optional(v.string()),
+      sourceSessionId: v.optional(v.string()),
+      sourceCommandId: v.optional(v.string()),
+      sourceStream: v.optional(v.union(v.literal('stdout'), v.literal('stderr'))),
+      sourceLine: v.optional(v.number()),
+      sourceOffset: v.optional(v.number()),
     })),
   },
   returns: v.array(runtimeEventReturn),
@@ -524,6 +558,33 @@ export const recordRuntimeEvents = mutation({
         throw new ConvexError('Workflow run not found')
       }
 
+      if (event.idempotencyKey !== undefined) {
+        const existing = await ctx.db
+          .query('runtimeEvents')
+          .withIndex('by_workflow_event_key', (q) =>
+            q.eq('workflowRunId', event.workflowRunId).eq('idempotencyKey', event.idempotencyKey)
+          )
+          .unique()
+        if (existing !== null) {
+          rows.push({
+            id: existing['_id'],
+            workflowRunId: existing.workflowRunId,
+            provider: existing.provider,
+            type: existing.type,
+            occurredAt: existing.occurredAt,
+            ...(existing.summary === undefined ? {} : { summary: existing.summary }),
+            ...(existing.payloadJson === undefined ? {} : { payloadJson: existing.payloadJson }),
+            ...(existing.idempotencyKey === undefined ? {} : { idempotencyKey: existing.idempotencyKey }),
+            ...(existing.sourceSessionId === undefined ? {} : { sourceSessionId: existing.sourceSessionId }),
+            ...(existing.sourceCommandId === undefined ? {} : { sourceCommandId: existing.sourceCommandId }),
+            ...(existing.sourceStream === undefined ? {} : { sourceStream: existing.sourceStream }),
+            ...(existing.sourceLine === undefined ? {} : { sourceLine: existing.sourceLine }),
+            ...(existing.sourceOffset === undefined ? {} : { sourceOffset: existing.sourceOffset }),
+          })
+          continue
+        }
+      }
+
       const id = await ctx.db.insert('runtimeEvents', {
         ...event,
         createdAt: Date.now(),
@@ -532,6 +593,126 @@ export const recordRuntimeEvents = mutation({
     }
 
     return rows
+  },
+})
+
+export const recordRuntimeSessionStarted = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    sandboxId: v.string(),
+    sessionId: v.string(),
+    commandId: v.string(),
+    startedAt: v.number(),
+  },
+  returns: runtimeSessionReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    const now = Date.now()
+    const id = await ctx.db.insert('runtimeSessions', {
+      workflowRunId: args.workflowRunId,
+      provider: args.provider,
+      sandboxId: args.sandboxId,
+      sessionId: args.sessionId,
+      commandId: args.commandId,
+      status: 'running' as const,
+      startedAt: args.startedAt,
+      updatedAt: now,
+      createdAt: now,
+    })
+
+    if (workflowRun.status === 'queued') {
+      await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'running' })
+    }
+
+    return {
+      id,
+      workflowRunId: args.workflowRunId,
+      provider: args.provider,
+      sandboxId: args.sandboxId,
+      sessionId: args.sessionId,
+      commandId: args.commandId,
+      status: 'running' as const,
+      startedAt: args.startedAt,
+      updatedAt: now,
+    }
+  },
+})
+
+export const markRuntimeSessionStatus = mutation({
+  args: {
+    systemSecret: v.string(),
+    runtimeSessionId: v.id('runtimeSessions'),
+    status: runtimeSessionStatusArg,
+    completedAt: v.optional(v.number()),
+  },
+  returns: runtimeSessionReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const runtimeSession = await ctx.db.get('runtimeSessions', args.runtimeSessionId)
+    if (runtimeSession === null) {
+      throw new ConvexError('Runtime session not found')
+    }
+
+    const updatedAt = Date.now()
+    await ctx.db.patch('runtimeSessions', args.runtimeSessionId, {
+      status: args.status,
+      updatedAt,
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
+    })
+
+    return {
+      id: args.runtimeSessionId,
+      workflowRunId: runtimeSession.workflowRunId,
+      provider: runtimeSession.provider,
+      sandboxId: runtimeSession.sandboxId,
+      sessionId: runtimeSession.sessionId,
+      commandId: runtimeSession.commandId,
+      status: args.status,
+      startedAt: runtimeSession.startedAt,
+      updatedAt,
+      ...(args.completedAt === undefined ? runtimeSession.completedAt === undefined ? {} : { completedAt: runtimeSession.completedAt } : { completedAt: args.completedAt }),
+    }
+  },
+})
+
+export const getActiveRuntimeSession = query({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+  },
+  returns: v.union(runtimeSessionReturn, v.null()),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const sessions = await ctx.db
+      .query('runtimeSessions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const active = sortedByNumber(
+      sessions.filter((session) => session.status === 'starting' || session.status === 'running'),
+      (session) => session.updatedAt,
+    ).at(-1)
+
+    if (active === undefined) return null
+    return {
+      id: active['_id'],
+      workflowRunId: active.workflowRunId,
+      provider: active.provider,
+      sandboxId: active.sandboxId,
+      sessionId: active.sessionId,
+      commandId: active.commandId,
+      status: active.status,
+      startedAt: active.startedAt,
+      updatedAt: active.updatedAt,
+      ...(active.completedAt === undefined ? {} : { completedAt: active.completedAt }),
+    }
   },
 })
 
@@ -595,6 +776,39 @@ export const recordSandboxExecution = mutation({
   },
 })
 
+export const authorizeRuntimeControl = query({
+  args: {
+    workflowRunId: v.id('workflowRuns'),
+  },
+  returns: v.object({
+    workflowRunId: v.id('workflowRuns'),
+    workspaceId: v.string(),
+    allowed: v.literal(true),
+  }),
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    requireWorkOSWorkspace(identity, workflowRun.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      workflowRun.workspaceId,
+      'run:interrupt',
+    )
+
+    return {
+      workflowRunId: workflowRun['_id'],
+      workspaceId: workflowRun.workspaceId,
+      allowed: true as const,
+    }
+  },
+})
+
 export const getDetail = query({
   args: {
     workflowRunId: v.id('workflowRuns'),
@@ -623,6 +837,11 @@ export const getDetail = query({
 
     const runtimeEvents = await ctx.db
       .query('runtimeEvents')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const runtimeSessions = await ctx.db
+      .query('runtimeSessions')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
       .collect()
 
@@ -662,6 +881,25 @@ export const getDetail = query({
           occurredAt: event.occurredAt,
           ...(event.summary === undefined ? {} : { summary: event.summary }),
           ...(event.payloadJson === undefined ? {} : { payloadJson: event.payloadJson }),
+          ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
+          ...(event.sourceSessionId === undefined ? {} : { sourceSessionId: event.sourceSessionId }),
+          ...(event.sourceCommandId === undefined ? {} : { sourceCommandId: event.sourceCommandId }),
+          ...(event.sourceStream === undefined ? {} : { sourceStream: event.sourceStream }),
+          ...(event.sourceLine === undefined ? {} : { sourceLine: event.sourceLine }),
+          ...(event.sourceOffset === undefined ? {} : { sourceOffset: event.sourceOffset }),
+        })),
+      runtimeSessions: sortedByNumber(runtimeSessions, (session) => session.startedAt)
+        .map((session) => ({
+          id: session['_id'],
+          workflowRunId: session.workflowRunId,
+          provider: session.provider,
+          sandboxId: session.sandboxId,
+          sessionId: session.sessionId,
+          commandId: session.commandId,
+          status: session.status,
+          startedAt: session.startedAt,
+          updatedAt: session.updatedAt,
+          ...(session.completedAt === undefined ? {} : { completedAt: session.completedAt }),
         })),
       sandboxExecutions: sortedByNumber(sandboxExecutions, (execution) => execution.startedAt)
         .map((execution) => ({

@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect'
-import type { SandboxError } from '@patchplane/domain/errors'
+import type { SandboxError, StorageError } from '@patchplane/domain/errors'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type { TelemetryContextFields } from './telemetry-service'
 
@@ -16,6 +16,14 @@ export interface SandboxCommandInput extends TelemetryContextFields {
   readonly traceId: string
 }
 
+export interface SandboxRuntimeSessionStarted {
+  readonly provider: string
+  readonly sandboxId: string
+  readonly sessionId: string
+  readonly commandId: string
+  readonly startedAt: number
+}
+
 export interface SandboxAgentInput extends TelemetryContextFields {
   readonly repositoryUrl: string
   readonly repositoryFullName: string
@@ -23,14 +31,19 @@ export interface SandboxAgentInput extends TelemetryContextFields {
   readonly provider: string
   readonly model: string
   readonly thinking?: string | undefined
-  readonly apiKey?: string | undefined
-  readonly env?: Readonly<Record<string, string>> | undefined
+  readonly mode?: 'json' | 'rpc' | undefined
   readonly branch?: string | undefined
   readonly commitId?: string | undefined
   readonly timeoutSeconds?: number | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
   readonly traceId: string
+  readonly onRuntimeSessionStarted?: (
+    session: SandboxRuntimeSessionStarted,
+  ) => Effect.Effect<void, SandboxError | StorageError>
+  readonly onRuntimeEvents?: (
+    events: ReadonlyArray<SandboxRuntimeEvent>,
+  ) => Effect.Effect<void, SandboxError | StorageError>
 }
 
 export interface SandboxRuntimeEvent {
@@ -39,11 +52,19 @@ export interface SandboxRuntimeEvent {
   readonly occurredAt: number
   readonly summary?: string | undefined
   readonly payloadJson?: string | undefined
+  readonly idempotencyKey?: string | undefined
+  readonly sourceSessionId?: string | undefined
+  readonly sourceCommandId?: string | undefined
+  readonly sourceStream?: 'stdout' | 'stderr' | undefined
+  readonly sourceLine?: number | undefined
+  readonly sourceOffset?: number | undefined
 }
 
 export interface SandboxCommandResult {
   readonly provider: string
   readonly sandboxId: string
+  readonly sessionId?: string | undefined
+  readonly commandId?: string | undefined
   readonly command: string
   readonly exitCode: number | undefined
   readonly stdout: string
@@ -54,6 +75,22 @@ export interface SandboxCommandResult {
   readonly completedAt: number
 }
 
+export interface SandboxRuntimeControlInput extends TelemetryContextFields {
+  readonly sandboxId: string
+  readonly sessionId: string
+  readonly commandId: string
+  readonly message?: string | undefined
+  readonly traceId: string
+}
+
+export interface SandboxRuntimeControlResult {
+  readonly provider: string
+  readonly sandboxId: string
+  readonly sessionId: string
+  readonly commandId: string
+  readonly status: 'sent' | 'terminated'
+}
+
 export class SandboxService extends Context.Service<SandboxService, {
   readonly runRepositoryAgent: (
     input: SandboxAgentInput,
@@ -61,4 +98,16 @@ export class SandboxService extends Context.Service<SandboxService, {
   readonly runRepositoryCommand: (
     input: SandboxCommandInput,
   ) => Effect.Effect<SandboxCommandResult, SandboxError>
+  readonly abortRuntimeSession: (
+    input: SandboxRuntimeControlInput,
+  ) => Effect.Effect<SandboxRuntimeControlResult, SandboxError>
+  readonly steerRuntimeSession: (
+    input: SandboxRuntimeControlInput & { readonly message: string },
+  ) => Effect.Effect<SandboxRuntimeControlResult, SandboxError>
+  readonly followUpRuntimeSession: (
+    input: SandboxRuntimeControlInput & { readonly message: string },
+  ) => Effect.Effect<SandboxRuntimeControlResult, SandboxError>
+  readonly terminateRuntimeSession: (
+    input: SandboxRuntimeControlInput,
+  ) => Effect.Effect<SandboxRuntimeControlResult, SandboxError>
 }>()('@patchplane/core/services/SandboxService') {}

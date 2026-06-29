@@ -28,6 +28,10 @@ interface WorkflowStartResult {
   }
 }
 
+interface WorkflowDetailResult {
+  readonly runtimeEvents?: ReadonlyArray<unknown> | undefined
+}
+
 const createWorkflowStart = makeFunctionReference<
   'mutation',
   CreateWorkflowStartArgs,
@@ -43,8 +47,14 @@ const listRecentWorkflowStarts = makeFunctionReference<
 const getWorkflowDetail = makeFunctionReference<
   'query',
   { workflowRunId: string },
-  unknown
+  WorkflowDetailResult
 >('workflowStarts:getDetail')
+
+const authorizeRuntimeControl = makeFunctionReference<
+  'query',
+  { workflowRunId: string },
+  unknown
+>('workflowStarts:authorizeRuntimeControl')
 
 const createWorkflowStartFromExternalIntake = makeFunctionReference<
   'mutation',
@@ -57,6 +67,30 @@ const recordSandboxExecution = makeFunctionReference<
   Record<string, unknown>,
   unknown
 >('workflowStarts:recordSandboxExecution')
+
+const recordRuntimeEvents = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Array<Record<string, unknown>>
+>('workflowStarts:recordRuntimeEvents')
+
+const recordRuntimeSessionStarted = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:recordRuntimeSessionStarted')
+
+const markRuntimeSessionStatus = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:markRuntimeSessionStatus')
+
+const getActiveRuntimeSession = makeFunctionReference<
+  'query',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:getActiveRuntimeSession')
 
 function createArgs(overrides: Partial<CreateWorkflowStartArgs> = {}) {
   return {
@@ -324,7 +358,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       completedAt: 20,
     })
 
-    await t.mutation(makeFunctionReference<'mutation', Record<string, unknown>, unknown>('workflowStarts:recordRuntimeEvents'), {
+    await t.mutation(recordRuntimeEvents, {
       systemSecret: 'system_test',
       events: [
         {
@@ -347,6 +381,119 @@ describe('workflowStarts trusted boundary and authz', () => {
       runtimeEvents: [{ provider: 'pi', type: 'agent.started' }],
       sandboxExecutions: [{ provider: 'daytona', status: 'failed' }],
     })
+  })
+
+  test('recordRuntimeEvents dedupes idempotency keys', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    const event = {
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'pi',
+      type: 'pi.agent_start',
+      occurredAt: 5,
+      summary: 'Pi agent started',
+      idempotencyKey: 'session:command:stdout:1:abc',
+      sourceSessionId: 'session',
+      sourceCommandId: 'command',
+      sourceStream: 'stdout',
+      sourceLine: 1,
+      sourceOffset: 0,
+    }
+
+    const first = await t.mutation(recordRuntimeEvents, {
+      systemSecret: 'system_test',
+      events: [event],
+    })
+    const second = await t.mutation(recordRuntimeEvents, {
+      systemSecret: 'system_test',
+      events: [event],
+    })
+
+    expect(second[0]?.id).toBe(first[0]?.id)
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(detail.runtimeEvents).toHaveLength(1)
+    expect(detail.runtimeEvents?.[0]).toMatchObject({
+      idempotencyKey: event.idempotencyKey,
+      sourceSessionId: 'session',
+      sourceCommandId: 'command',
+      sourceStream: 'stdout',
+      sourceLine: 1,
+      sourceOffset: 0,
+    })
+  })
+
+  test('records and updates active runtime session lifecycle', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    const started = await t.mutation(recordRuntimeSessionStarted, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'daytona:pi-rpc',
+      sandboxId: 'sandbox-1',
+      sessionId: 'session-1',
+      commandId: 'cmd-1',
+      startedAt: 10,
+    })
+
+    expect(started).toMatchObject({
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'daytona:pi-rpc',
+      status: 'running',
+    })
+
+    await expect(t.query(getActiveRuntimeSession, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+    })).resolves.toMatchObject({
+      sandboxId: 'sandbox-1',
+      sessionId: 'session-1',
+      commandId: 'cmd-1',
+      status: 'running',
+    })
+
+    const runtimeSessionId = typeof started === 'object' && started !== null && 'id' in started
+      ? started.id
+      : undefined
+    expect(runtimeSessionId).toBeDefined()
+
+    await t.mutation(markRuntimeSessionStatus, {
+      systemSecret: 'system_test',
+      runtimeSessionId,
+      status: 'cancelled',
+      completedAt: 20,
+    })
+
+    await expect(t.query(getActiveRuntimeSession, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+    })).resolves.toBeNull()
+  })
+
+  test('authorizeRuntimeControl requires run interrupt permission for workflow workspace', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t, { permissions: ['workspace:view', 'prompt:create', 'run:interrupt'] })
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await expect(t.query(authorizeRuntimeControl, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })).resolves.toMatchObject({
+      workflowRunId: workflowStart.workflowRun.id,
+      workspaceId: 'workos:org_123',
+      allowed: true,
+    })
+
+    const missingPermission = authenticatedTest()
+    await seedMembership(missingPermission, { permissions: ['workspace:view', 'prompt:create'] })
+    const otherWorkflowStart = await createWorkflowStartForTest(missingPermission)
+    await expect(missingPermission.query(authorizeRuntimeControl, {
+      workflowRunId: otherWorkflowStart.workflowRun.id,
+    })).rejects.toThrow('Permission required')
   })
 
   test('getDetail requires active organization access', async () => {
