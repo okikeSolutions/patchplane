@@ -710,6 +710,37 @@ Acceptance criteria:
 - The UI can link from a workflow/provenance event to its evidence artifacts.
 - Raw artifacts are not sent to PostHog and are not treated as Sentry product truth.
 
+### M9.9 — Minimal Landing Page Packaging Slice
+
+**Status:** Planned, public alpha packaging only
+
+Purpose:
+
+Make the public product message understandable before broader alpha demos.
+
+Scope:
+
+- Keep language product-focused and developer-facing.
+- Avoid heavy architecture-first copy.
+- Explain the trust loop clearly.
+- Link to the OSS repo/docs.
+- Avoid pricing/commercial details in OSS docs.
+
+Suggested minimal sections:
+
+- Hero: what PatchPlane does in one sentence.
+- Trust loop: agent patch → sandbox → evidence → human decision → publication.
+- Why it exists: AI coding output needs verification and provenance before entering trusted workflows.
+- Alpha status: focused on one GitHub/Daytona/Pi loop.
+- OSS/developer section: inspect, run, contribute, or follow development.
+
+Acceptance criteria:
+
+- A developer can understand the alpha promise quickly.
+- The landing page does not overpromise broad platform capabilities before alpha proof.
+
+---
+
 ---
 
 ### M10 — Review, decision, and publication loop
@@ -761,37 +792,6 @@ Acceptance criteria:
 - A SQL plugin can implement the `StorageService` workflow-start methods without changing `packages/core`.
 - SQL plugin failures map to PatchPlane `StorageError`.
 - Convex can remain enabled for realtime UI projection even when durable persistence is SQL-backed.
-
----
-
-### M10.75 — Minimal Landing Page Packaging Slice
-
-**Status:** Planned, public alpha packaging only
-
-Purpose:
-
-Make the public product message understandable before broader alpha demos.
-
-Scope:
-
-- Keep language product-focused and developer-facing.
-- Avoid heavy architecture-first copy.
-- Explain the trust loop clearly.
-- Link to the OSS repo/docs.
-- Avoid pricing/commercial details in OSS docs.
-
-Suggested minimal sections:
-
-- Hero: what PatchPlane does in one sentence.
-- Trust loop: agent patch → sandbox → evidence → human decision → publication.
-- Why it exists: AI coding output needs verification and provenance before entering trusted workflows.
-- Alpha status: focused on one GitHub/Daytona/Pi loop.
-- OSS/developer section: inspect, run, contribute, or follow development.
-
-Acceptance criteria:
-
-- A developer can understand the alpha promise quickly.
-- The landing page does not overpromise broad platform capabilities before alpha proof.
 
 ---
 
