@@ -45,17 +45,20 @@ export function isPatchPlaneResultComment(input: {
     input.prompt.trimStart().startsWith('PatchPlane sandbox run ')
 }
 
+export function githubWebhookGoneResponse() {
+  return jsonResponse(
+    {
+      ok: false,
+      error: 'GitHub webhooks are handled by the dedicated GitHubWebhookWorker in hosted Cloudflare deployments',
+    },
+    { status: 410 },
+  )
+}
+
 export const Route = createFileRoute('/api/github/webhook')({
   server: {
     handlers: {
-      POST: async () =>
-        jsonResponse(
-          {
-            ok: false,
-            error: 'GitHub webhooks are handled by the dedicated source-control Worker in hosted Cloudflare deployments',
-          },
-          { status: 410 },
-        ),
+      POST: async () => githubWebhookGoneResponse(),
     },
   },
 })

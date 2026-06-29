@@ -73,14 +73,6 @@ function configuredConvexUrl() {
   return value.replace(/\/$/, '')
 }
 
-function internalWorkerToken() {
-  const value = process.env.PATCHPLANE_INTERNAL_WORKER_TOKEN?.trim()
-  if (!value) {
-    throw new Error('PATCHPLANE_INTERNAL_WORKER_TOKEN is required')
-  }
-  return value
-}
-
 async function syncGitHubInstallation(input: {
   readonly installationId: string
   readonly workspaceId: string
@@ -94,7 +86,6 @@ async function syncGitHubInstallation(input: {
     client.execute(
       HttpClientRequest.post('https://source-control-worker/internal/github/install/sync', {
         headers: {
-          authorization: `Bearer ${internalWorkerToken()}`,
           'content-type': 'application/json',
         },
         body: HttpBody.text(JSON.stringify(input), 'application/json'),

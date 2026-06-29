@@ -1,4 +1,9 @@
-import { controlRuntimeSession, handleGitHubWebhook, syncGitHubInstallation } from './github/routes'
+import type { WorkerEnv } from './github/config'
+import { controlRuntimeSession, handleGitHubWebhook, makeSourceControlRuntime, syncGitHubInstallation } from './github/routes'
+
+interface RequestContext {
+  waitUntil(promise: Promise<unknown>): void
+}
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
@@ -7,21 +12,26 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 }
 
 export default {
-  async fetch(request: Request) {
+  async fetch(request: Request, env: WorkerEnv, context: RequestContext) {
     const url = new URL(request.url)
+    const runtime = makeSourceControlRuntime(env)
 
-    if (request.method === 'POST' && url.pathname === '/internal/github/install/sync') {
-      return await syncGitHubInstallation(request)
+    try {
+      if (request.method === 'POST' && url.pathname === '/internal/github/install/sync') {
+        return await syncGitHubInstallation(request, runtime)
+      }
+
+      if (request.method === 'POST' && url.pathname === '/internal/runtime/control') {
+        return await controlRuntimeSession(request, runtime)
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/github/webhook') {
+        return await handleGitHubWebhook(request, env, runtime)
+      }
+
+      return jsonResponse({ ok: false, error: 'Not found' }, { status: 404 })
+    } finally {
+      context.waitUntil(runtime.dispose())
     }
-
-    if (request.method === 'POST' && url.pathname === '/internal/runtime/control') {
-      return await controlRuntimeSession(request)
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/github/webhook') {
-      return await handleGitHubWebhook(request)
-    }
-
-    return jsonResponse({ ok: false, error: 'Not found' }, { status: 404 })
   },
 }

@@ -66,6 +66,7 @@ function WorkflowDetailPreview({ detail }: { readonly detail: WorkflowDetail }) 
       <div className="flex justify-end">
         <Button
           size="sm"
+          nativeButton={false}
           render={<a aria-label="Open full workflow" href={`/app/workflows/${detail.workflowRun.id}`} />}
         >
           Open full workflow

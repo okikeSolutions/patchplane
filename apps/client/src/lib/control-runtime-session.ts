@@ -33,14 +33,6 @@ function configuredConvexUrl() {
   return value.replace(/\/$/, '')
 }
 
-function internalWorkerToken() {
-  const value = process.env.PATCHPLANE_INTERNAL_WORKER_TOKEN?.trim()
-  if (!value) {
-    throw new Error('PATCHPLANE_INTERNAL_WORKER_TOKEN is required')
-  }
-  return value
-}
-
 async function authorizeWorkflowRun(workflowRunId: string, authToken?: string) {
   const convex = new ConvexHttpClient(configuredConvexUrl())
   if (authToken !== undefined) convex.setAuth(authToken)
@@ -62,7 +54,6 @@ async function sendRuntimeControl(input: typeof RuntimeControlInput.Type): Promi
     client.execute(
       HttpClientRequest.post('https://source-control-worker/internal/runtime/control', {
         headers: {
-          authorization: `Bearer ${internalWorkerToken()}`,
           'content-type': 'application/json',
         },
         body: HttpBody.text(JSON.stringify(input), 'application/json'),

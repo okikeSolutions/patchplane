@@ -34,10 +34,17 @@ const csrfMiddleware = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === 'serverFn',
 })
 
+function authRedirectUri(request: Request) {
+  const url = new URL(request.url)
+  return `${url.origin}/api/auth/callback`
+}
+
 const workosAuthkitMiddleware = createMiddleware().server(async (args) => {
   const { authkitMiddleware } =
     await import('@workos/authkit-tanstack-react-start')
-  const middleware: unknown = authkitMiddleware()
+  const middleware: unknown = authkitMiddleware({
+    redirectUri: authRedirectUri(args.request),
+  })
 
   if (hasMiddlewareServer(middleware) && middleware.options.server) {
     return middleware.options.server(args)

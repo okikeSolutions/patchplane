@@ -6,7 +6,14 @@ import { GitHubProviderPlugin } from '@patchplane/plugins/github/provider-plugin
 import { SentryTelemetryPlugin } from '@patchplane/plugins/sentry/telemetry-plugin'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { Cause, Crypto, Effect, Exit, Layer, ManagedRuntime, Schema } from 'effect'
+import { Cause, Crypto, Effect, Exit, Layer, ManagedRuntime, Redacted, Schema } from 'effect'
+import {
+  PATCHPLANE_DEFAULT_AGENT_PROVIDER,
+  loadSourceControlRouteConfig,
+  sourceControlConfigLayer,
+  type SourceControlRouteConfig as SourceControlRouteConfigType,
+  type WorkerEnv,
+} from './config'
 import { GitHubEventToWorkflowIntake } from '@patchplane/core/workflows/github-event-to-intake'
 import { IngestGitHubWebhook } from '@patchplane/core/workflows/ingest-github-webhook'
 import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
@@ -37,8 +44,17 @@ const SourceControlWorkerLayer = Layer.mergeAll(
   NodeServices.layer,
 )
 
-const memoMap = Layer.makeMemoMapUnsafe()
-const runtime = ManagedRuntime.make(SourceControlWorkerLayer, { memoMap })
+type SourceControlRuntime = ManagedRuntime.ManagedRuntime<
+  Layer.Success<typeof SourceControlWorkerLayer>,
+  Layer.Error<typeof SourceControlWorkerLayer>
+>
+
+export function makeSourceControlRuntime(env: WorkerEnv): SourceControlRuntime {
+  return ManagedRuntime.make(
+    SourceControlWorkerLayer.pipe(Layer.provide(sourceControlConfigLayer(env))),
+    { memoMap: Layer.makeMemoMapUnsafe() },
+  )
+}
 
 class SourceControlWorkerRequestError extends Schema.ErrorClass<SourceControlWorkerRequestError>('SourceControlWorkerRequestError')({
   message: Schema.String,
@@ -66,33 +82,13 @@ function requiredHeader(request: Request, name: string) {
   return value === null || value.length === 0 ? undefined : value
 }
 
-function configuredConvexUrl() {
-  const value = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
-  if (value === undefined || value.trim().length === 0) {
-    throw new Error('CONVEX_URL or VITE_CONVEX_URL is required')
-  }
-  return value.replace(/\/$/, '')
+function configuredConvexUrl(config: SourceControlRouteConfigType) {
+  return config.convexUrl.replace(/\/$/, '')
 }
 
-function systemIngestionSecret() {
-  const value = process.env.PATCHPLANE_SYSTEM_INGESTION_SECRET?.trim()
-  return value && value.length > 0 ? value : undefined
-}
-
-function internalWorkerToken() {
-  const value = process.env.PATCHPLANE_INTERNAL_WORKER_TOKEN?.trim()
-  if (!value) {
-    throw new Error('PATCHPLANE_INTERNAL_WORKER_TOKEN is required')
-  }
-  return value
-}
-
-function assertInternalAuthorization(request: Request) {
-  const authorization = request.headers.get('authorization')
-  if (authorization !== `Bearer ${internalWorkerToken()}`) {
-    return jsonResponse({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-  return undefined
+function systemIngestionSecret(config: SourceControlRouteConfigType) {
+  const value = Redacted.value(config.systemIngestionSecret).trim()
+  return value.length > 0 ? value : undefined
 }
 
 function parseRepositoryAllowlist(value: string | undefined) {
@@ -112,13 +108,13 @@ function parseRepositoryAllowlist(value: string | undefined) {
   return new Set(repositories)
 }
 
-function parseGitHubWorkspaceId() {
-  const workspaceId = process.env.PATCHPLANE_GITHUB_WORKSPACE_ID?.trim()
+function parseGitHubWorkspaceId(config: SourceControlRouteConfigType) {
+  const workspaceId = config.githubWorkspaceId.trim()
   if (workspaceId) {
     return makeWorkspaceId(workspaceId)
   }
 
-  const organizationId = process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID?.trim()
+  const organizationId = config.workosOrganizationId.trim()
   if (organizationId) {
     return makeWorkOSWorkspaceId(organizationId)
   }
@@ -128,43 +124,43 @@ function parseGitHubWorkspaceId() {
   )
 }
 
-function resolvePiExecutionConfig() {
-  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? (
-    process.env.CLOUDFLARE_API_KEY !== undefined &&
-      process.env.CLOUDFLARE_ACCOUNT_ID !== undefined &&
-      (process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID) !== undefined
+function resolvePiExecutionConfig(config: SourceControlRouteConfigType) {
+  const provider = config.piProvider.trim() || (
+    config.cloudflareApiKey.trim().length > 0 &&
+      config.cloudflareAccountId.trim().length > 0 &&
+      config.cloudflareGatewayId.trim().length > 0
       ? 'cloudflare-ai-gateway'
       : PATCHPLANE_DEFAULT_AGENT_PROVIDER
   )
 
   return {
     provider,
-    model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
-    thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-    piMode: process.env.PATCHPLANE_PI_MODE === 'rpc' ? 'rpc' : 'json',
+    model: config.piModel,
+    thinking: config.piThinking,
+    piMode: config.piMode === 'rpc' ? 'rpc' : 'json',
     timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
   } as const
 }
 
-function loadGitHubWebhookRouteConfig() {
-  const mode = process.env.PATCHPLANE_GITHUB_WEBHOOK_EXECUTION === 'daytona-command'
+function loadGitHubWebhookRouteConfig(config: SourceControlRouteConfigType) {
+  const mode = config.webhookExecution === 'daytona-command'
     ? 'daytona-command'
     : 'daytona-pi'
 
   if (mode === 'daytona-pi') {
     return {
-      workspaceId: parseGitHubWorkspaceId(),
-      repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+      workspaceId: parseGitHubWorkspaceId(config),
+      repositoryAllowlist: parseRepositoryAllowlist(config.repositoryAllowlist),
       execution: {
         mode,
-        ...resolvePiExecutionConfig(),
+        ...resolvePiExecutionConfig(config),
       },
     } as const
   }
 
   return {
-    workspaceId: parseGitHubWorkspaceId(),
-    repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+    workspaceId: parseGitHubWorkspaceId(config),
+    repositoryAllowlist: parseRepositoryAllowlist(config.repositoryAllowlist),
     execution: {
       mode,
       command: DAYTONA_DEFAULT_COMMAND,
@@ -173,7 +169,7 @@ function loadGitHubWebhookRouteConfig() {
   } as const
 }
 
-async function randomTraceId() {
+async function randomTraceId(runtime: SourceControlRuntime) {
   return await runtime.runPromise(
     Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto
@@ -208,10 +204,6 @@ function makeGitHubActor(installationId: number) {
   }
 }
 
-const PATCHPLANE_DEFAULT_AGENT_PROVIDER = 'openai'
-const PATCHPLANE_DEFAULT_AGENT_MODEL = 'gpt-5.5'
-const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
-
 const patchPlaneResultCommentEventKinds = new Set([
   'github.issue_comment.created',
   'github.pull_request_comment.created',
@@ -226,10 +218,7 @@ function isPatchPlaneResultComment(input: {
     input.prompt.trimStart().startsWith('PatchPlane sandbox run ')
 }
 
-export async function syncGitHubInstallation(request: Request) {
-  const unauthorized = assertInternalAuthorization(request)
-  if (unauthorized !== undefined) return unauthorized
-
+export async function syncGitHubInstallation(request: Request, runtime: SourceControlRuntime) {
   const input = await runtime.runPromise(
     Effect.tryPromise({
       try: () => request.json(),
@@ -273,11 +262,8 @@ export async function syncGitHubInstallation(request: Request) {
   })
 }
 
-export async function controlRuntimeSession(request: Request) {
-  const unauthorized = assertInternalAuthorization(request)
-  if (unauthorized !== undefined) return unauthorized
-
-  const traceId = await randomTraceId()
+export async function controlRuntimeSession(request: Request, runtime: SourceControlRuntime) {
+  const traceId = await randomTraceId(runtime)
 
   const inputExit = await runtime.runPromiseExit(
     Effect.tryPromise({
@@ -322,7 +308,19 @@ export async function controlRuntimeSession(request: Request) {
   return jsonResponse({ ok: true, traceId, status: controlExit.value.status })
 }
 
-export async function handleGitHubWebhook(request: Request) {
+export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runtime: SourceControlRuntime) {
+  const config = (() => {
+    try {
+      return loadSourceControlRouteConfig(env)
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error))
+    }
+  })()
+
+  if (config instanceof Error) {
+    return jsonResponse({ ok: false, error: config.message }, { status: 500 })
+  }
+
   const deliveryId = requiredHeader(request, 'x-github-delivery')
   const eventName = requiredHeader(request, 'x-github-event')
   const signature = requiredHeader(request, 'x-hub-signature-256')
@@ -337,11 +335,11 @@ export async function handleGitHubWebhook(request: Request) {
     )
   }
 
-  const traceId = await randomTraceId()
+  const traceId = await randomTraceId(runtime)
   const payload = await request.text()
   const routeConfig = (() => {
     try {
-      return loadGitHubWebhookRouteConfig()
+      return loadGitHubWebhookRouteConfig(config)
     } catch (error) {
       return error instanceof Error ? error : new Error(String(error))
     }
@@ -354,7 +352,7 @@ export async function handleGitHubWebhook(request: Request) {
   const program = Effect.gen(function* () {
     const event = yield* IngestGitHubWebhook({ deliveryId, eventName, signature, payload })
     const repositoryFullName = `${event.owner}/${event.repo}`
-    const secret = systemIngestionSecret()
+    const secret = systemIngestionSecret(config)
     const resolvedRoute = yield* Effect.tryPromise({
       try: () => resolveGitHubWebhookWorkspace({
         repositoryFullName,
@@ -362,7 +360,7 @@ export async function handleGitHubWebhook(request: Request) {
         repositoryAllowlist: routeConfig.repositoryAllowlist,
         lookupConnectedRepository: async () => {
           if (secret === undefined) return null
-          const convex = new ConvexHttpClient(configuredConvexUrl())
+          const convex = new ConvexHttpClient(configuredConvexUrl(config))
           return await convex.query(lookupGitHubWebhookRoute, {
             systemSecret: secret,
             installationId: String(event.installationId),

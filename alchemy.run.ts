@@ -1,7 +1,9 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Effect from 'effect/Effect'
-import { createPhysicalName } from './utils'
+import { Path } from 'effect/Path'
+import { clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
+import { createPhysicalName } from './apps/infra/utils.ts'
 
 const artifactRetentionDays = 14
 const aiGatewayCollectLogs = false
@@ -20,6 +22,7 @@ export default Alchemy.Stack(
     const retentionSeconds = retentionDays * 24 * 60 * 60
     const rateLimitPerMinute = Math.max(1, Math.floor(aiGatewayRateLimitPerMinute))
     const collectAiGatewayLogs = aiGatewayCollectLogs
+    const path = yield* Path
 
     const evidenceBucket = yield* Cloudflare.R2.Bucket('EvidenceArtifacts', {
       name: createPhysicalName({
@@ -58,32 +61,36 @@ export default Alchemy.Stack(
     })
 
     const sourceControlWorker = yield* Cloudflare.Worker('SourceControlWorker', {
-      main: '../source-control/src/worker.ts',
+      main: path.resolve(import.meta.dirname, 'apps/source-control/src/worker.ts'),
+      url: false,
       compatibility: { flags: ['nodejs_compat'] },
-      build: {
-        bundleAnalyzer: true,
-      },
       env: {
+        ...sourceControlRuntimeEnv,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
     })
 
-    const client = yield* Cloudflare.Website.Vite('Client', {
-      rootDir: '../client',
+    const githubWebhookWorker = yield* Cloudflare.Worker('GitHubWebhookWorker', {
+      main: path.resolve(import.meta.dirname, 'apps/source-control/src/webhook-worker.ts'),
       compatibility: { flags: ['nodejs_compat'] },
       env: {
+        SOURCE_CONTROL_WORKER: sourceControlWorker,
+      },
+    })
+
+    const client = yield* Cloudflare.Website.Vite('Client', {
+      rootDir: path.resolve(import.meta.dirname, 'apps/client'),
+      compatibility: { flags: ['nodejs_compat'] },
+      env: {
+        ...clientRuntimeEnv,
         SOURCE_CONTROL_WORKER: sourceControlWorker,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
       assets: { runWorkerFirst: true },
-      // Alchemy's proxied Cloudflare Vite dev path currently fails TanStack Start's
-      // module-runner WebSocket upgrade locally. Keep infra dev healthy and run the
-      // client with `bun run dev:client`.
-      dev: { mode: 'external', url: 'http://localhost:3000' },
     })
 
     return {
@@ -95,6 +102,7 @@ export default Alchemy.Stack(
       aiGatewayCollectLogs: collectAiGatewayLogs,
       aiGatewayRateLimitPerMinute: rateLimitPerMinute,
       sourceControlWorkerUrl: sourceControlWorker.url,
+      githubWebhookWorkerUrl: githubWebhookWorker.url,
       clientUrl: client.url,
       runtimeEnv: {
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,

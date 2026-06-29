@@ -80,9 +80,9 @@ export function WorkflowInspector({
               </h2>
             </div>
             <Button
-              type="button"
               variant="secondary"
               size="sm"
+              nativeButton={false}
               render={<a aria-label="Open workflow" href={`/app/workflows/${workflowRunId}`} />}
             >
               Open

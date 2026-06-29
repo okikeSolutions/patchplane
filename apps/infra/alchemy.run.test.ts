@@ -2,7 +2,7 @@ import * as Test from 'alchemy/Test/Vitest'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Effect from 'effect/Effect'
 import { expect } from '@effect/vitest'
-import PatchPlaneInfra from './alchemy.run'
+import PatchPlaneInfra from '../../alchemy.run'
 
 const liveInfraTest = false
 const destroyAfterLiveTest = false
@@ -23,7 +23,8 @@ test.skipIf(!liveInfraTest)(
     expect(output.evidenceBucketName).toContain('patchplane')
     expect(output.evidenceBucketName).toContain('evidence-artifacts')
     expect(output.aiGatewayId).toContain('patchplane')
-    expect(output.sourceControlWorkerUrl).toContain('workers.dev')
+    expect(output.sourceControlWorkerUrl).toBeUndefined()
+    expect(output.githubWebhookWorkerUrl).toContain('workers.dev')
     expect(output.clientUrl).toContain('workers.dev')
     expect(output.runtimeEnv.PATCHPLANE_EVIDENCE_R2_BUCKET).toBe(output.evidenceBucketName)
     expect(output.runtimeEnv.PATCHPLANE_AI_GATEWAY_ID).toBe(output.aiGatewayId)
