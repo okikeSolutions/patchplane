@@ -37,7 +37,7 @@
     "@effect/platform-bun": "4.0.0-beta.90",
     "@effect/platform-node": "4.0.0-beta.90",
     "@sentry/effect": "^10.62.0",
-    "alchemy": "^2.0.0-beta.58",
+    "alchemy": "^2.0.0-beta.59",
     "effect": "4.0.0-beta.90"
   },
   "devDependencies": {
