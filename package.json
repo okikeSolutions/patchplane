@@ -24,6 +24,7 @@
     "test:domain": "bun run --cwd packages/domain test",
     "test:core": "bun run --cwd packages/core test",
     "test:plugins": "bun run --cwd packages/plugins test",
+    "test:infra-patches": "vitest run test/alchemy-runtime-patches.test.ts",
     "smoke:foundation": "bun run --cwd apps/client smoke",
     "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/plugins typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck && bun run --cwd apps/source-control typecheck && bun run --cwd apps/infra typecheck",
     "lint": "oxlint apps packages && bun run --cwd packages/backend lint:convex",
@@ -51,5 +52,9 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   },
-  "packageManager": "bun@1.3.10"
+  "packageManager": "bun@1.3.10",
+  "patchedDependencies": {
+    "@distilled.cloud/cloudflare-runtime@0.11.3": "patches/@distilled.cloud%2Fcloudflare-runtime@0.11.3.patch",
+    "@distilled.cloud/cloudflare-vite-plugin@0.11.3": "patches/@distilled.cloud%2Fcloudflare-vite-plugin@0.11.3.patch"
+  }
 }

@@ -90,6 +90,7 @@ export default Alchemy.Stack(
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
+      dev: { port: 3000 },
       assets: { runWorkerFirst: true },
     })
 

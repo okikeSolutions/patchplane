@@ -1,0 +1,26 @@
+diff --git a/dist/node/Runtime.mjs b/dist/node/Runtime.mjs
+index 8c5717d29f609af7bd3b7343fd527e42df0b6979..cfc0c1d99454bfddfb7ae23a7dcabf90065acf76 100644
+--- a/dist/node/Runtime.mjs
++++ b/dist/node/Runtime.mjs
+@@ -60,7 +60,7 @@ const RuntimeLive = Layer.effect(Runtime, Effect.gen(function* () {
+ 			sockets: [{
+ 				name: SOCKET_USER_ENTRY,
+ 				address: "127.0.0.1:0",
+-				service: { name: config.entry ?? "user-worker" }
++				service: { name: "user-worker" }
+ 			}, ...config.sockets],
+ 			services: [{
+ 				name: SERVICE_USER_WORKER,
+diff --git a/src/Runtime.ts b/src/Runtime.ts
+index 5a13242ee0f696626d3c3cdd5b9013e14865ee85..20b9bd506c6fb028b87d8f97eaab788024889e05 100644
+--- a/src/Runtime.ts
++++ b/src/Runtime.ts
+@@ -96,7 +96,7 @@ export const RuntimeLive = Layer.effect(
+               {
+                 name: SOCKET_USER_ENTRY,
+                 address: "127.0.0.1:0",
+-                service: { name: config.entry ?? SERVICE_USER_WORKER },
++                service: { name: SERVICE_USER_WORKER },
+               },
+               ...config.sockets,
+             ],
