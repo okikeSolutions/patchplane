@@ -1,5 +1,6 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import { Path } from 'effect/Path'
 import { clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
@@ -8,6 +9,12 @@ import { createPhysicalName } from './apps/infra/utils.ts'
 const artifactRetentionDays = 14
 const aiGatewayCollectLogs = false
 const aiGatewayRateLimitPerMinute = 120
+const evidenceR2AccessKeyId = Config.redacted('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID').pipe(
+  Config.orElse(() => Config.redacted('CLOUDFLARE_ACCESS_KEY_ID')),
+)
+const evidenceR2SecretAccessKey = Config.redacted('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY').pipe(
+  Config.orElse(() => Config.redacted('CLOUDFLARE_SECRET_ACCESS_KEY')),
+)
 
 export default Alchemy.Stack(
   'PatchPlaneInfra',
@@ -67,6 +74,7 @@ export default Alchemy.Stack(
       env: {
         ...sourceControlRuntimeEnv,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
+        PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
@@ -87,6 +95,9 @@ export default Alchemy.Stack(
         ...clientRuntimeEnv,
         SOURCE_CONTROL_WORKER: sourceControlWorker,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
+        PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
+        PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID: evidenceR2AccessKeyId,
+        PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY: evidenceR2SecretAccessKey,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },

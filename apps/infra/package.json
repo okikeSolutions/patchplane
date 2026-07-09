@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sh -c 'if [ -f ../../.env.local ]; then bun ../../node_modules/alchemy/bin/alchemy.ts dev --env-file ../../.env.local \"$@\"; else bun ../../node_modules/alchemy/bin/alchemy.ts dev \"$@\"; fi' --",
-    "plan": "sh -c 'if [ -f ../../.env.local ]; then bun ../../node_modules/alchemy/bin/alchemy.ts deploy --dry-run --env-file ../../.env.local \"$@\"; else bun ../../node_modules/alchemy/bin/alchemy.ts deploy --dry-run \"$@\"; fi' --",
-    "deploy": "sh -c 'if [ -f ../../.env.local ]; then bun ../../node_modules/alchemy/bin/alchemy.ts deploy --env-file ../../.env.local \"$@\"; else bun ../../node_modules/alchemy/bin/alchemy.ts deploy \"$@\"; fi' --",
-    "destroy": "sh -c 'if [ -f ../../.env.local ]; then bun ../../node_modules/alchemy/bin/alchemy.ts destroy --env-file ../../.env.local \"$@\"; else bun ../../node_modules/alchemy/bin/alchemy.ts destroy \"$@\"; fi' --",
+    "dev": "sh -c 'cd ../.. && bun run infra:dev \"$@\"' --",
+    "plan": "sh -c 'cd ../.. && bun run infra:plan \"$@\"' --",
+    "deploy": "sh -c 'cd ../.. && bun run infra:deploy \"$@\"' --",
+    "destroy": "sh -c 'cd ../.. && bun run infra:destroy \"$@\"' --",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },

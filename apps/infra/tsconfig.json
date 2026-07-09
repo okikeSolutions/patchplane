@@ -1,6 +1,6 @@
 {
   "extends": "../../packages/typescript-config/base.json",
-  "include": ["alchemy.run.ts", "alchemy.run.test.ts", "utils.ts", "utils.test.ts"],
+  "include": ["alchemy.run.test.ts", "config.ts", "utils.ts", "utils.test.ts", "../../alchemy.run.ts"],
   "exclude": ["node_modules"],
   "compilerOptions": {
     "types": ["bun"],
