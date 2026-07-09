@@ -15,12 +15,9 @@ export type EvidenceArtifactKind =
 
 export type ArtifactBody = string | Uint8Array | AsyncIterable<Uint8Array>
 
-export interface EvidenceArtifactMetadata {
-  readonly id: string
-  readonly workflowRunId: string
-  readonly traceId?: string | undefined
-  readonly kind: EvidenceArtifactKind
-  readonly storageProvider: string
+/** Provider-level metadata for raw artifact bytes. Product artifact identity lives in StorageService/Convex. */
+export interface StoredArtifactObjectMetadata {
+  readonly storageProvider: 'cloudflare-r2'
   readonly storageKey: string
   readonly contentType: string
   readonly sizeBytes: number
@@ -40,11 +37,11 @@ export interface PutArtifactInput extends TelemetryContextFields {
 }
 
 export interface GetArtifactMetadataInput extends TelemetryContextFields {
-  readonly artifactId: string
+  readonly storageKey: string
 }
 
 export interface CreateSignedReadUrlInput extends TelemetryContextFields {
-  readonly artifactId: string
+  readonly storageKey: string
   readonly expiresInSeconds: number
 }
 
@@ -54,11 +51,11 @@ export interface SignedArtifactReadUrl {
 }
 
 export interface DeleteArtifactInput extends TelemetryContextFields {
-  readonly artifactId: string
+  readonly storageKey: string
 }
 
 export interface ApplyArtifactRetentionPolicyInput extends TelemetryContextFields {
-  readonly artifactId: string
+  readonly storageKey: string
   /** PatchPlane retention intent/metadata. Provider lifecycle rules may be bucket or prefix scoped. */
   readonly retentionPolicy: string
 }
@@ -67,10 +64,10 @@ export interface ApplyArtifactRetentionPolicyInput extends TelemetryContextField
 export class ArtifactsService extends Context.Service<ArtifactsService, {
   readonly putArtifact: (
     input: PutArtifactInput,
-  ) => Effect.Effect<EvidenceArtifactMetadata, ArtifactsError>
+  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
   readonly getArtifactMetadata: (
     input: GetArtifactMetadataInput,
-  ) => Effect.Effect<EvidenceArtifactMetadata, ArtifactsError>
+  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
   readonly createSignedReadUrl: (
     input: CreateSignedReadUrlInput,
   ) => Effect.Effect<SignedArtifactReadUrl, ArtifactsError>
@@ -80,5 +77,5 @@ export class ArtifactsService extends Context.Service<ArtifactsService, {
   /** Applies PatchPlane retention intent for an artifact. R2 lifecycle enforcement is configured by bucket/prefix. */
   readonly applyRetentionPolicy: (
     input: ApplyArtifactRetentionPolicyInput,
-  ) => Effect.Effect<EvidenceArtifactMetadata, ArtifactsError>
+  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
 }>()('@patchplane/core/services/ArtifactsService') {}

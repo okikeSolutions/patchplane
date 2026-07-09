@@ -30,6 +30,7 @@ interface WorkflowStartResult {
 
 interface WorkflowDetailResult {
   readonly runtimeEvents?: ReadonlyArray<unknown> | undefined
+  readonly evidenceArtifacts?: ReadonlyArray<unknown> | undefined
 }
 
 const createWorkflowStart = makeFunctionReference<
@@ -73,6 +74,18 @@ const recordRuntimeEvents = makeFunctionReference<
   Record<string, unknown>,
   Array<Record<string, unknown>>
 >('workflowStarts:recordRuntimeEvents')
+
+const recordEvidenceArtifact = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordEvidenceArtifact')
+
+const getEvidenceArtifact = makeFunctionReference<
+  'query',
+  Record<string, unknown>,
+  Record<string, unknown> | null
+>('workflowStarts:getEvidenceArtifact')
 
 const recordRuntimeSessionStarted = makeFunctionReference<
   'mutation',
@@ -381,6 +394,62 @@ describe('workflowStarts trusted boundary and authz', () => {
       runtimeEvents: [{ provider: 'pi', type: 'agent.started' }],
       sandboxExecutions: [{ provider: 'daytona', status: 'failed' }],
     })
+  })
+
+  test('records evidence artifact metadata for workflow detail', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    const artifact = await t.mutation(recordEvidenceArtifact, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      traceId: 'trace_123',
+      kind: 'stdout',
+      label: 'Sandbox stdout',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflow-1/stdout.txt',
+      contentType: 'text/plain; charset=utf-8',
+      sizeBytes: 2,
+      sha256: '2689367b205c16ce32e8ecd5e2fe58ae6d4acc7ba32d3d116dc92d4c2715f1b5',
+      retentionPolicy: 'alpha-14-days',
+      createdAt: 10,
+    })
+
+    expect(artifact).toMatchObject({
+      workflowRunId: workflowStart.workflowRun.id,
+      kind: 'stdout',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflow-1/stdout.txt',
+      sizeBytes: 2,
+    })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(detail.evidenceArtifacts).toHaveLength(1)
+    expect(detail.evidenceArtifacts?.[0]).toMatchObject({
+      kind: 'stdout',
+      storageKey: 'workflow-1/stdout.txt',
+      sha256: '2689367b205c16ce32e8ecd5e2fe58ae6d4acc7ba32d3d116dc92d4c2715f1b5',
+    })
+
+    const readBack = await t.query(getEvidenceArtifact, {
+      artifactId: artifact.id,
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(readBack).toMatchObject({
+      id: artifact.id,
+      workflowRunId: workflowStart.workflowRun.id,
+      storageKey: 'workflow-1/stdout.txt',
+    })
+
+    const mismatchedWorkflow = await createWorkflowStartForTest(t)
+    const mismatchedRead = await t.query(getEvidenceArtifact, {
+      artifactId: artifact.id,
+      workflowRunId: mismatchedWorkflow.workflowRun.id,
+    })
+    expect(mismatchedRead).toBeNull()
   })
 
   test('recordRuntimeEvents dedupes idempotency keys', async () => {

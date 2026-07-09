@@ -1,6 +1,18 @@
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
 
+const evidenceArtifactKind = v.union(
+  v.literal('raw-trace'),
+  v.literal('stdout'),
+  v.literal('stderr'),
+  v.literal('diff'),
+  v.literal('test-report'),
+  v.literal('screenshot'),
+  v.literal('video'),
+  v.literal('policy-result'),
+  v.literal('trust-report'),
+)
+
 const sandboxPolicy = v.object({
   lifecycle: v.object({
     ephemeral: v.boolean(),
@@ -187,6 +199,23 @@ export default defineSchema({
     completedAt: v.number(),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
+
+  evidenceArtifacts: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    traceId: v.optional(v.string()),
+    kind: evidenceArtifactKind,
+    label: v.optional(v.string()),
+    storageProvider: v.literal('cloudflare-r2'),
+    storageKey: v.string(),
+    contentType: v.string(),
+    sizeBytes: v.number(),
+    sha256: v.string(),
+    retentionPolicy: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_storage_key', ['storageProvider', 'storageKey'])
+    .index('by_hash', ['sha256']),
 
   githubConnectionIntents: defineTable({
     state: v.string(),

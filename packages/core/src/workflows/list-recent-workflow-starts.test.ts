@@ -19,6 +19,8 @@ const TestStorageLayer = Layer.succeed(
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     markRuntimeSessionStatus: () => Effect.die('unused'),
     getActiveRuntimeSession: () => Effect.die('unused'),
+    recordEvidenceArtifact: () => Effect.die('unused'),
+    getEvidenceArtifact: () => Effect.die('unused'),
     listRecentWorkflowStarts: (input) =>
       Effect.succeed([
         {

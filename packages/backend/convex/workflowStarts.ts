@@ -157,6 +157,33 @@ function sortedByNumber<A>(
   }, [])
 }
 
+const evidenceArtifactKindArg = v.union(
+  v.literal('raw-trace'),
+  v.literal('stdout'),
+  v.literal('stderr'),
+  v.literal('diff'),
+  v.literal('test-report'),
+  v.literal('screenshot'),
+  v.literal('video'),
+  v.literal('policy-result'),
+  v.literal('trust-report'),
+)
+
+const evidenceArtifactReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  traceId: v.optional(v.string()),
+  kind: evidenceArtifactKindArg,
+  label: v.optional(v.string()),
+  storageProvider: v.literal('cloudflare-r2'),
+  storageKey: v.string(),
+  contentType: v.string(),
+  sizeBytes: v.number(),
+  sha256: v.string(),
+  retentionPolicy: v.optional(v.string()),
+  createdAt: v.number(),
+})
+
 const runtimeEventReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
@@ -240,6 +267,7 @@ const workflowDetailReturn = v.object({
   runtimeEvents: v.array(runtimeEventReturn),
   runtimeSessions: v.array(runtimeSessionReturn),
   sandboxExecutions: v.array(sandboxExecutionReturn),
+  evidenceArtifacts: v.array(evidenceArtifactReturn),
 })
 
 const workflowStartReturn = v.object({
@@ -716,6 +744,100 @@ export const getActiveRuntimeSession = query({
   },
 })
 
+export const getEvidenceArtifact = query({
+  args: {
+    artifactId: v.id('evidenceArtifacts'),
+    workflowRunId: v.optional(v.id('workflowRuns')),
+    systemSecret: v.optional(v.string()),
+  },
+  returns: v.union(evidenceArtifactReturn, v.null()),
+  handler: async (ctx, args) => {
+    const artifact = await ctx.db.get('evidenceArtifacts', args.artifactId)
+    if (artifact === null) return null
+
+    if (args.workflowRunId !== undefined && artifact.workflowRunId !== args.workflowRunId) {
+      return null
+    }
+
+    const workflowRun = await ctx.db.get('workflowRuns', artifact.workflowRunId)
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    if (args.systemSecret !== undefined) {
+      requireSystemIngestionSecret(args.systemSecret)
+    } else {
+      const identity = await requireWorkOSIdentity(ctx)
+      requireWorkOSWorkspace(identity, workflowRun.workspaceId)
+      await requireMembershipPermission(
+        ctx,
+        identity,
+        workflowRun.workspaceId,
+        'workspace:view',
+      )
+    }
+
+    return {
+      id: artifact['_id'],
+      workflowRunId: artifact.workflowRunId,
+      ...(artifact.traceId === undefined ? {} : { traceId: artifact.traceId }),
+      kind: artifact.kind,
+      ...(artifact.label === undefined ? {} : { label: artifact.label }),
+      storageProvider: artifact.storageProvider,
+      storageKey: artifact.storageKey,
+      contentType: artifact.contentType,
+      sizeBytes: artifact.sizeBytes,
+      sha256: artifact.sha256,
+      ...(artifact.retentionPolicy === undefined ? {} : { retentionPolicy: artifact.retentionPolicy }),
+      createdAt: artifact.createdAt,
+    }
+  },
+})
+
+export const recordEvidenceArtifact = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    traceId: v.optional(v.string()),
+    kind: evidenceArtifactKindArg,
+    label: v.optional(v.string()),
+    storageProvider: v.literal('cloudflare-r2'),
+    storageKey: v.string(),
+    contentType: v.string(),
+    sizeBytes: v.number(),
+    sha256: v.string(),
+    retentionPolicy: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
+  },
+  returns: evidenceArtifactReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+    if (workflowRun === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+
+    const createdAt = args.createdAt ?? Date.now()
+    const artifact = {
+      workflowRunId: args.workflowRunId,
+      ...(args.traceId === undefined ? {} : { traceId: args.traceId }),
+      kind: args.kind,
+      ...(args.label === undefined ? {} : { label: args.label }),
+      storageProvider: args.storageProvider,
+      storageKey: args.storageKey,
+      contentType: args.contentType,
+      sizeBytes: args.sizeBytes,
+      sha256: args.sha256,
+      ...(args.retentionPolicy === undefined ? {} : { retentionPolicy: args.retentionPolicy }),
+      createdAt,
+    }
+    const id = await ctx.db.insert('evidenceArtifacts', artifact)
+
+    return { id, ...artifact }
+  },
+})
+
 export const recordSandboxExecution = mutation({
   args: {
     systemSecret: v.string(),
@@ -850,6 +972,11 @@ export const getDetail = query({
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
       .collect()
 
+    const evidenceArtifacts = await ctx.db
+      .query('evidenceArtifacts')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
     return {
       promptRequest: {
         id: promptRequest['_id'],
@@ -915,6 +1042,21 @@ export const getDetail = query({
           ...(execution.policy === undefined ? {} : { policy: execution.policy }),
           startedAt: execution.startedAt,
           completedAt: execution.completedAt,
+        })),
+      evidenceArtifacts: sortedByNumber(evidenceArtifacts, (artifact) => artifact.createdAt)
+        .map((artifact) => ({
+          id: artifact['_id'],
+          workflowRunId: artifact.workflowRunId,
+          ...(artifact.traceId === undefined ? {} : { traceId: artifact.traceId }),
+          kind: artifact.kind,
+          ...(artifact.label === undefined ? {} : { label: artifact.label }),
+          storageProvider: artifact.storageProvider,
+          storageKey: artifact.storageKey,
+          contentType: artifact.contentType,
+          sizeBytes: artifact.sizeBytes,
+          sha256: artifact.sha256,
+          ...(artifact.retentionPolicy === undefined ? {} : { retentionPolicy: artifact.retentionPolicy }),
+          createdAt: artifact.createdAt,
         })),
     }
   },

@@ -1,4 +1,6 @@
 import { NodeServices } from '@effect/platform-node'
+import { ArtifactsService } from '@patchplane/core/services/artifacts-service'
+import { CloudflareR2ArtifactsPlugin, type R2BucketLike } from '@patchplane/plugins/cloudflare/r2-artifacts-plugin'
 import { ConvexStoragePlugin } from '@patchplane/plugins/convex/storage-plugin'
 import { DaytonaSandboxPlugin } from '@patchplane/plugins/daytona/sandbox-plugin'
 import { DAYTONA_DEFAULT_COMMAND, DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS } from '@patchplane/plugins/daytona/config'
@@ -23,7 +25,7 @@ import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-san
 import { StartWorkflowFromIntake } from '@patchplane/core/workflows/start-workflow-from-intake'
 import { SourceControlService } from '@patchplane/core/services/source-control-service'
 import { captureTelemetryCause, withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
-import { SourceControlError, publicErrorMessage } from '@patchplane/domain/errors'
+import { ArtifactsError, SourceControlError, publicErrorMessage } from '@patchplane/domain/errors'
 import { makeGitHubAppActorId, makeWorkspaceId, makeWorkOSWorkspaceId } from '@patchplane/domain/ids'
 
 const lookupGitHubWebhookRoute = makeFunctionReference<
@@ -36,13 +38,51 @@ const lookupGitHubWebhookRoute = makeFunctionReference<
   { workspaceId: string; repositoryFullName: string; status: string } | null
 >('connectedRepositories:lookupGitHubWebhookRoute')
 
-const SourceControlWorkerLayer = Layer.mergeAll(
-  ConvexStoragePlugin.layer,
-  GitHubProviderPlugin.layer,
-  DaytonaSandboxPlugin.layer,
-  SentryTelemetryPlugin.layer,
-  NodeServices.layer,
-)
+const MissingR2ArtifactsLayer = Layer.succeed(ArtifactsService, ArtifactsService.of({
+  putArtifact: () => Effect.fail(new ArtifactsError({
+    operation: 'r2.config',
+    message: 'PATCHPLANE_EVIDENCE_BUCKET binding is required to store artifacts',
+    cause: undefined,
+  })),
+  getArtifactMetadata: () => Effect.fail(new ArtifactsError({
+    operation: 'r2.config',
+    message: 'PATCHPLANE_EVIDENCE_BUCKET binding is required to read artifacts',
+    cause: undefined,
+  })),
+  createSignedReadUrl: () => Effect.fail(new ArtifactsError({
+    operation: 'r2.config',
+    message: 'PATCHPLANE_EVIDENCE_BUCKET binding is required to sign artifacts',
+    cause: undefined,
+  })),
+  deleteArtifact: () => Effect.fail(new ArtifactsError({
+    operation: 'r2.config',
+    message: 'PATCHPLANE_EVIDENCE_BUCKET binding is required to delete artifacts',
+    cause: undefined,
+  })),
+  applyRetentionPolicy: () => Effect.fail(new ArtifactsError({
+    operation: 'r2.config',
+    message: 'PATCHPLANE_EVIDENCE_BUCKET binding is required to update artifact retention',
+    cause: undefined,
+  })),
+}))
+
+function sourceControlWorkerLayer(env: WorkerEnv) {
+  const bucket = env.PATCHPLANE_EVIDENCE_BUCKET as R2BucketLike | undefined
+  const artifactsLayer = bucket === undefined
+    ? MissingR2ArtifactsLayer
+    : CloudflareR2ArtifactsPlugin.layerFromBucket(bucket).pipe(Layer.provide(NodeServices.layer))
+
+  return Layer.mergeAll(
+    ConvexStoragePlugin.layer,
+    GitHubProviderPlugin.layer,
+    DaytonaSandboxPlugin.layer,
+    SentryTelemetryPlugin.layer,
+    artifactsLayer,
+    NodeServices.layer,
+  )
+}
+
+const SourceControlWorkerLayer = sourceControlWorkerLayer({})
 
 type SourceControlRuntime = ManagedRuntime.ManagedRuntime<
   Layer.Success<typeof SourceControlWorkerLayer>,
@@ -51,7 +91,7 @@ type SourceControlRuntime = ManagedRuntime.ManagedRuntime<
 
 export function makeSourceControlRuntime(env: WorkerEnv): SourceControlRuntime {
   return ManagedRuntime.make(
-    SourceControlWorkerLayer.pipe(Layer.provide(sourceControlConfigLayer(env))),
+    sourceControlWorkerLayer(env).pipe(Layer.provide(sourceControlConfigLayer(env))),
     { memoMap: Layer.makeMemoMapUnsafe() },
   )
 }
@@ -489,4 +529,3 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
 
   return jsonResponse({ ok: false, traceId, error }, { status: 400 })
 }
-

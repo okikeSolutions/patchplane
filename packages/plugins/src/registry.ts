@@ -233,6 +233,87 @@ export const patchPlanePlugins = {
       },
     ],
   },
+  cloudflareR2: {
+    id: 'cloudflare-r2',
+    name: 'Cloudflare R2 artifacts',
+    description: 'Stores raw evidence artifacts such as logs, diffs, reports, screenshots, and trust-report JSON in Cloudflare R2.',
+    layerExport: '@patchplane/plugins/cloudflare/R2ArtifactsPlugin#CloudflareR2ArtifactsPlugin.layerFromBucket',
+    provides: ['ArtifactsService'],
+    surfaces: ['app', 'githubWebhook'],
+    env: [
+      {
+        name: 'CLOUDFLARE_ACCOUNT_ID',
+        required: true,
+        description: 'Cloudflare account id that owns the evidence artifact R2 bucket.',
+      },
+      {
+        name: 'PATCHPLANE_EVIDENCE_R2_BUCKET',
+        required: true,
+        description: 'Cloudflare R2 bucket name for raw PatchPlane evidence artifacts.',
+      },
+      {
+        name: 'PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID',
+        required: true,
+        secret: true,
+        description: 'R2/S3 access key id used for signed artifact reads and direct R2 API operations. CLOUDFLARE_ACCESS_KEY_ID is accepted as fallback.',
+      },
+      {
+        name: 'PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY',
+        required: true,
+        secret: true,
+        description: 'R2/S3 secret access key used for signed artifact reads and direct R2 API operations. CLOUDFLARE_SECRET_ACCESS_KEY is accepted as fallback.',
+      },
+      {
+        name: 'CLOUDFLARE_S3_API_ENDPOINT',
+        required: false,
+        description: 'Optional Cloudflare R2 S3 API endpoint override. Defaults to https://<accountId>.r2.cloudflarestorage.com.',
+      },
+      {
+        name: 'PATCHPLANE_EVIDENCE_R2_SIGNED_URL_EXPIRES_SECONDS',
+        required: false,
+        defaultValue: '900',
+        description: 'Default signed artifact read URL lifetime in seconds.',
+      },
+      {
+        name: 'PATCHPLANE_EVIDENCE_MAX_ARTIFACT_BYTES',
+        required: false,
+        defaultValue: String(10 * 1024 * 1024),
+        description: 'Maximum raw artifact payload size accepted by the R2 artifacts plugin.',
+      },
+    ],
+  },
+  cloudflareAiGateway: {
+    id: 'cloudflare-ai-gateway',
+    name: 'Cloudflare AI Gateway',
+    description: 'Provides model gateway configuration for Pi sandbox model access through Cloudflare AI Gateway.',
+    layerExport: '@patchplane/plugins/sandbox-runtime/pi/config#piRuntimeEnvironment',
+    provides: ['ModelGatewayService'],
+    surfaces: ['githubWebhook'],
+    env: [
+      {
+        name: 'CLOUDFLARE_ACCOUNT_ID',
+        required: true,
+        description: 'Cloudflare account id that owns the AI Gateway.',
+      },
+      {
+        name: 'PATCHPLANE_AI_GATEWAY_ID',
+        required: true,
+        description: 'Cloudflare AI Gateway id/slug provisioned by PatchPlane infra. CLOUDFLARE_GATEWAY_ID is accepted as fallback by runtime code.',
+      },
+      {
+        name: 'CLOUDFLARE_API_KEY',
+        required: true,
+        secret: true,
+        description: 'Cloudflare API key/token used by Pi sandbox model access when PATCHPLANE_PI_PROVIDER=cloudflare-ai-gateway.',
+      },
+      {
+        name: 'PATCHPLANE_PI_PROVIDER',
+        required: false,
+        defaultValue: 'cloudflare-ai-gateway',
+        description: 'Pi provider value for routing model access through Cloudflare AI Gateway.',
+      },
+    ],
+  },
   observability: {
     id: 'observability',
     name: 'Local Effect observability',

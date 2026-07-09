@@ -1,6 +1,7 @@
 import { Context, Effect } from 'effect'
 import type { Actor } from '@patchplane/domain/actor'
 import type { StorageError } from '@patchplane/domain/errors'
+import type { EvidenceArtifact, EvidenceArtifactKind } from '@patchplane/domain/evidence-artifact'
 import type { ExternalWorkflowRef } from '@patchplane/domain/external-workflow-ref'
 import type { WorkspaceId } from '@patchplane/domain/ids'
 import type { ListRecentWorkflowStartsInput } from '@patchplane/domain/list-recent-workflow-starts'
@@ -78,6 +79,26 @@ export interface RecordRuntimeEventInput extends TelemetryContextFields {
   readonly sourceOffset?: number | undefined
 }
 
+export interface RecordEvidenceArtifactInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly traceId?: string | undefined
+  readonly kind: EvidenceArtifactKind
+  readonly label?: string | undefined
+  readonly storageProvider: 'cloudflare-r2'
+  readonly storageKey: string
+  readonly contentType: string
+  readonly sizeBytes: number
+  readonly sha256: string
+  readonly retentionPolicy?: string | undefined
+  readonly createdAt?: number | undefined
+}
+
+export interface GetEvidenceArtifactInput extends TelemetryContextFields {
+  readonly artifactId: string
+  readonly workflowRunId?: string | undefined
+  readonly authToken?: string | undefined
+}
+
 export class StorageService extends Context.Service<StorageService, {
   readonly createWorkflowFromIntake: (
     input: WorkflowIntake,
@@ -103,4 +124,10 @@ export class StorageService extends Context.Service<StorageService, {
   readonly getActiveRuntimeSession: (
     input: GetActiveRuntimeSessionInput,
   ) => Effect.Effect<RuntimeSession | undefined, StorageError>
+  readonly recordEvidenceArtifact: (
+    input: RecordEvidenceArtifactInput,
+  ) => Effect.Effect<EvidenceArtifact, StorageError>
+  readonly getEvidenceArtifact: (
+    input: GetEvidenceArtifactInput,
+  ) => Effect.Effect<EvidenceArtifact | undefined, StorageError>
 }>()('@patchplane/core/services/StorageService') {}

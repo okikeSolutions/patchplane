@@ -26,6 +26,8 @@ function storageLayer(events: Array<unknown>, session = activeSession) {
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     getActiveRuntimeSession: () => Effect.succeed(session),
+    recordEvidenceArtifact: () => Effect.die('unused'),
+    getEvidenceArtifact: () => Effect.die('unused'),
     markRuntimeSessionStatus: (input) => Effect.sync(() => {
       events.push(input)
       return { ...session, status: input.status, updatedAt: 2, ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }) }

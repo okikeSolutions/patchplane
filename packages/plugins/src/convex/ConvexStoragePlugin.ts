@@ -2,6 +2,7 @@ import { Config, Effect, Layer, Option, Redacted } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import { StorageError } from '@patchplane/domain/errors'
+import { decodeEvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
 import { decodeRuntimeSession } from '@patchplane/domain/runtime-session'
 import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
@@ -15,6 +16,8 @@ import {
   type CreateWorkflowFromPromptInput,
   type GetActiveRuntimeSessionInput,
   type MarkRuntimeSessionStatusInput,
+  type GetEvidenceArtifactInput,
+  type RecordEvidenceArtifactInput,
   type RecordRuntimeEventInput,
   type RecordRuntimeSessionStartedInput,
   type RecordSandboxExecutionInput,
@@ -149,6 +152,35 @@ const recordSandboxExecutionMutation = makeFunctionReference<
   },
   unknown
 >('workflowStarts:recordSandboxExecution')
+
+const recordEvidenceArtifactMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    traceId?: string
+    kind: RecordEvidenceArtifactInput['kind']
+    label?: string
+    storageProvider: 'cloudflare-r2'
+    storageKey: string
+    contentType: string
+    sizeBytes: number
+    sha256: string
+    retentionPolicy?: string
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordEvidenceArtifact')
+
+const getEvidenceArtifactQuery = makeFunctionReference<
+  'query',
+  {
+    artifactId: string
+    workflowRunId?: string
+    systemSecret?: string
+  },
+  unknown
+>('workflowStarts:getEvidenceArtifact')
 
 const listRecentWorkflowStartsQuery = makeFunctionReference<
   'query',
@@ -546,6 +578,97 @@ export const ConvexStoragePlugin = {
           )
         }))
 
+      const recordEvidenceArtifact = Effect.fn(
+        '@patchplane/plugins/convex/recordEvidenceArtifact',
+      )((input: RecordEvidenceArtifactInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordEvidenceArtifact.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record evidence artifacts',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordEvidenceArtifactMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
+                kind: input.kind,
+                ...(input.label === undefined ? {} : { label: input.label }),
+                storageProvider: input.storageProvider,
+                storageKey: input.storageKey,
+                contentType: input.contentType,
+                sizeBytes: input.sizeBytes,
+                sha256: input.sha256,
+                ...(input.retentionPolicy === undefined ? {} : { retentionPolicy: input.retentionPolicy }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordEvidenceArtifact',
+                message: 'Convex failed to record evidence artifact',
+                cause,
+              }),
+          })
+          return yield* decodeEvidenceArtifact(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordEvidenceArtifact.decode',
+                message: 'Convex returned invalid evidence artifact',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const getEvidenceArtifact = Effect.fn(
+        '@patchplane/plugins/convex/getEvidenceArtifact',
+      )((input: GetEvidenceArtifactInput) =>
+        Effect.gen(function* () {
+          if (input.authToken === undefined && systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'getEvidenceArtifact.config',
+              message: 'authToken or PATCHPLANE_SYSTEM_INGESTION_SECRET is required to read evidence artifacts',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              if (input.authToken !== undefined) {
+                client.setAuth(input.authToken)
+              }
+              return client.query(getEvidenceArtifactQuery, {
+                artifactId: input.artifactId,
+                ...(input.workflowRunId === undefined ? {} : { workflowRunId: input.workflowRunId }),
+                ...(input.authToken !== undefined || systemIngestionSecret === undefined
+                  ? {}
+                  : { systemSecret: Redacted.value(systemIngestionSecret) }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'getEvidenceArtifact',
+                message: 'Convex failed to read evidence artifact',
+                cause,
+              }),
+          })
+          if (value === null) return undefined
+          return yield* decodeEvidenceArtifact(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'getEvidenceArtifact.decode',
+                message: 'Convex returned invalid evidence artifact',
+                cause,
+              })
+            ),
+          )
+        }))
+
       return StorageService.of({
         createWorkflowFromIntake: createWorkflowFromPrompt,
         createWorkflowFromPrompt,
@@ -555,6 +678,8 @@ export const ConvexStoragePlugin = {
         markRuntimeSessionStatus,
         getActiveRuntimeSession,
         recordSandboxExecution,
+        recordEvidenceArtifact,
+        getEvidenceArtifact,
       })
     }),
   ),

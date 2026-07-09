@@ -7,6 +7,8 @@
     "node": ">=22.19.0"
   },
   "exports": {
+    "./cloudflare/r2-artifacts-config": "./src/cloudflare/R2ArtifactsConfig.ts",
+    "./cloudflare/r2-artifacts-plugin": "./src/cloudflare/R2ArtifactsPlugin.ts",
     "./convex/config": "./src/convex/ConvexConfig.ts",
     "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts",
     "./daytona/config": "./src/daytona/DaytonaConfig.ts",
@@ -27,10 +29,12 @@
     "smoke:daytona-rpc": "bun src/daytona/live-rpc-smoke.ts"
   },
   "dependencies": {
-    "@patchplane/core": "workspace:*",
-    "@patchplane/domain": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1079.0",
+    "@aws-sdk/s3-request-presigner": "^3.1079.0",
     "@daytona/sdk": "^0.186.0",
     "@effect/platform-node": "4.0.0-beta.90",
+    "@patchplane/core": "workspace:*",
+    "@patchplane/domain": "workspace:*",
     "@sentry/effect": "^10.62.0",
     "@workos-inc/node": "10.3.0",
     "convex": "^1.41.0",

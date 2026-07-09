@@ -4,6 +4,18 @@ import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { PrepareRepositoryClone } from '../repository/prepare-repository-clone'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
+import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
+
+const inlineLogPreviewBytes = 16 * 1024
+
+function shouldCaptureAsArtifact(value: string | undefined) {
+  return value !== undefined && value.length > inlineLogPreviewBytes
+}
+
+function truncatePreview(value: string) {
+  if (value.length <= inlineLogPreviewBytes) return value
+  return `${value.slice(0, inlineLogPreviewBytes)}\n\n…truncated; full output stored as evidence artifact…`
+}
 
 export const RunSandboxAgentForWorkflow = Effect.fn(
   '@patchplane/core/workflows/RunSandboxAgentForWorkflow',
@@ -102,6 +114,30 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     })
   }
 
+  if (shouldCaptureAsArtifact(result.stdout)) {
+    yield* CaptureEvidenceArtifact({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      traceId: input.workflowStart.workflowRun.traceId,
+      kind: 'stdout',
+      label: 'Sandbox stdout',
+      contentType: 'text/plain',
+      body: result.stdout,
+      retentionPolicy: 'alpha-14d',
+    })
+  }
+
+  if (shouldCaptureAsArtifact(result.stderr)) {
+    yield* CaptureEvidenceArtifact({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      traceId: input.workflowStart.workflowRun.traceId,
+      kind: 'stderr',
+      label: 'Sandbox stderr',
+      contentType: 'text/plain',
+      body: result.stderr!,
+      retentionPolicy: 'alpha-14d',
+    })
+  }
+
   return yield* storage.recordSandboxExecution({
     workflowRunId: input.workflowStart.workflowRun.id,
     provider: result.provider,
@@ -109,8 +145,8 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     command: result.command,
     status: result.exitCode === 0 ? 'succeeded' : 'failed',
     ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-    stdout: result.stdout,
-    ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+    stdout: truncatePreview(result.stdout),
+    ...(result.stderr === undefined ? {} : { stderr: truncatePreview(result.stderr) }),
     ...(result.policy === undefined ? {} : { policy: result.policy }),
     startedAt: result.startedAt,
     completedAt: result.completedAt,
