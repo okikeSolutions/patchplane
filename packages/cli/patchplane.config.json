@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/patchplane/schema/patchplane.schema.json",
+  "plugins": {
+    "app": [
+      "convex",
+      "workos"
+    ]
+  },
+  "runtime": {
+    "githubWebhookExecution": "daytona-command"
+  }
+}

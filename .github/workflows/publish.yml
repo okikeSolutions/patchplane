@@ -37,6 +37,41 @@ jobs:
 
       - run: bun run --cwd packages/cli build
 
+      - name: Smoke test packaged CLI executable
+        run: |
+          set -euo pipefail
+
+          node --input-type=module -e "await import('./packages/cli/dist/main.js'); if (process.exitCode !== undefined) process.exit(process.exitCode)"
+
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+
+          cat > "$tmpdir/.env.local" <<'EOF'
+          CONVEX_URL=
+          PATCHPLANE_SYSTEM_INGESTION_SECRET=
+          VITE_CONVEX_URL=
+          WORKOS_API_KEY=
+          WORKOS_CLIENT_ID=
+          WORKOS_COOKIE_PASSWORD=
+          WORKOS_REDIRECT_URI=
+          EOF
+
+          cat > "$tmpdir/secrets.env" <<'EOF'
+          CONVEX_URL=x
+          PATCHPLANE_SYSTEM_INGESTION_SECRET=x
+          VITE_CONVEX_URL=x
+          WORKOS_API_KEY=x
+          WORKOS_CLIENT_ID=x
+          WORKOS_COOKIE_PASSWORD=x
+          WORKOS_REDIRECT_URI=x
+          EOF
+
+          packages/cli/dist/main.js --cwd "$tmpdir" --dotenv secrets.env env check --surface app --json > "$tmpdir/env-check.json"
+          node -e "const fs = require('node:fs'); const result = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); if (!result.ok || result.missingRequired !== 0) { console.error(result); process.exit(1) }" "$tmpdir/env-check.json"
+
+          packages/cli/dist/main.js --cwd "$tmpdir" init --profile app --dry-run --yes --json > "$tmpdir/init.json"
+          test ! -e "$tmpdir/patchplane.config.json"
+
       - run: npm pack --dry-run
         working-directory: packages/cli
 

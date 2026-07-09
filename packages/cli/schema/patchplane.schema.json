@@ -35,7 +35,7 @@
   "$defs": {
     "pluginId": {
       "type": "string",
-      "enum": ["convex", "workos", "github", "daytona", "pi"]
+      "enum": ["convex", "workos", "github", "daytona", "cloudflare-r2", "cloudflare-ai-gateway", "observability", "sentry"]
     },
     "pluginList": {
       "type": "array",

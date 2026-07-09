@@ -2,7 +2,7 @@ import { Console, Effect, Option } from 'effect'
 import { CliError, Command, Flag } from 'effect/unstable/cli'
 import { getPatchPlanePlugin } from '@patchplane/plugins/registry'
 import { CliDiagnostics } from '../services/diagnostics'
-import { failCommand } from '../services/errors'
+import { failCommand, failSilently } from '../services/errors'
 
 const pluginsFlag = Flag.string('plugins').pipe(
   Flag.withDescription('Comma-separated plugin ids to check, e.g. github,convex'),
@@ -30,6 +30,9 @@ const doctorFlags = {
   includeOptional: Flag.boolean('include-optional').pipe(
     Flag.withDescription('Include optional environment variables in checks'),
   ),
+  json: Flag.boolean('json').pipe(
+    Flag.withDescription('Emit machine-readable JSON to stdout'),
+  ),
 } as const
 
 export const doctorCommand = Command.make('doctor', doctorFlags, (input) =>
@@ -40,6 +43,16 @@ export const doctorCommand = Command.make('doctor', doctorFlags, (input) =>
       plugins: Option.getOrUndefined(input.plugins),
       includeOptional: input.includeOptional,
     })
+    if (input.json) {
+      yield* Console.log(JSON.stringify({
+        ok: result.failures === 0,
+        failures: result.failures,
+        diagnostics: result.diagnostics,
+      }, null, 2))
+      if (result.failures > 0) return yield* failSilently
+      return undefined
+    }
+
     for (const line of result.lines) {
       yield* Console.log(line)
     }

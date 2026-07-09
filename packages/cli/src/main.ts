@@ -1,52 +1,39 @@
 #!/usr/bin/env node
-import { Effect, Runtime } from 'effect'
-import { CliError, Command } from 'effect/unstable/cli'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { NodeRuntime, NodeServices } from '@effect/platform-node'
+import { Effect } from 'effect'
+import { Command } from 'effect/unstable/cli'
+import packageJson from '../package.json'
 import { doctorCommand } from './commands/doctor'
 import { envCommand } from './commands/env'
 import { initCommand } from './commands/init'
 import { pluginsCommand } from './commands/plugins'
-import { cliRuntime } from './runtime'
+import { patchPlaneRootCommand } from './command'
+import { CliLayer } from './runtime'
+import { CliConfigFlag, CliCwdFlag, CliDotenvFlag } from './services/global-options'
 
-/** Root Effect CLI command for PatchPlane onboarding and diagnostics. */
-export const patchPlaneCommand = Command.make('patchplane', {}, () =>
-  Effect.fail(new CliError.ShowHelp({
-    commandPath: ['patchplane'],
-    errors: [new CliError.MissingArgument({ argument: 'subcommand' })],
-  })),
-).pipe(
-  Command.withDescription('PatchPlane project setup and diagnostics.'),
-  Command.withShortDescription('PatchPlane CLI'),
-  Command.withExamples([
-    { command: 'patchplane init --profile app --yes', description: 'Initialize app-only local config without prompts' },
-    { command: 'patchplane doctor', description: 'Check config and required environment variables' },
-  ]),
+export const cliCommand = patchPlaneRootCommand.pipe(
   Command.withSubcommands([
-    initCommand,
-    doctorCommand,
-    envCommand,
-    pluginsCommand,
+    initCommand.pipe(Command.provide(CliLayer)),
+    doctorCommand.pipe(Command.provide(CliLayer)),
+    envCommand.pipe(Command.provide(CliLayer)),
+    pluginsCommand.pipe(Command.provide(CliLayer)),
   ]),
+  Command.withGlobalFlags([CliCwdFlag, CliConfigFlag, CliDotenvFlag]),
 )
 
-function reportMainError(error: unknown) {
-  process.exitCode = Runtime.getErrorExitCode(error)
-  if (!Runtime.getErrorReported(error)) return
-  console.error(error instanceof Error ? error.message : String(error))
+export const cliProgram = Command.run(cliCommand, {
+  version: packageJson.version,
+}).pipe(
+  Effect.provide(NodeServices.layer),
+)
+
+export function main() {
+  NodeRuntime.runMain(cliProgram)
 }
 
-export async function main() {
-  try {
-    await cliRuntime.runPromise(
-      Command.run(patchPlaneCommand, { version: '0.0.0' }),
-    )
-  } catch (error) {
-    reportMainError(error)
-  } finally {
-    await cliRuntime.dispose()
-  }
-}
-
-const entrypoint = process.argv[1]?.split(/[\\/]/).at(-1)
-if (entrypoint === 'main.ts' || entrypoint === 'main.js' || entrypoint === 'patchplane') {
-  await main()
+const entrypoint = process.argv[1] === undefined ? undefined : resolve(process.argv[1])
+if (entrypoint !== undefined && fileURLToPath(import.meta.url) === entrypoint) {
+  main()
 }

@@ -2,7 +2,7 @@ import { Console, Effect, Option } from 'effect'
 import { CliError, Command, Flag } from 'effect/unstable/cli'
 import { getPatchPlanePlugin } from '@patchplane/plugins/registry'
 import { CliEnvFile, envTemplateText } from '../services/env-file'
-import { failCommand } from '../services/errors'
+import { failCommand, failSilently } from '../services/errors'
 import { formatEnvCheckResults } from '../output/format'
 
 const pluginsFlag = Flag.string('plugins').pipe(
@@ -31,12 +31,16 @@ const envFlags = {
   includeOptional: Flag.boolean('include-optional').pipe(
     Flag.withDescription('Include optional environment variables'),
   ),
+  json: Flag.boolean('json').pipe(
+    Flag.withDescription('Emit machine-readable JSON to stdout'),
+  ),
 } as const
 
 function selection(input: {
   readonly surface: Option.Option<'app' | 'githubWebhook'>
   readonly plugins: Option.Option<string>
   readonly includeOptional: boolean
+  readonly json: boolean
 }) {
   return {
     surface: Option.getOrUndefined(input.surface),
@@ -58,11 +62,21 @@ export const envCheckCommand = Command.make('check', envFlags, (input) =>
   Effect.gen(function* () {
     const envFile = yield* CliEnvFile
     const results = yield* envFile.collectEnvCheck(selection(input))
+    const missingRequired = results.filter((result) => !result.present && result.variable.required).length
+    if (input.json) {
+      yield* Console.log(JSON.stringify({
+        ok: missingRequired === 0,
+        missingRequired,
+        results,
+      }, null, 2))
+      if (missingRequired > 0) return yield* failSilently
+      return undefined
+    }
+
     for (const line of formatEnvCheckResults(results)) {
       yield* Console.log(line)
     }
 
-    const missingRequired = results.filter((result) => !result.present && result.variable.required).length
     if (missingRequired > 0) {
       return yield* failCommand(`\nMissing required env vars: ${missingRequired}`)
     }

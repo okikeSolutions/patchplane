@@ -1,5 +1,5 @@
 import { Console, Effect } from 'effect'
-import { Argument, CliError, Command } from 'effect/unstable/cli'
+import { Argument, CliError, Command, Flag } from 'effect/unstable/cli'
 import {
   getPatchPlanePlugin,
   patchPlanePlugins,
@@ -56,8 +56,14 @@ const pluginIdArgument = Argument.string('id').pipe(
   ),
 )
 
-export const pluginsListCommand = Command.make('list', {}, () =>
-  Console.log(pluginsListText())
+export const pluginsListCommand = Command.make('list', {
+  json: Flag.boolean('json').pipe(
+    Flag.withDescription('Emit machine-readable JSON to stdout'),
+  ),
+}, ({ json }) =>
+  Console.log(json
+    ? JSON.stringify({ plugins: Object.values(patchPlanePlugins) }, null, 2)
+    : pluginsListText())
 ).pipe(
   Command.withDescription('List available PatchPlane plugins.'),
   Command.withShortDescription('List plugins'),
@@ -65,8 +71,15 @@ export const pluginsListCommand = Command.make('list', {}, () =>
 
 export const pluginsExplainCommand = Command.make('explain', {
   id: pluginIdArgument,
-}, ({ id }) =>
-  Effect.sync(() => pluginsExplainText(id)).pipe(
+  json: Flag.boolean('json').pipe(
+    Flag.withDescription('Emit machine-readable JSON to stdout'),
+  ),
+}, ({ id, json }) =>
+  Effect.sync(() => {
+    const plugin = getPatchPlanePlugin(id)
+    if (plugin === undefined) throw new Error(`Unknown plugin: ${id}`)
+    return json ? JSON.stringify({ plugin }, null, 2) : pluginsExplainText(id)
+  }).pipe(
     Effect.flatMap((text) => Console.log(text)),
   )
 ).pipe(

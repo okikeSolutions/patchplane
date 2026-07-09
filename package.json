@@ -25,6 +25,7 @@
     "test:core": "bun run --cwd packages/core test",
     "test:plugins": "bun run --cwd packages/plugins test",
     "test:infra-patches": "vitest run test/alchemy-runtime-patches.test.ts",
+    "eval:cli": "vitest run tests/evals/cli-friendliness.test.ts --project default",
     "smoke:foundation": "bun run --cwd apps/client smoke",
     "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/plugins typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck && bun run --cwd apps/source-control typecheck && bun run --cwd apps/infra typecheck",
     "lint": "oxlint apps packages && bun run --cwd packages/backend lint:convex",

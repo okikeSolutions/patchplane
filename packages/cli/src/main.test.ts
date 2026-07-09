@@ -1,14 +1,41 @@
+import { NodeServices } from '@effect/platform-node'
 import { Effect, Exit, FileSystem, Path } from 'effect'
 import type { PlatformError } from 'effect/PlatformError'
 import { TestConsole } from 'effect/testing'
-import { CliLayer } from './runtime'
+import { CliLayer, makeCliLayer } from './runtime'
 import { afterEach, describe, expect, it, layer } from '@effect/vitest'
 import { Command } from 'effect/unstable/cli'
-import { patchPlaneCommand } from './main'
+import { doctorCommand } from './commands/doctor'
+import { envCommand } from './commands/env'
+import { initCommand } from './commands/init'
+import { pluginsCommand } from './commands/plugins'
+import { patchPlaneRootCommand } from './command'
+import { cliCommand } from './main'
 import { parsePluginIds } from './services/env-file'
+import { CliConfigFlag, CliCwdFlag, CliDotenvFlag } from './services/global-options'
+import { patchPlaneDefaultSurfaces } from '@patchplane/plugins/registry'
 
 function runPatchPlane(args: readonly string[]) {
-  return Command.runWith(patchPlaneCommand, { version: '0.0.0' })(args)
+  return Command.runWith(
+    cliCommand,
+    { version: '0.0.0' },
+  )(args)
+}
+
+function runPatchPlaneIn(cwd: string, args: readonly string[]) {
+  const layer = makeCliLayer({ cwd, envFiles: [] })
+  return Command.runWith(
+    patchPlaneRootCommand.pipe(
+      Command.withSubcommands([
+        initCommand.pipe(Command.provide(layer)),
+        doctorCommand.pipe(Command.provide(layer)),
+        envCommand.pipe(Command.provide(layer)),
+        pluginsCommand.pipe(Command.provide(layer)),
+      ]),
+      Command.withGlobalFlags([CliCwdFlag, CliConfigFlag, CliDotenvFlag]),
+    ),
+    { version: '0.0.0' },
+  )(args)
 }
 
 function captureConsole<A, E, R>(effect: Effect.Effect<A, E, R>) {
@@ -68,13 +95,10 @@ function projectPathIsDirectory(dir: string, file: string) {
 function inTempProject<A, E, R>(fn: (dir: string) => Effect.Effect<A, E, R>): Effect.Effect<A, E | PlatformError, R | FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const previousCwd = process.cwd()
     const dir = yield* fs.makeTempDirectory({ prefix: 'patchplane-cli-' })
-    process.chdir(dir)
     try {
       return yield* fn(dir)
     } finally {
-      process.chdir(previousCwd)
       yield* fs.remove(dir, { recursive: true }).pipe(Effect.ignore)
     }
   })
@@ -85,6 +109,12 @@ afterEach(() => {
 })
 
 describe('patchplane cli parsing', () => {
+  it('importing the executable module does not run the command', async () => {
+    process.exitCode = undefined
+    await import('./main')
+    expect(process.exitCode).toBeUndefined()
+  })
+
   it('resolves default plugin ids for a runtime surface', () => {
     expect(parsePluginIds({ surface: 'githubWebhook' })).toEqual([
       'github',
@@ -102,7 +132,7 @@ describe('patchplane cli parsing', () => {
   })
 })
 
-layer(CliLayer)('patchplane cli integration', (effectIt) => {
+layer(NodeServices.layer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('runs plugins explain through the Effect command tree', () =>
     Effect.gen(function* () {
       const output = yield* captureConsole(
@@ -126,15 +156,68 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
       expect(output.stdout).not.toContain('DAYTONA_API_KEY=')
     }))
 
+  effectIt.effect('applies --cwd through Effect global settings', () =>
+    inTempProject((dir) =>
+      Effect.gen(function* () {
+        yield* captureConsole(
+          runPatchPlane(['--cwd', dir, 'init', '--profile', 'app', '--yes']),
+        )
+
+        expect(yield* projectPathExists(dir, 'patchplane.config.json')).toBe(true)
+        expect(yield* projectPathExists(dir, '.env.local')).toBe(true)
+      }),
+    ))
+
+  effectIt.effect('explicit --dotenv values override blank auto-loaded placeholders', () =>
+    inTempProject((dir) =>
+      Effect.gen(function* () {
+        yield* writeProjectFile(
+          dir,
+          '.env.local',
+          [
+            'CONVEX_URL=',
+            'PATCHPLANE_SYSTEM_INGESTION_SECRET=',
+            'VITE_CONVEX_URL=',
+            'WORKOS_API_KEY=',
+            'WORKOS_CLIENT_ID=',
+            'WORKOS_COOKIE_PASSWORD=',
+            'WORKOS_REDIRECT_URI=',
+            '',
+          ].join('\n'),
+        )
+        yield* writeProjectFile(
+          dir,
+          'secrets.env',
+          [
+            'CONVEX_URL=x',
+            'PATCHPLANE_SYSTEM_INGESTION_SECRET=x',
+            'VITE_CONVEX_URL=x',
+            'WORKOS_API_KEY=x',
+            'WORKOS_CLIENT_ID=x',
+            'WORKOS_COOKIE_PASSWORD=x',
+            'WORKOS_REDIRECT_URI=x',
+            '',
+          ].join('\n'),
+        )
+
+        const output = yield* captureConsole(
+          runPatchPlane(['--cwd', dir, '--dotenv', 'secrets.env', 'env', 'check', '--surface', 'app', '--json']),
+        )
+
+        expect(output.failed).toBe(false)
+        expect(JSON.parse(output.stdout).missingRequired).toBe(0)
+      }),
+    ))
+
   effectIt.effect('initializes a real project with root config, env file, and generated state dirs', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
         const output = yield* captureConsole(
-          runPatchPlane(['init', '--profile', 'app', '--yes']),
+          runPatchPlaneIn(dir, ['init', '--profile', 'app', '--yes']),
         )
 
         const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
-        expect(config.plugins).toEqual({ app: ['convex', 'workos'] })
+        expect(config.plugins).toEqual({ app: patchPlaneDefaultSurfaces.app })
         expect(config.runtime.githubWebhookExecution).toBe('daytona-command')
 
         const env = yield* readProjectFile(dir, '.env.local')
@@ -151,7 +234,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('init --profile app --yes writes only app env vars', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--yes']))
         const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('CONVEX_URL=')
         expect(env).toContain('WORKOS_API_KEY=')
@@ -163,7 +246,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('init --profile githubWebhook --yes writes webhook env vars, not WorkOS vars', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'githubWebhook', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'githubWebhook', '--yes']))
         const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('GITHUB_APP_ID=')
         expect(env).toContain('GITHUB_PRIVATE_KEY=')
@@ -176,9 +259,9 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('init --profile githubWebhook --with-pi --yes enables Daytona Pi mode without loading the in-process pi plugin', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'githubWebhook', '--with-pi', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'githubWebhook', '--with-pi', '--yes']))
         const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
-        expect(config.plugins.githubWebhook).toEqual(['github', 'convex', 'daytona'])
+        expect(config.plugins.githubWebhook).toEqual(patchPlaneDefaultSurfaces.githubWebhook)
         expect(config.plugins.githubWebhook).not.toContain('pi')
         expect(config.runtime.githubWebhookExecution).toBe('daytona-pi')
       }),
@@ -188,7 +271,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
     inTempProject((dir) =>
       Effect.gen(function* () {
         yield* writeProjectFile(dir, '.env.local', 'WORKOS_API_KEY=keep-me\n')
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--yes']))
         const env = yield* readProjectFile(dir, '.env.local')
         expect(env).toContain('WORKOS_API_KEY=keep-me')
         expect((env.match(/WORKOS_API_KEY=/g) ?? []).length).toBe(1)
@@ -198,7 +281,7 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
   effectIt.effect('--dry-run writes nothing', () =>
     inTempProject((dir) =>
       Effect.gen(function* () {
-        const output = yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--dry-run', '--yes']))
+        const output = yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--dry-run', '--yes']))
         expect(output.stdout).toContain('would write patchplane.config.json')
         expect(yield* projectPathExists(dir, 'patchplane.config.json')).toBe(false)
         expect(yield* projectPathExists(dir, '.env.local')).toBe(false)
@@ -211,27 +294,27 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
       Effect.gen(function* () {
         yield* writeProjectFile(dir, 'patchplane.config.json', '{"old":true}\n')
         yield* writeProjectFile(dir, '.env.local', 'WORKOS_API_KEY=keep-me\n')
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--force', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--force', '--yes']))
         const config = JSON.parse(yield* readProjectFile(dir, 'patchplane.config.json'))
         const env = yield* readProjectFile(dir, '.env.local')
-        expect(config.plugins).toEqual({ app: ['convex', 'workos'] })
+        expect(config.plugins).toEqual({ app: patchPlaneDefaultSurfaces.app })
         expect(env).toContain('WORKOS_API_KEY=keep-me')
       }),
     ))
 
   effectIt.effect('non-interactive init without explicit flags fails clearly', () =>
-    inTempProject(() =>
+    inTempProject((dir) =>
       Effect.gen(function* () {
-        const output = yield* captureConsole(runPatchPlane(['init', '--non-interactive']))
+        const output = yield* captureConsole(runPatchPlaneIn(dir, ['init', '--non-interactive']))
         expect(output.stderr).toContain('patchplane init needs an interactive terminal or explicit flags')
         expect(output.failed).toBe(true)
       }),
     ))
 
   effectIt.effect('rejects --with-pi for app profile as structured CLI validation', () =>
-    inTempProject(() =>
+    inTempProject((dir) =>
       Effect.gen(function* () {
-        const output = yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--with-pi', '--yes']))
+        const output = yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--with-pi', '--yes']))
         expect(output.stdout).toContain('USAGE')
         expect(output.stderr).toContain('Invalid value for flag --with-pi')
         expect(output.failed).toBe(true)
@@ -255,11 +338,11 @@ layer(CliLayer)('patchplane cli integration', (effectIt) => {
     }))
 
   effectIt.effect('doctor checks real config and env files and exits non-zero on missing required env', () =>
-    inTempProject(() =>
+    inTempProject((dir) =>
       Effect.gen(function* () {
-        yield* captureConsole(runPatchPlane(['init', '--profile', 'app', '--yes']))
+        yield* captureConsole(runPatchPlaneIn(dir, ['init', '--profile', 'app', '--yes']))
         const output = yield* captureConsole(
-          runPatchPlane(['doctor', '--surface', 'app']),
+          runPatchPlaneIn(dir, ['doctor', '--surface', 'app']),
         )
 
         expect(output.stdout).toContain('ok      patchplane.config.json')

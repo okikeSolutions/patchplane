@@ -87,6 +87,9 @@ export const initCommand = Command.make('init', {
   nonInteractive: Flag.boolean('non-interactive').pipe(
     Flag.withDescription('Never prompt; require explicit flags'),
   ),
+  json: Flag.boolean('json').pipe(
+    Flag.withDescription('Emit machine-readable JSON to stdout'),
+  ),
 }, (input) =>
   Effect.gen(function* () {
     const resolved = yield* resolveInitOptions({
@@ -101,11 +104,25 @@ export const initCommand = Command.make('init', {
 
     const configFile = yield* CliConfigFile
     const envFile = yield* CliEnvFile
-    for (const message of [
+    const messages = [
       yield* configFile.writeProjectConfig(resolved),
       yield* envFile.updateEnvForInit(resolved),
       yield* configFile.ensureStateDirectories(resolved),
-    ]) {
+    ]
+
+    if (input.json) {
+      yield* Console.log(JSON.stringify({
+        ok: true,
+        dryRun: resolved.dryRun,
+        profile: resolved.profile,
+        withPi: resolved.withPi,
+        changes: messages.map((message) => ({ message })),
+        next: 'patchplane doctor',
+      }, null, 2))
+      return
+    }
+
+    for (const message of messages) {
       yield* Console.log(message)
     }
     yield* Console.log('\nNext: patchplane doctor')

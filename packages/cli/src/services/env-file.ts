@@ -8,7 +8,8 @@ import {
   type PatchPlanePluginEnvVar,
   type PatchPlaneRuntimeSurface,
 } from '@patchplane/plugins/registry'
-import type { ResolvedInitOptions } from './config-file'
+import { pluginIdsForInitProfile, type ResolvedInitOptions } from './config-file'
+import { CliGlobalOptions } from './global-options'
 
 const surfaces: readonly PatchPlaneRuntimeSurface[] = ['app', 'githubWebhook']
 
@@ -68,11 +69,7 @@ export function selectedPluginIdsForInit(options: {
   readonly profile: 'app' | 'githubWebhook' | 'full'
   readonly withPi: boolean
 }) {
-  const githubPlugins = ['github', 'convex', 'daytona']
-
-  if (options.profile === 'app') return ['convex', 'workos']
-  if (options.profile === 'githubWebhook') return githubPlugins
-  return ['convex', 'workos', ...githubPlugins]
+  return pluginIdsForInitProfile(options.profile)
 }
 
 export function missingEnvVarsForPlugins(
@@ -140,7 +137,6 @@ export type EnvCheckResults = ReadonlyArray<EnvCheckResult>
 
 /** Environment-file boundary for template generation, checks, and init updates. */
 export class CliEnvFile extends Context.Service<CliEnvFile, {
-  readonly loadKnownEnvFiles: Effect.Effect<Map<string, string>, PlatformError>
   readonly collectEnvCheck: (selection: EnvSelection) => Effect.Effect<EnvCheckResults, PlatformError>
   readonly updateEnvForInit: (options: ResolvedInitOptions) => Effect.Effect<string, PlatformError>
 }>()('patchplane/CliEnvFile') {
@@ -148,18 +144,44 @@ export class CliEnvFile extends Context.Service<CliEnvFile, {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
+      const globalOptions = yield* CliGlobalOptions
 
-      const loadEnvFile = (filePath: string, target: Map<string, string>) =>
+      const resolveProjectPath = (filePath: string) =>
+        globalOptions.cwd === undefined ? path.resolve(filePath) : path.resolve(globalOptions.cwd, filePath)
+
+      const loadEnvFile = (
+        filePath: string,
+        target: Map<string, string>,
+        options?: {
+          readonly required?: boolean | undefined
+          readonly overwrite?: (key: string, existing: string | undefined, next: string) => boolean
+        } | undefined,
+      ) =>
         Effect.gen(function* () {
-          if (!(yield* fs.exists(filePath))) return
+          if (!(yield* fs.exists(filePath))) {
+            if (!options?.required) return
+          }
           const content = yield* fs.readFileString(filePath)
-          loadEnvFileContent(content, target)
+          const parsed = new Map<string, string>()
+          loadEnvFileContent(content, parsed)
+          for (const [key, value] of parsed) {
+            const existing = target.get(key)
+            if (options?.overwrite?.(key, existing, value) ?? existing === undefined) {
+              target.set(key, value)
+            }
+          }
         })
 
       const loadKnownEnvFiles = Effect.gen(function* () {
         const values = new Map<string, string>()
+        const processKeys = new Set<string>()
         for (const [key, value] of Object.entries(process.env)) {
-          if (value !== undefined) values.set(key, value)
+          if (value !== undefined) {
+            values.set(key, value)
+            if (value.trim().length > 0) {
+              processKeys.add(key)
+            }
+          }
         }
 
         for (const envPath of [
@@ -168,14 +190,20 @@ export class CliEnvFile extends Context.Service<CliEnvFile, {
           'apps/client/.env.local',
           'packages/backend/.env.local',
         ]) {
-          yield* loadEnvFile(path.resolve(envPath), values)
+          yield* loadEnvFile(resolveProjectPath(envPath), values)
+        }
+
+        for (const envPath of globalOptions.envFiles) {
+          yield* loadEnvFile(envPath, values, {
+            required: true,
+            overwrite: (key) => !processKeys.has(key),
+          })
         }
 
         return values
       })
 
       return {
-        loadKnownEnvFiles,
         collectEnvCheck: (selection) =>
           Effect.gen(function* () {
             const selected = selectedEnvVars(selection)
@@ -193,7 +221,7 @@ export class CliEnvFile extends Context.Service<CliEnvFile, {
           }),
         updateEnvForInit: (options) =>
           Effect.gen(function* () {
-            const envPath = path.resolve('.env.local')
+            const envPath = resolveProjectPath('.env.local')
             const envContent = (yield* fs.exists(envPath)) ? yield* fs.readFileString(envPath) : ''
             const missingEnvVars = missingEnvVarsForPlugins(
               selectedPluginIdsForInit(options),
