@@ -89,6 +89,7 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
         completedAt: 1_778_000_310_000,
       },
     ],
+    evidenceArtifacts: [],
     sandboxExecutions: [
       {
         id: 'sandbox_execution_1',
@@ -227,7 +228,7 @@ describe('WorkflowConsole', () => {
     expect(within(dialog).getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
     expect(within(dialog).getByText('okikeSolutions/guerillaglass · Sandbox failed · run_reviewed')).toBeTruthy()
 
-    expect(within(dialog).getByRole('link', { name: 'Open full workflow' }).getAttribute('href')).toBe('/app/workflows/run_reviewed')
+    expect(within(dialog).getByRole('button', { name: 'Open full workflow' }).getAttribute('href')).toBe('/app/workflows/run_reviewed')
     expect(within(dialog).getByRole('tab', { name: 'Overview' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'Timeline' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'Artifacts' })).toBeTruthy()
@@ -252,15 +253,15 @@ describe('WorkflowConsole', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Runtime' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Patch report: PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Agent activity' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Review' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Decision' })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent activity' }))
     expect(screen.getByText('daytona:pi-rpc')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Review' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Decision' }))
     expect(screen.getByLabelText('Required comment')).toBeTruthy()
     const approveButton = screen.getByRole('button', { name: 'Approve' })
     expect(approveButton).toBeInstanceOf(HTMLButtonElement)

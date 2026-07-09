@@ -106,6 +106,30 @@ export interface SandboxPolicyRow {
   timeoutSeconds?: number
 }
 
+export interface EvidenceArtifactRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  traceId?: string
+  kind:
+    | 'raw-trace'
+    | 'stdout'
+    | 'stderr'
+    | 'diff'
+    | 'test-report'
+    | 'screenshot'
+    | 'video'
+    | 'policy-result'
+    | 'trust-report'
+  label?: string
+  storageProvider: 'cloudflare-r2'
+  storageKey: string
+  contentType: string
+  sizeBytes: number
+  sha256: string
+  retentionPolicy?: string
+  createdAt: number
+}
+
 export interface SandboxExecutionRow {
   id: string
   workflowRunId: Id<'workflowRuns'>
@@ -125,4 +149,5 @@ export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
+  evidenceArtifacts: ReadonlyArray<EvidenceArtifactRow>
 }

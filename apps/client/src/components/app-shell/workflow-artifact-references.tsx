@@ -32,7 +32,7 @@ export function WorkflowArtifactReferences({
             <EmptyMedia variant="icon"><FileArchiveIcon /></EmptyMedia>
             <EmptyTitle>No artifact references</EmptyTitle>
             <EmptyDescription>
-              Runtime events and command logs are recorded. R2-backed artifact metadata lands in the artifact slice.
+              Runtime events and command logs are recorded. R2-backed artifact metadata appears here when available.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

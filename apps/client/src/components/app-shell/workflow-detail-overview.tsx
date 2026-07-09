@@ -1,3 +1,5 @@
+import type { ActorId, PromptRequestId, WorkflowRunId, WorkspaceId } from '@patchplane/domain/ids'
+import { assemblePatchReportV0, type PatchReportStatus } from '@patchplane/domain/patch-report'
 import { ExternalLinkIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,29 +17,65 @@ import { deriveWorkflowTrustState, workflowTrustStateDetail } from './workflow-t
 
 export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDetail }) {
   const trustState = deriveWorkflowTrustState(detail)
+  const workflowRunId = detail.workflowRun.id as string as WorkflowRunId
+  const patchReport = assemblePatchReportV0({
+    workflowStart: {
+      promptRequest: {
+        ...detail.promptRequest,
+        id: detail.promptRequest.id as PromptRequestId,
+        workspaceId: detail.promptRequest.workspaceId as WorkspaceId,
+        actorId: detail.promptRequest.actorId as ActorId,
+      },
+      workflowRun: {
+        ...detail.workflowRun,
+        id: workflowRunId,
+        promptRequestId: detail.workflowRun.promptRequestId as PromptRequestId,
+        workspaceId: detail.workflowRun.workspaceId as WorkspaceId,
+      },
+    },
+    runtimeEvents: detail.runtimeEvents.map((event) => ({
+      ...event,
+      workflowRunId,
+    })),
+    runtimeSessions: detail.runtimeSessions.map((session) => ({
+      ...session,
+      workflowRunId,
+    })),
+    sandboxExecutions: detail.sandboxExecutions.map((execution) => ({
+      ...execution,
+      workflowRunId,
+    })),
+  })
   const externalRef = detail.promptRequest.externalRef
-  const sourceLabel = externalRef?.repositoryFullName ?? detail.promptRequest.source
+  const sourceLabel = patchReport.repository ?? detail.promptRequest.source
+  const decisionStatus = patchReport.decision?.status ?? 'pending human decision'
 
   return (
     <div className="flex flex-col gap-5">
       <Card className="ring-border/60">
         <CardHeader>
-          <CardTitle>Current state</CardTitle>
+          <CardTitle>Patch report</CardTitle>
           <CardDescription>{workflowTrustStateDetail(trustState)}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
             <WorkflowRunStatusBadge status={detail.workflowRun.status} />
             <WorkflowTrustStateBadge state={trustState} />
+            <Badge variant="secondary" className="bg-muted text-muted-foreground">{patchReportStatusLabel(patchReport.status)}</Badge>
             <Badge variant="secondary" className="bg-muted text-muted-foreground">{sourceLabel}</Badge>
           </div>
           <Separator className="bg-border/60" />
           <MetadataGrid
             items={[
-              ['Workflow run', detail.workflowRun.id],
+              ['Patch report', patchReport.id],
+              ['Workflow run', patchReport.workflowRunId],
               ['Trace', detail.workflowRun.traceId],
-              ['Prompt request', detail.promptRequest.id],
-              ['Source', detail.promptRequest.source],
+              ['Verification', patchReport.execution.status],
+              ['Command', patchReport.execution.command ?? 'not run'],
+              ['Exit code', patchReport.execution.exitCode === undefined ? 'unknown' : String(patchReport.execution.exitCode)],
+              ['Checks', String(patchReport.checks.length)],
+              ['Evidence', `${patchReport.evidence.length} evidence items`],
+              ['Decision', decisionStatus],
             ]}
           />
         </CardContent>
@@ -45,8 +83,8 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
 
       <Card className="ring-border/60">
         <CardHeader>
-          <CardTitle>Prompt</CardTitle>
-          <CardDescription>Intake summary</CardDescription>
+          <CardTitle>What was requested?</CardTitle>
+          <CardDescription>The original AI patch request stays attached to the report.</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">
@@ -57,9 +95,9 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
 
       <Card className="ring-border/60">
         <CardHeader>
-          <CardTitle>Source</CardTitle>
+          <CardTitle>Where did it come from?</CardTitle>
           <CardDescription>
-            Repository or product surface that created this workflow
+            Repository, pull request, issue, or product surface that created this report.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -95,6 +133,25 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
       </Card>
     </div>
   )
+}
+
+function patchReportStatusLabel(status: PatchReportStatus) {
+  switch (status) {
+    case 'pending':
+      return 'Patch report pending'
+    case 'verification-passed':
+      return 'Verification passed'
+    case 'verification-failed':
+      return 'Verification failed'
+    case 'approved':
+      return 'Approved'
+    case 'rejected':
+      return 'Rejected'
+    case 'changes-requested':
+      return 'Changes requested'
+    default:
+      return status
+  }
 }
 
 function MetadataGrid({

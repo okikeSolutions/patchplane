@@ -70,7 +70,12 @@ export function logSummary(detail: WorkflowDetail) {
 }
 
 export function artifactReferences(detail: WorkflowDetail): ReadonlyArray<WorkflowArtifactReference> {
-  const references: Array<WorkflowArtifactReference> = []
+  const references: Array<WorkflowArtifactReference> = detail.evidenceArtifacts.map((artifact) => ({
+    id: artifact.id,
+    label: artifact.label ?? artifact.kind,
+    value: `${artifact.storageProvider}:${artifact.storageKey}`,
+    source: `${artifact.contentType} · ${artifact.sizeBytes} bytes`,
+  }))
 
   for (const event of detail.runtimeEvents) {
     if (event.payloadJson === undefined) {

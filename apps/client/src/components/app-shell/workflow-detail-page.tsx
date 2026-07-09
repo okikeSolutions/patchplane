@@ -49,7 +49,7 @@ export function WorkflowDetailPage({
               Back to workflows
             </Button>
             <h1 className="line-clamp-2 text-xl font-semibold tracking-tight">
-              {detail.promptRequest.prompt}
+              Patch report: {detail.promptRequest.prompt}
             </h1>
             <p className="m-0 mt-2 truncate font-mono text-xs text-muted-foreground">
               {sourceLabel(detail)} · {detail.workflowRun.id}
@@ -70,13 +70,13 @@ export function WorkflowDetailPage({
       <main className="min-h-0 flex-1 p-4 lg:p-6">
         <Tabs defaultValue="overview" className="gap-4">
           <TabsList variant="line" className="flex-wrap justify-start">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="overview">Patch report</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="runtime">Runtime</TabsTrigger>
-            <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
+            <TabsTrigger value="runtime">Agent activity</TabsTrigger>
+            <TabsTrigger value="sandbox">Verification run</TabsTrigger>
             <TabsTrigger value="logs">Logs</TabsTrigger>
-            <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-            <TabsTrigger value="review">Review</TabsTrigger>
+            <TabsTrigger value="artifacts">Evidence</TabsTrigger>
+            <TabsTrigger value="review">Decision</TabsTrigger>
             <TabsTrigger value="raw">Raw</TabsTrigger>
           </TabsList>
           <TabsContent value="overview">
@@ -115,10 +115,10 @@ function WorkflowRawEvidence({ detail }: { readonly detail: WorkflowDetail }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BracesIcon />
-          Raw workflow evidence
+          Raw report evidence
         </CardTitle>
         <CardDescription>
-          Normalized Convex read-model payload used by this detail page.
+          Normalized Convex read-model payload used to assemble this patch report.
         </CardDescription>
       </CardHeader>
       <CardContent>
