@@ -20,7 +20,11 @@ This document is intentionally public and OSS-safe. It describes what PatchPlane
 
 ## 1. Executive summary
 
-**PatchPlane** is an open-source AI change-control plane for coordinating humans and AI agents around software changes.
+**PatchPlane** is an open-source AI patch trust layer for developers.
+
+PatchPlane should not be positioned as a broad AI workflow platform. Its core developer outcome is simple: help a human decide whether to trust or reject an AI-generated patch before merge.
+
+The primary product primitive is the **Patch Report**: an inspectable trust report for one AI-generated patch attempt.
 
 PatchPlane sits at the **pre-CI trust boundary**. Every AI-generated patch is treated as untrusted until it has been:
 
@@ -41,7 +45,13 @@ PatchPlane is not a Git replacement, a hosted LLM platform, an agent runtime, a 
 7. human approval or rejection,
 8. provenance and publication.
 
-PatchPlane uses an Effect-native plugin model:
+The alpha product loop is intentionally boring and obvious:
+
+```text
+AI patch → sandbox verification → Patch Report → human decision → GitHub result
+```
+
+PatchPlane uses an Effect-native plugin model as implementation structure, not as the user-facing product promise:
 
 ```text
 PatchPlane core defines capabilities.
@@ -82,11 +92,11 @@ The first product wedge is GitHub-compatible AI patch verification. GitHub remai
 
 ### 2.1 What PatchPlane is
 
-PatchPlane is a collaborative execution, review, and merge-governance system for AI-generated software changes.
+PatchPlane is a developer-first evidence layer for AI-generated software changes.
 
-It gives teams:
+It gives developers:
 
-- a durable record for every AI-generated patch attempt,
+- a Patch Report for every AI-generated patch attempt,
 - sandbox execution before publication,
 - normalized runtime events,
 - evidence artifacts such as logs, diffs, screenshots, videos, and test reports,
@@ -139,8 +149,11 @@ PatchPlane integrates with coding agents, sandboxes, Git forges, and observabili
 8. **Complement existing tools**  
    PatchPlane should consume outputs from coding agents and sandboxes through stable contracts instead of trying to outbuild them.
 
-9. **Alpha proves the trust loop**  
-   The alpha is successful when one real AI-generated patch can be sandboxed, evidenced, reviewed, approved or rejected, and published back to GitHub.
+9. **Patch Report is the primitive**  
+   Build only what makes the trust report more credible, complete, or easier to inspect. Dashboard, plugin, policy, and integration work is secondary to answering: can I trust this patch?
+
+10. **Alpha proves the trust loop**  
+   The alpha is successful when one real AI-generated patch can be sandboxed, evidenced in a Patch Report, reviewed, approved or rejected, and published back to GitHub.
 
 ---
 
@@ -313,6 +326,7 @@ Initial domain entities:
 - `PolicyBundle`
 - `MergeDecision`
 - `EvidenceArtifact`
+- `PatchReport`
 - `ProvenanceEvent`
 - `PublicationEvent`
 
@@ -620,7 +634,22 @@ type EvidenceArtifact = {
 }
 ```
 
-### 11.3 Provenance timeline
+### 11.3 Patch Report
+
+The Patch Report is the developer-facing trust artifact assembled from workflow, runtime, sandbox, evidence, review, decision, and publication records.
+
+It answers:
+
+- what changed,
+- what ran,
+- where it ran,
+- what passed or failed,
+- what evidence exists,
+- who approved or rejected it.
+
+The Patch Report may be materialized as a read model for the UI and GitHub publication, but it must be backed by PatchPlane-owned evidence and provenance records rather than transient logs.
+
+### 11.4 Provenance timeline
 
 A `ProvenanceEvent` links workflow actions to evidence:
 

@@ -92,7 +92,9 @@ describe('PublishSandboxResultToSource', () => {
         name: 'demo',
         issueNumber: 12,
       })
-      expect(comments[0]?.body).toContain('PatchPlane sandbox run passed')
+      expect(comments[0]?.body).toContain('## PatchPlane Patch Report')
+      expect(comments[0]?.body).toContain('**Status:** verification passed')
+      expect(comments[0]?.body).toContain('- Decision: pending human approval')
     }),
   )
 })

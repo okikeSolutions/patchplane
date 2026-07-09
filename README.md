@@ -1,8 +1,19 @@
 # PatchPlane
 
-Open-source pre-CI sandbox and trust layer for AI-generated code changes.
+Open-source Patch Reports for AI-generated code changes.
 
-PatchPlane treats every AI-generated patch as untrusted until it has been executed, validated, and reported from an isolated environment. It keeps normal GitHub and CI/CD workflows while adding a trust boundary before generated code reaches secrets, shared caches, trusted automation, or merge paths.
+PatchPlane gives developers evidence before they trust an AI patch. It turns each AI-generated change into an inspectable trust report before the patch continues toward merge.
+
+For every patch, PatchPlane should make it obvious:
+
+- what changed,
+- what ran,
+- where it ran,
+- what passed or failed,
+- what evidence exists,
+- who approved or rejected it.
+
+PatchPlane treats every AI-generated patch as untrusted until it has been executed, evidenced, reviewed, and explicitly approved. It keeps normal GitHub and CI/CD workflows while adding a trust boundary before generated code reaches secrets, shared caches, trusted automation, or merge paths.
 
 Core docs:
 
@@ -78,7 +89,13 @@ Optional provider keys, such as `OPENAI_API_KEY`, are only needed for Pi modes.
 
 ## Current implementation
 
-The current alpha foundation includes two workflow-start paths:
+The current alpha is being narrowed around one developer-first loop:
+
+```text
+AI patch → sandbox verification → Patch Report → human decision → GitHub result
+```
+
+The current foundation includes two workflow-start paths:
 
 ```text
 WorkOS AuthKit session

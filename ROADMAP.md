@@ -19,7 +19,11 @@ This file is intentionally OSS-safe. It documents product and engineering direct
 
 ## 1. Current objective
 
-PatchPlane v2 has completed the authenticated foundation work and is now focused on the first credible pre-CI trust-boundary demo:
+PatchPlane v2 has completed the authenticated foundation work and is now focused on one developer-first outcome: **trusting or rejecting an AI-generated patch before merge**.
+
+The product primitive is the **Patch Report**: an evidence-backed report that tells a developer what changed, what ran, where it ran, what passed or failed, what evidence exists, and who approved or rejected it.
+
+The first credible pre-CI trust-boundary demo is:
 
 ```text
 GitHub/manual intake
@@ -28,13 +32,14 @@ GitHub/manual intake
 → Daytona sandbox provisioning
 → Pi runtime execution
 → candidate patch + logs/tests/browser evidence
+→ Patch Report
 → PatchPlane policy/review decision
 → human approve/reject
 → GitHub comment/check/draft PR publication
 → persisted provenance timeline
 ```
 
-The next slice is **not more platform**. It is the smallest workflow that shows an AI-generated patch remaining untrusted until sandbox execution, evidence capture, review, and explicit decision complete.
+The next slice is **not more platform**. It is the smallest workflow that shows an AI-generated patch remaining untrusted until sandbox execution, Patch Report evidence, review, and explicit decision complete.
 
 For alpha, these remain deferred:
 
@@ -91,6 +96,7 @@ ExternalWorkflowRef
 RuntimeEvent
 SandboxPolicy
 CandidatePatchSet
+PatchReport
 ReviewFinding
 PolicyDecision
 HumanDecision
@@ -677,16 +683,19 @@ Acceptance criteria:
 
 ---
 
-### M9.75 — Evidence Capture and Browser Verification Slice
+### M9.75 — Patch Report and evidence capture slice
 
-**Status:** Planned before final alpha decision/publication loop
+**Status:** Planned before final alpha decision/publication loop; started with the public `PatchReport` domain schema and GitHub Patch Report comment framing
 
 Purpose:
 
-Capture enough evidence to make the trust report useful and inspectable.
+Make the Patch Report the center of the alpha. Capture enough evidence to help a developer trust or reject the AI patch.
 
 Scope:
 
+- Add `PatchReport` domain/read-model schema.
+- Assemble Patch Report v0 from workflow, sandbox, runtime, and source-control data.
+- Publish Patch Report summary to GitHub.
 - Add `EvidenceArtifact` domain model and Convex metadata persistence.
 - Add `ArtifactsService` with Cloudflare R2 implementation.
 - Store large/raw artifacts in R2, not Convex, Sentry, or PostHog.
@@ -694,10 +703,13 @@ Scope:
 
 Tasks:
 
-- [ ] Define `EvidenceArtifact` schema.
-- [ ] Define `ArtifactsService` interface.
+- [x] Define initial `PatchReport` schema.
+- [x] Assemble Patch Report v0 read model from existing Convex workflow detail data.
+- [x] Reframe GitHub sandbox publication as a Patch Report summary.
+- [x] Define `EvidenceArtifact` schema.
+- [x] Define `ArtifactsService` interface.
 - [ ] Implement R2-backed `ArtifactsService` plugin.
-- [ ] Store artifact metadata and hashes in Convex.
+- [x] Store artifact metadata and hashes in Convex.
 - [ ] Add signed or authenticated artifact access path.
 - [ ] Capture stdout/stderr logs as artifacts where size warrants it.
 - [ ] Capture patch/diff/test-report artifacts.
@@ -705,9 +717,10 @@ Tasks:
 
 Acceptance criteria:
 
+- A developer can open one Patch Report and answer: what changed, what ran, where it ran, what passed or failed, what evidence exists, and what decision is pending or recorded.
 - A workflow stores raw evidence artifacts in R2.
 - Convex stores artifact metadata, hashes, and references.
-- The UI can link from a workflow/provenance event to its evidence artifacts.
+- The UI can link from a Patch Report/provenance event to its evidence artifacts.
 - Raw artifacts are not sent to PostHog and are not treated as Sentry product truth.
 
 ### M9.9 — Minimal Landing Page Packaging Slice
@@ -743,9 +756,13 @@ Acceptance criteria:
 
 ---
 
-### M10 — Review, decision, and publication loop
+### M10 — Evidence-backed decision and publication loop
 
 **Status:** Alpha demo finish line
+
+Purpose:
+
+A human can approve, reject, or request changes from the Patch Report, and PatchPlane can publish the resulting GitHub outcome without treating the AI patch as trusted before the recorded decision.
 
 Tasks:
 
@@ -754,15 +771,18 @@ Tasks:
 - [ ] Implement one reviewer path, initially test/lint-oriented.
 - [ ] Implement `PolicyService.evaluatePolicy`.
 - [ ] Implement `ProposeMergeDecision`.
-- [ ] Add operator approval/rejection path.
-- [ ] Publish GitHub comment/check/draft PR through GitHub plugin.
-- [ ] Record provenance linking prompt, actor/workspace, repository, sandbox, runtime session, commands/tests, candidate patch, review result, decision, and publication result.
+- [ ] Persist minimal human decision linked to the Patch Report.
+- [ ] Require a comment for approve/reject/request-changes decisions.
+- [ ] Update Patch Report status from the durable decision.
+- [ ] Add operator approval/rejection/request-changes path.
+- [ ] Publish updated GitHub comment/check/draft PR result after decision.
+- [ ] Record provenance linking prompt, actor/workspace, repository, sandbox, runtime session, commands/tests, candidate patch, Patch Report, review result, decision, and publication result.
 
 Acceptance criteria:
 
-- A generated patch remains untrusted until sandbox execution and review complete.
-- A human can approve or reject the candidate before publication/merge handoff.
-- The alpha demo can show why the decision was made using persisted provenance and evidence, not only transient logs.
+- A generated patch remains untrusted until sandbox execution, Patch Report evidence, and review complete.
+- A human can approve, reject, or request changes from the Patch Report before publication/merge handoff.
+- The alpha demo can show why the decision was made using persisted Patch Report provenance and evidence, not only transient logs.
 
 ---
 

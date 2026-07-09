@@ -39,6 +39,8 @@ describe('formatSandboxResultComment', () => {
       },
     })
 
+    expect(body).toContain('## PatchPlane Patch Report')
+    expect(body).toContain('This patch is not trusted until a maintainer reviews the evidence')
     expect(body).toContain('- Command: `echo \\`owned\\``')
     expect(body).toContain('`\u200b``md')
     expect(body).not.toContain('```md\ninjected')
