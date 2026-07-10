@@ -685,7 +685,7 @@ Acceptance criteria:
 
 ### M9.75 — Patch Report and evidence capture slice
 
-**Status:** Planned before final alpha decision/publication loop; started with the public `PatchReport` domain schema and GitHub Patch Report comment framing
+**Status:** Complete for the alpha evidence pipeline; remaining work moves into the M10 decision/publication loop
 
 Purpose:
 
@@ -708,12 +708,20 @@ Tasks:
 - [x] Reframe GitHub sandbox publication as a Patch Report summary.
 - [x] Define `EvidenceArtifact` schema.
 - [x] Define `ArtifactsService` interface.
-- [ ] Implement R2-backed `ArtifactsService` plugin.
+- [x] Implement R2-backed `ArtifactsService` plugin.
 - [x] Store artifact metadata and hashes in Convex.
-- [ ] Add signed or authenticated artifact access path.
-- [ ] Capture stdout/stderr logs as artifacts where size warrants it.
-- [ ] Capture patch/diff/test-report artifacts.
-- [ ] Add first browser verification result and screenshot/video artifact path.
+- [x] Add signed or authenticated artifact access path.
+- [x] Capture stdout/stderr logs as artifacts where size warrants it.
+- [x] Capture patch/diff/test-report artifacts.
+- [x] Add first browser verification result and screenshot/video artifact path.
+
+Implementation evidence:
+
+- Daytona captures `git diff --binary` as a `diff` artifact when a sandbox run changes the worktree.
+- Daytona probes conventional test report files such as `.patchplane/test-report.json` and `.patchplane/test-report.xml` after the main run and optional producer command.
+- Daytona probes conventional browser screenshot files such as `.patchplane/browser-screenshot.png` after the main run and optional producer command.
+- Core uploads sandbox-provided evidence through `CaptureEvidenceArtifact`, which stores raw bytes in R2 and metadata in Convex.
+- The client Evidence tab opens persisted evidence artifacts through authenticated signed URLs.
 
 Acceptance criteria:
 
@@ -766,17 +774,26 @@ A human can approve, reject, or request changes from the Patch Report, and Patch
 
 Tasks:
 
-- [ ] Implement `CandidatePatchSet` schema and persistence.
-- [ ] Implement `ReviewRun` and `ReviewFinding` schemas and persistence.
-- [ ] Implement one reviewer path, initially test/lint-oriented.
-- [ ] Implement `PolicyService.evaluatePolicy`.
-- [ ] Implement `ProposeMergeDecision`.
-- [ ] Persist minimal human decision linked to the Patch Report.
-- [ ] Require a comment for approve/reject/request-changes decisions.
+- [x] Implement `CandidatePatchSet` schema and persistence.
+- [x] Implement `ReviewRun` and `ReviewFinding` schemas and persistence.
+- [x] Implement one reviewer path, initially test/lint-oriented.
+- [x] Implement `PolicyService.evaluatePolicy`.
+- [x] Implement `ProposeMergeDecision`.
+- [x] Persist minimal human decision linked to the Patch Report.
+- [x] Require a comment for approve/reject/request-changes decisions.
 - [ ] Update Patch Report status from the durable decision.
 - [ ] Add operator approval/rejection/request-changes path.
 - [ ] Publish updated GitHub comment/check/draft PR result after decision.
 - [ ] Record provenance linking prompt, actor/workspace, repository, sandbox, runtime session, commands/tests, candidate patch, Patch Report, review result, decision, and publication result.
+
+Implementation evidence:
+
+- Domain schemas now cover `CandidatePatchSet`, `ReviewRun`, `ReviewFinding`, `PolicyDecision`, `HumanDecision`, and `PublicationResult`.
+- Convex persists those records with workflow-run indexes and returns them from workflow detail.
+- System-ingestion mutations record candidate patches, automated review/policy output, and publication results.
+- Authenticated human decisions require a non-empty comment and `decision:approve` or `decision:reject` permission.
+- Core now has `ReviewService`, `PolicyService`, alpha deterministic review/policy layers, and `ProposeMergeDecision`.
+- The first reviewer records failed sandbox execution and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
 
 Acceptance criteria:
 

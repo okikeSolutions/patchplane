@@ -118,4 +118,18 @@ These are deployed to the client Worker as secret bindings for
 `/api/artifacts/url`. Source-control artifact capture uses the native R2 bucket
 binding and does not require these signing credentials.
 
+Optional source-control evidence producer commands can create richer artifacts
+inside the Daytona sandbox before capture:
+
+```text
+PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND
+PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND
+```
+
+The Daytona plugin uploads `git diff --binary` when the agent changes the
+worktree. It also probes conventional files such as
+`.patchplane/test-report.json`, `.patchplane/test-report.xml`, and
+`.patchplane/browser-screenshot.png` and stores them as R2-backed evidence
+artifacts when present.
+
 Do not use Alchemy provisioning APIs from runtime packages for object uploads, signed URLs, or model calls. Runtime access belongs behind PatchPlane plugin/service boundaries; the `alchemy/Cloudflare/Bridge` import is only for service-binding transport adaptation.
