@@ -278,6 +278,73 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
+  test('reuses an issue comment with the same publication marker', async () => {
+    mockInstallationToken()
+    nock('https://api.github.com')
+      .get('/repos/octokit/octokit.js/issues/1/comments')
+      .query({ per_page: '100' })
+      .reply(200, [{
+        id: 42,
+        body: 'Existing result\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
+        html_url: 'https://github.test/comment/42',
+      }])
+
+    const result = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.createIssueComment({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          issueNumber: 1,
+          body: 'Hello from PatchPlane',
+          idempotencyKey: 'decision-1:issue-comment',
+        })
+      }),
+    )
+
+    expect(result).toEqual({ externalId: '42', url: 'https://github.test/comment/42' })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test('reuses a check run with the same external publication id', async () => {
+    mockInstallationToken()
+    nock('https://api.github.com')
+      .get('/repos/octokit/octokit.js/commits/abc123/check-runs')
+      .query({ check_name: 'PatchPlane Review', filter: 'all', per_page: '100' })
+      .reply(200, {
+        total_count: 1,
+        check_runs: [{
+          id: 84,
+          external_id: 'decision-1:check-run',
+          html_url: 'https://github.test/check/84',
+        }],
+      })
+
+    const result = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.createCheckRun({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          headSha: 'abc123',
+          checkName: 'PatchPlane Review',
+          status: 'completed',
+          conclusion: 'success',
+          title: 'Approved',
+          summary: 'Approved by PatchPlane',
+          idempotencyKey: 'decision-1:check-run',
+        })
+      }),
+    )
+
+    expect(result).toEqual({ externalId: '84', url: 'https://github.test/check/84' })
+    expect(nock.isDone()).toBe(true)
+  })
+
   test('creates repository-scoped installation clone credentials for private repository clones', async () => {
     mockScopedInstallationToken()
 

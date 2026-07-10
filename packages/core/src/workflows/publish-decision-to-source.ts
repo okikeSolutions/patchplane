@@ -70,6 +70,7 @@ export const PublishDecisionToSource = Effect.fn(
         name,
         issueNumber: ref.issueNumber,
         body,
+        idempotencyKey: `${input.humanDecision.id}:issue-comment`,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
         operation: 'publishDecisionToSource.createIssueComment',
@@ -95,6 +96,7 @@ export const PublishDecisionToSource = Effect.fn(
         title: `PatchPlane: ${input.humanDecision.status}`,
         summary: body,
         ...(ref?.url === undefined ? {} : { detailsUrl: ref.url }),
+        idempotencyKey: `${input.humanDecision.id}:check-run`,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
         operation: 'publishDecisionToSource.createCheckRun',
@@ -114,6 +116,20 @@ export const PublishDecisionToSource = Effect.fn(
 
   const publications = yield* Effect.forEach(pendingPublications, (publication) =>
     Effect.gen(function* () {
+      const pending = yield* storage.recordPublicationResult({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        provider,
+        kind: publication.kind,
+        status: 'pending',
+        summary: publication.summary,
+        createdAt: Date.now(),
+        idempotencyKey: publication.key,
+        traceId,
+        ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
+        operation: 'publishDecisionToSource.claimPublicationResult',
+      })
+      if (pending.status === 'published') return pending
+
       const published = yield* publication.publish.pipe(Effect.exit)
       if (Exit.isSuccess(published)) {
         return yield* storage.recordPublicationResult({
@@ -148,20 +164,26 @@ export const PublishDecisionToSource = Effect.fn(
     }),
   )
 
-  const failedCount = publications.filter((publication) => publication.status === 'failed').length
+  const publicationState = mergePublicationState(
+    input.publicationResults ?? [],
+    publications,
+    new Set(publicationInputs.map((publication) => publication.key)),
+  )
+  const failedCount = publicationState.filter((publication) => publication.status === 'failed').length
+  const publishedCount = publicationState.filter((publication) => publication.status === 'published').length
   const provenanceEvent = yield* storage.recordProvenanceEvent({
     workflowRunId: input.workflowStart.workflowRun.id,
     traceId,
     type: 'publication',
     operation: 'publishDecisionToSource',
     ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
-    status: failedCount === 0 ? 'succeeded' : 'failed',
+    status: failedCount === 0 && publishedCount === publicationInputs.length ? 'succeeded' : 'failed',
     startedAt,
     completedAt: Date.now(),
-    summary: `Published ${publications.length - failedCount}/${publications.length} decision publication targets.`,
+    summary: `Published ${publishedCount}/${publicationInputs.length} decision publication targets.`,
     artifactRefs: [
       input.humanDecision.id,
-      ...publications.map((publication) => publication.id),
+      ...publicationState.map((publication) => publication.id),
     ],
     idempotencyKey: `${input.humanDecision.id}:publication`,
   })
@@ -171,4 +193,18 @@ export const PublishDecisionToSource = Effect.fn(
 
 function errorMessage(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause)
+}
+
+function mergePublicationState(
+  existing: ReadonlyArray<PublicationResult>,
+  attempted: ReadonlyArray<PublicationResult>,
+  decisionKeys: ReadonlySet<string>,
+) {
+  const byKey = new Map<string, PublicationResult>()
+  for (const publication of [...existing, ...attempted]) {
+    if (publication.idempotencyKey !== undefined && decisionKeys.has(publication.idempotencyKey)) {
+      byKey.set(publication.idempotencyKey, publication)
+    }
+  }
+  return Array.from(byKey.values())
 }

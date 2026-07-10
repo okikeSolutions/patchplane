@@ -37,6 +37,7 @@ interface WorkflowDetailResult {
   readonly policyDecisions?: ReadonlyArray<unknown> | undefined
   readonly humanDecisions?: ReadonlyArray<unknown> | undefined
   readonly publicationResults?: ReadonlyArray<unknown> | undefined
+  readonly provenanceEvents?: ReadonlyArray<Record<string, unknown>> | undefined
 }
 
 const createWorkflowStart = makeFunctionReference<
@@ -146,6 +147,12 @@ const recordPublicationResult = makeFunctionReference<
   Record<string, unknown>,
   Record<string, unknown>
 >('workflowStarts:recordPublicationResult')
+
+const recordProvenanceEvent = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordProvenanceEvent')
 
 function createArgs(overrides: Partial<CreateWorkflowStartArgs> = {}) {
   return {
@@ -800,6 +807,50 @@ describe('workflowStarts trusted boundary and authz', () => {
       externalId: 'check-1',
     })
     expect(detail.publicationResults?.[0]).not.toHaveProperty('error')
+  })
+
+  test('recordProvenanceEvent updates aggregate retry status and artifact links', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+    const common = {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      traceId: 'trace-1',
+      type: 'publication',
+      operation: 'publishDecisionToSource',
+      startedAt: 20,
+      completedAt: 21,
+      idempotencyKey: 'decision-1:publication',
+    }
+
+    const failed = await t.mutation(recordProvenanceEvent, {
+      ...common,
+      status: 'failed',
+      summary: 'Published 1/2 decision publication targets.',
+      artifactRefs: ['decision-1', 'publication-1'],
+    })
+    const succeeded = await t.mutation(recordProvenanceEvent, {
+      ...common,
+      status: 'succeeded',
+      completedAt: 22,
+      summary: 'Published 2/2 decision publication targets.',
+      artifactRefs: ['decision-1', 'publication-1', 'publication-2'],
+    })
+
+    expect(succeeded.id).toBe(failed.id)
+    expect(succeeded).toMatchObject({
+      status: 'succeeded',
+      completedAt: 22,
+      artifactRefs: ['decision-1', 'publication-1', 'publication-2'],
+    })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(detail.provenanceEvents?.filter((event) => event.idempotencyKey === common.idempotencyKey)).toEqual([
+      expect.objectContaining({ status: 'succeeded', summary: 'Published 2/2 decision publication targets.' }),
+    ])
   })
 
   test('records and updates active runtime session lifecycle', async () => {

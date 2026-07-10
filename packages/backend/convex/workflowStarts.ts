@@ -736,7 +736,38 @@ async function insertProvenanceEvent(
       .unique()
 
     if (existing !== null) {
-      return { id: existing._id, ...existing }
+      const updated = {
+        traceId: input.traceId,
+        parentEventId: input.parentEventId,
+        type: input.type,
+        operation: input.operation,
+        pluginName: input.pluginName,
+        status: input.status,
+        startedAt: input.startedAt,
+        completedAt: input.completedAt,
+        summary: input.summary,
+        artifactRefs: [...(input.artifactRefs ?? [])],
+        errorCategory: input.errorCategory,
+        idempotencyKey: input.idempotencyKey,
+      }
+      await ctx.db.patch('provenanceEvents', existing._id, updated)
+      return {
+        id: existing._id,
+        workflowRunId: existing.workflowRunId,
+        traceId: updated.traceId,
+        ...(updated.parentEventId === undefined ? {} : { parentEventId: updated.parentEventId }),
+        sequence: existing.sequence,
+        type: updated.type,
+        operation: updated.operation,
+        ...(updated.pluginName === undefined ? {} : { pluginName: updated.pluginName }),
+        status: updated.status,
+        startedAt: updated.startedAt,
+        ...(updated.completedAt === undefined ? {} : { completedAt: updated.completedAt }),
+        ...(updated.summary === undefined ? {} : { summary: updated.summary }),
+        artifactRefs: updated.artifactRefs,
+        ...(updated.errorCategory === undefined ? {} : { errorCategory: updated.errorCategory }),
+        idempotencyKey: updated.idempotencyKey,
+      }
     }
   }
 

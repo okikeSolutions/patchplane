@@ -32,6 +32,10 @@ function toGitHubRepositoryTokenScope(input: {
   return Effect.succeed({ repository_ids: [repositoryId] })
 }
 
+function publicationMarker(idempotencyKey: string) {
+  return `<!-- patchplane-publication:${encodeURIComponent(idempotencyKey)} -->`
+}
+
 const sourceControlLayer = Layer.effect(
   SourceControlService,
   Effect.gen(function* () {
@@ -210,16 +214,34 @@ const sourceControlLayer = Layer.effect(
       readonly name: string
       readonly issueNumber: number
       readonly body: string
+      readonly idempotencyKey?: string | undefined
     }) {
       const installationId = yield* parseGitHubInstallationId(input)
       return yield* Effect.tryPromise({
         try: async () => {
           const octokit = await app.getInstallationOctokit(installationId)
+          if (input.idempotencyKey !== undefined) {
+            const marker = publicationMarker(input.idempotencyKey)
+            const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+              owner: input.owner,
+              repo: input.name,
+              issue_number: input.issueNumber,
+              per_page: 100,
+            })
+            const existing = comments.find((comment) => comment.body?.includes(marker))
+            if (existing !== undefined) {
+              return {
+                externalId: String(existing.id),
+                url: existing.html_url,
+              }
+            }
+          }
+          const marker = input.idempotencyKey === undefined ? undefined : publicationMarker(input.idempotencyKey)
           const result = await octokit.rest.issues.createComment({
             owner: input.owner,
             repo: input.name,
             issue_number: input.issueNumber,
-            body: input.body,
+            body: marker === undefined ? input.body : `${input.body}\n\n${marker}`,
           })
           return {
             externalId: String(result.data.id),
@@ -250,11 +272,33 @@ const sourceControlLayer = Layer.effect(
       readonly summary: string
       readonly text?: string | undefined
       readonly detailsUrl?: string | undefined
+      readonly idempotencyKey?: string | undefined
     }) {
       const installationId = yield* parseGitHubInstallationId(input)
       return yield* Effect.tryPromise({
         try: async () => {
           const octokit = await app.getInstallationOctokit(installationId)
+          if (input.idempotencyKey !== undefined) {
+            const checkPages = octokit.paginate.iterator(octokit.rest.checks.listForRef, {
+              owner: input.owner,
+              repo: input.name,
+              ref: input.headSha,
+              check_name: input.checkName,
+              filter: 'all',
+              per_page: 100,
+            })
+            let existing: { readonly id: number; readonly html_url: string | null } | undefined
+            for await (const page of checkPages) {
+              existing = page.data.find((check) => check.external_id === input.idempotencyKey)
+              if (existing !== undefined) break
+            }
+            if (existing !== undefined) {
+              return {
+                externalId: String(existing.id),
+                url: existing.html_url ?? undefined,
+              }
+            }
+          }
           const result = await octokit.rest.checks.create({
             owner: input.owner,
             repo: input.name,
@@ -262,6 +306,7 @@ const sourceControlLayer = Layer.effect(
             head_sha: input.headSha,
             status: input.status,
             conclusion: input.conclusion,
+            ...(input.idempotencyKey === undefined ? {} : { external_id: input.idempotencyKey }),
             ...(input.detailsUrl === undefined ? {} : { details_url: input.detailsUrl }),
             output: {
               title: input.title,

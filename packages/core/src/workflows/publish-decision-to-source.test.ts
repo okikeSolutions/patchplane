@@ -68,6 +68,7 @@ describe('PublishDecisionToSource', () => {
     Effect.gen(function* () {
       const sourceCalls: Array<{ readonly type: string; readonly input: unknown }> = []
       const storageRecords: Array<{ readonly type: string; readonly input: unknown }> = []
+      const publicationOrder: Array<string> = []
 
       const sourceControlLayer = Layer.succeed(
         SourceControlService,
@@ -80,11 +81,13 @@ describe('PublishDecisionToSource', () => {
           createIssueComment: (input) =>
             Effect.sync(() => {
               sourceCalls.push({ type: 'issue-comment', input })
+              publicationOrder.push('source:issue-comment')
               return { externalId: 'comment-1', url: 'https://github.test/comment/1' }
             }),
           createCheckRun: (input) =>
             Effect.sync(() => {
               sourceCalls.push({ type: 'check-run', input })
+              publicationOrder.push('source:check-run')
               return { externalId: 'check-1', url: 'https://github.test/check/1' }
             }),
         }),
@@ -109,6 +112,7 @@ describe('PublishDecisionToSource', () => {
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               storageRecords.push({ type: 'publication', input })
+              publicationOrder.push(`storage:${input.kind}:${input.status}`)
               return Effect.succeed({ id: `publication-${storageRecords.length}`, ...input, createdAt: input.createdAt ?? 1 } as never)
             }),
           recordProvenanceEvent: (input) =>
@@ -127,13 +131,23 @@ describe('PublishDecisionToSource', () => {
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
       expect(sourceCalls.map((call) => call.type)).toEqual(['issue-comment', 'check-run'])
-      expect(storageRecords.filter((record) => record.type === 'publication')).toHaveLength(2)
+      expect(storageRecords.filter((record) => record.type === 'publication')).toHaveLength(4)
       expect(storageRecords.filter((record) => record.type === 'provenance')).toHaveLength(1)
       expect(storageRecords.filter((record) => record.type === 'publication').map((record) =>
         (record.input as { readonly idempotencyKey?: string }).idempotencyKey
       )).toEqual([
         'decision-1:issue-comment',
+        'decision-1:issue-comment',
         'decision-1:check-run',
+        'decision-1:check-run',
+      ])
+      expect(publicationOrder).toEqual([
+        'storage:issue-comment:pending',
+        'source:issue-comment',
+        'storage:issue-comment:published',
+        'storage:check-run:pending',
+        'source:check-run',
+        'storage:check-run:published',
       ])
       expect(result.publications).toHaveLength(2)
       expect(result.publications.map((publication) => publication.status)).toEqual(['published', 'published'])
@@ -143,7 +157,7 @@ describe('PublishDecisionToSource', () => {
   it.effect('skips already published decision targets for the same decision id', () =>
     Effect.gen(function* () {
       const sourceCalls: Array<string> = []
-      const recordedPublications: Array<{ readonly idempotencyKey?: string }> = []
+      const recordedPublications: Array<{ readonly idempotencyKey?: string; readonly status: string }> = []
       const sourceControlLayer = Layer.succeed(
         SourceControlService,
         SourceControlService.of({
@@ -184,7 +198,9 @@ describe('PublishDecisionToSource', () => {
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               recordedPublications.push(
-                input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey },
+                input.idempotencyKey === undefined
+                  ? { status: input.status }
+                  : { idempotencyKey: input.idempotencyKey, status: input.status },
               )
               return Effect.succeed({ id: `publication-${recordedPublications.length}`, ...input, createdAt: input.createdAt ?? 1 } as never)
             }),
@@ -206,7 +222,7 @@ describe('PublishDecisionToSource', () => {
         workflowStart,
         humanDecision: { ...humanDecision, decidedAt: 11 },
         sandboxExecution,
-        publicationResults: recordedPublications.map((publication, index) => ({
+        publicationResults: recordedPublications.filter((publication) => publication.status === 'published').map((publication, index) => ({
           id: `publication-${index + 1}`,
           workflowRunId,
           provider: 'github',

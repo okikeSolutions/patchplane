@@ -44,6 +44,7 @@ export interface CreateIssueCommentInput extends TelemetryContextFields {
   readonly name: string
   readonly issueNumber: number
   readonly body: string
+  readonly idempotencyKey?: string | undefined
 }
 
 export interface SourcePublicationRef {
@@ -64,6 +65,7 @@ export interface CreateCheckRunInput extends TelemetryContextFields {
   readonly summary: string
   readonly text?: string | undefined
   readonly detailsUrl?: string | undefined
+  readonly idempotencyKey?: string | undefined
 }
 
 export interface CreateDraftPullRequestInput extends TelemetryContextFields {
