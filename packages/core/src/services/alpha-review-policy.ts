@@ -10,6 +10,15 @@ export const AlphaReviewServiceLayer = Layer.succeed(
         const findings = []
         const diffArtifact = input.evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
 
+        for (const verification of input.verificationResults ?? []) {
+          if (verification.status === 'succeeded') continue
+          findings.push({
+            severity: verification.kind === 'test' ? 'error' as const : 'warning' as const,
+            category: verification.kind === 'test' ? 'test' as const : 'quality' as const,
+            message: verification.message ?? `${verification.kind} verification command failed with exit ${verification.exitCode ?? 'unknown'}.`,
+          })
+        }
+
         if (input.sandboxExecution === undefined) {
           findings.push({
             severity: 'warning' as const,

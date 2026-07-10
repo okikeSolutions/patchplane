@@ -168,6 +168,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   yield* storage.recordCandidatePatchSet({
     workflowRunId: input.workflowStart.workflowRun.id,
     status: diffArtifact === undefined ? 'empty' : 'captured',
+    ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
     ...(diffArtifact === undefined ? {} : { diffArtifactId: diffArtifact.id }),
     summary: diffArtifact === undefined
       ? 'Sandbox completed without a captured candidate diff.'
@@ -181,6 +182,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     workflowRunId: input.workflowStart.workflowRun.id,
     sandboxExecution,
     evidenceArtifacts,
+    verificationResults: result.verificationResults,
     traceId: input.workflowStart.workflowRun.traceId,
     operation: 'runSandboxAgentForWorkflow.proposeMergeDecision',
   })

@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
+import type { SandboxVerificationResult } from '../services/sandbox-service'
 import { PolicyService } from '../services/policy-service'
 import { ReviewService } from '../services/review-service'
 import { StorageService } from '../services/storage-service'
@@ -10,6 +11,7 @@ export interface ProposeMergeDecisionInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly evidenceArtifacts: ReadonlyArray<EvidenceArtifact>
+  readonly verificationResults?: ReadonlyArray<SandboxVerificationResult> | undefined
 }
 
 export const ProposeMergeDecision = Effect.fn(

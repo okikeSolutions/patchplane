@@ -10,6 +10,8 @@ import { buildPiCommandSpec, buildRedactedPiCommandSpec, renderShellCommand } fr
 import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
 import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
 
+const repositoryBaseSha = 'a'.repeat(40)
+
 function config(overrides: Partial<DaytonaConfig> = {}): DaytonaConfig {
   return {
     apiKey: Redacted.make('daytona-key'),
@@ -36,7 +38,10 @@ function fakeSandbox(overrides: Partial<DaytonaSandboxLike> = {}) {
     },
     process: {
       createSession: vi.fn(async () => undefined),
-      executeSessionCommand: vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '' })),
+      executeSessionCommand: vi.fn(async (_sessionId: string, request: { readonly command: string }) =>
+        request.command.includes('git rev-parse HEAD')
+          ? { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+          : { exitCode: 0, stdout: 'ok', stderr: '' }),
       deleteSession: vi.fn(async () => undefined),
     },
     waitUntilStarted: vi.fn(async () => undefined),
@@ -201,7 +206,12 @@ describe('Daytona sandbox boundary adapters', () => {
     const sandbox = fakeSandbox({
       process: {
         createSession: vi.fn(async () => undefined),
-        executeSessionCommand: vi.fn(async () => { throw new Error('command failed') }),
+        executeSessionCommand: vi.fn(async (_sessionId: string, request: { readonly command: string }) => {
+          if (request.command.includes('git rev-parse HEAD')) {
+            return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+          }
+          throw new Error('command failed')
+        }),
         deleteSession: vi.fn(async () => undefined),
       },
     })
@@ -221,7 +231,10 @@ describe('Daytona sandbox boundary adapters', () => {
     const sandbox = fakeSandbox({
       process: {
         createSession: vi.fn(async () => undefined),
-        executeSessionCommand: vi.fn(async () => ({ exitCode: 42, stdout: 'out', stderr: 'err' })),
+        executeSessionCommand: vi.fn(async (_sessionId: string, request: { readonly command: string }) =>
+          request.command.includes('git rev-parse HEAD')
+            ? { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+            : { exitCode: 42, stdout: 'out', stderr: 'err' }),
         deleteSession: vi.fn(async () => undefined),
       },
     })
@@ -240,6 +253,9 @@ describe('Daytona sandbox boundary adapters', () => {
 
   it.effect('collects diff, test report, and screenshot evidence before deleting the sandbox', () => {
     const executeSessionCommand = vi.fn(async (_sessionId: string, request: { readonly command: string }) => {
+      if (request.command.includes('git rev-parse HEAD')) {
+        return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+      }
       if (request.command.includes('bun test')) {
         return { exitCode: 0, stdout: 'ok', stderr: '' }
       }
@@ -297,7 +313,53 @@ describe('Daytona sandbox boundary adapters', () => {
           body: Uint8Array.from([1, 2, 3]),
         }),
       ])
+      expect(result.baseSha).toBe(repositoryBaseSha)
+      expect(result.verificationResults).toEqual([
+        expect.objectContaining({ kind: 'test', status: 'succeeded', exitCode: 0 }),
+        expect.objectContaining({ kind: 'browser', status: 'succeeded', exitCode: 0 }),
+      ])
+      expect(executeSessionCommand).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ command: expect.stringContaining(`git diff --binary --no-ext-diff '${repositoryBaseSha}' -- .`) }),
+        expect.any(Number),
+      )
       expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('reports failed configured verification commands', () => {
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(async (_sessionId: string, request: { readonly command: string }) => {
+          if (request.command.includes('git rev-parse HEAD')) {
+            return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+          }
+          if (request.command.includes('make-report')) {
+            return { exitCode: 2, stdout: '', stderr: 'tests failed' }
+          }
+          return { exitCode: 0, stdout: '', stderr: '' }
+        }),
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.runRepositoryCommand({
+        ...commandInput,
+        evidenceTestReportCommand: 'make-report',
+      })
+
+      expect(result.verificationResults).toEqual([
+        expect.objectContaining({
+          kind: 'test',
+          status: 'failed',
+          exitCode: 2,
+          message: 'Test verification command failed with exit 2.',
+        }),
+      ])
     }).pipe(Effect.provide(testLayer(client)))
   })
 
@@ -309,7 +371,10 @@ describe('Daytona sandbox boundary adapters', () => {
     const sandbox = fakeSandbox({
       process: {
         createSession: vi.fn(async () => undefined),
-        executeSessionCommand: vi.fn(async () => ({ exitCode: 0, stdout, stderr: '' })),
+        executeSessionCommand: vi.fn(async (_sessionId: string, request: { readonly command: string }) =>
+          request.command.includes('git rev-parse HEAD')
+            ? { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+            : { exitCode: 0, stdout, stderr: '' }),
         deleteSession: vi.fn(async () => undefined),
       },
     })

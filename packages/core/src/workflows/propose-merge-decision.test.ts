@@ -73,15 +73,25 @@ describe('ProposeMergeDecision', () => {
         workflowRunId: 'workflow-1',
         sandboxExecution,
         evidenceArtifacts: [diffArtifact],
+        verificationResults: [{
+          kind: 'test',
+          command: 'bun test',
+          status: 'failed',
+          exitCode: 2,
+          message: 'Test verification command failed with exit 2.',
+        }],
       }).pipe(Effect.provide(Layer.mergeAll(storageLayer, AlphaReviewServiceLayer, AlphaPolicyServiceLayer)))
 
       expect(result.reviewRun.reviewer).toBe('patchplane:alpha-reviewer')
-      expect(result.findings).toHaveLength(1)
-      expect(result.findings[0]?.message).toContain('Sandbox command failed')
+      expect(result.findings).toHaveLength(2)
+      expect(result.findings.map((finding) => finding.message)).toEqual([
+        'Test verification command failed with exit 2.',
+        'Sandbox command failed with exit 1.',
+      ])
       expect(result.policyDecision).toMatchObject({
         status: 'changes-requested',
         reason: 'review:error',
       })
-      expect(recorded.map((entry) => entry.type)).toEqual(['reviewRun', 'finding', 'policy'])
+      expect(recorded.map((entry) => entry.type)).toEqual(['reviewRun', 'finding', 'finding', 'policy'])
     }))
 })

@@ -1,7 +1,11 @@
 import { Config, Effect, Exit, Layer, Schedule, Stream } from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { SandboxError } from '@patchplane/domain/errors'
-import { SandboxService, type SandboxEvidenceArtifact } from '@patchplane/core/services/sandbox-service'
+import {
+  SandboxService,
+  type SandboxEvidenceArtifact,
+  type SandboxVerificationResult,
+} from '@patchplane/core/services/sandbox-service'
 import {
   DAYTONA_DEFAULT_COMMAND,
   DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -20,6 +24,7 @@ import {
 } from './daytona-adapter'
 import { executeSandboxCommand, startSandboxSessionCommand, streamSandboxSessionCommandLogs } from './daytona-process'
 import { sanitizeDaytonaCause } from './daytona-redaction'
+import { shellQuote } from './daytona-shell'
 import { buildPiCommandSpec, buildPiRpcCommandSpec, buildRedactedPiCommandSpec, renderShellCommand } from '../sandbox-runtime/pi/command'
 import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
 import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
@@ -219,16 +224,37 @@ function screenshotProbeCommand() {
   return `node -e '${script}'`
 }
 
+function captureRepositoryBaseSha(sandbox: DaytonaSandboxLike, traceId: string) {
+  return Effect.gen(function* () {
+    const result = yield* executeSandboxCommand(sandbox, {
+      command: 'git rev-parse HEAD',
+      timeoutSeconds: evidenceCaptureTimeoutSeconds,
+      traceId: `${traceId}-base-sha`,
+    })
+    const baseSha = result.stdout.trim()
+    if (result.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+      return yield* new SandboxError({
+        operation: 'daytona.captureRepositoryBaseSha',
+        message: 'Daytona could not determine the repository base commit for evidence capture',
+        cause: { exitCode: result.exitCode, stderr: result.stderr },
+      })
+    }
+    return baseSha
+  })
+}
+
 function collectSandboxEvidenceArtifacts(
   sandbox: DaytonaSandboxLike,
   input: {
     readonly traceId: string
+    readonly baseSha: string
     readonly evidenceTestReportCommand?: string | undefined
     readonly evidenceBrowserScreenshotCommand?: string | undefined
   },
 ) {
   return Effect.gen(function* () {
     const artifacts: Array<SandboxEvidenceArtifact> = []
+    const verificationResults: Array<SandboxVerificationResult> = []
     const runCaptureCommand = (operation: string, command: string) =>
       executeSandboxCommand(sandbox, {
         command,
@@ -246,7 +272,7 @@ function collectSandboxEvidenceArtifacts(
 
     const diff = yield* runCaptureCommand(
       'diff',
-      'git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff -- .',
+      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- .`,
     )
     if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
       artifacts.push({
@@ -259,7 +285,21 @@ function collectSandboxEvidenceArtifacts(
     }
 
     if (nonEmpty(input.evidenceTestReportCommand)) {
-      yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand).pipe(Effect.ignore)
+      const result = yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand)
+      verificationResults.push(result === undefined
+        ? {
+            kind: 'test',
+            command: input.evidenceTestReportCommand,
+            status: 'failed',
+            message: 'Test verification command could not be executed.',
+          }
+        : {
+            kind: 'test',
+            command: input.evidenceTestReportCommand,
+            status: result.exitCode === 0 ? 'succeeded' : 'failed',
+            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            ...(result.exitCode === 0 ? {} : { message: `Test verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
+          })
     }
     const testReport = yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
     if (testReport !== undefined && testReport.exitCode === 0) {
@@ -274,9 +314,33 @@ function collectSandboxEvidenceArtifacts(
         })
       }
     }
+    if (nonEmpty(input.evidenceTestReportCommand) && !artifacts.some((artifact) => artifact.kind === 'test-report')) {
+      const result = verificationResults.find((verification) => verification.kind === 'test')
+      if (result?.status === 'succeeded') {
+        verificationResults[verificationResults.indexOf(result)] = {
+          ...result,
+          status: 'failed',
+          message: 'Test verification command did not produce a supported test report artifact.',
+        }
+      }
+    }
 
     if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
-      yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand).pipe(Effect.ignore)
+      const result = yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand)
+      verificationResults.push(result === undefined
+        ? {
+            kind: 'browser',
+            command: input.evidenceBrowserScreenshotCommand,
+            status: 'failed',
+            message: 'Browser verification command could not be executed.',
+          }
+        : {
+            kind: 'browser',
+            command: input.evidenceBrowserScreenshotCommand,
+            status: result.exitCode === 0 ? 'succeeded' : 'failed',
+            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            ...(result.exitCode === 0 ? {} : { message: `Browser verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
+          })
     }
     const screenshot = yield* runCaptureCommand('browser-screenshot-probe', screenshotProbeCommand())
     if (screenshot !== undefined && screenshot.exitCode === 0) {
@@ -291,8 +355,18 @@ function collectSandboxEvidenceArtifacts(
         })
       }
     }
+    if (nonEmpty(input.evidenceBrowserScreenshotCommand) && !artifacts.some((artifact) => artifact.kind === 'screenshot')) {
+      const result = verificationResults.find((verification) => verification.kind === 'browser')
+      if (result?.status === 'succeeded') {
+        verificationResults[verificationResults.indexOf(result)] = {
+          ...result,
+          status: 'failed',
+          message: 'Browser verification command did not produce a supported screenshot artifact.',
+        }
+      }
+    }
 
-    return artifacts
+    return { artifacts, verificationResults }
   })
 }
 
@@ -413,6 +487,7 @@ export function makeDaytonaSandboxLayer(
               { ...input, envVars, retainAfterUse: input.mode === 'rpc' },
               (sandbox) => Effect.gen(function* () {
                 yield* cloneRepository(sandbox, input)
+                const baseSha = yield* captureRepositoryBaseSha(sandbox, input.traceId)
                 const timeoutSeconds = input.timeoutSeconds ?? DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
                 if (input.mode === 'rpc') {
                   const command = renderShellCommand(buildPiRpcCommandSpec({
@@ -491,7 +566,10 @@ export function makeDaytonaSandboxLayer(
                     Stream.runCollect,
                     Effect.map((events) => Array.from(events)),
                   )
-                  const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
+                  const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                    sandbox,
+                    { ...input, baseSha },
+                  )
 
                   return {
                     provider: 'daytona:pi-rpc',
@@ -510,6 +588,8 @@ export function makeDaytonaSandboxLayer(
                     policy: toSandboxPolicy(config, { timeoutSeconds }),
                     runtimeEvents: parsedRuntimeEvents,
                     evidenceArtifacts,
+                    verificationResults,
+                    baseSha,
                     startedAt,
                     completedAt: Date.now(),
                   }
@@ -536,7 +616,10 @@ export function makeDaytonaSandboxLayer(
                     parseErrors: parsedRuntimeEvents.parseErrors,
                   })
                 }
-                const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
+                const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                  sandbox,
+                  { ...input, baseSha },
+                )
 
                 return {
                   provider: 'daytona:pi',
@@ -553,6 +636,8 @@ export function makeDaytonaSandboxLayer(
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
                   runtimeEvents: parsedRuntimeEvents.events,
                   evidenceArtifacts,
+                  verificationResults,
+                  baseSha,
                   startedAt,
                   completedAt: Date.now(),
                 }
@@ -644,6 +729,7 @@ export function makeDaytonaSandboxLayer(
               { ...input, envVars: input.env === undefined ? undefined : { ...input.env } },
               (sandbox) => Effect.gen(function* () {
                 yield* cloneRepository(sandbox, input)
+                const baseSha = yield* captureRepositoryBaseSha(sandbox, input.traceId)
                 const command = input.command.trim().length === 0
                   ? DAYTONA_DEFAULT_COMMAND
                   : input.command
@@ -653,7 +739,10 @@ export function makeDaytonaSandboxLayer(
                   timeoutSeconds,
                   traceId: input.traceId,
                 })
-                const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
+                const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                  sandbox,
+                  { ...input, baseSha },
+                )
 
                 return {
                   provider: 'daytona',
@@ -664,6 +753,8 @@ export function makeDaytonaSandboxLayer(
                   stderr: response.stderr,
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
                   evidenceArtifacts,
+                  verificationResults,
+                  baseSha,
                   startedAt,
                   completedAt: Date.now(),
                 }

@@ -73,6 +73,14 @@ export interface SandboxEvidenceArtifact {
   readonly retentionPolicy?: string | undefined
 }
 
+export interface SandboxVerificationResult {
+  readonly kind: 'test' | 'browser'
+  readonly command: string
+  readonly status: 'succeeded' | 'failed'
+  readonly exitCode?: number | undefined
+  readonly message?: string | undefined
+}
+
 export interface SandboxCommandResult {
   readonly provider: string
   readonly sandboxId: string
@@ -85,6 +93,8 @@ export interface SandboxCommandResult {
   readonly policy?: SandboxPolicy | undefined
   readonly runtimeEvents?: ReadonlyArray<SandboxRuntimeEvent> | undefined
   readonly evidenceArtifacts?: ReadonlyArray<SandboxEvidenceArtifact> | undefined
+  readonly verificationResults?: ReadonlyArray<SandboxVerificationResult> | undefined
+  readonly baseSha?: string | undefined
   readonly startedAt: number
   readonly completedAt: number
 }
