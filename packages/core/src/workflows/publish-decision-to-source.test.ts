@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { makeGitHubAppActorId, makePromptRequestId, makeSystemActorId, makeWorkOSWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
-import { StorageError } from '@patchplane/domain/errors'
+import { SourceControlError, StorageError } from '@patchplane/domain/errors'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
 import { PublishDecisionToSource } from './publish-decision-to-source'
@@ -154,10 +154,21 @@ describe('PublishDecisionToSource', () => {
     }),
   )
 
-  it.effect('skips already published decision targets for the same decision id', () =>
+  it.effect('repairs failed targets and aggregate provenance on retry', () =>
     Effect.gen(function* () {
       const sourceCalls: Array<string> = []
-      const recordedPublications: Array<{ readonly idempotencyKey?: string; readonly status: string }> = []
+      const recordedPublications: Array<{
+        readonly id: string
+        readonly idempotencyKey?: string
+        readonly kind: 'issue-comment' | 'check-run' | 'draft-pull-request' | 'branch'
+        readonly status: 'pending' | 'published' | 'failed'
+      }> = []
+      const provenanceRecords: Array<{
+        readonly status: string
+        readonly summary?: string | undefined
+        readonly artifactRefs?: ReadonlyArray<string> | undefined
+      }> = []
+      let checkAttempts = 0
       const sourceControlLayer = Layer.succeed(
         SourceControlService,
         SourceControlService.of({
@@ -172,9 +183,17 @@ describe('PublishDecisionToSource', () => {
               return { externalId: 'comment-1', url: 'https://github.test/comment/1' }
             }),
           createCheckRun: () =>
-            Effect.sync(() => {
+            Effect.suspend(() => {
               sourceCalls.push('check-run')
-              return { externalId: 'check-1', url: 'https://github.test/check/1' }
+              checkAttempts += 1
+              if (checkAttempts === 1) {
+                return Effect.fail(new SourceControlError({
+                  operation: 'createCheckRun.test',
+                  message: 'temporary failure',
+                  cause: undefined,
+                }))
+              }
+              return Effect.succeed({ externalId: 'check-1', url: 'https://github.test/check/1' })
             }),
         }),
       )
@@ -197,15 +216,19 @@ describe('PublishDecisionToSource', () => {
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
-              recordedPublications.push(
-                input.idempotencyKey === undefined
-                  ? { status: input.status }
-                  : { idempotencyKey: input.idempotencyKey, status: input.status },
-              )
-              return Effect.succeed({ id: `publication-${recordedPublications.length}`, ...input, createdAt: input.createdAt ?? 1 } as never)
+              const id = `publication-${recordedPublications.length + 1}`
+              recordedPublications.push({
+                id,
+                kind: input.kind,
+                status: input.status,
+                ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+              })
+              return Effect.succeed({ id, ...input, createdAt: input.createdAt ?? 1 } as never)
             }),
-          recordProvenanceEvent: (input) =>
-            Effect.succeed({ id: 'provenance-1', ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] } as never),
+          recordProvenanceEvent: (input) => {
+            provenanceRecords.push(input)
+            return Effect.succeed({ id: 'provenance-1', ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] } as never)
+          },
         }),
       )
 
@@ -216,25 +239,37 @@ describe('PublishDecisionToSource', () => {
         sandboxExecution,
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
+      expect(provenanceRecords.at(-1)).toMatchObject({
+        status: 'failed',
+        summary: 'Published 1/2 decision publication targets.',
+      })
+
       sourceCalls.length = 0
       const retry = yield* PublishDecisionToSource({
         traceId: 'trace-2',
         workflowStart,
         humanDecision: { ...humanDecision, decidedAt: 11 },
         sandboxExecution,
-        publicationResults: recordedPublications.filter((publication) => publication.status === 'published').map((publication, index) => ({
-          id: `publication-${index + 1}`,
+        publicationResults: recordedPublications.filter((publication) => publication.status !== 'pending').map((publication) => ({
+          id: publication.id,
           workflowRunId,
           provider: 'github',
-          kind: index === 0 ? 'issue-comment' : 'check-run',
-          status: 'published',
+          kind: publication.kind,
+          status: publication.status,
           createdAt: 10,
           idempotencyKey: publication.idempotencyKey,
         } as never)),
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
-      expect(sourceCalls).toEqual([])
-      expect(retry.publications).toEqual([])
+      expect(sourceCalls).toEqual(['check-run'])
+      expect(retry.publications).toEqual([
+        expect.objectContaining({ kind: 'check-run', status: 'published' }),
+      ])
+      expect(provenanceRecords.at(-1)).toMatchObject({
+        status: 'succeeded',
+        summary: 'Published 2/2 decision publication targets.',
+        artifactRefs: expect.arrayContaining(['decision-1', 'publication-2']),
+      })
     }),
   )
 
