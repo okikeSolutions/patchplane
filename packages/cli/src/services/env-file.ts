@@ -153,9 +153,9 @@ export class CliEnvFile extends Context.Service<CliEnvFile, {
         filePath: string,
         target: Map<string, string>,
         options?: {
-          readonly required?: boolean | undefined
+          readonly required?: boolean
           readonly overwrite?: (key: string, existing: string | undefined, next: string) => boolean
-        } | undefined,
+        },
       ) =>
         Effect.gen(function* () {
           if (!(yield* fs.exists(filePath))) {
