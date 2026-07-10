@@ -33,11 +33,17 @@ function storageLayer(options: { readonly failRecord?: boolean } = {}) {
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     markRuntimeSessionStatus: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
-    getActiveRuntimeSession: () => Effect.succeed(undefined),
+    getActiveRuntimeSession: () => Effect.void as never,
     recordEvidenceArtifact: (input) => options.failRecord
       ? Effect.fail(new StorageError({ operation: 'recordEvidenceArtifact', message: 'boom', cause: undefined }))
       : Effect.succeed({ id: 'artifact_1', ...input, createdAt: input.createdAt ?? 123 } as never),
-    getEvidenceArtifact: () => Effect.succeed(undefined),
+    getEvidenceArtifact: () => Effect.void as never,
+    recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordPublicationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordProvenanceEvent: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
   }))
 }
 

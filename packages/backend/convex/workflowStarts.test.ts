@@ -31,6 +31,12 @@ interface WorkflowStartResult {
 interface WorkflowDetailResult {
   readonly runtimeEvents?: ReadonlyArray<unknown> | undefined
   readonly evidenceArtifacts?: ReadonlyArray<unknown> | undefined
+  readonly candidatePatchSets?: ReadonlyArray<unknown> | undefined
+  readonly reviewRuns?: ReadonlyArray<unknown> | undefined
+  readonly reviewFindings?: ReadonlyArray<unknown> | undefined
+  readonly policyDecisions?: ReadonlyArray<unknown> | undefined
+  readonly humanDecisions?: ReadonlyArray<unknown> | undefined
+  readonly publicationResults?: ReadonlyArray<unknown> | undefined
 }
 
 const createWorkflowStart = makeFunctionReference<
@@ -104,6 +110,42 @@ const getActiveRuntimeSession = makeFunctionReference<
   Record<string, unknown>,
   unknown
 >('workflowStarts:getActiveRuntimeSession')
+
+const recordCandidatePatchSet = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordCandidatePatchSet')
+
+const recordReviewRun = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordReviewRun')
+
+const recordReviewFinding = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordReviewFinding')
+
+const recordPolicyDecision = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordPolicyDecision')
+
+const recordHumanDecision = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordHumanDecision')
+
+const recordPublicationResult = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown>
+>('workflowStarts:recordPublicationResult')
 
 function createArgs(overrides: Partial<CreateWorkflowStartArgs> = {}) {
   return {
@@ -452,6 +494,221 @@ describe('workflowStarts trusted boundary and authz', () => {
     expect(mismatchedRead).toBeNull()
   })
 
+  test('records candidate patch, review, policy, human decision, and publication data for workflow detail', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t, {
+      role: 'admin',
+      roles: ['admin'],
+      permissions: [
+        'workspace:view',
+        'prompt:create',
+        'run:start',
+        'decision:approve',
+        'decision:reject',
+      ],
+    })
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'daytona',
+      sandboxId: 'sandbox-1',
+      command: 'bun test',
+      status: 'failed',
+      exitCode: 1,
+      stdout: 'failed',
+      startedAt: 9,
+      completedAt: 10,
+    })
+
+    const diffArtifact = await t.mutation(recordEvidenceArtifact, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      kind: 'diff',
+      label: 'Candidate patch diff',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflow-1/diff.patch',
+      contentType: 'text/x-diff',
+      sizeBytes: 42,
+      sha256: 'e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
+      createdAt: 10,
+    })
+
+    const patchSet = await t.mutation(recordCandidatePatchSet, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'captured',
+      baseRef: 'main',
+      baseSha: 'abc123',
+      headRef: 'patchplane/workflow-1',
+      headSha: 'def456',
+      diffArtifactId: diffArtifact.id,
+      summary: 'Updates the auth callback.',
+      stats: { filesChanged: 2, additions: 10, deletions: 3 },
+      createdAt: 11,
+    })
+
+    const reviewRun = await t.mutation(recordReviewRun, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      kind: 'test',
+      reviewer: 'patchplane:test-reviewer',
+      status: 'completed',
+      summary: 'One failing test',
+      startedAt: 12,
+      completedAt: 13,
+      createdAt: 12,
+    })
+
+    const finding = await t.mutation(recordReviewFinding, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      reviewRunId: reviewRun.id,
+      severity: 'error',
+      category: 'test',
+      message: 'Unit test failed',
+      path: 'src/auth.test.ts',
+      startLine: 17,
+      endLine: 17,
+      evidenceArtifactId: diffArtifact.id,
+      createdAt: 13,
+    })
+
+    const policyDecision = await t.mutation(recordPolicyDecision, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      reviewRunId: reviewRun.id,
+      status: 'changes-requested',
+      summary: 'Tests must pass before approval.',
+      reason: 'review-finding:error',
+      createdAt: 14,
+    })
+
+    const humanDecision = await t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'changes-requested',
+      comment: 'Please fix the failing auth test first.',
+      idempotencyKey: 'decision-attempt-1',
+    })
+    const replayedHumanDecision = await t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'changes-requested',
+      comment: 'Please fix the failing auth test first.',
+      idempotencyKey: 'decision-attempt-1',
+    })
+
+    const publication = await t.mutation(recordPublicationResult, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'github',
+      kind: 'check-run',
+      status: 'published',
+      externalId: '12345',
+      url: 'https://github.com/patchplane/demo/runs/12345',
+      summary: 'Published PatchPlane decision check.',
+      createdAt: 16,
+    })
+
+    expect(patchSet).toMatchObject({ diffArtifactId: diffArtifact.id, status: 'captured' })
+    expect(finding).toMatchObject({ reviewRunId: reviewRun.id, evidenceArtifactId: diffArtifact.id })
+    expect(policyDecision).toMatchObject({ status: 'changes-requested' })
+    expect(humanDecision).toMatchObject({
+      actorId: 'workos:user_123',
+      comment: 'Please fix the failing auth test first.',
+      idempotencyKey: 'decision-attempt-1',
+    })
+    expect(replayedHumanDecision.id).toBe(humanDecision.id)
+    expect(publication).toMatchObject({ provider: 'github', kind: 'check-run' })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(detail.candidatePatchSets?.[0]).toMatchObject({
+      id: patchSet.id,
+      diffArtifactId: diffArtifact.id,
+    })
+    expect(detail.reviewRuns?.[0]).toMatchObject({ id: reviewRun.id, status: 'completed' })
+    expect(detail.reviewFindings?.[0]).toMatchObject({ id: finding.id, severity: 'error' })
+    expect(detail.policyDecisions?.[0]).toMatchObject({ id: policyDecision.id })
+    expect(detail.humanDecisions).toHaveLength(1)
+    expect(detail.humanDecisions?.[0]).toMatchObject({ id: humanDecision.id })
+    expect(detail.publicationResults?.[0]).toMatchObject({ id: publication.id })
+  })
+
+  test('human decisions require a non-empty comment and matching decision permission', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t, {
+      permissions: ['workspace:view', 'prompt:create', 'run:start', 'decision:approve'],
+    })
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await expect(t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'approved',
+      comment: '   ',
+    })).rejects.toThrow('Decision comment required')
+
+    await expect(t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'rejected',
+      comment: 'This is not safe enough.',
+    })).rejects.toThrow('Permission required')
+
+    await expect(t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'approved',
+      comment: 'Evidence looks good.',
+    })).rejects.toThrow('Sandbox execution required before decision')
+  })
+
+  test('review findings reject review runs and artifacts from a different workflow', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const firstWorkflow = await createWorkflowStartForTest(t)
+    const secondWorkflow = await createWorkflowStartForTest(t)
+
+    const reviewRun = await t.mutation(recordReviewRun, {
+      systemSecret: 'system_test',
+      workflowRunId: firstWorkflow.workflowRun.id,
+      kind: 'test',
+      reviewer: 'patchplane:test-reviewer',
+      status: 'completed',
+      startedAt: 1,
+      completedAt: 2,
+      createdAt: 1,
+    })
+    const artifact = await t.mutation(recordEvidenceArtifact, {
+      systemSecret: 'system_test',
+      workflowRunId: firstWorkflow.workflowRun.id,
+      kind: 'test-report',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflow-1/test-report.json',
+      contentType: 'application/json',
+      sizeBytes: 2,
+      sha256: '2689367b205c16ce32e8ecd5e2fe58ae6d4acc7ba32d3d116dc92d4c2715f1b5',
+      createdAt: 3,
+    })
+
+    await expect(t.mutation(recordReviewFinding, {
+      systemSecret: 'system_test',
+      workflowRunId: secondWorkflow.workflowRun.id,
+      reviewRunId: reviewRun.id,
+      severity: 'error',
+      category: 'test',
+      message: 'Wrong workflow review run',
+    })).rejects.toThrow('Review run not found')
+
+    await expect(t.mutation(recordReviewFinding, {
+      systemSecret: 'system_test',
+      workflowRunId: secondWorkflow.workflowRun.id,
+      severity: 'error',
+      category: 'test',
+      message: 'Wrong workflow artifact',
+      evidenceArtifactId: artifact.id,
+    })).rejects.toThrow('Evidence artifact not found')
+  })
+
   test('recordRuntimeEvents dedupes idempotency keys', async () => {
     const t = authenticatedTest()
     await seedMembership(t)
@@ -493,6 +750,56 @@ describe('workflowStarts trusted boundary and authz', () => {
       sourceLine: 1,
       sourceOffset: 0,
     })
+  })
+
+  test('recordPublicationResult updates failed retry rows without stale errors', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+    const idempotencyKey = `${workflowStart.workflowRun.id}:decision:reviewer:approved:key:check-run`
+
+    const failed = await t.mutation(recordPublicationResult, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'github',
+      kind: 'check-run',
+      status: 'failed',
+      summary: 'Published approval check.',
+      error: 'GitHub timeout',
+      createdAt: 20,
+      idempotencyKey,
+    })
+    const published = await t.mutation(recordPublicationResult, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      provider: 'github',
+      kind: 'check-run',
+      status: 'published',
+      externalId: 'check-1',
+      url: 'https://github.test/check/1',
+      summary: 'Published approval check.',
+      createdAt: 21,
+      idempotencyKey,
+    })
+
+    expect(published.id).toBe(failed.id)
+    expect(published).toMatchObject({
+      status: 'published',
+      externalId: 'check-1',
+      url: 'https://github.test/check/1',
+    })
+    expect(published).not.toHaveProperty('error')
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(detail.publicationResults).toHaveLength(1)
+    expect(detail.publicationResults?.[0]).toMatchObject({
+      id: failed.id,
+      status: 'published',
+      externalId: 'check-1',
+    })
+    expect(detail.publicationResults?.[0]).not.toHaveProperty('error')
   })
 
   test('records and updates active runtime session lifecycle', async () => {

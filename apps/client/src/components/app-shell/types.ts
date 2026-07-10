@@ -145,9 +145,112 @@ export interface SandboxExecutionRow {
   completedAt: number
 }
 
+export interface CandidatePatchSetRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  status: 'captured' | 'empty' | 'failed'
+  baseRef?: string
+  baseSha?: string
+  headRef?: string
+  headSha?: string
+  diffArtifactId?: string
+  summary?: string
+  stats?: {
+    filesChanged: number
+    additions: number
+    deletions: number
+  }
+  createdAt: number
+}
+
+export interface ReviewRunRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  kind: 'test' | 'lint' | 'policy' | 'manual'
+  reviewer: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  summary?: string
+  startedAt: number
+  completedAt?: number
+  createdAt: number
+}
+
+export interface ReviewFindingRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  reviewRunId?: string
+  severity: 'info' | 'warning' | 'error' | 'critical'
+  category: 'test' | 'lint' | 'security' | 'policy' | 'quality' | 'unknown'
+  message: string
+  path?: string
+  startLine?: number
+  endLine?: number
+  evidenceArtifactId?: string
+  createdAt: number
+}
+
+export interface PolicyDecisionRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  reviewRunId?: string
+  status: 'approved' | 'rejected' | 'changes-requested' | 'manual-review'
+  summary: string
+  reason?: string
+  createdAt: number
+}
+
+export interface HumanDecisionRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  actorId: string
+  status: 'approved' | 'rejected' | 'changes-requested'
+  comment: string
+  decidedAt: number
+  idempotencyKey?: string
+}
+
+export interface PublicationResultRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  provider: string
+  kind: 'issue-comment' | 'check-run' | 'draft-pull-request' | 'branch'
+  status: 'pending' | 'published' | 'failed'
+  externalId?: string
+  url?: string
+  summary?: string
+  error?: string
+  createdAt: number
+  idempotencyKey?: string
+}
+
+export interface ProvenanceEventRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  traceId: string
+  parentEventId?: string
+  sequence: number
+  type: string
+  operation: string
+  pluginName?: string
+  status: 'started' | 'succeeded' | 'failed' | 'blocked'
+  startedAt: number
+  completedAt?: number
+  summary?: string
+  artifactRefs: ReadonlyArray<string>
+  errorCategory?: string
+  idempotencyKey?: string
+}
+
 export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
   evidenceArtifacts: ReadonlyArray<EvidenceArtifactRow>
+  candidatePatchSets: ReadonlyArray<CandidatePatchSetRow>
+  reviewRuns: ReadonlyArray<ReviewRunRow>
+  reviewFindings: ReadonlyArray<ReviewFindingRow>
+  policyDecisions: ReadonlyArray<PolicyDecisionRow>
+  humanDecisions: ReadonlyArray<HumanDecisionRow>
+  publicationResults: ReadonlyArray<PublicationResultRow>
+  provenanceEvents: ReadonlyArray<ProvenanceEventRow>
 }

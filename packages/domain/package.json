@@ -6,6 +6,7 @@
   "exports": {
     "./actor": "./src/actor.ts",
     "./authorization": "./src/authorization.ts",
+    "./decision-review": "./src/decision-review.ts",
     "./errors": "./src/errors.ts",
     "./evidence-artifact": "./src/evidence-artifact.ts",
     "./external-workflow-ref": "./src/external-workflow-ref.ts",

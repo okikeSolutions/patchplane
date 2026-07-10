@@ -10,6 +10,8 @@ export interface WorkflowArtifactReference {
   readonly label: string
   readonly value: string
   readonly source: string
+  readonly artifactId?: string | undefined
+  readonly workflowRunId?: string | undefined
 }
 
 export function sourceLabel(row: WorkflowStartRow) {
@@ -75,6 +77,8 @@ export function artifactReferences(detail: WorkflowDetail): ReadonlyArray<Workfl
     label: artifact.label ?? artifact.kind,
     value: `${artifact.storageProvider}:${artifact.storageKey}`,
     source: `${artifact.contentType} · ${artifact.sizeBytes} bytes`,
+    artifactId: artifact.id,
+    workflowRunId: artifact.workflowRunId,
   }))
 
   for (const event of detail.runtimeEvents) {

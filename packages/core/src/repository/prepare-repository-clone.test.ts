@@ -11,6 +11,8 @@ const SourceControlTestLayer = Layer.succeed(
     getInstallationAccount: () => Effect.die('unused'),
     listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
+    createCheckRun: () => Effect.die('unused'),
+    createDraftPullRequest: () => Effect.die('unused'),
     createRepositoryCloneCredentials: (input) =>
       Effect.succeed({
         username: 'x-access-token',

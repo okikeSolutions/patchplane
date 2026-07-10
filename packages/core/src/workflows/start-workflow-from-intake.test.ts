@@ -23,6 +23,12 @@ const TestStorageLayer = Layer.succeed(
     getActiveRuntimeSession: () => Effect.die('unused'),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
+    recordCandidatePatchSet: () => Effect.die('unused'),
+    recordReviewRun: () => Effect.die('unused'),
+    recordReviewFinding: () => Effect.die('unused'),
+    recordPolicyDecision: () => Effect.die('unused'),
+    recordPublicationResult: () => Effect.die('unused'),
+    recordProvenanceEvent: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     createWorkflowFromIntake: (input) =>
       Effect.succeed({
@@ -68,6 +74,8 @@ const TestSourceControlLayer = Layer.succeed(
     getInstallationAccount: () => Effect.die('unused'),
     listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
+    createCheckRun: () => Effect.die('unused'),
+    createDraftPullRequest: () => Effect.die('unused'),
     createRepositoryCloneCredentials: () => Effect.die('unused'),
   }),
 )

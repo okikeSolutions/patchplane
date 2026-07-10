@@ -4,13 +4,46 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
+import { submitReviewDecisionServerFn } from '@/lib/review-decision'
 import type { WorkflowDetail } from './types'
 import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-trust-state'
 
 export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetail }) {
   const [comment, setComment] = useState('')
+  const [submittingStatus, setSubmittingStatus] = useState<HumanDecisionStatus | undefined>()
+  const [error, setError] = useState<string | undefined>()
   const hasComment = comment.trim().length > 0
   const trustState = deriveWorkflowTrustState(detail)
+  const isSubmitting = submittingStatus !== undefined
+
+  const submitDecision = async (status: HumanDecisionStatus) => {
+    const trimmedComment = comment.trim()
+    if (trimmedComment.length === 0 || isSubmitting) {
+      return
+    }
+
+    setSubmittingStatus(status)
+    setError(undefined)
+    try {
+      const response = await submitReviewDecisionServerFn({
+        data: {
+          workflowRunId: detail.workflowRun.id,
+          status,
+          comment: trimmedComment,
+          idempotencyKey: `${detail.workflowRun.id}:${status}:${globalThis.crypto.randomUUID()}`,
+        },
+      })
+      if (!response.ok) {
+        setError(response.error)
+        return
+      }
+      setComment('')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to record decision')
+    } finally {
+      setSubmittingStatus(undefined)
+    }
+  }
 
   return (
     <section className="flex flex-col gap-4">
@@ -24,9 +57,16 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <MessageSquareWarningIcon />
         <AlertTitle>Current verdict: {workflowTrustStateLabel(trustState)}</AlertTitle>
         <AlertDescription>
-          M9.5 collects the review intent in the workflow UI. Durable review-run publication remains part of the M10 review loop.
+          Decisions are durable and become part of the Patch Report audit trail.
         </AlertDescription>
       </Alert>
+      {error === undefined ? null : (
+        <Alert variant="destructive">
+          <MessageSquareWarningIcon />
+          <AlertTitle>Decision failed</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <FieldGroup>
         <Field data-invalid={!hasComment && comment.length > 0 ? true : undefined}>
           <FieldLabel htmlFor="workflow-review-comment">Required comment</FieldLabel>
@@ -43,19 +83,35 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         </Field>
       </FieldGroup>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" disabled={!hasComment}>
+        <Button
+          type="button"
+          disabled={!hasComment || isSubmitting}
+          onClick={() => void submitDecision('approved')}
+        >
           <CheckIcon data-icon="inline-start" />
-          Approve
+          {submittingStatus === 'approved' ? 'Approving...' : 'Approve'}
         </Button>
-        <Button type="button" variant="secondary" disabled={!hasComment}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!hasComment || isSubmitting}
+          onClick={() => void submitDecision('changes-requested')}
+        >
           <MessageSquareWarningIcon data-icon="inline-start" />
-          Request changes
+          {submittingStatus === 'changes-requested' ? 'Requesting...' : 'Request changes'}
         </Button>
-        <Button type="button" variant="destructive" disabled={!hasComment}>
+        <Button
+          type="button"
+          variant="destructive"
+          disabled={!hasComment || isSubmitting}
+          onClick={() => void submitDecision('rejected')}
+        >
           <XIcon data-icon="inline-start" />
-          Reject
+          {submittingStatus === 'rejected' ? 'Rejecting...' : 'Reject'}
         </Button>
       </div>
     </section>
   )
 }
+
+type HumanDecisionStatus = 'approved' | 'rejected' | 'changes-requested'

@@ -90,6 +90,13 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
       },
     ],
     evidenceArtifacts: [],
+    candidatePatchSets: [],
+    reviewRuns: [],
+    reviewFindings: [],
+    policyDecisions: [],
+    humanDecisions: [],
+    publicationResults: [],
+    provenanceEvents: [],
     sandboxExecutions: [
       {
         id: 'sandbox_execution_1',

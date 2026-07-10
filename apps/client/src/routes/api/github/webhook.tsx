@@ -40,9 +40,14 @@ export function isPatchPlaneResultComment(input: {
   readonly eventKind?: string | undefined
   readonly prompt: string
 }) {
+  const prompt = input.prompt.trimStart()
   return input.eventKind !== undefined &&
     patchPlaneResultCommentEventKinds.has(input.eventKind) &&
-    input.prompt.trimStart().startsWith('PatchPlane sandbox run ')
+    (
+      prompt.startsWith('PatchPlane sandbox run ') ||
+      prompt.startsWith('## PatchPlane Patch Report') ||
+      prompt.startsWith('## PatchPlane Decision Update')
+    )
 }
 
 export function githubWebhookGoneResponse() {

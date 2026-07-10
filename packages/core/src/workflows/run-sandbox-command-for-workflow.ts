@@ -4,6 +4,8 @@ import { PrepareRepositoryClone } from '../repository/prepare-repository-clone'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
+import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
+import { ProposeMergeDecision } from './propose-merge-decision'
 
 const inlineLogPreviewBytes = 16 * 1024
 
@@ -22,6 +24,8 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   readonly workflowStart: WorkflowStart
   readonly command: string
   readonly timeoutSeconds?: number | undefined
+  readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceBrowserScreenshotCommand?: string | undefined
 }) {
   const clone = yield* PrepareRepositoryClone(input.workflowStart)
 
@@ -41,6 +45,8 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     ...clone,
     command: input.command,
     timeoutSeconds: input.timeoutSeconds,
+    evidenceTestReportCommand: input.evidenceTestReportCommand,
+    evidenceBrowserScreenshotCommand: input.evidenceBrowserScreenshotCommand,
     traceId: input.workflowStart.workflowRun.traceId,
   })
 
@@ -68,7 +74,13 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     })
   }
 
-  return yield* storage.recordSandboxExecution({
+  const evidenceArtifacts = yield* CaptureSandboxResultArtifacts({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    traceId: input.workflowStart.workflowRun.traceId,
+    result,
+  })
+
+  const sandboxExecution = yield* storage.recordSandboxExecution({
     workflowRunId: input.workflowStart.workflowRun.id,
     provider: result.provider,
     sandboxId: result.sandboxId,
@@ -81,4 +93,27 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     startedAt: result.startedAt,
     completedAt: result.completedAt,
   })
+
+  const diffArtifact = evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
+  yield* storage.recordCandidatePatchSet({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    status: diffArtifact === undefined ? 'empty' : 'captured',
+    ...(diffArtifact === undefined ? {} : { diffArtifactId: diffArtifact.id }),
+    summary: diffArtifact === undefined
+      ? 'Sandbox completed without a captured candidate diff.'
+      : 'Captured candidate patch diff from sandbox worktree.',
+    createdAt: result.completedAt,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxCommandForWorkflow.recordCandidatePatchSet',
+  })
+
+  yield* ProposeMergeDecision({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    sandboxExecution,
+    evidenceArtifacts,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxCommandForWorkflow.proposeMergeDecision',
+  })
+
+  return sandboxExecution
 })

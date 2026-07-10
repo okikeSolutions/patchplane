@@ -1,4 +1,6 @@
 import { Schema } from 'effect'
+import type { HumanDecision, PolicyDecision } from './decision-review'
+import type { EvidenceArtifact } from './evidence-artifact'
 import { ActorId, WorkflowRunId } from './ids'
 import type { RuntimeEvent } from './runtime-event'
 import type { RuntimeSession } from './runtime-session'
@@ -31,6 +33,8 @@ export const PatchReportEvidenceKind = Schema.Literals([
   'screenshot',
   'video',
   'raw-trace',
+  'policy-result',
+  'trust-report',
 ])
 export type PatchReportEvidenceKind = Schema.Schema.Type<typeof PatchReportEvidenceKind>
 
@@ -97,6 +101,9 @@ export interface AssemblePatchReportV0Input {
   readonly runtimeEvents: ReadonlyArray<RuntimeEvent>
   readonly runtimeSessions: ReadonlyArray<RuntimeSession>
   readonly sandboxExecutions: ReadonlyArray<SandboxExecution>
+  readonly evidenceArtifacts?: ReadonlyArray<EvidenceArtifact> | undefined
+  readonly policyDecisions?: ReadonlyArray<PolicyDecision> | undefined
+  readonly humanDecisions?: ReadonlyArray<HumanDecision> | undefined
 }
 
 /**
@@ -109,7 +116,9 @@ export interface AssemblePatchReportV0Input {
  */
 export function assemblePatchReportV0(input: AssemblePatchReportV0Input): PatchReport {
   const latestExecution = latestSandboxExecution(input.sandboxExecutions)
-  const status = patchReportStatus(latestExecution)
+  const latestHumanDecision = latestBy(input.humanDecisions ?? [], (decision) => decision.decidedAt)
+  const latestPolicyDecision = latestBy(input.policyDecisions ?? [], (decision) => decision.createdAt)
+  const status = patchReportStatus(latestExecution, latestHumanDecision, latestPolicyDecision)
   const updatedAt = latestUpdatedAt(input)
 
   return decodePatchReportSync({
@@ -120,7 +129,8 @@ export function assemblePatchReportV0(input: AssemblePatchReportV0Input): PatchR
     promptSummary: summarizeText(input.workflowStart.promptRequest.prompt),
     execution: executionSection(latestExecution),
     checks: checksSection(latestExecution),
-    evidence: evidenceSection(input.runtimeEvents, latestExecution),
+    evidence: evidenceSection(input.runtimeEvents, latestExecution, input.evidenceArtifacts ?? []),
+    ...decisionSection(latestHumanDecision),
     createdAt: input.workflowStart.workflowRun.createdAt,
     updatedAt,
   })
@@ -129,12 +139,25 @@ export function assemblePatchReportV0(input: AssemblePatchReportV0Input): PatchR
 function latestSandboxExecution(
   executions: ReadonlyArray<SandboxExecution>,
 ): SandboxExecution | undefined {
-  return [...executions].sort((left, right) => left.startedAt - right.startedAt).at(-1)
+  return latestBy(executions, (execution) => execution.startedAt)
 }
 
 function patchReportStatus(
   latestExecution: SandboxExecution | undefined,
+  latestHumanDecision: HumanDecision | undefined,
+  latestPolicyDecision: PolicyDecision | undefined,
 ): PatchReportStatus {
+  if (latestHumanDecision !== undefined) {
+    return latestHumanDecision.status
+  }
+
+  if (
+    latestPolicyDecision?.status === 'rejected' ||
+    latestPolicyDecision?.status === 'changes-requested'
+  ) {
+    return 'changes-requested'
+  }
+
   if (latestExecution === undefined) {
     return 'pending'
   }
@@ -142,6 +165,23 @@ function patchReportStatus(
   return latestExecution.status === 'succeeded'
     ? 'verification-passed'
     : 'verification-failed'
+}
+
+function decisionSection(
+  latestHumanDecision: HumanDecision | undefined,
+): Pick<PatchReport, 'decision'> | object {
+  if (latestHumanDecision === undefined) {
+    return {}
+  }
+
+  return {
+    decision: {
+      status: latestHumanDecision.status,
+      actorId: latestHumanDecision.actorId,
+      comment: latestHumanDecision.comment,
+      decidedAt: latestHumanDecision.decidedAt,
+    },
+  }
 }
 
 function executionSection(latestExecution: SandboxExecution | undefined): PatchReport['execution'] {
@@ -177,6 +217,7 @@ function checksSection(latestExecution: SandboxExecution | undefined): ReadonlyA
 function evidenceSection(
   runtimeEvents: ReadonlyArray<RuntimeEvent>,
   latestExecution: SandboxExecution | undefined,
+  evidenceArtifacts: ReadonlyArray<EvidenceArtifact>,
 ): ReadonlyArray<PatchReportEvidence> {
   return [
     ...runtimeEvents.map((event): PatchReportEvidence => ({
@@ -185,6 +226,12 @@ function evidenceSection(
       summary: `${event.provider} · ${event.type}`,
     })),
     ...(latestExecution === undefined ? [] : sandboxExecutionEvidence(latestExecution)),
+    ...evidenceArtifacts.map((artifact): PatchReportEvidence => ({
+      kind: artifact.kind,
+      label: artifact.label ?? artifact.kind,
+      summary: `${artifact.contentType} · ${artifact.sizeBytes} bytes`,
+      artifactId: artifact.id,
+    })),
   ]
 }
 
@@ -210,6 +257,20 @@ function latestUpdatedAt(input: AssemblePatchReportV0Input) {
     ...input.runtimeEvents.map((event) => event.occurredAt),
     ...input.runtimeSessions.map((session) => session.completedAt ?? session.updatedAt),
     ...input.sandboxExecutions.map((execution) => execution.completedAt),
+    ...(input.evidenceArtifacts ?? []).map((artifact) => artifact.createdAt),
+    ...(input.policyDecisions ?? []).map((decision) => decision.createdAt),
+    ...(input.humanDecisions ?? []).map((decision) => decision.decidedAt),
+  )
+}
+
+function latestBy<A>(
+  items: ReadonlyArray<A>,
+  value: (item: A) => number,
+): A | undefined {
+  return items.reduce<A | undefined>(
+    (latest, item) =>
+      latest === undefined || value(item) > value(latest) ? item : latest,
+    undefined,
   )
 }
 

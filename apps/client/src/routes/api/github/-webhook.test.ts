@@ -82,6 +82,16 @@ describe('GitHub webhook result-comment loop guard', () => {
       eventKind: 'github.pull_request_comment.created',
       prompt: 'PatchPlane sandbox run passed.\n\n- Workflow run: run_123',
     })).toBe(true)
+
+    expect(isPatchPlaneResultComment({
+      eventKind: 'github.issue_comment.created',
+      prompt: '## PatchPlane Patch Report\n\n**Status:** verification passed',
+    })).toBe(true)
+
+    expect(isPatchPlaneResultComment({
+      eventKind: 'github.pull_request_comment.created',
+      prompt: '## PatchPlane Decision Update\n\n**Decision:** approved',
+    })).toBe(true)
   })
 
   test('keeps non-PatchPlane comments eligible for workflow intake', () => {

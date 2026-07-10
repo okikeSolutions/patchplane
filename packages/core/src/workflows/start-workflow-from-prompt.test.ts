@@ -20,6 +20,12 @@ const TestStorageLayer = Layer.succeed(
     getActiveRuntimeSession: () => Effect.die('unused'),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
+    recordCandidatePatchSet: () => Effect.die('unused'),
+    recordReviewRun: () => Effect.die('unused'),
+    recordReviewFinding: () => Effect.die('unused'),
+    recordPolicyDecision: () => Effect.die('unused'),
+    recordPublicationResult: () => Effect.die('unused'),
+    recordProvenanceEvent: () => Effect.die('unused'),
     createWorkflowFromIntake: (input) =>
       Effect.succeed({
         promptRequest: {

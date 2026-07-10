@@ -46,6 +46,37 @@ export interface CreateIssueCommentInput extends TelemetryContextFields {
   readonly body: string
 }
 
+export interface SourcePublicationRef {
+  readonly externalId?: string | undefined
+  readonly url?: string | undefined
+}
+
+export interface CreateCheckRunInput extends TelemetryContextFields {
+  readonly provider: string
+  readonly installationId?: string
+  readonly owner: string
+  readonly name: string
+  readonly headSha: string
+  readonly checkName: string
+  readonly status: 'completed'
+  readonly conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required'
+  readonly title: string
+  readonly summary: string
+  readonly text?: string | undefined
+  readonly detailsUrl?: string | undefined
+}
+
+export interface CreateDraftPullRequestInput extends TelemetryContextFields {
+  readonly provider: string
+  readonly installationId?: string
+  readonly owner: string
+  readonly name: string
+  readonly title: string
+  readonly head: string
+  readonly base: string
+  readonly body?: string | undefined
+}
+
 export interface CreateRepositoryCloneCredentialsInput extends TelemetryContextFields {
   readonly provider: string
   readonly installationId?: string
@@ -71,7 +102,13 @@ export class SourceControlService extends Context.Service<SourceControlService, 
   ) => Effect.Effect<ReadonlyArray<RepositoryRef>, SourceControlError>
   readonly createIssueComment: (
     input: CreateIssueCommentInput,
-  ) => Effect.Effect<void, SourceControlError>
+  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
+  readonly createCheckRun: (
+    input: CreateCheckRunInput,
+  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
+  readonly createDraftPullRequest: (
+    input: CreateDraftPullRequestInput,
+  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
   readonly createRepositoryCloneCredentials: (
     input: CreateRepositoryCloneCredentialsInput,
   ) => Effect.Effect<RepositoryCloneCredentials, SourceControlError>

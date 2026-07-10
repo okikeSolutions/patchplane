@@ -212,20 +212,111 @@ const sourceControlLayer = Layer.effect(
       readonly body: string
     }) {
       const installationId = yield* parseGitHubInstallationId(input)
-      yield* Effect.tryPromise({
+      return yield* Effect.tryPromise({
         try: async () => {
           const octokit = await app.getInstallationOctokit(installationId)
-          await octokit.rest.issues.createComment({
+          const result = await octokit.rest.issues.createComment({
             owner: input.owner,
             repo: input.name,
             issue_number: input.issueNumber,
             body: input.body,
           })
+          return {
+            externalId: String(result.data.id),
+            url: result.data.html_url,
+          }
         },
         catch: (cause) =>
           new SourceControlError({
             operation: 'createIssueComment.github',
             message: 'GitHub failed to create an issue comment',
+            cause,
+          }),
+      })
+    })
+
+    const createCheckRun = Effect.fn(
+      'GitHubProviderPlugin.createCheckRun',
+    )(function*(input: {
+      readonly provider: string
+      readonly installationId?: string
+      readonly owner: string
+      readonly name: string
+      readonly headSha: string
+      readonly checkName: string
+      readonly status: 'completed'
+      readonly conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required'
+      readonly title: string
+      readonly summary: string
+      readonly text?: string | undefined
+      readonly detailsUrl?: string | undefined
+    }) {
+      const installationId = yield* parseGitHubInstallationId(input)
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const octokit = await app.getInstallationOctokit(installationId)
+          const result = await octokit.rest.checks.create({
+            owner: input.owner,
+            repo: input.name,
+            name: input.checkName,
+            head_sha: input.headSha,
+            status: input.status,
+            conclusion: input.conclusion,
+            ...(input.detailsUrl === undefined ? {} : { details_url: input.detailsUrl }),
+            output: {
+              title: input.title,
+              summary: input.summary,
+              ...(input.text === undefined ? {} : { text: input.text }),
+            },
+          })
+          return {
+            externalId: String(result.data.id),
+            url: result.data.html_url ?? undefined,
+          }
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation: 'createCheckRun.github',
+            message: 'GitHub failed to create a check run',
+            cause,
+          }),
+      })
+    })
+
+    const createDraftPullRequest = Effect.fn(
+      'GitHubProviderPlugin.createDraftPullRequest',
+    )(function*(input: {
+      readonly provider: string
+      readonly installationId?: string
+      readonly owner: string
+      readonly name: string
+      readonly title: string
+      readonly head: string
+      readonly base: string
+      readonly body?: string | undefined
+    }) {
+      const installationId = yield* parseGitHubInstallationId(input)
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const octokit = await app.getInstallationOctokit(installationId)
+          const result = await octokit.rest.pulls.create({
+            owner: input.owner,
+            repo: input.name,
+            title: input.title,
+            head: input.head,
+            base: input.base,
+            draft: true,
+            ...(input.body === undefined ? {} : { body: input.body }),
+          })
+          return {
+            externalId: String(result.data.id),
+            url: result.data.html_url,
+          }
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation: 'createDraftPullRequest.github',
+            message: 'GitHub failed to create a draft pull request',
             cause,
           }),
       })
@@ -273,6 +364,8 @@ const sourceControlLayer = Layer.effect(
       getInstallationAccount,
       listInstallationRepositories,
       createIssueComment,
+      createCheckRun,
+      createDraftPullRequest,
       createRepositoryCloneCredentials,
     })
   }),

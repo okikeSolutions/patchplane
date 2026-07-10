@@ -19,11 +19,13 @@ import {
 import { GitHubEventToWorkflowIntake } from '@patchplane/core/workflows/github-event-to-intake'
 import { IngestGitHubWebhook } from '@patchplane/core/workflows/ingest-github-webhook'
 import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
+import { PublishDecisionToSource } from '@patchplane/core/workflows/publish-decision-to-source'
 import { PublishSandboxResultToSource } from '@patchplane/core/workflows/publish-sandbox-result-to-source'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
 import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-sandbox-command-for-workflow'
 import { StartWorkflowFromIntake } from '@patchplane/core/workflows/start-workflow-from-intake'
 import { SourceControlService } from '@patchplane/core/services/source-control-service'
+import { AlphaPolicyServiceLayer, AlphaReviewServiceLayer } from '@patchplane/core/services/alpha-review-policy'
 import { captureTelemetryCause, withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
 import { ArtifactsError, SourceControlError, publicErrorMessage } from '@patchplane/domain/errors'
 import { makeGitHubAppActorId, makeWorkspaceId, makeWorkOSWorkspaceId } from '@patchplane/domain/ids'
@@ -76,6 +78,8 @@ function sourceControlWorkerLayer(env: WorkerEnv) {
     ConvexStoragePlugin.layer,
     GitHubProviderPlugin.layer,
     DaytonaSandboxPlugin.layer,
+    AlphaReviewServiceLayer,
+    AlphaPolicyServiceLayer,
     SentryTelemetryPlugin.layer,
     artifactsLayer,
     NodeServices.layer,
@@ -109,6 +113,15 @@ const runtimeControlRequestSchema = Schema.Struct({
   workflowRunId: Schema.String,
   operation: Schema.Literals(['abort', 'steer', 'followUp', 'terminate']),
   message: Schema.optional(Schema.String),
+})
+
+const publishDecisionRequestSchema = Schema.Struct({
+  traceId: Schema.String,
+  workflowStart: Schema.Unknown,
+  humanDecision: Schema.Unknown,
+  sandboxExecution: Schema.optional(Schema.Unknown),
+  candidatePatchSet: Schema.optional(Schema.Unknown),
+  publicationResults: Schema.Array(Schema.Unknown),
 })
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -182,6 +195,15 @@ function resolvePiExecutionConfig(config: SourceControlRouteConfigType) {
   } as const
 }
 
+function resolveEvidenceCaptureConfig(config: SourceControlRouteConfigType) {
+  const testReportCommand = config.evidenceTestReportCommand.trim()
+  const browserScreenshotCommand = config.evidenceBrowserScreenshotCommand.trim()
+  return {
+    ...(testReportCommand.length === 0 ? {} : { evidenceTestReportCommand: testReportCommand }),
+    ...(browserScreenshotCommand.length === 0 ? {} : { evidenceBrowserScreenshotCommand: browserScreenshotCommand }),
+  }
+}
+
 function loadGitHubWebhookRouteConfig(config: SourceControlRouteConfigType) {
   const mode = config.webhookExecution === 'daytona-command'
     ? 'daytona-command'
@@ -194,6 +216,7 @@ function loadGitHubWebhookRouteConfig(config: SourceControlRouteConfigType) {
       execution: {
         mode,
         ...resolvePiExecutionConfig(config),
+        ...resolveEvidenceCaptureConfig(config),
       },
     } as const
   }
@@ -205,6 +228,7 @@ function loadGitHubWebhookRouteConfig(config: SourceControlRouteConfigType) {
       mode,
       command: DAYTONA_DEFAULT_COMMAND,
       timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+      ...resolveEvidenceCaptureConfig(config),
     },
   } as const
 }
@@ -253,9 +277,14 @@ function isPatchPlaneResultComment(input: {
   readonly eventKind?: string | undefined
   readonly prompt: string
 }) {
+  const prompt = input.prompt.trimStart()
   return input.eventKind !== undefined &&
     patchPlaneResultCommentEventKinds.has(input.eventKind) &&
-    input.prompt.trimStart().startsWith('PatchPlane sandbox run ')
+    (
+      prompt.startsWith('PatchPlane sandbox run ') ||
+      prompt.startsWith('## PatchPlane Patch Report') ||
+      prompt.startsWith('## PatchPlane Decision Update')
+    )
 }
 
 export async function syncGitHubInstallation(request: Request, runtime: SourceControlRuntime) {
@@ -346,6 +375,64 @@ export async function controlRuntimeSession(request: Request, runtime: SourceCon
   }
 
   return jsonResponse({ ok: true, traceId, status: controlExit.value.status })
+}
+
+export async function publishDecision(request: Request, runtime: SourceControlRuntime) {
+  const traceId = await randomTraceId(runtime)
+  const inputExit = await runtime.runPromiseExit(
+    Effect.tryPromise({
+      try: () => request.json(),
+      catch: (cause) => new SourceControlWorkerRequestError({ message: `Invalid JSON body: ${String(cause)}` }),
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(publishDecisionRequestSchema))),
+  )
+
+  if (Exit.isFailure(inputExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Invalid decision publication request' }, { status: 400 })
+  }
+
+  const input = inputExit.value
+  const publicationExit = await runtime.runPromiseExit(
+    PublishDecisionToSource({
+      traceId: input.traceId,
+      workflowStart: input.workflowStart as never,
+      humanDecision: input.humanDecision as never,
+      ...(input.sandboxExecution === undefined ? {} : { sandboxExecution: input.sandboxExecution as never }),
+      ...(input.candidatePatchSet === undefined ? {} : { candidatePatchSet: input.candidatePatchSet as never }),
+      publicationResults: input.publicationResults as never,
+    }).pipe(
+      (effect) => withTelemetrySpan({
+        traceId: input.traceId,
+        operation: 'githubWorker.publishDecision',
+        name: 'githubWorker.publishDecision',
+      }, effect),
+    ),
+  )
+
+  if (Exit.isFailure(publicationExit)) {
+    const error = publicErrorMessage(Cause.squash(publicationExit.cause), 'Decision publication failed')
+    await runtime.runPromise(Effect.logError('Decision publication failed', {
+      traceId: input.traceId,
+      cause: Cause.pretty(publicationExit.cause),
+      error,
+    }))
+    return jsonResponse({ ok: false, traceId: input.traceId, error }, { status: 500 })
+  }
+
+  const failed = publicationExit.value.publications.filter((publication) => publication.status === 'failed')
+  if (failed.length > 0) {
+    return jsonResponse({
+      ok: false,
+      traceId: input.traceId,
+      publications: publicationExit.value.publications,
+      error: failed.map((publication) => publication.error ?? publication.summary ?? publication.kind).join('; '),
+    }, { status: 500 })
+  }
+
+  return jsonResponse({
+    ok: true,
+    traceId: input.traceId,
+    publications: publicationExit.value.publications,
+  })
 }
 
 export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runtime: SourceControlRuntime) {
@@ -465,11 +552,15 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
           thinking: routeConfig.execution.thinking,
           mode: routeConfig.execution.piMode,
           timeoutSeconds: routeConfig.execution.timeoutSeconds,
+          evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
         })
       : yield* RunSandboxCommandForWorkflow({
           workflowStart,
           command: routeConfig.execution.command,
           timeoutSeconds: routeConfig.execution.timeoutSeconds,
+          evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
         })
 
     const publication = yield* PublishSandboxResultToSource({ workflowStart, sandboxExecution })

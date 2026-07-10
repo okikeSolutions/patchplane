@@ -184,6 +184,173 @@ const evidenceArtifactReturn = v.object({
   createdAt: v.number(),
 })
 
+const candidatePatchSetStatusArg = v.union(
+  v.literal('captured'),
+  v.literal('empty'),
+  v.literal('failed'),
+)
+
+const candidatePatchSetStatsArg = v.object({
+  filesChanged: v.number(),
+  additions: v.number(),
+  deletions: v.number(),
+})
+
+const candidatePatchSetReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  status: candidatePatchSetStatusArg,
+  baseRef: v.optional(v.string()),
+  baseSha: v.optional(v.string()),
+  headRef: v.optional(v.string()),
+  headSha: v.optional(v.string()),
+  diffArtifactId: v.optional(v.string()),
+  summary: v.optional(v.string()),
+  stats: v.optional(candidatePatchSetStatsArg),
+  createdAt: v.number(),
+})
+
+const reviewRunKindArg = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('policy'),
+  v.literal('manual'),
+)
+
+const reviewRunStatusArg = v.union(
+  v.literal('queued'),
+  v.literal('running'),
+  v.literal('completed'),
+  v.literal('failed'),
+)
+
+const reviewRunReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  kind: reviewRunKindArg,
+  reviewer: v.string(),
+  status: reviewRunStatusArg,
+  summary: v.optional(v.string()),
+  startedAt: v.number(),
+  completedAt: v.optional(v.number()),
+  createdAt: v.number(),
+})
+
+const reviewFindingSeverityArg = v.union(
+  v.literal('info'),
+  v.literal('warning'),
+  v.literal('error'),
+  v.literal('critical'),
+)
+
+const reviewFindingCategoryArg = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('security'),
+  v.literal('policy'),
+  v.literal('quality'),
+  v.literal('unknown'),
+)
+
+const reviewFindingReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  reviewRunId: v.optional(v.string()),
+  severity: reviewFindingSeverityArg,
+  category: reviewFindingCategoryArg,
+  message: v.string(),
+  path: v.optional(v.string()),
+  startLine: v.optional(v.number()),
+  endLine: v.optional(v.number()),
+  evidenceArtifactId: v.optional(v.string()),
+  createdAt: v.number(),
+})
+
+const decisionStatusArg = v.union(
+  v.literal('approved'),
+  v.literal('rejected'),
+  v.literal('changes-requested'),
+)
+
+const policyDecisionStatusArg = v.union(
+  v.literal('approved'),
+  v.literal('rejected'),
+  v.literal('changes-requested'),
+  v.literal('manual-review'),
+)
+
+const policyDecisionReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  reviewRunId: v.optional(v.string()),
+  status: policyDecisionStatusArg,
+  summary: v.string(),
+  reason: v.optional(v.string()),
+  createdAt: v.number(),
+})
+
+const humanDecisionReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  actorId: v.string(),
+  status: decisionStatusArg,
+  comment: v.string(),
+  decidedAt: v.number(),
+  idempotencyKey: v.optional(v.string()),
+})
+
+const publicationResultKindArg = v.union(
+  v.literal('issue-comment'),
+  v.literal('check-run'),
+  v.literal('draft-pull-request'),
+  v.literal('branch'),
+)
+
+const publicationResultStatusArg = v.union(
+  v.literal('pending'),
+  v.literal('published'),
+  v.literal('failed'),
+)
+
+const publicationResultReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  provider: v.string(),
+  kind: publicationResultKindArg,
+  status: publicationResultStatusArg,
+  externalId: v.optional(v.string()),
+  url: v.optional(v.string()),
+  summary: v.optional(v.string()),
+  error: v.optional(v.string()),
+  createdAt: v.number(),
+  idempotencyKey: v.optional(v.string()),
+})
+
+const provenanceEventStatusArg = v.union(
+  v.literal('started'),
+  v.literal('succeeded'),
+  v.literal('failed'),
+  v.literal('blocked'),
+)
+
+const provenanceEventReturn = v.object({
+  id: v.string(),
+  workflowRunId: v.string(),
+  traceId: v.string(),
+  parentEventId: v.optional(v.string()),
+  sequence: v.number(),
+  type: v.string(),
+  operation: v.string(),
+  pluginName: v.optional(v.string()),
+  status: provenanceEventStatusArg,
+  startedAt: v.number(),
+  completedAt: v.optional(v.number()),
+  summary: v.optional(v.string()),
+  artifactRefs: v.array(v.string()),
+  errorCategory: v.optional(v.string()),
+  idempotencyKey: v.optional(v.string()),
+})
+
 const runtimeEventReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
@@ -268,6 +435,13 @@ const workflowDetailReturn = v.object({
   runtimeSessions: v.array(runtimeSessionReturn),
   sandboxExecutions: v.array(sandboxExecutionReturn),
   evidenceArtifacts: v.array(evidenceArtifactReturn),
+  candidatePatchSets: v.array(candidatePatchSetReturn),
+  reviewRuns: v.array(reviewRunReturn),
+  reviewFindings: v.array(reviewFindingReturn),
+  policyDecisions: v.array(policyDecisionReturn),
+  humanDecisions: v.array(humanDecisionReturn),
+  publicationResults: v.array(publicationResultReturn),
+  provenanceEvents: v.array(provenanceEventReturn),
 })
 
 const workflowStartReturn = v.object({
@@ -357,6 +531,21 @@ async function createWorkflowStartRecord(
       traceId: args.traceId,
       status: workflowRunStatus,
       createdAt,
+    })
+
+    await insertProvenanceEvent(ctx, {
+      workflowRunId,
+      traceId: args.traceId,
+      type: 'workflow-start',
+      operation: 'workflowStarts.create',
+      status: 'succeeded',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.externalRef?.repositoryFullName === undefined
+        ? `Prompt recorded from ${args.source} by ${args.actorId}.`
+        : `Prompt recorded from ${args.source} by ${args.actorId} for ${args.externalRef.repositoryFullName}.`,
+      artifactRefs: [String(promptRequestId)],
+      idempotencyKey: `${String(workflowRunId)}:workflow-start`,
     })
 
     console.log('workflowStarts:create succeeded', {
@@ -484,6 +673,98 @@ function requireSystemIngestionSecret(secret: string) {
   if (expected === undefined || expected.length === 0 || secret !== expected) {
     throw new ConvexError('System ingestion secret required')
   }
+}
+
+async function requireWorkflowRun(ctx: QueryCtx | MutationCtx, workflowRunId: Id<'workflowRuns'>) {
+  const workflowRun = await ctx.db.get('workflowRuns', workflowRunId)
+  if (workflowRun === null) {
+    throw new ConvexError('Workflow run not found')
+  }
+  return workflowRun
+}
+
+async function requireReviewRunForWorkflow(
+  ctx: QueryCtx | MutationCtx,
+  reviewRunId: Id<'reviewRuns'>,
+  workflowRunId: Id<'workflowRuns'>,
+) {
+  const reviewRun = await ctx.db.get('reviewRuns', reviewRunId)
+  if (reviewRun === null || reviewRun.workflowRunId !== workflowRunId) {
+    throw new ConvexError('Review run not found')
+  }
+  return reviewRun
+}
+
+async function requireEvidenceArtifactForWorkflow(
+  ctx: QueryCtx | MutationCtx,
+  artifactId: Id<'evidenceArtifacts'>,
+  workflowRunId: Id<'workflowRuns'>,
+) {
+  const artifact = await ctx.db.get('evidenceArtifacts', artifactId)
+  if (artifact === null || artifact.workflowRunId !== workflowRunId) {
+    throw new ConvexError('Evidence artifact not found')
+  }
+  return artifact
+}
+
+async function insertProvenanceEvent(
+  ctx: MutationCtx,
+  input: {
+    workflowRunId: Id<'workflowRuns'>
+    traceId: string
+    parentEventId?: string | undefined
+    type: string
+    operation: string
+    pluginName?: string | undefined
+    status: 'started' | 'succeeded' | 'failed' | 'blocked'
+    startedAt: number
+    completedAt?: number | undefined
+    summary?: string | undefined
+    artifactRefs?: ReadonlyArray<string> | undefined
+    errorCategory?: string | undefined
+    idempotencyKey?: string | undefined
+  },
+) {
+  if (input.idempotencyKey !== undefined) {
+    const existing = await ctx.db
+      .query('provenanceEvents')
+      .withIndex('by_workflow_event_key', (q) =>
+        q
+          .eq('workflowRunId', input.workflowRunId)
+          .eq('idempotencyKey', input.idempotencyKey),
+      )
+      .unique()
+
+    if (existing !== null) {
+      return { id: existing._id, ...existing }
+    }
+  }
+
+  const latest = await ctx.db
+    .query('provenanceEvents')
+    .withIndex('by_workflow_sequence', (q) => q.eq('workflowRunId', input.workflowRunId))
+    .order('desc')
+    .first()
+  const sequence = latest === null ? 1 : latest.sequence + 1
+  const event = {
+    workflowRunId: input.workflowRunId,
+    traceId: input.traceId,
+    ...(input.parentEventId === undefined ? {} : { parentEventId: input.parentEventId }),
+    sequence,
+    type: input.type,
+    operation: input.operation,
+    ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
+    status: input.status,
+    startedAt: input.startedAt,
+    ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+    ...(input.summary === undefined ? {} : { summary: input.summary }),
+    artifactRefs: [...(input.artifactRefs ?? [])],
+    ...(input.errorCategory === undefined ? {} : { errorCategory: input.errorCategory }),
+    ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+  }
+  const id = await ctx.db.insert('provenanceEvents', event)
+
+  return { id, ...event }
 }
 
 export const create = mutation({
@@ -617,6 +898,21 @@ export const recordRuntimeEvents = mutation({
         ...event,
         createdAt: Date.now(),
       })
+      await insertProvenanceEvent(ctx, {
+        workflowRunId: event.workflowRunId,
+        traceId: workflowRun.traceId ?? 'legacy',
+        type: 'runtime-event',
+        operation: event.type,
+        pluginName: event.provider,
+        status: 'succeeded',
+        startedAt: event.occurredAt,
+        completedAt: event.occurredAt,
+        summary: event.summary,
+        artifactRefs: [String(id)],
+        idempotencyKey: event.idempotencyKey === undefined
+          ? `${String(id)}:runtime-event`
+          : `${event.idempotencyKey}:provenance`,
+      })
       rows.push({ id, ...event })
     }
 
@@ -659,6 +955,19 @@ export const recordRuntimeSessionStarted = mutation({
       await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'running' })
     }
 
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'runtime-session',
+      operation: 'runtimeSession.started',
+      pluginName: args.provider,
+      status: 'started',
+      startedAt: args.startedAt,
+      summary: `Runtime session ${args.sessionId} started in sandbox ${args.sandboxId}.`,
+      artifactRefs: [String(id)],
+      idempotencyKey: `${args.sessionId}:${args.commandId}:started`,
+    })
+
     return {
       id,
       workflowRunId: args.workflowRunId,
@@ -689,10 +998,25 @@ export const markRuntimeSessionStatus = mutation({
     }
 
     const updatedAt = Date.now()
+    const workflowRun = await requireWorkflowRun(ctx, runtimeSession.workflowRunId)
     await ctx.db.patch('runtimeSessions', args.runtimeSessionId, {
       status: args.status,
       updatedAt,
       ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
+    })
+
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: runtimeSession.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'runtime-session',
+      operation: 'runtimeSession.status',
+      pluginName: runtimeSession.provider,
+      status: args.status === 'completed' ? 'succeeded' : args.status === 'running' ? 'started' : args.status === 'cancelled' ? 'blocked' : 'failed',
+      startedAt: updatedAt,
+      completedAt: args.completedAt ?? updatedAt,
+      summary: `Runtime session ${runtimeSession.sessionId} marked ${args.status}.`,
+      artifactRefs: [String(args.runtimeSessionId)],
+      idempotencyKey: `${String(args.runtimeSessionId)}:${args.status}:${args.completedAt ?? updatedAt}`,
     })
 
     return {
@@ -833,8 +1157,382 @@ export const recordEvidenceArtifact = mutation({
       createdAt,
     }
     const id = await ctx.db.insert('evidenceArtifacts', artifact)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: args.traceId ?? workflowRun.traceId ?? 'legacy',
+      type: 'evidence-artifact',
+      operation: `evidenceArtifact.${args.kind}`,
+      status: 'succeeded',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.label ?? `Captured ${args.kind} artifact.`,
+      artifactRefs: [String(id)],
+      idempotencyKey: `${String(id)}:evidence-artifact`,
+    })
 
     return { id, ...artifact }
+  },
+})
+
+export const recordCandidatePatchSet = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    status: candidatePatchSetStatusArg,
+    baseRef: v.optional(v.string()),
+    baseSha: v.optional(v.string()),
+    headRef: v.optional(v.string()),
+    headSha: v.optional(v.string()),
+    diffArtifactId: v.optional(v.id('evidenceArtifacts')),
+    summary: v.optional(v.string()),
+    stats: v.optional(candidatePatchSetStatsArg),
+    createdAt: v.optional(v.number()),
+  },
+  returns: candidatePatchSetReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (args.diffArtifactId !== undefined) {
+      await requireEvidenceArtifactForWorkflow(ctx, args.diffArtifactId, args.workflowRunId)
+    }
+
+    const createdAt = args.createdAt ?? Date.now()
+    const patchSet = {
+      workflowRunId: args.workflowRunId,
+      status: args.status,
+      ...(args.baseRef === undefined ? {} : { baseRef: args.baseRef }),
+      ...(args.baseSha === undefined ? {} : { baseSha: args.baseSha }),
+      ...(args.headRef === undefined ? {} : { headRef: args.headRef }),
+      ...(args.headSha === undefined ? {} : { headSha: args.headSha }),
+      ...(args.diffArtifactId === undefined ? {} : { diffArtifactId: args.diffArtifactId }),
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      ...(args.stats === undefined ? {} : { stats: args.stats }),
+      createdAt,
+    }
+    const id = await ctx.db.insert('candidatePatchSets', patchSet)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'candidate-patch-set',
+      operation: 'candidatePatchSet.recorded',
+      status: args.status === 'failed' ? 'failed' : 'succeeded',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.summary ?? `Candidate patch set ${args.status}.`,
+      artifactRefs: [
+        String(id),
+        ...(args.diffArtifactId === undefined ? [] : [String(args.diffArtifactId)]),
+      ],
+      idempotencyKey: `${String(id)}:candidate-patch-set`,
+    })
+
+    return { id, ...patchSet }
+  },
+})
+
+export const recordReviewRun = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    kind: reviewRunKindArg,
+    reviewer: v.string(),
+    status: reviewRunStatusArg,
+    summary: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    createdAt: v.optional(v.number()),
+  },
+  returns: reviewRunReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+
+    const createdAt = args.createdAt ?? Date.now()
+    const reviewRun = {
+      workflowRunId: args.workflowRunId,
+      kind: args.kind,
+      reviewer: args.reviewer,
+      status: args.status,
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      startedAt: args.startedAt,
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
+      createdAt,
+    }
+    const id = await ctx.db.insert('reviewRuns', reviewRun)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'review-run',
+      operation: `reviewRun.${args.kind}`,
+      status: args.status === 'failed' ? 'failed' : args.status === 'running' ? 'started' : 'succeeded',
+      startedAt: args.startedAt,
+      completedAt: args.completedAt ?? createdAt,
+      summary: args.summary ?? `Review run ${args.kind} ${args.status}.`,
+      artifactRefs: [String(id)],
+      idempotencyKey: `${String(id)}:review-run`,
+    })
+
+    return { id, ...reviewRun }
+  },
+})
+
+export const recordReviewFinding = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    severity: reviewFindingSeverityArg,
+    category: reviewFindingCategoryArg,
+    message: v.string(),
+    path: v.optional(v.string()),
+    startLine: v.optional(v.number()),
+    endLine: v.optional(v.number()),
+    evidenceArtifactId: v.optional(v.id('evidenceArtifacts')),
+    createdAt: v.optional(v.number()),
+  },
+  returns: reviewFindingReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (args.reviewRunId !== undefined) {
+      await requireReviewRunForWorkflow(ctx, args.reviewRunId, args.workflowRunId)
+    }
+    if (args.evidenceArtifactId !== undefined) {
+      await requireEvidenceArtifactForWorkflow(ctx, args.evidenceArtifactId, args.workflowRunId)
+    }
+
+    const createdAt = args.createdAt ?? Date.now()
+    const finding = {
+      workflowRunId: args.workflowRunId,
+      ...(args.reviewRunId === undefined ? {} : { reviewRunId: args.reviewRunId }),
+      severity: args.severity,
+      category: args.category,
+      message: args.message,
+      ...(args.path === undefined ? {} : { path: args.path }),
+      ...(args.startLine === undefined ? {} : { startLine: args.startLine }),
+      ...(args.endLine === undefined ? {} : { endLine: args.endLine }),
+      ...(args.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: args.evidenceArtifactId }),
+      createdAt,
+    }
+    const id = await ctx.db.insert('reviewFindings', finding)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'review-finding',
+      operation: `reviewFinding.${args.category}`,
+      status: args.severity === 'critical' || args.severity === 'error' ? 'failed' : 'succeeded',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.message,
+      artifactRefs: [
+        String(id),
+        ...(args.reviewRunId === undefined ? [] : [String(args.reviewRunId)]),
+        ...(args.evidenceArtifactId === undefined ? [] : [String(args.evidenceArtifactId)]),
+      ],
+      idempotencyKey: `${String(id)}:review-finding`,
+    })
+
+    return { id, ...finding }
+  },
+})
+
+export const recordPolicyDecision = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    status: policyDecisionStatusArg,
+    summary: v.string(),
+    reason: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
+  },
+  returns: policyDecisionReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (args.reviewRunId !== undefined) {
+      await requireReviewRunForWorkflow(ctx, args.reviewRunId, args.workflowRunId)
+    }
+
+    const createdAt = args.createdAt ?? Date.now()
+    const decision = {
+      workflowRunId: args.workflowRunId,
+      ...(args.reviewRunId === undefined ? {} : { reviewRunId: args.reviewRunId }),
+      status: args.status,
+      summary: args.summary,
+      ...(args.reason === undefined ? {} : { reason: args.reason }),
+      createdAt,
+    }
+    const id = await ctx.db.insert('policyDecisions', decision)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'policy-decision',
+      operation: 'policyDecision.recorded',
+      status: args.status === 'approved' ? 'succeeded' : args.status === 'manual-review' ? 'blocked' : 'failed',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.summary,
+      artifactRefs: [
+        String(id),
+        ...(args.reviewRunId === undefined ? [] : [String(args.reviewRunId)]),
+      ],
+      idempotencyKey: `${String(id)}:policy-decision`,
+    })
+
+    return { id, ...decision }
+  },
+})
+
+export const recordPublicationResult = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    kind: publicationResultKindArg,
+    status: publicationResultStatusArg,
+    externalId: v.optional(v.string()),
+    url: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
+    idempotencyKey: v.optional(v.string()),
+  },
+  returns: publicationResultReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+
+    if (args.idempotencyKey !== undefined) {
+      const existing = await ctx.db
+        .query('publicationResults')
+        .withIndex('by_workflow_publication_key', (q) =>
+          q
+            .eq('workflowRunId', args.workflowRunId)
+            .eq('idempotencyKey', args.idempotencyKey),
+        )
+        .unique()
+
+      if (existing !== null) {
+        if (existing.status === 'published') {
+          return {
+            id: existing._id,
+            workflowRunId: existing.workflowRunId,
+            provider: existing.provider,
+            kind: existing.kind,
+            status: existing.status,
+            ...(existing.externalId === undefined ? {} : { externalId: existing.externalId }),
+            ...(existing.url === undefined ? {} : { url: existing.url }),
+            ...(existing.summary === undefined ? {} : { summary: existing.summary }),
+            ...(existing.error === undefined ? {} : { error: existing.error }),
+            createdAt: existing.createdAt,
+            ...(existing.idempotencyKey === undefined ? {} : { idempotencyKey: existing.idempotencyKey }),
+          }
+        }
+
+        const createdAt = args.createdAt ?? Date.now()
+        const updated = {
+          provider: args.provider,
+          kind: args.kind,
+          status: args.status,
+          externalId: args.externalId,
+          url: args.url,
+          summary: args.summary,
+          error: args.error,
+          createdAt,
+          idempotencyKey: args.idempotencyKey,
+        }
+        await ctx.db.patch('publicationResults', existing._id, updated)
+        await insertProvenanceEvent(ctx, {
+          workflowRunId: args.workflowRunId,
+          traceId: workflowRun.traceId ?? 'legacy',
+          type: 'publication-result',
+          operation: `publicationResult.${args.kind}.retry`,
+          pluginName: args.provider,
+          status: args.status === 'published' ? 'succeeded' : args.status === 'pending' ? 'started' : 'failed',
+          startedAt: createdAt,
+          completedAt: createdAt,
+          summary: args.summary ?? `Publication ${args.kind} ${args.status}.`,
+          artifactRefs: [String(existing._id)],
+          errorCategory: args.error === undefined ? undefined : 'publication',
+          idempotencyKey: `${args.idempotencyKey}:provenance:${args.status}`,
+        })
+        return { id: existing._id, workflowRunId: existing.workflowRunId, ...updated }
+      }
+    }
+
+    const createdAt = args.createdAt ?? Date.now()
+    const result = {
+      workflowRunId: args.workflowRunId,
+      provider: args.provider,
+      kind: args.kind,
+      status: args.status,
+      ...(args.externalId === undefined ? {} : { externalId: args.externalId }),
+      ...(args.url === undefined ? {} : { url: args.url }),
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      ...(args.error === undefined ? {} : { error: args.error }),
+      createdAt,
+      ...(args.idempotencyKey === undefined ? {} : { idempotencyKey: args.idempotencyKey }),
+    }
+    const id = await ctx.db.insert('publicationResults', result)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'publication-result',
+      operation: `publicationResult.${args.kind}`,
+      pluginName: args.provider,
+      status: args.status === 'published' ? 'succeeded' : args.status === 'pending' ? 'started' : 'failed',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: args.summary ?? `Publication ${args.kind} ${args.status}.`,
+      artifactRefs: [String(id)],
+      errorCategory: args.error === undefined ? undefined : 'publication',
+      idempotencyKey: args.idempotencyKey === undefined
+        ? `${String(id)}:publication-result`
+        : `${args.idempotencyKey}:provenance`,
+    })
+
+    return { id, ...result }
+  },
+})
+
+export const recordProvenanceEvent = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    traceId: v.string(),
+    parentEventId: v.optional(v.string()),
+    type: v.string(),
+    operation: v.string(),
+    pluginName: v.optional(v.string()),
+    status: provenanceEventStatusArg,
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    summary: v.optional(v.string()),
+    artifactRefs: v.array(v.string()),
+    errorCategory: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
+  },
+  returns: provenanceEventReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    await requireWorkflowRun(ctx, args.workflowRunId)
+
+    return insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: args.traceId,
+      ...(args.parentEventId === undefined ? {} : { parentEventId: args.parentEventId }),
+      type: args.type,
+      operation: args.operation,
+      ...(args.pluginName === undefined ? {} : { pluginName: args.pluginName }),
+      status: args.status,
+      startedAt: args.startedAt,
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      artifactRefs: args.artifactRefs,
+      ...(args.errorCategory === undefined ? {} : { errorCategory: args.errorCategory }),
+      ...(args.idempotencyKey === undefined ? {} : { idempotencyKey: args.idempotencyKey }),
+    })
   },
 })
 
@@ -880,6 +1578,20 @@ export const recordSandboxExecution = mutation({
     if (workflowRun.status === 'queued') {
       await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'reviewed' })
     }
+
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'sandbox-execution',
+      operation: 'sandboxExecution.command',
+      pluginName: args.provider,
+      status: args.status === 'succeeded' ? 'succeeded' : 'failed',
+      startedAt: args.startedAt,
+      completedAt: args.completedAt,
+      summary: `${args.command} exited ${args.exitCode ?? 'unknown'}.`,
+      artifactRefs: [String(id)],
+      idempotencyKey: `${String(id)}:sandbox-execution`,
+    })
 
     return {
       id,
@@ -931,6 +1643,111 @@ export const authorizeRuntimeControl = query({
   },
 })
 
+export const recordHumanDecision = mutation({
+  args: {
+    workflowRunId: v.id('workflowRuns'),
+    status: decisionStatusArg,
+    comment: v.string(),
+    idempotencyKey: v.optional(v.string()),
+  },
+  returns: humanDecisionReturn,
+  handler: async (ctx, args) => {
+    const comment = args.comment.trim()
+    if (comment.length === 0) {
+      throw new ConvexError('Decision comment required')
+    }
+
+    const identity = await requireWorkOSIdentity(ctx)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    requireWorkOSWorkspace(identity, workflowRun.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      workflowRun.workspaceId,
+      args.status === 'approved' ? 'decision:approve' : 'decision:reject',
+    )
+
+    const sandboxExecution = await ctx.db
+      .query('sandboxExecutions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .first()
+    if (sandboxExecution === null) {
+      throw new ConvexError('Sandbox execution required before decision')
+    }
+
+    const candidatePatchSet = await ctx.db
+      .query('candidatePatchSets')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .first()
+    if (candidatePatchSet === null) {
+      throw new ConvexError('Candidate patch set required before decision')
+    }
+
+    const reviewRun = await ctx.db
+      .query('reviewRuns')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .first()
+    if (reviewRun === null) {
+      throw new ConvexError('Review run required before decision')
+    }
+
+    const policyDecision = await ctx.db
+      .query('policyDecisions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .first()
+    if (policyDecision === null) {
+      throw new ConvexError('Policy decision required before decision')
+    }
+
+    if (args.idempotencyKey !== undefined) {
+      const existing = await ctx.db
+        .query('humanDecisions')
+        .withIndex('by_workflow_decision_key', (q) =>
+          q
+            .eq('workflowRunId', args.workflowRunId)
+            .eq('idempotencyKey', args.idempotencyKey),
+        )
+        .unique()
+
+      if (existing !== null) {
+        return {
+          id: existing._id,
+          workflowRunId: existing.workflowRunId,
+          actorId: existing.actorId,
+          status: existing.status,
+          comment: existing.comment,
+          decidedAt: existing.decidedAt,
+          ...(existing.idempotencyKey === undefined ? {} : { idempotencyKey: existing.idempotencyKey }),
+        }
+      }
+    }
+
+    const decision = {
+      workflowRunId: args.workflowRunId,
+      actorId: `workos:${identity.subject}`,
+      status: args.status,
+      comment,
+      decidedAt: Date.now(),
+      ...(args.idempotencyKey === undefined ? {} : { idempotencyKey: args.idempotencyKey }),
+    }
+    const id = await ctx.db.insert('humanDecisions', decision)
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'human-decision',
+      operation: 'humanDecision.recorded',
+      status: args.status === 'approved' ? 'succeeded' : args.status === 'changes-requested' ? 'blocked' : 'failed',
+      startedAt: decision.decidedAt,
+      completedAt: decision.decidedAt,
+      summary: comment,
+      artifactRefs: [String(id)],
+      idempotencyKey: `${String(id)}:human-decision`,
+    })
+
+    return { id, ...decision }
+  },
+})
+
 export const getDetail = query({
   args: {
     workflowRunId: v.id('workflowRuns'),
@@ -974,6 +1791,41 @@ export const getDetail = query({
 
     const evidenceArtifacts = await ctx.db
       .query('evidenceArtifacts')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const candidatePatchSets = await ctx.db
+      .query('candidatePatchSets')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const reviewRuns = await ctx.db
+      .query('reviewRuns')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const reviewFindings = await ctx.db
+      .query('reviewFindings')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const policyDecisions = await ctx.db
+      .query('policyDecisions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const humanDecisions = await ctx.db
+      .query('humanDecisions')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const publicationResults = await ctx.db
+      .query('publicationResults')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .collect()
+
+    const provenanceEvents = await ctx.db
+      .query('provenanceEvents')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
       .collect()
 
@@ -1057,6 +1909,98 @@ export const getDetail = query({
           sha256: artifact.sha256,
           ...(artifact.retentionPolicy === undefined ? {} : { retentionPolicy: artifact.retentionPolicy }),
           createdAt: artifact.createdAt,
+        })),
+      candidatePatchSets: sortedByNumber(candidatePatchSets, (patchSet) => patchSet.createdAt)
+        .map((patchSet) => ({
+          id: patchSet['_id'],
+          workflowRunId: patchSet.workflowRunId,
+          status: patchSet.status,
+          ...(patchSet.baseRef === undefined ? {} : { baseRef: patchSet.baseRef }),
+          ...(patchSet.baseSha === undefined ? {} : { baseSha: patchSet.baseSha }),
+          ...(patchSet.headRef === undefined ? {} : { headRef: patchSet.headRef }),
+          ...(patchSet.headSha === undefined ? {} : { headSha: patchSet.headSha }),
+          ...(patchSet.diffArtifactId === undefined ? {} : { diffArtifactId: patchSet.diffArtifactId }),
+          ...(patchSet.summary === undefined ? {} : { summary: patchSet.summary }),
+          ...(patchSet.stats === undefined ? {} : { stats: patchSet.stats }),
+          createdAt: patchSet.createdAt,
+        })),
+      reviewRuns: sortedByNumber(reviewRuns, (reviewRun) => reviewRun.startedAt)
+        .map((reviewRun) => ({
+          id: reviewRun['_id'],
+          workflowRunId: reviewRun.workflowRunId,
+          kind: reviewRun.kind,
+          reviewer: reviewRun.reviewer,
+          status: reviewRun.status,
+          ...(reviewRun.summary === undefined ? {} : { summary: reviewRun.summary }),
+          startedAt: reviewRun.startedAt,
+          ...(reviewRun.completedAt === undefined ? {} : { completedAt: reviewRun.completedAt }),
+          createdAt: reviewRun.createdAt,
+        })),
+      reviewFindings: sortedByNumber(reviewFindings, (finding) => finding.createdAt)
+        .map((finding) => ({
+          id: finding['_id'],
+          workflowRunId: finding.workflowRunId,
+          ...(finding.reviewRunId === undefined ? {} : { reviewRunId: finding.reviewRunId }),
+          severity: finding.severity,
+          category: finding.category,
+          message: finding.message,
+          ...(finding.path === undefined ? {} : { path: finding.path }),
+          ...(finding.startLine === undefined ? {} : { startLine: finding.startLine }),
+          ...(finding.endLine === undefined ? {} : { endLine: finding.endLine }),
+          ...(finding.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: finding.evidenceArtifactId }),
+          createdAt: finding.createdAt,
+        })),
+      policyDecisions: sortedByNumber(policyDecisions, (decision) => decision.createdAt)
+        .map((decision) => ({
+          id: decision['_id'],
+          workflowRunId: decision.workflowRunId,
+          ...(decision.reviewRunId === undefined ? {} : { reviewRunId: decision.reviewRunId }),
+          status: decision.status,
+          summary: decision.summary,
+          ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+          createdAt: decision.createdAt,
+        })),
+      humanDecisions: sortedByNumber(humanDecisions, (decision) => decision.decidedAt)
+        .map((decision) => ({
+          id: decision['_id'],
+          workflowRunId: decision.workflowRunId,
+          actorId: decision.actorId,
+          status: decision.status,
+          comment: decision.comment,
+          decidedAt: decision.decidedAt,
+          ...(decision.idempotencyKey === undefined ? {} : { idempotencyKey: decision.idempotencyKey }),
+        })),
+      publicationResults: sortedByNumber(publicationResults, (result) => result.createdAt)
+        .map((result) => ({
+          id: result['_id'],
+          workflowRunId: result.workflowRunId,
+          provider: result.provider,
+          kind: result.kind,
+          status: result.status,
+          ...(result.externalId === undefined ? {} : { externalId: result.externalId }),
+          ...(result.url === undefined ? {} : { url: result.url }),
+          ...(result.summary === undefined ? {} : { summary: result.summary }),
+          ...(result.error === undefined ? {} : { error: result.error }),
+          createdAt: result.createdAt,
+          ...(result.idempotencyKey === undefined ? {} : { idempotencyKey: result.idempotencyKey }),
+        })),
+      provenanceEvents: sortedByNumber(provenanceEvents, (event) => event.sequence)
+        .map((event) => ({
+          id: event['_id'],
+          workflowRunId: event.workflowRunId,
+          traceId: event.traceId,
+          ...(event.parentEventId === undefined ? {} : { parentEventId: event.parentEventId }),
+          sequence: event.sequence,
+          type: event.type,
+          operation: event.operation,
+          ...(event.pluginName === undefined ? {} : { pluginName: event.pluginName }),
+          status: event.status,
+          startedAt: event.startedAt,
+          ...(event.completedAt === undefined ? {} : { completedAt: event.completedAt }),
+          ...(event.summary === undefined ? {} : { summary: event.summary }),
+          artifactRefs: event.artifactRefs,
+          ...(event.errorCategory === undefined ? {} : { errorCategory: event.errorCategory }),
+          ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
         })),
     }
   },

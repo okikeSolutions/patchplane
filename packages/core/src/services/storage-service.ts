@@ -1,5 +1,22 @@
 import { Context, Effect } from 'effect'
 import type { Actor } from '@patchplane/domain/actor'
+import type {
+  CandidatePatchSet,
+  CandidatePatchSetStatus,
+  PolicyDecision,
+  PolicyDecisionStatus,
+  ProvenanceEvent,
+  ProvenanceEventStatus,
+  PublicationResult,
+  PublicationResultKind,
+  PublicationResultStatus,
+  ReviewFinding,
+  ReviewFindingCategory,
+  ReviewFindingSeverity,
+  ReviewRun,
+  ReviewRunKind,
+  ReviewRunStatus,
+} from '@patchplane/domain/decision-review'
 import type { StorageError } from '@patchplane/domain/errors'
 import type { EvidenceArtifact, EvidenceArtifactKind } from '@patchplane/domain/evidence-artifact'
 import type { ExternalWorkflowRef } from '@patchplane/domain/external-workflow-ref'
@@ -99,6 +116,85 @@ export interface GetEvidenceArtifactInput extends TelemetryContextFields {
   readonly authToken?: string | undefined
 }
 
+export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly status: CandidatePatchSetStatus
+  readonly baseRef?: string | undefined
+  readonly baseSha?: string | undefined
+  readonly headRef?: string | undefined
+  readonly headSha?: string | undefined
+  readonly diffArtifactId?: string | undefined
+  readonly summary?: string | undefined
+  readonly stats?: {
+    readonly filesChanged: number
+    readonly additions: number
+    readonly deletions: number
+  } | undefined
+  readonly createdAt?: number | undefined
+}
+
+export interface RecordReviewRunInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly kind: ReviewRunKind
+  readonly reviewer: string
+  readonly status: ReviewRunStatus
+  readonly summary?: string | undefined
+  readonly startedAt: number
+  readonly completedAt?: number | undefined
+  readonly createdAt?: number | undefined
+}
+
+export interface RecordReviewFindingInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly reviewRunId?: string | undefined
+  readonly severity: ReviewFindingSeverity
+  readonly category: ReviewFindingCategory
+  readonly message: string
+  readonly path?: string | undefined
+  readonly startLine?: number | undefined
+  readonly endLine?: number | undefined
+  readonly evidenceArtifactId?: string | undefined
+  readonly createdAt?: number | undefined
+}
+
+export interface RecordPolicyDecisionInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly reviewRunId?: string | undefined
+  readonly status: PolicyDecisionStatus
+  readonly summary: string
+  readonly reason?: string | undefined
+  readonly createdAt?: number | undefined
+}
+
+export interface RecordPublicationResultInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly provider: string
+  readonly kind: PublicationResultKind
+  readonly status: PublicationResultStatus
+  readonly externalId?: string | undefined
+  readonly url?: string | undefined
+  readonly summary?: string | undefined
+  readonly error?: string | undefined
+  readonly createdAt?: number | undefined
+  readonly idempotencyKey?: string | undefined
+}
+
+export interface RecordProvenanceEventInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly traceId: string
+  readonly parentEventId?: string | undefined
+  readonly type: string
+  readonly operation: string
+  readonly pluginName?: string | undefined
+  readonly status: ProvenanceEventStatus
+  readonly startedAt: number
+  readonly completedAt?: number | undefined
+  readonly summary?: string | undefined
+  readonly artifactRefs?: ReadonlyArray<string> | undefined
+  readonly errorCategory?: string | undefined
+  readonly idempotencyKey?: string | undefined
+}
+
 export class StorageService extends Context.Service<StorageService, {
   readonly createWorkflowFromIntake: (
     input: WorkflowIntake,
@@ -130,4 +226,22 @@ export class StorageService extends Context.Service<StorageService, {
   readonly getEvidenceArtifact: (
     input: GetEvidenceArtifactInput,
   ) => Effect.Effect<EvidenceArtifact | undefined, StorageError>
+  readonly recordCandidatePatchSet: (
+    input: RecordCandidatePatchSetInput,
+  ) => Effect.Effect<CandidatePatchSet, StorageError>
+  readonly recordReviewRun: (
+    input: RecordReviewRunInput,
+  ) => Effect.Effect<ReviewRun, StorageError>
+  readonly recordReviewFinding: (
+    input: RecordReviewFindingInput,
+  ) => Effect.Effect<ReviewFinding, StorageError>
+  readonly recordPolicyDecision: (
+    input: RecordPolicyDecisionInput,
+  ) => Effect.Effect<PolicyDecision, StorageError>
+  readonly recordPublicationResult: (
+    input: RecordPublicationResultInput,
+  ) => Effect.Effect<PublicationResult, StorageError>
+  readonly recordProvenanceEvent: (
+    input: RecordProvenanceEventInput,
+  ) => Effect.Effect<ProvenanceEvent, StorageError>
 }>()('@patchplane/core/services/StorageService') {}

@@ -238,6 +238,69 @@ describe('Daytona sandbox boundary adapters', () => {
     }).pipe(Effect.provide(testLayer(client)))
   })
 
+  it.effect('collects diff, test report, and screenshot evidence before deleting the sandbox', () => {
+    const executeSessionCommand = vi.fn(async (_sessionId: string, request: { readonly command: string }) => {
+      if (request.command.includes('bun test')) {
+        return { exitCode: 0, stdout: 'ok', stderr: '' }
+      }
+      if (request.command.includes('git diff --binary')) {
+        return { exitCode: 0, stdout: 'diff --git a/file.ts b/file.ts\n+changed\n', stderr: '' }
+      }
+      if (request.command.includes('make-report')) {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (request.command.includes('PATCHPLANE_ARTIFACT_BODY') && request.command.includes('test-report.json')) {
+        return { exitCode: 0, stdout: '.patchplane/test-report.json\n---PATCHPLANE_ARTIFACT_BODY---\n{"ok":true}', stderr: '' }
+      }
+      if (request.command.includes('make-screenshot')) {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      if (request.command.includes('PATCHPLANE_ARTIFACT_BODY_BASE64')) {
+        return { exitCode: 0, stdout: '.patchplane/browser-screenshot.png\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\nAQID', stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand,
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.runRepositoryCommand({
+        ...commandInput,
+        evidenceTestReportCommand: 'make-report',
+        evidenceBrowserScreenshotCommand: 'make-screenshot',
+      })
+
+      expect(result.evidenceArtifacts).toEqual([
+        expect.objectContaining({
+          kind: 'diff',
+          label: 'Candidate patch diff',
+          contentType: 'text/x-diff',
+          body: expect.stringContaining('diff --git'),
+        }),
+        expect.objectContaining({
+          kind: 'test-report',
+          label: 'Test report',
+          contentType: 'application/json',
+          body: '{"ok":true}',
+        }),
+        expect.objectContaining({
+          kind: 'screenshot',
+          label: 'Browser verification screenshot',
+          contentType: 'image/png',
+          body: Uint8Array.from([1, 2, 3]),
+        }),
+      ])
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
   it.effect('runs Pi in JSON mode and returns normalized runtime events', () => {
     const stdout = [
       JSON.stringify({ type: 'agent_start' }),

@@ -1,0 +1,80 @@
+import { Effect } from 'effect'
+import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
+import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
+import { PolicyService } from '../services/policy-service'
+import { ReviewService } from '../services/review-service'
+import { StorageService } from '../services/storage-service'
+import type { TelemetryContextFields } from '../services/telemetry-service'
+
+export interface ProposeMergeDecisionInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly sandboxExecution?: SandboxExecution | undefined
+  readonly evidenceArtifacts: ReadonlyArray<EvidenceArtifact>
+}
+
+export const ProposeMergeDecision = Effect.fn(
+  '@patchplane/core/workflows/ProposeMergeDecision',
+)(function*(input: ProposeMergeDecisionInput) {
+  const storage = yield* StorageService
+  const reviewer = yield* ReviewService
+  const policy = yield* PolicyService
+  const startedAt = Date.now()
+
+  const review = yield* reviewer.runReview(input)
+  const completedAt = Date.now()
+  const reviewRun = yield* storage.recordReviewRun({
+    workflowRunId: input.workflowRunId,
+    kind: review.kind,
+    reviewer: review.reviewer,
+    status: 'completed',
+    summary: review.summary,
+    startedAt,
+    completedAt,
+    createdAt: startedAt,
+    traceId: input.traceId,
+    pluginName: input.pluginName,
+    operation: 'proposeMergeDecision.recordReviewRun',
+  })
+
+  const findings = yield* Effect.forEach(review.findings, (finding) =>
+    storage.recordReviewFinding({
+      workflowRunId: input.workflowRunId,
+      reviewRunId: reviewRun.id,
+      severity: finding.severity,
+      category: finding.category,
+      message: finding.message,
+      ...(finding.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: finding.evidenceArtifactId }),
+      createdAt: completedAt,
+      traceId: input.traceId,
+      pluginName: input.pluginName,
+      operation: 'proposeMergeDecision.recordReviewFinding',
+    })
+  )
+
+  const policyResult = yield* policy.evaluatePolicy({
+    workflowRunId: input.workflowRunId,
+    sandboxExecution: input.sandboxExecution,
+    reviewFindings: findings,
+    traceId: input.traceId,
+    pluginName: input.pluginName,
+    operation: 'proposeMergeDecision.evaluatePolicy',
+  })
+
+  const policyDecision = yield* storage.recordPolicyDecision({
+    workflowRunId: input.workflowRunId,
+    reviewRunId: reviewRun.id,
+    status: policyResult.status,
+    summary: policyResult.summary,
+    ...(policyResult.reason === undefined ? {} : { reason: policyResult.reason }),
+    createdAt: Date.now(),
+    traceId: input.traceId,
+    pluginName: input.pluginName,
+    operation: 'proposeMergeDecision.recordPolicyDecision',
+  })
+
+  return {
+    reviewRun,
+    findings,
+    policyDecision,
+  }
+})

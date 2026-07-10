@@ -45,6 +45,19 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
       ...execution,
       workflowRunId,
     })),
+    evidenceArtifacts: detail.evidenceArtifacts.map((artifact) => ({
+      ...artifact,
+      workflowRunId,
+    })),
+    policyDecisions: detail.policyDecisions.map((decision) => ({
+      ...decision,
+      workflowRunId,
+    })),
+    humanDecisions: detail.humanDecisions.map((decision) => ({
+      ...decision,
+      workflowRunId,
+      actorId: decision.actorId as ActorId,
+    })),
   })
   const externalRef = detail.promptRequest.externalRef
   const sourceLabel = patchReport.repository ?? detail.promptRequest.source

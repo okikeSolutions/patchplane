@@ -34,10 +34,19 @@ export const rolePermissions = {
     'run:start',
     'run:interrupt',
     'review:create',
+    'decision:approve',
+    'decision:reject',
     'publication:create',
   ],
   reviewer: ['workspace:view', 'review:create'],
-  operator: ['workspace:view', 'prompt:create', 'run:start', 'run:interrupt'],
+  operator: [
+    'workspace:view',
+    'prompt:create',
+    'run:start',
+    'run:interrupt',
+    'decision:approve',
+    'decision:reject',
+  ],
   viewer: ['workspace:view'],
 } satisfies Record<WorkspaceRole, ReadonlyArray<Permission>>
 

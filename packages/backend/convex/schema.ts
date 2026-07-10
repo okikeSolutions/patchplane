@@ -13,6 +13,75 @@ const evidenceArtifactKind = v.union(
   v.literal('trust-report'),
 )
 
+const candidatePatchSetStatus = v.union(
+  v.literal('captured'),
+  v.literal('empty'),
+  v.literal('failed'),
+)
+
+const reviewRunKind = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('policy'),
+  v.literal('manual'),
+)
+
+const reviewRunStatus = v.union(
+  v.literal('queued'),
+  v.literal('running'),
+  v.literal('completed'),
+  v.literal('failed'),
+)
+
+const reviewFindingSeverity = v.union(
+  v.literal('info'),
+  v.literal('warning'),
+  v.literal('error'),
+  v.literal('critical'),
+)
+
+const reviewFindingCategory = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('security'),
+  v.literal('policy'),
+  v.literal('quality'),
+  v.literal('unknown'),
+)
+
+const decisionStatus = v.union(
+  v.literal('approved'),
+  v.literal('rejected'),
+  v.literal('changes-requested'),
+)
+
+const policyDecisionStatus = v.union(
+  v.literal('approved'),
+  v.literal('rejected'),
+  v.literal('changes-requested'),
+  v.literal('manual-review'),
+)
+
+const publicationResultKind = v.union(
+  v.literal('issue-comment'),
+  v.literal('check-run'),
+  v.literal('draft-pull-request'),
+  v.literal('branch'),
+)
+
+const publicationResultStatus = v.union(
+  v.literal('pending'),
+  v.literal('published'),
+  v.literal('failed'),
+)
+
+const provenanceEventStatus = v.union(
+  v.literal('started'),
+  v.literal('succeeded'),
+  v.literal('failed'),
+  v.literal('blocked'),
+)
+
 const sandboxPolicy = v.object({
   lifecycle: v.object({
     ephemeral: v.boolean(),
@@ -216,6 +285,109 @@ export default defineSchema({
     .index('by_workflow_run', ['workflowRunId'])
     .index('by_storage_key', ['storageProvider', 'storageKey'])
     .index('by_hash', ['sha256']),
+
+  candidatePatchSets: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    status: candidatePatchSetStatus,
+    baseRef: v.optional(v.string()),
+    baseSha: v.optional(v.string()),
+    headRef: v.optional(v.string()),
+    headSha: v.optional(v.string()),
+    diffArtifactId: v.optional(v.id('evidenceArtifacts')),
+    summary: v.optional(v.string()),
+    stats: v.optional(v.object({
+      filesChanged: v.number(),
+      additions: v.number(),
+      deletions: v.number(),
+    })),
+    createdAt: v.number(),
+  }).index('by_workflow_run', ['workflowRunId']),
+
+  reviewRuns: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    kind: reviewRunKind,
+    reviewer: v.string(),
+    status: reviewRunStatus,
+    summary: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_status', ['status']),
+
+  reviewFindings: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    severity: reviewFindingSeverity,
+    category: reviewFindingCategory,
+    message: v.string(),
+    path: v.optional(v.string()),
+    startLine: v.optional(v.number()),
+    endLine: v.optional(v.number()),
+    evidenceArtifactId: v.optional(v.id('evidenceArtifacts')),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_review_run', ['reviewRunId']),
+
+  policyDecisions: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    status: policyDecisionStatus,
+    summary: v.string(),
+    reason: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index('by_workflow_run', ['workflowRunId']),
+
+  humanDecisions: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    actorId: v.string(),
+    status: decisionStatus,
+    comment: v.string(),
+    decidedAt: v.number(),
+    idempotencyKey: v.optional(v.string()),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_actor', ['actorId'])
+    .index('by_workflow_decision_key', ['workflowRunId', 'idempotencyKey']),
+
+  publicationResults: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    provider: v.string(),
+    kind: publicationResultKind,
+    status: publicationResultStatus,
+    externalId: v.optional(v.string()),
+    url: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    idempotencyKey: v.optional(v.string()),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_provider_external', ['provider', 'externalId'])
+    .index('by_workflow_publication_key', ['workflowRunId', 'idempotencyKey']),
+
+  provenanceEvents: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    traceId: v.string(),
+    parentEventId: v.optional(v.string()),
+    sequence: v.number(),
+    type: v.string(),
+    operation: v.string(),
+    pluginName: v.optional(v.string()),
+    status: provenanceEventStatus,
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    summary: v.optional(v.string()),
+    artifactRefs: v.array(v.string()),
+    errorCategory: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_sequence', ['workflowRunId', 'sequence'])
+    .index('by_trace', ['traceId'])
+    .index('by_workflow_event_key', ['workflowRunId', 'idempotencyKey']),
 
   githubConnectionIntents: defineTable({
     state: v.string(),

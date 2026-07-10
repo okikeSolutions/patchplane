@@ -1,6 +1,7 @@
 import { Context, Effect } from 'effect'
 import type { SandboxError, StorageError } from '@patchplane/domain/errors'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import type { ArtifactBody, EvidenceArtifactKind } from './artifacts-service'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export interface SandboxCommandInput extends TelemetryContextFields {
@@ -11,6 +12,8 @@ export interface SandboxCommandInput extends TelemetryContextFields {
   readonly command: string
   readonly timeoutSeconds?: number | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
+  readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceBrowserScreenshotCommand?: string | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
   readonly traceId: string
@@ -35,6 +38,8 @@ export interface SandboxAgentInput extends TelemetryContextFields {
   readonly branch?: string | undefined
   readonly commitId?: string | undefined
   readonly timeoutSeconds?: number | undefined
+  readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceBrowserScreenshotCommand?: string | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
   readonly traceId: string
@@ -60,6 +65,14 @@ export interface SandboxRuntimeEvent {
   readonly sourceOffset?: number | undefined
 }
 
+export interface SandboxEvidenceArtifact {
+  readonly kind: EvidenceArtifactKind
+  readonly label?: string | undefined
+  readonly contentType: string
+  readonly body: ArtifactBody
+  readonly retentionPolicy?: string | undefined
+}
+
 export interface SandboxCommandResult {
   readonly provider: string
   readonly sandboxId: string
@@ -71,6 +84,7 @@ export interface SandboxCommandResult {
   readonly stderr?: string | undefined
   readonly policy?: SandboxPolicy | undefined
   readonly runtimeEvents?: ReadonlyArray<SandboxRuntimeEvent> | undefined
+  readonly evidenceArtifacts?: ReadonlyArray<SandboxEvidenceArtifact> | undefined
   readonly startedAt: number
   readonly completedAt: number
 }

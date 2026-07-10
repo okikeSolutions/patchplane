@@ -24,9 +24,12 @@ describe('PublishSandboxResultToSource', () => {
           getInstallationAccount: () => Effect.die('unused'),
           listInstallationRepositories: () => Effect.die('unused'),
           createRepositoryCloneCredentials: () => Effect.die('unused'),
+          createCheckRun: () => Effect.die('unused'),
+          createDraftPullRequest: () => Effect.die('unused'),
           createIssueComment: (input) =>
             Effect.sync(() => {
               comments.push(input)
+              return { externalId: 'comment-1' }
             }),
         }),
       )

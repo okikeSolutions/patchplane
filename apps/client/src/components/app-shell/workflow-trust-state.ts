@@ -8,12 +8,22 @@ export type WorkflowTrustState =
   | 'needs-review'
   | 'approved'
   | 'rejected'
+  | 'changes-requested'
 
 export function deriveWorkflowTrustState(
   detail: WorkflowDetail | undefined,
 ): WorkflowTrustState {
   if (detail === undefined) {
     return 'queued'
+  }
+
+  const latestDecision = detail.humanDecisions.reduce(
+    (latest, decision) =>
+      latest === undefined || decision.decidedAt > latest.decidedAt ? decision : latest,
+    undefined as (typeof detail.humanDecisions)[number] | undefined,
+  )
+  if (latestDecision !== undefined) {
+    return latestDecision.status
   }
 
   if (detail.workflowRun.status === 'queued') {
@@ -51,6 +61,8 @@ export function workflowTrustStateLabel(state: WorkflowTrustState) {
       return 'Approved'
     case 'rejected':
       return 'Rejected'
+    case 'changes-requested':
+      return 'Changes requested'
     default:
       return state
   }
@@ -72,6 +84,8 @@ export function workflowTrustStateDetail(state: WorkflowTrustState) {
       return 'A reviewer approved this workflow.'
     case 'rejected':
       return 'A reviewer rejected this workflow.'
+    case 'changes-requested':
+      return 'A reviewer requested changes before this workflow can be trusted.'
     default:
       return 'PatchPlane has no additional trust-state detail for this workflow yet.'
   }

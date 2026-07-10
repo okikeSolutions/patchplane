@@ -1,6 +1,14 @@
 import { Config, Effect, Layer, Option, Redacted } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
+import {
+  decodeCandidatePatchSet,
+  decodePolicyDecision,
+  decodeProvenanceEvent,
+  decodePublicationResult,
+  decodeReviewFinding,
+  decodeReviewRun,
+} from '@patchplane/domain/decision-review'
 import { StorageError } from '@patchplane/domain/errors'
 import { decodeEvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
@@ -18,6 +26,12 @@ import {
   type MarkRuntimeSessionStatusInput,
   type GetEvidenceArtifactInput,
   type RecordEvidenceArtifactInput,
+  type RecordCandidatePatchSetInput,
+  type RecordPolicyDecisionInput,
+  type RecordProvenanceEventInput,
+  type RecordPublicationResultInput,
+  type RecordReviewFindingInput,
+  type RecordReviewRunInput,
   type RecordRuntimeEventInput,
   type RecordRuntimeSessionStartedInput,
   type RecordSandboxExecutionInput,
@@ -181,6 +195,115 @@ const getEvidenceArtifactQuery = makeFunctionReference<
   },
   unknown
 >('workflowStarts:getEvidenceArtifact')
+
+const recordCandidatePatchSetMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    status: RecordCandidatePatchSetInput['status']
+    baseRef?: string
+    baseSha?: string
+    headRef?: string
+    headSha?: string
+    diffArtifactId?: string
+    summary?: string
+    stats?: {
+      filesChanged: number
+      additions: number
+      deletions: number
+    }
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordCandidatePatchSet')
+
+const recordReviewRunMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    kind: RecordReviewRunInput['kind']
+    reviewer: string
+    status: RecordReviewRunInput['status']
+    summary?: string
+    startedAt: number
+    completedAt?: number
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordReviewRun')
+
+const recordReviewFindingMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    reviewRunId?: string
+    severity: RecordReviewFindingInput['severity']
+    category: RecordReviewFindingInput['category']
+    message: string
+    path?: string
+    startLine?: number
+    endLine?: number
+    evidenceArtifactId?: string
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordReviewFinding')
+
+const recordPolicyDecisionMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    reviewRunId?: string
+    status: RecordPolicyDecisionInput['status']
+    summary: string
+    reason?: string
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordPolicyDecision')
+
+const recordPublicationResultMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    provider: string
+    kind: RecordPublicationResultInput['kind']
+    status: RecordPublicationResultInput['status']
+    externalId?: string
+    url?: string
+    summary?: string
+    error?: string
+    createdAt?: number
+    idempotencyKey?: string
+  },
+  unknown
+>('workflowStarts:recordPublicationResult')
+
+const recordProvenanceEventMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    traceId: string
+    parentEventId?: string
+    type: string
+    operation: string
+    pluginName?: string
+    status: RecordProvenanceEventInput['status']
+    startedAt: number
+    completedAt?: number
+    summary?: string
+    artifactRefs: ReadonlyArray<string>
+    errorCategory?: string
+    idempotencyKey?: string
+  },
+  unknown
+>('workflowStarts:recordProvenanceEvent')
 
 const listRecentWorkflowStartsQuery = makeFunctionReference<
   'query',
@@ -669,6 +792,279 @@ export const ConvexStoragePlugin = {
           )
         }))
 
+      const recordCandidatePatchSet = Effect.fn(
+        '@patchplane/plugins/convex/recordCandidatePatchSet',
+      )((input: RecordCandidatePatchSetInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordCandidatePatchSet.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record candidate patch sets',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordCandidatePatchSetMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                status: input.status,
+                ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+                ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
+                ...(input.headRef === undefined ? {} : { headRef: input.headRef }),
+                ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+                ...(input.diffArtifactId === undefined ? {} : { diffArtifactId: input.diffArtifactId }),
+                ...(input.summary === undefined ? {} : { summary: input.summary }),
+                ...(input.stats === undefined ? {} : { stats: input.stats }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordCandidatePatchSet',
+                message: 'Convex failed to record candidate patch set',
+                cause,
+              }),
+          })
+          return yield* decodeCandidatePatchSet(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordCandidatePatchSet.decode',
+                message: 'Convex returned invalid candidate patch set',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const recordReviewRun = Effect.fn(
+        '@patchplane/plugins/convex/recordReviewRun',
+      )((input: RecordReviewRunInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordReviewRun.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record review runs',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordReviewRunMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                kind: input.kind,
+                reviewer: input.reviewer,
+                status: input.status,
+                ...(input.summary === undefined ? {} : { summary: input.summary }),
+                startedAt: input.startedAt,
+                ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordReviewRun',
+                message: 'Convex failed to record review run',
+                cause,
+              }),
+          })
+          return yield* decodeReviewRun(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordReviewRun.decode',
+                message: 'Convex returned invalid review run',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const recordReviewFinding = Effect.fn(
+        '@patchplane/plugins/convex/recordReviewFinding',
+      )((input: RecordReviewFindingInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordReviewFinding.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record review findings',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordReviewFindingMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                ...(input.reviewRunId === undefined ? {} : { reviewRunId: input.reviewRunId }),
+                severity: input.severity,
+                category: input.category,
+                message: input.message,
+                ...(input.path === undefined ? {} : { path: input.path }),
+                ...(input.startLine === undefined ? {} : { startLine: input.startLine }),
+                ...(input.endLine === undefined ? {} : { endLine: input.endLine }),
+                ...(input.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: input.evidenceArtifactId }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordReviewFinding',
+                message: 'Convex failed to record review finding',
+                cause,
+              }),
+          })
+          return yield* decodeReviewFinding(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordReviewFinding.decode',
+                message: 'Convex returned invalid review finding',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const recordPolicyDecision = Effect.fn(
+        '@patchplane/plugins/convex/recordPolicyDecision',
+      )((input: RecordPolicyDecisionInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordPolicyDecision.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record policy decisions',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordPolicyDecisionMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                ...(input.reviewRunId === undefined ? {} : { reviewRunId: input.reviewRunId }),
+                status: input.status,
+                summary: input.summary,
+                ...(input.reason === undefined ? {} : { reason: input.reason }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordPolicyDecision',
+                message: 'Convex failed to record policy decision',
+                cause,
+              }),
+          })
+          return yield* decodePolicyDecision(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordPolicyDecision.decode',
+                message: 'Convex returned invalid policy decision',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const recordPublicationResult = Effect.fn(
+        '@patchplane/plugins/convex/recordPublicationResult',
+      )((input: RecordPublicationResultInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordPublicationResult.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record publication results',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordPublicationResultMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                provider: input.provider,
+                kind: input.kind,
+                status: input.status,
+                ...(input.externalId === undefined ? {} : { externalId: input.externalId }),
+                ...(input.url === undefined ? {} : { url: input.url }),
+                ...(input.summary === undefined ? {} : { summary: input.summary }),
+                ...(input.error === undefined ? {} : { error: input.error }),
+                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+                ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordPublicationResult',
+                message: 'Convex failed to record publication result',
+                cause,
+              }),
+          })
+          return yield* decodePublicationResult(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordPublicationResult.decode',
+                message: 'Convex returned invalid publication result',
+                cause,
+              })
+            ),
+          )
+        }))
+
+      const recordProvenanceEvent = Effect.fn(
+        '@patchplane/plugins/convex/recordProvenanceEvent',
+      )((input: RecordProvenanceEventInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordProvenanceEvent.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record provenance events',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => {
+              const client = new ConvexHttpClient(convexUrl)
+              return client.mutation(recordProvenanceEventMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                traceId: input.traceId,
+                ...(input.parentEventId === undefined ? {} : { parentEventId: input.parentEventId }),
+                type: input.type,
+                operation: input.operation,
+                ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
+                status: input.status,
+                startedAt: input.startedAt,
+                ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+                ...(input.summary === undefined ? {} : { summary: input.summary }),
+                artifactRefs: input.artifactRefs ?? [],
+                ...(input.errorCategory === undefined ? {} : { errorCategory: input.errorCategory }),
+                ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+              })
+            },
+            catch: (cause) =>
+              new StorageError({
+                operation: 'recordProvenanceEvent',
+                message: 'Convex failed to record provenance event',
+                cause,
+              }),
+          })
+          return yield* decodeProvenanceEvent(value).pipe(
+            Effect.mapError((cause) =>
+              new StorageError({
+                operation: 'recordProvenanceEvent.decode',
+                message: 'Convex returned invalid provenance event',
+                cause,
+              })
+            ),
+          )
+        }))
+
       return StorageService.of({
         createWorkflowFromIntake: createWorkflowFromPrompt,
         createWorkflowFromPrompt,
@@ -680,6 +1076,12 @@ export const ConvexStoragePlugin = {
         recordSandboxExecution,
         recordEvidenceArtifact,
         getEvidenceArtifact,
+        recordCandidatePatchSet,
+        recordReviewRun,
+        recordReviewFinding,
+        recordPolicyDecision,
+        recordPublicationResult,
+        recordProvenanceEvent,
       })
     }),
   ),

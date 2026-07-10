@@ -93,9 +93,15 @@ const smokeArtifactStorageLayer = Layer.succeed(StorageService, StorageService.o
   recordRuntimeEvents: () => Effect.succeed([]),
   recordRuntimeSessionStarted: () => Effect.die('unused'),
   markRuntimeSessionStatus: () => Effect.die('unused'),
-  getActiveRuntimeSession: () => Effect.succeed(undefined),
+  getActiveRuntimeSession: () => Effect.void as never,
   recordEvidenceArtifact: (input) => Effect.succeed({ id: `smoke-artifact:${input.storageKey}`, ...input, createdAt: input.createdAt ?? Date.now() } as never),
-  getEvidenceArtifact: () => Effect.succeed(undefined),
+  getEvidenceArtifact: () => Effect.void as never,
+  recordCandidatePatchSet: () => Effect.die('unused'),
+  recordReviewRun: () => Effect.die('unused'),
+  recordReviewFinding: () => Effect.die('unused'),
+  recordPolicyDecision: () => Effect.die('unused'),
+  recordPublicationResult: () => Effect.die('unused'),
+  recordProvenanceEvent: () => Effect.die('unused'),
 }))
 
 const program = Effect.gen(function* () {
@@ -106,6 +112,7 @@ const program = Effect.gen(function* () {
   const model = process.env.PATCHPLANE_PI_MODEL ?? 'gpt-5.5'
   const traceId = `smoke-rpc-${Date.now()}`
   const observedEvents: SandboxRuntimeEvent[] = []
+  let artifactCaptureFailure: string | undefined
 
   const result = yield* sandbox.runRepositoryAgent({
     repositoryUrl,
@@ -162,9 +169,10 @@ const program = Effect.gen(function* () {
         sha256: artifactExit.value.sha256,
       }))
     } else {
+      artifactCaptureFailure = String(artifactExit.cause)
       console.log(JSON.stringify({
         type: 'artifact_capture_failed',
-        cause: String(artifactExit.cause),
+        cause: artifactCaptureFailure,
       }))
     }
   }
@@ -242,6 +250,11 @@ const program = Effect.gen(function* () {
   }
   console.log(JSON.stringify(summary))
 
+  if (artifactCaptureFailure !== undefined) {
+    return yield* new RpcSmokeError({
+      message: `RPC smoke artifact capture failed: ${artifactCaptureFailure}`,
+    })
+  }
   if (!summary.getStateResponse || !summary.promptResponse || !summary.hasRuntimeEvents) {
     return yield* new RpcSmokeError({ message: 'RPC smoke did not observe required get_state, prompt, and runtime events' })
   }

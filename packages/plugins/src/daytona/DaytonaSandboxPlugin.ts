@@ -1,7 +1,7 @@
 import { Config, Effect, Exit, Layer, Schedule, Stream } from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { SandboxError } from '@patchplane/domain/errors'
-import { SandboxService } from '@patchplane/core/services/sandbox-service'
+import { SandboxService, type SandboxEvidenceArtifact } from '@patchplane/core/services/sandbox-service'
 import {
   DAYTONA_DEFAULT_COMMAND,
   DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -26,6 +26,10 @@ import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
 import { decodePiRpcRuntimeEvents, type PiRpcRuntimeEvent } from '../sandbox-runtime/pi/ingestion'
 import { makePiRuntimeSession } from '../sandbox-runtime/pi/runtime-session'
 import { makePiRpcCommandSender } from '../sandbox-runtime/pi/transport'
+
+const evidenceCaptureTimeoutSeconds = 30
+const textArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY---\n'
+const binaryArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\n'
 
 export interface DaytonaClientLike {
   readonly create: (
@@ -143,6 +147,153 @@ function makeDefaultDaytonaClient(config: DaytonaConfig): DaytonaClientLike {
     get: (sandboxIdOrName) => daytona.get(sandboxIdOrName),
     [Symbol.asyncDispose]: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
   }
+}
+
+function nonEmpty(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0
+}
+
+function parseTextArtifactProbe(stdout: string) {
+  const markerIndex = stdout.indexOf(textArtifactMarker)
+  if (markerIndex < 0) return undefined
+  const path = stdout.slice(0, markerIndex).trim()
+  const body = stdout.slice(markerIndex + textArtifactMarker.length)
+  return path.length === 0 || body.length === 0 ? undefined : { path, body }
+}
+
+function parseBinaryArtifactProbe(stdout: string) {
+  const markerIndex = stdout.indexOf(binaryArtifactMarker)
+  if (markerIndex < 0) return undefined
+  const path = stdout.slice(0, markerIndex).trim()
+  const encoded = stdout.slice(markerIndex + binaryArtifactMarker.length).replace(/\s+/g, '')
+  if (path.length === 0 || encoded.length === 0) return undefined
+  const binary = atob(encoded)
+  const body = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    body[index] = binary.charCodeAt(index)
+  }
+  return { path, body }
+}
+
+function testReportContentType(path: string) {
+  return path.endsWith('.xml') ? 'application/xml' : 'application/json'
+}
+
+function testReportProbeCommand() {
+  return [
+    'for file in',
+    [
+      '.patchplane/test-report.json',
+      '.patchplane/test-report.xml',
+      'patchplane-test-report.json',
+      'patchplane-test-report.xml',
+      'test-results/junit.xml',
+      'junit.xml',
+      'coverage/coverage-final.json',
+    ].map((path) => `'${path}'`).join(' '),
+    '; do',
+    'if [ -s "$file" ]; then',
+    `printf '%s${textArtifactMarker.replaceAll('\n', '\\n')}' "$file";`,
+    'cat "$file";',
+    'exit 0;',
+    'fi;',
+    'done',
+  ].join(' ')
+}
+
+function screenshotProbeCommand() {
+  const paths = [
+    '.patchplane/browser-screenshot.png',
+    'patchplane-browser-screenshot.png',
+    'test-results/browser-screenshot.png',
+    'playwright-report/browser-screenshot.png',
+  ]
+  const script = [
+    'const fs=require("fs");',
+    `const paths=${JSON.stringify(paths)};`,
+    'const path=paths.find((candidate)=>fs.existsSync(candidate)&&fs.statSync(candidate).size>0);',
+    'if(path){',
+    `process.stdout.write(path+${JSON.stringify(binaryArtifactMarker)}+fs.readFileSync(path).toString("base64"));`,
+    '}',
+  ].join('')
+  return `node -e '${script}'`
+}
+
+function collectSandboxEvidenceArtifacts(
+  sandbox: DaytonaSandboxLike,
+  input: {
+    readonly traceId: string
+    readonly evidenceTestReportCommand?: string | undefined
+    readonly evidenceBrowserScreenshotCommand?: string | undefined
+  },
+) {
+  return Effect.gen(function* () {
+    const artifacts: Array<SandboxEvidenceArtifact> = []
+    const runCaptureCommand = (operation: string, command: string) =>
+      executeSandboxCommand(sandbox, {
+        command,
+        timeoutSeconds: evidenceCaptureTimeoutSeconds,
+        traceId: `${input.traceId}-${operation}`,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning('Evidence artifact probe failed', {
+            traceId: input.traceId,
+            operation,
+            error: error.message,
+          }).pipe(Effect.as(undefined))
+        ),
+      )
+
+    const diff = yield* runCaptureCommand(
+      'diff',
+      'git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff -- .',
+    )
+    if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
+      artifacts.push({
+        kind: 'diff',
+        label: 'Candidate patch diff',
+        contentType: 'text/x-diff',
+        body: diff.stdout,
+        retentionPolicy: 'alpha-14d',
+      })
+    }
+
+    if (nonEmpty(input.evidenceTestReportCommand)) {
+      yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand).pipe(Effect.ignore)
+    }
+    const testReport = yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
+    if (testReport !== undefined && testReport.exitCode === 0) {
+      const probed = parseTextArtifactProbe(testReport.stdout)
+      if (probed !== undefined) {
+        artifacts.push({
+          kind: 'test-report',
+          label: 'Test report',
+          contentType: testReportContentType(probed.path),
+          body: probed.body,
+          retentionPolicy: 'alpha-14d',
+        })
+      }
+    }
+
+    if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
+      yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand).pipe(Effect.ignore)
+    }
+    const screenshot = yield* runCaptureCommand('browser-screenshot-probe', screenshotProbeCommand())
+    if (screenshot !== undefined && screenshot.exitCode === 0) {
+      const probed = parseBinaryArtifactProbe(screenshot.stdout)
+      if (probed !== undefined) {
+        artifacts.push({
+          kind: 'screenshot',
+          label: 'Browser verification screenshot',
+          contentType: 'image/png',
+          body: probed.body,
+          retentionPolicy: 'alpha-14d',
+        })
+      }
+    }
+
+    return artifacts
+  })
 }
 
 export function makeDaytonaSandboxLayer(
@@ -340,6 +491,7 @@ export function makeDaytonaSandboxLayer(
                     Stream.runCollect,
                     Effect.map((events) => Array.from(events)),
                   )
+                  const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
 
                   return {
                     provider: 'daytona:pi-rpc',
@@ -357,6 +509,7 @@ export function makeDaytonaSandboxLayer(
                     stderr: logs.stderr,
                     policy: toSandboxPolicy(config, { timeoutSeconds }),
                     runtimeEvents: parsedRuntimeEvents,
+                    evidenceArtifacts,
                     startedAt,
                     completedAt: Date.now(),
                   }
@@ -383,6 +536,7 @@ export function makeDaytonaSandboxLayer(
                     parseErrors: parsedRuntimeEvents.parseErrors,
                   })
                 }
+                const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
 
                 return {
                   provider: 'daytona:pi',
@@ -398,6 +552,7 @@ export function makeDaytonaSandboxLayer(
                   stderr: response.stderr,
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
                   runtimeEvents: parsedRuntimeEvents.events,
+                  evidenceArtifacts,
                   startedAt,
                   completedAt: Date.now(),
                 }
@@ -498,6 +653,7 @@ export function makeDaytonaSandboxLayer(
                   timeoutSeconds,
                   traceId: input.traceId,
                 })
+                const evidenceArtifacts = yield* collectSandboxEvidenceArtifacts(sandbox, input)
 
                 return {
                   provider: 'daytona',
@@ -507,6 +663,7 @@ export function makeDaytonaSandboxLayer(
                   stdout: response.stdout,
                   stderr: response.stderr,
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
+                  evidenceArtifacts,
                   startedAt,
                   completedAt: Date.now(),
                 }

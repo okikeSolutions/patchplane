@@ -12,6 +12,8 @@ export const sourceControlRuntimeEnv = {
   GITHUB_WEBHOOK_SECRET: Config.redacted('GITHUB_WEBHOOK_SECRET'),
   DAYTONA_API_KEY: Config.redacted('DAYTONA_API_KEY'),
   OPENAI_API_KEY: Config.redacted('OPENAI_API_KEY'),
+  PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND: Config.string('PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND').pipe(Config.withDefault('')),
+  PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND: Config.string('PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND').pipe(Config.withDefault('')),
   SENTRY_DSN: Config.string('SENTRY_DSN'),
 } as const
 

@@ -1,5 +1,5 @@
 import type { WorkerEnv } from './github/config'
-import { controlRuntimeSession, handleGitHubWebhook, makeSourceControlRuntime, syncGitHubInstallation } from './github/routes'
+import { controlRuntimeSession, handleGitHubWebhook, makeSourceControlRuntime, publishDecision, syncGitHubInstallation } from './github/routes'
 
 interface RequestContext {
   waitUntil(promise: Promise<unknown>): void
@@ -23,6 +23,10 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/internal/runtime/control') {
         return await controlRuntimeSession(request, runtime)
+      }
+
+      if (request.method === 'POST' && url.pathname === '/internal/decision/publish') {
+        return await publishDecision(request, runtime)
       }
 
       if (request.method === 'POST' && url.pathname === '/api/github/webhook') {

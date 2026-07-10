@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { assemblePatchReportV0 } from './patch-report'
+import type { HumanDecision, PolicyDecision } from './decision-review'
+import type { EvidenceArtifact } from './evidence-artifact'
 import { makePromptRequestId, makeSystemActorId, makeSystemWorkspaceId, makeWorkflowRunId } from './ids'
 import type { RuntimeEvent } from './runtime-event'
 import type { RuntimeSession } from './runtime-session'
@@ -72,6 +74,20 @@ const sandboxExecution: SandboxExecution = {
   completedAt: 6,
 }
 
+const evidenceArtifact: EvidenceArtifact = {
+  id: 'artifact-1',
+  workflowRunId,
+  traceId: 'trace-1',
+  kind: 'diff',
+  label: 'Candidate patch diff',
+  storageProvider: 'cloudflare-r2',
+  storageKey: 'workflows/workflow-1/diff/patch.diff',
+  contentType: 'text/x-diff',
+  sizeBytes: 42,
+  sha256: 'sha256',
+  createdAt: 7,
+}
+
 describe('assemblePatchReportV0', () => {
   it('assembles a verification-passed report from existing workflow evidence', () => {
     const report = assemblePatchReportV0({
@@ -139,5 +155,80 @@ describe('assemblePatchReportV0', () => {
 
     expect(report.status).toBe('verification-passed')
     expect(report.execution.exitCode).toBe(0)
+  })
+
+  it('includes artifact-backed evidence from durable metadata', () => {
+    const report = assemblePatchReportV0({
+      workflowStart,
+      runtimeEvents: [],
+      runtimeSessions: [],
+      sandboxExecutions: [sandboxExecution],
+      evidenceArtifacts: [evidenceArtifact],
+    })
+
+    expect(report.evidence).toContainEqual({
+      kind: 'diff',
+      label: 'Candidate patch diff',
+      summary: 'text/x-diff · 42 bytes',
+      artifactId: 'artifact-1',
+    })
+    expect(report.updatedAt).toBe(7)
+  })
+
+  it('uses the latest human decision as the report status and decision', () => {
+    const approved: HumanDecision = {
+      id: 'decision-approved',
+      workflowRunId,
+      actorId: makeSystemActorId('reviewer-1'),
+      status: 'approved',
+      comment: 'Looks good.',
+      decidedAt: 8,
+    }
+    const changesRequested: HumanDecision = {
+      ...approved,
+      id: 'decision-changes',
+      status: 'changes-requested',
+      comment: 'Please tighten the test coverage.',
+      decidedAt: 9,
+    }
+
+    const report = assemblePatchReportV0({
+      workflowStart,
+      runtimeEvents: [],
+      runtimeSessions: [],
+      sandboxExecutions: [sandboxExecution],
+      humanDecisions: [approved, changesRequested],
+    })
+
+    expect(report.status).toBe('changes-requested')
+    expect(report.decision).toEqual({
+      status: 'changes-requested',
+      actorId: makeSystemActorId('reviewer-1'),
+      comment: 'Please tighten the test coverage.',
+      decidedAt: 9,
+    })
+    expect(report.updatedAt).toBe(9)
+  })
+
+  it('maps blocking policy decisions to changes-requested before human review', () => {
+    const policyDecision: PolicyDecision = {
+      id: 'policy-1',
+      workflowRunId,
+      status: 'rejected',
+      summary: 'Sandbox failed.',
+      createdAt: 8,
+    }
+
+    const report = assemblePatchReportV0({
+      workflowStart,
+      runtimeEvents: [],
+      runtimeSessions: [],
+      sandboxExecutions: [sandboxExecution],
+      policyDecisions: [policyDecision],
+    })
+
+    expect(report.status).toBe('changes-requested')
+    expect(report.decision).toBeUndefined()
+    expect(report.updatedAt).toBe(8)
   })
 })
