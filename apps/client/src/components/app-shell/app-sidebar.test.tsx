@@ -61,7 +61,7 @@ describe('AppSidebar', () => {
 
     expect(sidebar?.getAttribute('data-variant')).toBe('sidebar')
     expect(sidebarContainer?.className).toContain('border-sidebar-border/60')
-    expect(screen.getByText('PatchPlane')).toBeTruthy()
+    expect(screen.getByText('patchplane')).toBeTruthy()
     expect(screen.getByText('Workflow review')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Workflows' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Reviews' })).toBeTruthy()

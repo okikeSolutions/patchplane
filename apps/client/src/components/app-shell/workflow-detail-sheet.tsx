@@ -37,7 +37,7 @@ export function WorkflowDetailSheet({
           <>
             <SheetTitle>Loading workflow</SheetTitle>
             <SheetDescription>
-              PatchPlane is reading workflow evidence from Convex.
+              patchplane is reading workflow evidence from Convex.
             </SheetDescription>
           </>
         ) : (
@@ -102,7 +102,7 @@ function WorkflowDetailSkeleton() {
         <AlertCircleIcon />
         <AlertTitle>Loading workflow evidence</AlertTitle>
         <AlertDescription>
-          PatchPlane is reading the workflow detail from Convex.
+          patchplane is reading the workflow detail from Convex.
         </AlertDescription>
       </Alert>
     </div>

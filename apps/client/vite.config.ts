@@ -15,6 +15,29 @@ const cloudflareWorkersTestStub = resolve(
 )
 
 const config = defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) {
+            return 'react-vendor'
+          }
+
+          if (
+            id.includes('/@shadergradient/') ||
+            id.includes('/@react-three/') ||
+            id.includes('/three/') ||
+            id.includes('/three-stdlib/') ||
+            id.includes('/camera-controls/')
+          ) {
+            return 'shader-gradient'
+          }
+
+          return undefined
+        },
+      },
+    },
+  },
   server: {
     allowedHosts: ['.ngrok-free.app'],
   },

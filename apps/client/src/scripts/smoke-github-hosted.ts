@@ -47,7 +47,7 @@ async function main() {
   const missing = requiredEnv.filter((name) => env(name) === undefined)
   const missingInstall = installUrl() === undefined
 
-  console.log('\nPatchPlane hosted GitHub App smoke checklist')
+  console.log('\npatchplane hosted GitHub App smoke checklist')
   console.log('================================================')
 
   if (missing.length > 0 || missingInstall) {
@@ -86,7 +86,7 @@ async function main() {
   console.log('5. Open or synchronize a PR in the selected repository.')
   console.log('6. Confirm /api/github/webhook returns 202 in the ngrok/GitHub delivery log.')
   console.log('7. Confirm the app workflow queue shows the new external workflow.')
-  console.log('8. Confirm a PatchPlane sandbox trust report comment appears on the PR.')
+  console.log('8. Confirm a patchplane sandbox trust report comment appears on the PR.')
 
   const result = await head(webhookUrl)
   console.log('\nReachability check:')

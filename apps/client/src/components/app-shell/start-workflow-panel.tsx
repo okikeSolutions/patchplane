@@ -117,7 +117,7 @@ function StartWorkflowForm() {
                   aria-invalid={isInvalid}
                 />
                 <FieldDescription>
-                  Starts the WorkOS-authorized PatchPlane foundation workflow.
+                  Starts the WorkOS-authorized patchplane foundation workflow.
                 </FieldDescription>
                 {isInvalid ? <FieldError errors={toFieldErrors(field.state.meta.errors)} /> : null}
               </Field>

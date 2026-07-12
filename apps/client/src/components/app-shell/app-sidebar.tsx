@@ -13,6 +13,7 @@ import * as m from '@/paraglide/messages'
 import { NavMain } from './nav-main'
 import { NavSecondary } from './nav-secondary'
 import { NavUser } from './nav-user'
+import { BrandMark } from '@/components/brand-logo'
 import {
   Sidebar,
   SidebarContent,
@@ -53,13 +54,11 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<a href="#overview" aria-label="PatchPlane overview" />}
+              render={<a href="#overview" aria-label="patchplane overview" />}
             >
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg border border-sidebar-border/40 bg-sidebar-primary/10 shadow-[0_0_24px_rgb(255_169_72/0.22)]">
-                <span className="size-3 rounded-full bg-[linear-gradient(135deg,rgb(255_144_52),rgb(255_209_122))] shadow-[0_0_18px_rgb(255_169_72/0.6)]" />
-              </div>
+              <BrandMark className="size-8 shrink-0" />
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">PatchPlane</span>
+                <span className="truncate font-medium">patchplane</span>
                 <span className="truncate text-xs">Workflow review</span>
               </div>
             </SidebarMenuButton>

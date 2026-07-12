@@ -56,7 +56,7 @@ export function GitHubRepositoryConnections({
               GitHub repositories
             </CardTitle>
             <CardDescription>
-              Connect a GitHub App installation so PatchPlane can route PR events
+              Connect a GitHub App installation so patchplane can route PR events
               to this workspace.
             </CardDescription>
           </div>

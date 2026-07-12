@@ -110,7 +110,7 @@ const prompt =
   `Smoke workflow from script ${new Date().toISOString()}`
 
 try {
-  console.log('\nRunning PatchPlane authenticated workflow smoke tests...')
+  console.log('\nRunning patchplane authenticated workflow smoke tests...')
 
   await startWorkflow(prompt)
   await listWorkflowStarts(5)
