@@ -9,6 +9,10 @@ import tailwindcss from '@tailwindcss/vite'
 import { translatedPathnames } from './src/lib/translated-pathnames.ts'
 
 const configDir = dirname(fileURLToPath(import.meta.url))
+const cloudflareWorkersTestStub = resolve(
+  configDir,
+  'src/test/cloudflare-workers.ts',
+)
 
 const config = defineConfig({
   server: {
@@ -29,6 +33,10 @@ const config = defineConfig({
     viteReact(),
   ],
   resolve: {
+    alias:
+      process.env.VITEST === undefined
+        ? undefined
+        : { 'cloudflare:workers': cloudflareWorkersTestStub },
     tsconfigPaths: true,
   },
 })
