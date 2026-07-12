@@ -61,6 +61,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/brand-logo'
+import { LandingShaderBackground } from '@/components/landing-shader-background'
 
 export const Route = createFileRoute('/')({ component: LandingPage })
 
@@ -223,27 +224,378 @@ function LandingPage() {
 
   return (
     <TooltipProvider>
-      <main className="pb-16">
-        <section className="relative overflow-clip border-b border-white/8 before:pointer-events-none before:absolute before:inset-0 before:content-[''] before:[background:linear-gradient(90deg,var(--hero-grid)_1px,transparent_1px),linear-gradient(180deg,var(--hero-grid)_1px,transparent_1px)] before:bg-size-[4.5rem_4.5rem] before:mask-[linear-gradient(180deg,black,rgb(0_0_0/0.08))]">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_50%_8%,rgb(255_196_92/0.2),transparent_32rem)]" />
-          <div className="relative mx-auto flex min-h-[calc(100svh-var(--header-height))] w-[min(1180px,calc(100%-2rem))] flex-col items-center justify-center pt-[clamp(3rem,7vw,5.5rem)] pb-[clamp(2rem,5vw,4rem)]">
-            <div className="max-w-220 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]">
-              <div className="mb-4 flex justify-center">
-                <BrandLogo
-                  className="h-[clamp(2rem,4vw,2.8rem)]"
-                  priority
-                />
+      <main id="main-content" tabIndex={-1} className="relative isolate">
+        <LandingShaderBackground />
+        <div className="relative z-1 pb-16">
+          <section
+            aria-labelledby="landing-title"
+            className="relative overflow-clip before:pointer-events-none before:absolute before:inset-0 before:z-1 before:content-[''] before:[background:linear-gradient(90deg,var(--hero-grid)_1px,transparent_1px),linear-gradient(180deg,var(--hero-grid)_1px,transparent_1px)] before:bg-size-[4.5rem_4.5rem] before:mask-[linear-gradient(180deg,black,rgb(0_0_0/0.08))]"
+          >
+            <div className="relative z-2 mx-auto flex min-h-[calc(100svh-var(--header-height))] w-[min(1180px,calc(100%-2rem))] flex-col items-center justify-center pt-[clamp(3rem,7vw,5.5rem)] pb-[clamp(2rem,5vw,4rem)]">
+              <div className="max-w-220 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]">
+                <div className="mb-4 flex justify-center">
+                  <BrandLogo className="h-[clamp(2rem,4vw,2.8rem)]" priority />
+                </div>
+                <Badge variant="outline" className={badgeClass}>
+                  {m.landing_badge()}
+                </Badge>
+                <h1
+                  id="landing-title"
+                  className="mx-auto mt-[1rem] max-w-206 text-balance text-[clamp(3.3rem,8vw,7.4rem)] leading-[0.9] tracking-[-0.075em]"
+                >
+                  {m.landing_title()}
+                </h1>
+                <p className="mx-auto mt-[1.2rem] max-w-172 text-[clamp(1.05rem,1.8vw,1.22rem)] leading-[1.7] text-muted-foreground">
+                  {m.landing_lede()}
+                </p>
+                <div className="mt-8 flex flex-wrap justify-center gap-[0.9rem]">
+                  <Link
+                    to="/app"
+                    className={cn(
+                      buttonVariants({ size: 'lg' }),
+                      'rounded-full border-[rgb(255_210_128/0.16)] px-[1.15rem] shadow-[0_18px_48px_rgb(237_176_69/0.16)] hover:-translate-y-px',
+                    )}
+                  >
+                    {m.landing_open_shell()}
+                    <ArrowRight />
+                  </Link>
+                  <a
+                    href="https://github.com/okikeSolutions/patchplane"
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(
+                      buttonVariants({ variant: 'outline', size: 'lg' }),
+                      'rounded-full border-(--landing-border) bg-white/2 px-[1.15rem] hover:-translate-y-px',
+                    )}
+                  >
+                    {m.landing_cta_secondary()}
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                </div>
               </div>
+
+              <div
+                className="mt-[clamp(2rem,5vw,3.5rem)] w-full motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
+                style={{ animationDelay: '140ms' }}
+              >
+                <ReviewSurface />
+              </div>
+            </div>
+          </section>
+
+          <section
+            aria-labelledby="landing-stack-title"
+            className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]"
+          >
+            <div className="mb-8 max-w-190">
               <Badge variant="outline" className={badgeClass}>
-                {m.landing_badge()}
+                {m.landing_stack_badge()}
               </Badge>
-              <h1 className="mx-auto mt-[1rem] max-w-206 text-balance text-[clamp(3.3rem,8vw,7.4rem)] leading-[0.9] tracking-[-0.075em]">
-                {m.landing_title()}
-              </h1>
-              <p className="mx-auto mt-[1.2rem] max-w-172 text-[clamp(1.05rem,1.8vw,1.22rem)] leading-[1.7] text-muted-foreground">
-                {m.landing_lede()}
+              <h2
+                id="landing-stack-title"
+                className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]"
+              >
+                {m.landing_stack_title()}
+              </h2>
+              <p className="mt-[1.1rem] max-w-155 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+                {m.landing_stack_intro()}
               </p>
-              <div className="mt-8 flex flex-wrap justify-center gap-[0.9rem]">
+            </div>
+            <IntegrationBento />
+          </section>
+
+          <section
+            aria-labelledby="landing-workflow-title"
+            className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] items-start gap-[clamp(2rem,5vw,4rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1"
+          >
+            <div className="sticky top-[calc(var(--header-height)+2rem)] max-[960px]:static">
+              <Badge variant="outline" className={badgeClass}>
+                {m.landing_workflow_badge()}
+              </Badge>
+              <h2
+                id="landing-workflow-title"
+                className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]"
+              >
+                {m.landing_workflow_title()}
+              </h2>
+              <p className="mt-[1.1rem] max-w-150 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+                {m.landing_workflow_intro()}
+              </p>
+              <div className="mt-7">
+                <Progress value={72} getAriaValueText={getProgressValueText}>
+                  <ProgressLabel>{m.landing_progress_label()}</ProgressLabel>
+                  <ProgressValue>{() => '72%'}</ProgressValue>
+                </Progress>
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              {problems.map((problem, index) => {
+                const Icon = problem.icon
+                return (
+                  <Item
+                    key={problem.title}
+                    variant="outline"
+                    className="border-(--landing-border) bg-(--surface-panel) p-4 transition-transform hover:-translate-y-0.5 hover:bg-white/5"
+                  >
+                    <ItemMedia
+                      variant="icon"
+                      className="size-11 rounded-2xl bg-[rgb(255_203_116/0.1)] text-(--brand-readable)"
+                    >
+                      <Icon />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle className="text-[0.78rem] uppercase tracking-[0.12em] text-(--brand-readable)">
+                        {problem.label}
+                      </ItemTitle>
+                      <ItemTitle className="text-[1.15rem] tracking-[-0.035em]">
+                        {problem.title}
+                      </ItemTitle>
+                      <ItemDescription className="line-clamp-none text-[0.96rem] leading-7">
+                        {problem.summary}
+                      </ItemDescription>
+                    </ItemContent>
+                    <span className="ml-auto self-start rounded-full border border-(--landing-border) px-2 py-1 font-mono text-xs text-muted-foreground">
+                      0{index + 1}
+                    </span>
+                  </Item>
+                )
+              })}
+            </div>
+          </section>
+
+          <section
+            aria-labelledby="landing-signal-title"
+            className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]"
+          >
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <Badge variant="outline" className={badgeClass}>
+                  {m.landing_signal_intro_kicker()}
+                </Badge>
+                <h2
+                  id="landing-signal-title"
+                  className="mt-[0.85rem] max-w-190 text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]"
+                >
+                  {m.landing_signal_intro_body()}
+                </h2>
+              </div>
+              <div className="inline-flex items-center gap-[0.7rem] rounded-full border border-(--landing-border) bg-white/4 px-[0.9rem] py-[0.7rem] text-sm text-muted-foreground">
+                <Workflow />
+                <span>{m.landing_signal_footer()}</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-3 max-[960px]:grid-cols-2 max-[560px]:grid-cols-1">
+              {workflowSteps.map((step, index) => {
+                const Icon = step.icon
+                return (
+                  <div
+                    key={step.title}
+                    className="group relative min-h-58 overflow-hidden rounded-3xl border border-(--landing-border) bg-(--surface-panel) p-5 transition-transform hover:-translate-y-1"
+                  >
+                    <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,rgb(255_203_116/0.72),transparent)] opacity-0 transition-opacity group-hover:opacity-100" />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="rounded-full font-mono text-sm text-muted-foreground">
+                        0{index + 1}
+                      </span>
+                      <span className="flex size-10 items-center justify-center rounded-2xl bg-[rgb(255_203_116/0.1)] text-(--brand-readable)">
+                        <Icon />
+                      </span>
+                    </div>
+                    <h3 className="mt-10 text-[1.2rem] tracking-[-0.04em]">
+                      {step.title}
+                    </h3>
+                    <p className="m-0 mt-3 text-sm leading-6 text-muted-foreground">
+                      {step.detail}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+
+          <section
+            aria-labelledby="landing-proof-title"
+            className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] items-start gap-[clamp(1.75rem,4vw,3rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1"
+          >
+            <div>
+              <Badge variant="outline" className={badgeClass}>
+                {m.landing_proof_badge()}
+              </Badge>
+              <h2
+                id="landing-proof-title"
+                className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.2rem)] leading-[1] tracking-[-0.055em]"
+              >
+                {m.landing_proof_title()}
+              </h2>
+              <p className="mt-[1.1rem] max-w-150 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+                {m.landing_proof_intro()}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+              {benefits.map((benefit) => {
+                const Icon = benefit.icon
+                return (
+                  <HoverCard key={benefit.title}>
+                    <HoverCardTrigger
+                      className="rounded-2xl border border-(--landing-border) bg-(--surface-panel) p-[1.2rem] text-left transition-transform hover:-translate-y-0.5 hover:bg-white/5 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      render={
+                        <button type="button" aria-label={benefit.title} />
+                      }
+                    >
+                      <Icon className="size-5 text-(--brand-readable)" />
+                      <h3 className="mt-4 text-[1.05rem] tracking-[-0.03em]">
+                        {benefit.title}
+                      </h3>
+                      <p className="m-0 leading-[1.7] text-muted-foreground">
+                        {benefit.summary}
+                      </p>
+                    </HoverCardTrigger>
+                    <HoverCardContent className="w-76 border border-(--landing-border) bg-(--surface-panel-strong) p-4">
+                      <p className="m-0 text-sm leading-6 text-muted-foreground">
+                        {m.landing_hover_detail()}
+                      </p>
+                    </HoverCardContent>
+                  </HoverCard>
+                )
+              })}
+            </div>
+          </section>
+
+          <section
+            aria-labelledby="landing-platform-title"
+            className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]"
+          >
+            <div className="mb-7 max-w-180">
+              <Badge variant="outline" className={badgeClass}>
+                {m.landing_platform_badge()}
+              </Badge>
+              <h2
+                id="landing-platform-title"
+                className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.25rem)] leading-[1] tracking-[-0.055em]"
+              >
+                {m.landing_platform_title()}
+              </h2>
+              <p className="mt-[1.1rem] text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+                {m.landing_platform_intro()}
+              </p>
+            </div>
+
+            <Tabs defaultValue="request" className="gap-5">
+              <TabsList
+                variant="line"
+                className="w-full justify-start overflow-x-auto"
+              >
+                <TabsTrigger value="request">
+                  <MessageSquareText />
+                  {m.landing_tab_request()}
+                </TabsTrigger>
+                <TabsTrigger value="run">
+                  <Play />
+                  {m.landing_tab_run()}
+                </TabsTrigger>
+                <TabsTrigger value="evidence">
+                  <FileDiff />
+                  {m.landing_tab_evidence()}
+                </TabsTrigger>
+                <TabsTrigger value="decision">
+                  <UserCheck />
+                  {m.landing_tab_decision()}
+                </TabsTrigger>
+              </TabsList>
+              <div className="rounded-4xl border border-(--landing-border) bg-(--surface-panel) p-[clamp(1rem,3vw,1.5rem)]">
+                <TabsContent value="request">
+                  <ProductTabShell
+                    eyebrow="prompt/request"
+                    title={m.landing_tab_request_title()}
+                    command="/patchplane review billing-webhook"
+                  >
+                    <ItemGroup className="gap-3">
+                      <EvidenceList items={evidenceItems.slice(0, 2)} />
+                    </ItemGroup>
+                  </ProductTabShell>
+                </TabsContent>
+                <TabsContent value="run">
+                  <ProductTabShell
+                    eyebrow="sandbox/run"
+                    title={m.landing_tab_run_title()}
+                    command="patchplane run --pre-ci"
+                  >
+                    <div className="grid gap-4">
+                      <Progress value={100}>
+                        <ProgressLabel>isolated execution</ProgressLabel>
+                        <ProgressValue>{() => 'complete'}</ProgressValue>
+                      </Progress>
+                      <TerminalBlock />
+                    </div>
+                  </ProductTabShell>
+                </TabsContent>
+                <TabsContent value="evidence">
+                  <ProductTabShell
+                    eyebrow="review/evidence"
+                    title={m.landing_tab_evidence_title()}
+                    command="patchplane evidence attach"
+                  >
+                    <ItemGroup className="gap-3">
+                      <EvidenceList items={evidenceItems.slice(1)} />
+                    </ItemGroup>
+                  </ProductTabShell>
+                </TabsContent>
+                <TabsContent value="decision">
+                  <ProductTabShell
+                    eyebrow="human/decision"
+                    title={m.landing_tab_decision_title()}
+                    command="approval required"
+                  >
+                    <div className="flex flex-wrap items-center gap-4 rounded-3xl border border-(--landing-border) bg-white/3 p-4">
+                      <AvatarGroup>
+                        <Avatar>
+                          <AvatarFallback>AI</AvatarFallback>
+                        </Avatar>
+                        <Avatar>
+                          <AvatarFallback>UG</AvatarFallback>
+                        </Avatar>
+                        <Avatar>
+                          <AvatarFallback>PR</AvatarFallback>
+                        </Avatar>
+                        <AvatarGroupCount>+2</AvatarGroupCount>
+                      </AvatarGroup>
+                      <div className="min-w-0 flex-1">
+                        <p className="m-0 font-medium">
+                          {m.landing_decision_reviewers()}
+                        </p>
+                        <p className="m-0 text-sm leading-6 text-muted-foreground">
+                          {m.landing_decision_reviewers_detail()}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={badgeClass}>
+                        awaiting approval
+                      </Badge>
+                    </div>
+                  </ProductTabShell>
+                </TabsContent>
+              </div>
+            </Tabs>
+          </section>
+
+          <section
+            aria-labelledby="landing-cta-title"
+            className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,1fr)_minmax(300px,0.7fr)] gap-[clamp(2rem,5vw,4rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1"
+          >
+            <div className="rounded-4xl border border-(--landing-border) bg-[linear-gradient(135deg,rgb(255_203_116/0.12),transparent_42%),var(--surface-panel)] p-[clamp(1.5rem,4vw,2.25rem)]">
+              <Badge variant="outline" className={badgeClass}>
+                {m.landing_cta_badge()}
+              </Badge>
+              <h2
+                id="landing-cta-title"
+                className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.25rem)] leading-[1] tracking-[-0.055em]"
+              >
+                {m.landing_cta_title()}
+              </h2>
+              <p className="mt-[1.1rem] max-w-152 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
+                {m.landing_cta_body()}
+              </p>
+              <div className="mt-8 flex flex-wrap gap-[0.9rem]">
                 <Link
                   to="/app"
                   className={cn(
@@ -251,343 +603,36 @@ function LandingPage() {
                     'rounded-full border-[rgb(255_210_128/0.16)] px-[1.15rem] shadow-[0_18px_48px_rgb(237_176_69/0.16)] hover:-translate-y-px',
                   )}
                 >
-                  {m.landing_open_shell()}
-                  <ArrowRight />
+                  {m.landing_cta_primary()}
                 </Link>
-                <a
-                  href="https://github.com/okikeSolutions/patchplane"
-                  target="_blank"
-                  rel="noreferrer"
+                <Link
+                  to="/about"
                   className={cn(
                     buttonVariants({ variant: 'outline', size: 'lg' }),
-                    'rounded-full border-white/10 bg-white/2 px-[1.15rem] hover:-translate-y-px',
+                    'rounded-full border-(--landing-border) bg-white/2 px-[1.15rem] hover:-translate-y-px',
                   )}
                 >
-                  {m.landing_cta_secondary()}
-                </a>
+                  {m.landing_read_architecture()}
+                </Link>
               </div>
             </div>
-
-            <div
-              className="mt-[clamp(2rem,5vw,3.5rem)] w-full motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
-              style={{ animationDelay: '140ms' }}
-            >
-              <ReviewSurface />
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]">
-          <div className="mb-8 max-w-190">
-            <Badge variant="outline" className={badgeClass}>
-              {m.landing_stack_badge()}
-            </Badge>
-            <h2 className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]">
-              {m.landing_stack_title()}
-            </h2>
-            <p className="mt-[1.1rem] max-w-155 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
-              {m.landing_stack_intro()}
-            </p>
-          </div>
-          <IntegrationBento />
-        </section>
-
-        <section className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] items-start gap-[clamp(2rem,5vw,4rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1">
-          <div className="sticky top-[calc(var(--header-height)+2rem)] max-[960px]:static">
-            <Badge variant="outline" className={badgeClass}>
-              {m.landing_workflow_badge()}
-            </Badge>
-            <h2 className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]">
-              {m.landing_workflow_title()}
-            </h2>
-            <p className="mt-[1.1rem] max-w-150 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
-              {m.landing_workflow_intro()}
-            </p>
-            <div className="mt-7">
-              <Progress value={72} getAriaValueText={getProgressValueText}>
-                <ProgressLabel>{m.landing_progress_label()}</ProgressLabel>
-                <ProgressValue>{() => '72%'}</ProgressValue>
-              </Progress>
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {problems.map((problem, index) => {
-              const Icon = problem.icon
-              return (
-                <Item
-                  key={problem.title}
-                  variant="outline"
-                  className="border-white/8 bg-(--surface-panel) p-4 transition-transform hover:-translate-y-0.5 hover:bg-white/5"
-                >
-                  <ItemMedia
-                    variant="icon"
-                    className="size-11 rounded-2xl bg-[rgb(255_203_116/0.1)] text-(--brand-readable)"
-                  >
-                    <Icon />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle className="text-[0.78rem] uppercase tracking-[0.12em] text-(--brand-readable)">
-                      {problem.label}
-                    </ItemTitle>
-                    <ItemTitle className="text-[1.15rem] tracking-[-0.035em]">
-                      {problem.title}
-                    </ItemTitle>
-                    <ItemDescription className="line-clamp-none text-[0.96rem] leading-7">
-                      {problem.summary}
-                    </ItemDescription>
-                  </ItemContent>
-                  <span className="ml-auto self-start rounded-full border border-white/8 px-2 py-1 font-mono text-xs text-muted-foreground">
-                    0{index + 1}
-                  </span>
-                </Item>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]">
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <Badge variant="outline" className={badgeClass}>
-                {m.landing_signal_intro_kicker()}
-              </Badge>
-              <h2 className="mt-[0.85rem] max-w-190 text-balance text-[clamp(2rem,4vw,3.3rem)] leading-[1] tracking-[-0.055em]">
-                {m.landing_signal_intro_body()}
-              </h2>
-            </div>
-            <div className="inline-flex items-center gap-[0.7rem] rounded-full border border-white/8 bg-white/4 px-[0.9rem] py-[0.7rem] text-sm text-muted-foreground">
-              <Workflow />
-              <span>{m.landing_signal_footer()}</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-3 max-[960px]:grid-cols-2 max-[560px]:grid-cols-1">
-            {workflowSteps.map((step, index) => {
-              const Icon = step.icon
-              return (
-                <div
-                  key={step.title}
-                  className="group relative min-h-58 overflow-hidden rounded-3xl border border-white/8 bg-(--surface-panel) p-5 transition-transform hover:-translate-y-1"
-                >
-                  <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,rgb(255_203_116/0.72),transparent)] opacity-0 transition-opacity group-hover:opacity-100" />
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="rounded-full font-mono text-sm text-muted-foreground">
+            <Accordion className="rounded-4xl border border-(--landing-border) bg-(--surface-panel) p-5">
+              {faqs.map((faq, index) => (
+                <AccordionItem key={faq.question}>
+                  <AccordionTrigger>
+                    <span className="mr-4 font-mono text-xs text-muted-foreground">
                       0{index + 1}
                     </span>
-                    <span className="flex size-10 items-center justify-center rounded-2xl bg-[rgb(255_203_116/0.1)] text-(--brand-readable)">
-                      <Icon />
-                    </span>
-                  </div>
-                  <h3 className="mt-10 text-[1.2rem] tracking-[-0.04em]">
-                    {step.title}
-                  </h3>
-                  <p className="m-0 mt-3 text-sm leading-6 text-muted-foreground">
-                    {step.detail}
-                  </p>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] items-start gap-[clamp(1.75rem,4vw,3rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1">
-          <div>
-            <Badge variant="outline" className={badgeClass}>
-              {m.landing_proof_badge()}
-            </Badge>
-            <h2 className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.2rem)] leading-[1] tracking-[-0.055em]">
-              {m.landing_proof_title()}
-            </h2>
-            <p className="mt-[1.1rem] max-w-150 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
-              {m.landing_proof_intro()}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
-            {benefits.map((benefit) => {
-              const Icon = benefit.icon
-              return (
-                <HoverCard key={benefit.title}>
-                  <HoverCardTrigger
-                    className="rounded-2xl border border-white/8 bg-(--surface-panel) p-[1.2rem] text-left transition-transform hover:-translate-y-0.5 hover:bg-white/5"
-                    render={<button type="button" aria-label={benefit.title} />}
-                  >
-                    <Icon className="size-5 text-(--brand-readable)" />
-                    <h3 className="mt-4 text-[1.05rem] tracking-[-0.03em]">
-                      {benefit.title}
-                    </h3>
-                    <p className="m-0 leading-[1.7] text-muted-foreground">
-                      {benefit.summary}
-                    </p>
-                  </HoverCardTrigger>
-                  <HoverCardContent className="w-76 border border-white/8 bg-(--surface-panel-strong) p-4">
-                    <p className="m-0 text-sm leading-6 text-muted-foreground">
-                      {m.landing_hover_detail()}
-                    </p>
-                  </HoverCardContent>
-                </HoverCard>
-              )
-            })}
-          </div>
-        </section>
-
-        <section className="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2.8rem,7vw,5rem)]">
-          <div className="mb-7 max-w-180">
-            <Badge variant="outline" className={badgeClass}>
-              {m.landing_platform_badge()}
-            </Badge>
-            <h2 className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.25rem)] leading-[1] tracking-[-0.055em]">
-              {m.landing_platform_title()}
-            </h2>
-            <p className="mt-[1.1rem] text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
-              {m.landing_platform_intro()}
-            </p>
-          </div>
-
-          <Tabs defaultValue="request" className="gap-5">
-            <TabsList
-              variant="line"
-              className="w-full justify-start overflow-x-auto"
-            >
-              <TabsTrigger value="request">
-                <MessageSquareText />
-                {m.landing_tab_request()}
-              </TabsTrigger>
-              <TabsTrigger value="run">
-                <Play />
-                {m.landing_tab_run()}
-              </TabsTrigger>
-              <TabsTrigger value="evidence">
-                <FileDiff />
-                {m.landing_tab_evidence()}
-              </TabsTrigger>
-              <TabsTrigger value="decision">
-                <UserCheck />
-                {m.landing_tab_decision()}
-              </TabsTrigger>
-            </TabsList>
-            <div className="rounded-4xl border border-white/8 bg-(--surface-panel) p-[clamp(1rem,3vw,1.5rem)]">
-              <TabsContent value="request">
-                <ProductTabShell
-                  eyebrow="prompt/request"
-                  title={m.landing_tab_request_title()}
-                  command="/patchplane review billing-webhook"
-                >
-                  <ItemGroup className="gap-3">
-                    <EvidenceList items={evidenceItems.slice(0, 2)} />
-                  </ItemGroup>
-                </ProductTabShell>
-              </TabsContent>
-              <TabsContent value="run">
-                <ProductTabShell
-                  eyebrow="sandbox/run"
-                  title={m.landing_tab_run_title()}
-                  command="patchplane run --pre-ci"
-                >
-                  <div className="grid gap-4">
-                    <Progress value={100}>
-                      <ProgressLabel>isolated execution</ProgressLabel>
-                      <ProgressValue>{() => 'complete'}</ProgressValue>
-                    </Progress>
-                    <TerminalBlock />
-                  </div>
-                </ProductTabShell>
-              </TabsContent>
-              <TabsContent value="evidence">
-                <ProductTabShell
-                  eyebrow="review/evidence"
-                  title={m.landing_tab_evidence_title()}
-                  command="patchplane evidence attach"
-                >
-                  <ItemGroup className="gap-3">
-                    <EvidenceList items={evidenceItems.slice(1)} />
-                  </ItemGroup>
-                </ProductTabShell>
-              </TabsContent>
-              <TabsContent value="decision">
-                <ProductTabShell
-                  eyebrow="human/decision"
-                  title={m.landing_tab_decision_title()}
-                  command="approval required"
-                >
-                  <div className="flex flex-wrap items-center gap-4 rounded-3xl border border-white/8 bg-white/3 p-4">
-                    <AvatarGroup>
-                      <Avatar>
-                        <AvatarFallback>AI</AvatarFallback>
-                      </Avatar>
-                      <Avatar>
-                        <AvatarFallback>UG</AvatarFallback>
-                      </Avatar>
-                      <Avatar>
-                        <AvatarFallback>PR</AvatarFallback>
-                      </Avatar>
-                      <AvatarGroupCount>+2</AvatarGroupCount>
-                    </AvatarGroup>
-                    <div className="min-w-0 flex-1">
-                      <p className="m-0 font-medium">
-                        {m.landing_decision_reviewers()}
-                      </p>
-                      <p className="m-0 text-sm leading-6 text-muted-foreground">
-                        {m.landing_decision_reviewers_detail()}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className={badgeClass}>
-                      awaiting approval
-                    </Badge>
-                  </div>
-                </ProductTabShell>
-              </TabsContent>
-            </div>
-          </Tabs>
-        </section>
-
-        <section className="mx-auto grid w-[min(1180px,calc(100%-2rem))] grid-cols-[minmax(0,1fr)_minmax(300px,0.7fr)] gap-[clamp(2rem,5vw,4rem)] py-[clamp(2.8rem,7vw,5rem)] max-[960px]:grid-cols-1">
-          <div className="rounded-4xl border border-white/8 bg-[linear-gradient(135deg,rgb(255_203_116/0.12),transparent_42%),var(--surface-panel)] p-[clamp(1.5rem,4vw,2.25rem)]">
-            <Badge variant="outline" className={badgeClass}>
-              {m.landing_cta_badge()}
-            </Badge>
-            <h2 className="mt-[0.85rem] text-balance text-[clamp(2rem,4vw,3.25rem)] leading-[1] tracking-[-0.055em]">
-              {m.landing_cta_title()}
-            </h2>
-            <p className="mt-[1.1rem] max-w-152 text-[clamp(1.02rem,1.6vw,1.14rem)] leading-[1.7] text-muted-foreground">
-              {m.landing_cta_body()}
-            </p>
-            <div className="mt-8 flex flex-wrap gap-[0.9rem]">
-              <Link
-                to="/app"
-                className={cn(
-                  buttonVariants({ size: 'lg' }),
-                  'rounded-full border-[rgb(255_210_128/0.16)] px-[1.15rem] shadow-[0_18px_48px_rgb(237_176_69/0.16)] hover:-translate-y-px',
-                )}
-              >
-                {m.landing_cta_primary()}
-              </Link>
-              <Link
-                to="/about"
-                className={cn(
-                  buttonVariants({ variant: 'outline', size: 'lg' }),
-                  'rounded-full border-white/10 bg-white/2 px-[1.15rem] hover:-translate-y-px',
-                )}
-              >
-                {m.landing_read_architecture()}
-              </Link>
-            </div>
-          </div>
-          <Accordion className="rounded-4xl border border-white/8 bg-(--surface-panel) p-5">
-            {faqs.map((faq, index) => (
-              <AccordionItem key={faq.question}>
-                <AccordionTrigger>
-                  <span className="mr-4 font-mono text-xs text-muted-foreground">
-                    0{index + 1}
-                  </span>
-                  {faq.question}
-                </AccordionTrigger>
-                <AccordionContent className="pl-9 text-muted-foreground">
-                  {faq.answer}
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        </section>
+                    {faq.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="pl-9 text-muted-foreground">
+                    {faq.answer}
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </section>
+        </div>
       </main>
     </TooltipProvider>
   )
@@ -595,9 +640,9 @@ function LandingPage() {
 
 function ReviewSurface() {
   return (
-    <div className="overflow-hidden rounded-[2rem] border border-white/8 bg-[linear-gradient(180deg,rgb(255_255_255/0.08),rgb(255_255_255/0.03))] shadow-[0_24px_90px_rgb(3_8_18/0.28)]">
+    <div className="overflow-hidden rounded-4xl border border-(--landing-border) bg-(--surface-panel) backdrop-blur-md">
       <div className="grid grid-cols-[0.72fr_1.28fr] max-[900px]:grid-cols-1">
-        <div className="border-r border-white/8 bg-black/5 p-5 max-[900px]:border-r-0 max-[900px]:border-b">
+        <div className="border-r border-(--landing-border) bg-(--surface-panel-strong) p-5 max-[900px]:border-r-0 max-[900px]:border-b">
           <div className="mb-5 flex items-center gap-2">
             <Bot className="size-4 text-(--brand-readable)" />
             <span className="text-sm font-medium">AI patch review</span>
@@ -621,7 +666,7 @@ function ReviewSurface() {
               </Item>
             ))}
           </ItemGroup>
-          <Separator className="my-5 bg-white/8" />
+          <Separator className="my-5 bg-(--landing-border)" />
           <Progress value={72} getAriaValueText={getProgressValueText}>
             <ProgressLabel>review confidence</ProgressLabel>
             <ProgressValue>{() => '72%'}</ProgressValue>
@@ -640,7 +685,7 @@ function ReviewSurface() {
             </div>
             <div className="flex items-center gap-2">
               <Tooltip>
-                <TooltipTrigger className="rounded-full border border-white/8 px-3 py-1.5 text-sm text-muted-foreground">
+                <TooltipTrigger className="rounded-full border border-(--landing-border) px-3 py-1.5 text-sm text-muted-foreground">
                   <Kbd>/patchplane</Kbd>
                 </TooltipTrigger>
                 <TooltipContent>GitHub-native command intake</TooltipContent>
@@ -651,7 +696,7 @@ function ReviewSurface() {
             </div>
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 max-[720px]:grid-cols-1">
-            <div className="rounded-3xl border border-white/8 bg-black/18 p-4 font-mono text-[0.86rem] leading-[1.7] text-muted-foreground">
+            <div className="rounded-3xl border border-(--landing-border) bg-black/18 p-4 font-mono text-[0.86rem] leading-[1.7] text-muted-foreground">
               <p className="m-0 text-foreground">
                 $ patchplane review billing-webhook
               </p>
@@ -663,7 +708,11 @@ function ReviewSurface() {
               </p>
             </div>
             <ItemGroup className="gap-2">
-              <Item variant="outline" size="sm" className="border-white/8">
+              <Item
+                variant="outline"
+                size="sm"
+                className="border-(--landing-border)"
+              >
                 <ItemMedia variant="icon" className="text-(--success-readable)">
                   <CheckCircle2 />
                 </ItemMedia>
@@ -672,7 +721,11 @@ function ReviewSurface() {
                   <ItemDescription>42 checks recorded</ItemDescription>
                 </ItemContent>
               </Item>
-              <Item variant="outline" size="sm" className="border-white/8">
+              <Item
+                variant="outline"
+                size="sm"
+                className="border-(--landing-border)"
+              >
                 <ItemMedia variant="icon" className="text-(--brand-readable)">
                   <FileDiff />
                 </ItemMedia>
@@ -681,7 +734,11 @@ function ReviewSurface() {
                   <ItemDescription>3 files changed</ItemDescription>
                 </ItemContent>
               </Item>
-              <Item variant="outline" size="sm" className="border-white/8">
+              <Item
+                variant="outline"
+                size="sm"
+                className="border-(--landing-border)"
+              >
                 <ItemMedia variant="icon" className="text-(--success-readable)">
                   <ShieldCheck />
                 </ItemMedia>
@@ -702,8 +759,7 @@ function IntegrationBento() {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-6 lg:grid-rows-[minmax(18rem,auto)_minmax(18rem,auto)]">
       <div className="group flex md:col-span-6 lg:col-span-4">
-        <div className="relative w-full overflow-hidden rounded-3xl border border-white/8 bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-tl-[2rem]">
-          <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgb(255_203_116/0.65),transparent)] opacity-70" />
+        <div className="relative w-full overflow-hidden rounded-3xl border border-(--landing-border) bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-tl-[2rem]">
           <div className="grid gap-5 xl:min-h-76 xl:grid-cols-[minmax(0,1fr)_minmax(240px,0.85fr)]">
             <div className="flex flex-col justify-between gap-5 md:gap-8">
               <div>
@@ -725,7 +781,7 @@ function IntegrationBento() {
                 ].map(([number, label]) => (
                   <div
                     key={number}
-                    className="rounded-2xl border border-white/8 bg-black/12 p-2.5 sm:p-3"
+                    className="rounded-2xl border border-(--landing-border) bg-black/12 p-2.5 sm:p-3"
                   >
                     <span className="font-mono text-xs text-(--brand-readable)">
                       {number}
@@ -737,15 +793,14 @@ function IntegrationBento() {
                 ))}
               </div>
             </div>
-            <div className="relative min-h-48 overflow-hidden rounded-3xl border border-white/8 bg-black/18 p-3 md:min-h-60 md:p-4">
-              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgb(255_203_116/0.12),transparent_48%)]" />
+            <div className="relative min-h-48 overflow-hidden rounded-3xl border border-(--landing-border) bg-black/18 p-3 md:min-h-60 md:p-4">
               <div className="relative flex h-full flex-col justify-between gap-5">
                 <div className="grid grid-cols-4 gap-2 min-[520px]:grid-cols-2 min-[520px]:gap-3">
                   {stackLogos.slice(0, 4).map((logo) => (
                     <SvglLogo key={logo.title} logo={logo} />
                   ))}
                 </div>
-                <div className="rounded-2xl border border-white/8 bg-(--surface-panel-strong) p-3 font-mono text-xs leading-5 text-muted-foreground sm:text-sm sm:leading-6">
+                <div className="rounded-2xl border border-(--landing-border) bg-(--surface-panel-strong) p-3 font-mono text-xs leading-5 text-muted-foreground sm:text-sm sm:leading-6">
                   <p className="m-0 text-foreground">patchplane collect</p>
                   <p className="m-0">github issue linked</p>
                   <p className="m-0">agent run attached</p>
@@ -760,7 +815,7 @@ function IntegrationBento() {
       </div>
 
       <div className="group flex md:col-span-3 lg:col-span-2">
-        <div className="w-full overflow-hidden rounded-3xl border border-white/8 bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-tr-[2rem]">
+        <div className="w-full overflow-hidden rounded-3xl border border-(--landing-border) bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-tr-[2rem]">
           <p className="m-0 text-[0.78rem] uppercase tracking-[0.14em] text-(--brand-readable)">
             {m.landing_bento_tools_label()}
           </p>
@@ -779,7 +834,7 @@ function IntegrationBento() {
       </div>
 
       <div className="group flex md:col-span-3 lg:col-span-2">
-        <div className="w-full overflow-hidden rounded-3xl border border-white/8 bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-bl-[2rem]">
+        <div className="w-full overflow-hidden rounded-3xl border border-(--landing-border) bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-bl-[2rem]">
           <p className="m-0 text-[0.78rem] uppercase tracking-[0.14em] text-(--brand-readable)">
             {m.landing_bento_boundary_label()}
           </p>
@@ -797,7 +852,7 @@ function IntegrationBento() {
             ].map((item) => (
               <div
                 key={item}
-                className="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/12 p-3"
+                className="flex items-center gap-3 rounded-2xl border border-(--landing-border) bg-black/12 p-3"
               >
                 <ShieldCheck className="size-4 text-(--brand-readable)" />
                 <span className="text-sm text-muted-foreground">{item}</span>
@@ -808,7 +863,7 @@ function IntegrationBento() {
       </div>
 
       <div className="group flex md:col-span-6 lg:col-span-4">
-        <div className="w-full overflow-hidden rounded-3xl border border-white/8 bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-br-[2rem]">
+        <div className="w-full overflow-hidden rounded-3xl border border-(--landing-border) bg-(--surface-panel) p-[clamp(1.2rem,3vw,1.6rem)] transition-transform hover:-translate-y-1 lg:rounded-br-[2rem]">
           <div className="grid gap-5 md:grid-cols-[minmax(0,0.8fr)_minmax(240px,1fr)] xl:min-h-76">
             <div>
               <p className="m-0 text-[0.78rem] uppercase tracking-[0.14em] text-(--brand-readable)">
@@ -821,7 +876,7 @@ function IntegrationBento() {
                 {m.landing_bento_decision_body()}
               </p>
             </div>
-            <div className="grid content-center gap-3 rounded-3xl border border-white/8 bg-black/18 p-4">
+            <div className="grid content-center gap-3 rounded-3xl border border-(--landing-border) bg-black/18 p-4">
               {[
                 [m.landing_bento_decision_1(), 'passed'],
                 [m.landing_bento_decision_2(), 'attached'],
@@ -855,19 +910,24 @@ function SvglLogo({
   return (
     <div
       className={cn(
-        'group/logo flex min-h-12 items-center gap-3 rounded-2xl border border-white/8 bg-(--surface-panel-strong) p-2.5 transition-colors hover:bg-white/6 sm:p-3',
+        'group/logo flex min-h-12 items-center gap-3 rounded-2xl border border-(--landing-border) bg-(--surface-panel-strong) p-2.5 transition-colors hover:bg-white/6 sm:p-3',
         compact && 'justify-center',
       )}
     >
-      <picture>
-        <source srcSet={logo.dark} media="(prefers-color-scheme: dark)" />
+      <span className="contents">
         <img
           src={logo.light}
-          alt=""
+          alt={compact ? logo.title : ''}
           loading="lazy"
-          className="size-6 shrink-0 object-contain transition-transform group-hover/logo:scale-110 sm:size-7"
+          className="size-6 shrink-0 object-contain transition-transform group-hover/logo:scale-110 sm:size-7 dark:hidden"
         />
-      </picture>
+        <img
+          src={logo.dark}
+          alt={compact ? logo.title : ''}
+          loading="lazy"
+          className="hidden size-6 shrink-0 object-contain transition-transform group-hover/logo:scale-110 sm:size-7 dark:block"
+        />
+      </span>
       {!compact && (
         <span className="hidden text-sm font-medium min-[520px]:inline">
           {logo.title}
@@ -890,7 +950,7 @@ function ProductTabShell({
 }) {
   return (
     <div className="grid grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-5 max-[860px]:grid-cols-1">
-      <div className="grid content-between gap-8 rounded-3xl border border-white/8 bg-black/10 p-5">
+      <div className="grid content-between gap-8 rounded-3xl border border-(--landing-border) bg-black/10 p-5">
         <div>
           <p className="m-0 text-[0.78rem] uppercase tracking-[0.14em] text-(--brand-readable)">
             {eyebrow}
@@ -923,7 +983,11 @@ function EvidenceList({
       {items.map((item) => {
         const Icon = item.icon
         return (
-          <Item key={item.title} variant="outline" className="border-white/8">
+          <Item
+            key={item.title}
+            variant="outline"
+            className="border-(--landing-border)"
+          >
             <ItemMedia
               variant="icon"
               className="size-10 rounded-2xl bg-[rgb(255_203_116/0.1)] text-(--brand-readable)"
@@ -945,7 +1009,7 @@ function EvidenceList({
 
 function TerminalBlock() {
   return (
-    <div className="rounded-3xl border border-white/8 bg-black/18 p-4 font-mono text-[0.86rem] leading-[1.7] text-muted-foreground">
+    <div className="rounded-3xl border border-(--landing-border) bg-black/18 p-4 font-mono text-[0.86rem] leading-[1.7] text-muted-foreground">
       <p className="m-0 text-foreground">$ patchplane run --pre-ci</p>
       <p className="m-0">pulling isolated runtime</p>
       <p className="m-0">applying generated patch</p>
