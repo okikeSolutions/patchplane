@@ -72,7 +72,7 @@ function LogBlock({
           <EmptyMedia variant="icon"><CopyIcon /></EmptyMedia>
           <EmptyTitle>{emptyTitle}</EmptyTitle>
           <EmptyDescription>
-            PatchPlane will show captured evidence here when the runtime records it.
+            patchplane will show captured evidence here when the runtime records it.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

@@ -60,6 +60,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { BrandLogo } from '@/components/brand-logo'
 
 export const Route = createFileRoute('/')({ component: LandingPage })
 
@@ -227,9 +228,12 @@ function LandingPage() {
           <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_50%_8%,rgb(255_196_92/0.2),transparent_32rem)]" />
           <div className="relative mx-auto flex min-h-[calc(100svh-var(--header-height))] w-[min(1180px,calc(100%-2rem))] flex-col items-center justify-center pt-[clamp(3rem,7vw,5.5rem)] pb-[clamp(2rem,5vw,4rem)]">
             <div className="max-w-220 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-[18px] motion-safe:duration-720 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]">
-              <p className="mb-3 text-sm font-bold tracking-[-0.03em] text-(--brand-readable)">
-                PatchPlane
-              </p>
+              <div className="mb-4 flex justify-center">
+                <BrandLogo
+                  className="h-[clamp(2rem,4vw,2.8rem)]"
+                  priority
+                />
+              </div>
               <Badge variant="outline" className={badgeClass}>
                 {m.landing_badge()}
               </Badge>

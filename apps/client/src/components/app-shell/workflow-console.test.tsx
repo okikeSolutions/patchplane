@@ -128,7 +128,7 @@ describe('WorkflowConsole', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
-      'PatchPlane smoke retry after GitHub App PEM fix',
+      'patchplane smoke retry after GitHub App PEM fix',
     )
     const queued = workflowRow(
       queuedRunId,
@@ -159,7 +159,7 @@ describe('WorkflowConsole', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
-      'PatchPlane smoke retry after GitHub App PEM fix',
+      'patchplane smoke retry after GitHub App PEM fix',
     )
     const queued = workflowRow(
       queuedRunId,
@@ -177,14 +177,14 @@ describe('WorkflowConsole', () => {
     )
 
     const table = screen.getByRole('table')
-    expect(within(table).getByText('PatchPlane smoke retry after GitHub App PEM fix')).toBeTruthy()
+    expect(within(table).getByText('patchplane smoke retry after GitHub App PEM fix')).toBeTruthy()
     expect(within(table).getByText('Review the recent authentication foundation')).toBeTruthy()
 
     fireEvent.change(screen.getByPlaceholderText('Search workflows, repos, run IDs...'), {
       target: { value: 'authentication' },
     })
 
-    expect(within(table).queryByText('PatchPlane smoke retry after GitHub App PEM fix')).toBeNull()
+    expect(within(table).queryByText('patchplane smoke retry after GitHub App PEM fix')).toBeNull()
     expect(within(table).getByText('Review the recent authentication foundation')).toBeTruthy()
 
     fireEvent.change(screen.getByPlaceholderText('Search workflows, repos, run IDs...'), {
@@ -192,7 +192,7 @@ describe('WorkflowConsole', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Queued' }))
 
-    expect(within(table).queryByText('PatchPlane smoke retry after GitHub App PEM fix')).toBeNull()
+    expect(within(table).queryByText('patchplane smoke retry after GitHub App PEM fix')).toBeNull()
     expect(within(table).getByText('Review the recent authentication foundation')).toBeTruthy()
   })
 
@@ -200,7 +200,7 @@ describe('WorkflowConsole', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
-      'PatchPlane smoke retry after GitHub App PEM fix',
+      'patchplane smoke retry after GitHub App PEM fix',
     )
 
     render(
@@ -213,7 +213,7 @@ describe('WorkflowConsole', () => {
     )
 
     const table = screen.getByRole('table')
-    const rowPrompt = within(table).getByText('PatchPlane smoke retry after GitHub App PEM fix')
+    const rowPrompt = within(table).getByText('patchplane smoke retry after GitHub App PEM fix')
     const row = rowPrompt.closest('tr')
 
     expect(row).not.toBeNull()
@@ -224,7 +224,7 @@ describe('WorkflowConsole', () => {
     })
 
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
+    expect(within(dialog).getByRole('heading', { name: 'patchplane smoke retry after GitHub App PEM fix' })).toBeTruthy()
     expect(within(dialog).getByText('okikeSolutions/guerillaglass · Sandbox failed · run_reviewed')).toBeTruthy()
 
     expect(within(dialog).getByRole('link', { name: 'Open full workflow' }).getAttribute('href')).toBe('/app/workflows/run_reviewed')
@@ -242,7 +242,7 @@ describe('WorkflowConsole', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
-      'PatchPlane smoke retry after GitHub App PEM fix',
+      'patchplane smoke retry after GitHub App PEM fix',
     )
 
     render(
@@ -252,7 +252,7 @@ describe('WorkflowConsole', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'PatchPlane smoke retry after GitHub App PEM fix' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'patchplane smoke retry after GitHub App PEM fix' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Runtime' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Review' })).toBeTruthy()

@@ -17,7 +17,7 @@ vi.mock('@/paraglide/messages', () => ({
   app_signed_out_queue_label: () => 'Queue',
   app_signed_out_queue_value: () => 'Privat',
   app_signed_out_workflows_intro: () =>
-    'PatchPlane schuetzt Workflow-Belege hinter deiner Workspace-Sitzung.',
+    'patchplane schuetzt Workflow-Belege hinter deiner Workspace-Sitzung.',
   app_signed_out_workflows_title: () => 'Anmelden, um Workflows zu sehen',
 }))
 
@@ -30,7 +30,7 @@ describe('SignedOutWorkflowConsole', () => {
     render(<SignedOutWorkflowConsole />)
 
     expect(screen.getByRole('heading', { name: 'Anmelden, um Workflows zu sehen' })).toBeTruthy()
-    expect(screen.getByText('PatchPlane schuetzt Workflow-Belege hinter deiner Workspace-Sitzung.')).toBeTruthy()
+    expect(screen.getByText('patchplane schuetzt Workflow-Belege hinter deiner Workspace-Sitzung.')).toBeTruthy()
     expect(screen.getByText('Privat')).toBeTruthy()
     expect(screen.getByText('Geschuetzt')).toBeTruthy()
     expect(screen.getByText('Erforderlich')).toBeTruthy()

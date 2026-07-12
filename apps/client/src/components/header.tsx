@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/navigation-menu'
 import LocaleSwitcher from './locale-switcher'
 import { ModeToggle } from './mode-toggle'
+import { BrandLogo } from './brand-logo'
 
 function GitHubIcon() {
   return (
@@ -34,10 +35,9 @@ export default function Header() {
         <div className="flex min-w-0 flex-col gap-[0.2rem]">
           <Link
             to="/"
-            className="inline-flex w-fit items-center gap-[0.65rem] text-base font-bold tracking-[-0.03em] transition-colors hover:text-primary"
+            className="inline-flex w-fit transition-opacity hover:opacity-80"
           >
-            <span className="size-[0.7rem] rounded-full bg-[linear-gradient(135deg,rgb(255_144_52),rgb(255_209_122))] shadow-[0_0_24px_rgb(255_169_72/0.5)]" />
-            <span>PatchPlane</span>
+            <BrandLogo className="h-7" priority />
           </Link>
           <p className="m-0 text-[0.8rem] text-muted-foreground max-[720px]:hidden">
             {m.header_tagline()}

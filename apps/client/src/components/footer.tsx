@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import * as m from '@/paraglide/messages'
+import { BrandLogo } from './brand-logo'
 
 export default function Footer() {
   const year = new Date().getFullYear()
@@ -8,7 +9,7 @@ export default function Footer() {
     <footer className="px-0 pt-16 pb-8">
       <div className="mx-auto flex w-[min(1120px,calc(100%-2rem))] justify-between gap-6 border-t border-white/8 pt-6 max-[960px]:flex-col">
         <div className="grid gap-[0.8rem]">
-          <p className="m-0 font-bold tracking-[-0.03em]">PatchPlane</p>
+          <BrandLogo className="h-7" />
           <p className="m-0 text-muted-foreground">{m.footer_description()}</p>
         </div>
 
@@ -35,7 +36,7 @@ export default function Footer() {
               GitHub
             </a>
           </div>
-          <p className="m-0 text-muted-foreground">&copy; {year} PatchPlane</p>
+          <p className="m-0 text-muted-foreground">&copy; {year} patchplane</p>
         </div>
       </div>
     </footer>

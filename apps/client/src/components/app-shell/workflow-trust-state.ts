@@ -59,7 +59,7 @@ export function workflowTrustStateLabel(state: WorkflowTrustState) {
 export function workflowTrustStateDetail(state: WorkflowTrustState) {
   switch (state) {
     case 'queued':
-      return 'PatchPlane has accepted the workflow and is waiting for runtime evidence.'
+      return 'patchplane has accepted the workflow and is waiting for runtime evidence.'
     case 'running':
       return 'Runtime work is in progress. Evidence is still being collected.'
     case 'no-sandbox-run':
@@ -73,6 +73,6 @@ export function workflowTrustStateDetail(state: WorkflowTrustState) {
     case 'rejected':
       return 'A reviewer rejected this workflow.'
     default:
-      return 'PatchPlane has no additional trust-state detail for this workflow yet.'
+      return 'patchplane has no additional trust-state detail for this workflow yet.'
   }
 }
