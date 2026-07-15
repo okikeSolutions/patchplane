@@ -17,7 +17,7 @@
     "@convex-dev/workos-authkit": "^0.2.7",
     "@daytona/sdk": "^0.186.0",
     "@patchplane/domain": "workspace:*",
-    "convex": "^1.41.0",
+    "convex": "^1.42.1",
     "effect": "4.0.0-beta.90",
     "octokit": "^5.0.5"
   },

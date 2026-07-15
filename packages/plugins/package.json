@@ -13,6 +13,7 @@
     "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts",
     "./daytona/config": "./src/daytona/DaytonaConfig.ts",
     "./daytona/sandbox-plugin": "./src/daytona/DaytonaSandboxPlugin.ts",
+    "./github/app": "./src/github/github-app.ts",
     "./github/config": "./src/github/GitHubConfig.ts",
     "./github/provider-plugin": "./src/github/GitHubProviderPlugin.ts",
     "./observability/local-plugin": "./src/observability/LocalObservabilityPlugin.ts",
@@ -37,7 +38,7 @@
     "@patchplane/domain": "workspace:*",
     "@sentry/effect": "^10.62.0",
     "@workos-inc/node": "10.3.0",
-    "convex": "^1.41.0",
+    "convex": "^1.42.1",
     "effect": "4.0.0-beta.90",
     "octokit": "^5.0.5"
   },
