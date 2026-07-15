@@ -125,7 +125,7 @@ R2 objects              -> EvidenceArtifact references
 
 ### M0 — Repo alignment and dependency baseline
 
-**Status:** In progress
+**Status:** Complete for the M0-M10 alpha architecture baseline
 
 Public goals:
 
@@ -358,7 +358,7 @@ Acceptance criteria:
 
 ### M7 — GitHub Provider Plugin
 
-**Status:** Initial verified external intake complete; publication path pending
+**Status:** Complete for alpha intake plus issue-comment/check-run publication; draft PR publication remains in M10 follow-up scope
 
 Tasks:
 
@@ -370,14 +370,15 @@ Tasks:
 - [x] Normalize initial GitHub events into generic workflow intake values.
 - [x] Persist external event references for idempotency.
 - [x] Require an alpha repository allowlist for webhook-to-workspace routing.
-- [ ] Implement check/draft PR publication.
-- [ ] Add one user-visible GitHub publication path for the alpha demo.
+- [x] Implement check-run publication.
+- [ ] Implement draft PR publication after durable candidate branches exist.
+- [x] Add user-visible GitHub comment and check-run publication paths for the alpha demo.
 
 Acceptance criteria:
 
 - [x] GitHub App installation-token flow is isolated inside `packages/plugins`.
 - [x] Verified GitHub events become generic `WorkflowIntake` values.
-- [ ] PatchPlane can publish an alpha result back to GitHub without leaking Octokit objects into core.
+- [x] PatchPlane can publish an alpha result back to GitHub without leaking Octokit objects into core.
 
 ---
 
@@ -414,7 +415,7 @@ Acceptance criteria:
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** Complete for Daytona lifecycle/policy scope; durable R2 raw artifact capture remains in the artifact slice. The old Daytona-SDK-only live smoke has been removed in favor of the PatchPlane Daytona/Pi RPC smoke.
+**Status:** Complete for Daytona lifecycle/policy and R2-backed evidence capture. The old Daytona-SDK-only live smoke has been removed in favor of the PatchPlane Daytona/Pi RPC smoke.
 
 Tasks:
 
@@ -424,7 +425,7 @@ Tasks:
 - [x] Add explicit sandbox policy fields for lifecycle, resources, timeout, and network posture.
 - [x] Implement checkout/clone support.
 - [x] Implement command execution.
-- [x] Collect basic command logs in workflow storage; R2-backed artifact capture remains in the artifact slice.
+- [x] Collect command logs in workflow storage and upload large/raw evidence through the R2 artifact path.
 - [x] Stop/destroy sandboxes on cancellation/failure where possible after acquisition succeeds.
 - [x] Add live Daytona smoke script with redacted API-key handling, public repository clone, command execution, and cleanup polling.
 - [x] Persist normalized sandbox policy as typed Convex metadata rather than JSON glue.
@@ -439,13 +440,13 @@ Acceptance criteria:
 - [x] A workflow can provision a sandbox, check out a GitHub repository ref, run at least one command, collect command logs, and tear down the sandbox.
 - [x] Sandboxes never receive long-lived WorkOS, Convex, or GitHub App credentials.
 - [x] Sandbox lifecycle and network policy are visible in stored workflow metadata.
-- [ ] Durable raw artifact capture is backed by R2 rather than Convex stdout/stderr columns.
+- [x] Durable raw artifact capture is backed by R2 rather than Convex stdout/stderr columns.
 
 ---
 
 ### M8.25 — Minimal Cloudflare infra provisioning
 
-**Status:** Complete for minimal alpha R2 + AI Gateway provisioning; runtime artifact plugin remains in the later artifact slice
+**Status:** Complete for minimal alpha R2 + AI Gateway provisioning and runtime binding composition
 
 Purpose:
 
@@ -487,7 +488,7 @@ Acceptance criteria:
 
 ### M8.5 — Alpha Workflow Visibility Slice
 
-**Status:** Implemented for the current Convex workflow read model; durable R2 artifact capture remains deferred to the artifact slice
+**Status:** Implemented for the current Convex workflow read model and R2-backed evidence links
 
 Scope:
 
@@ -534,6 +535,7 @@ Goal:
 Make the hosted PatchPlane alpha usable without CLI setup and without asking users to manually install/configure their own GitHub App.
 
 User-facing flow:
+
 1. User signs in to PatchPlane.
 2. User clicks "Connect GitHub".
 3. GitHub shows the standard account/org and repository access screen.
@@ -547,6 +549,7 @@ User-facing flow:
 11. Dashboard shows the run result, logs, and decision state.
 
 Implementation notes:
+
 - Hosted PatchPlane uses a PatchPlane-owned GitHub App.
 - Use Octokit for GitHub App authentication, installation access tokens, webhook handling, repository listing, PR comments, and check/status updates.
 - Users should not see GitHub App terminology unless GitHub itself displays it during authorization.
@@ -554,6 +557,7 @@ Implementation notes:
 - Treat missing repo access as a reconnect/configuration issue, not a developer setup task.
 
 Completed implementation:
+
 - [x] Added provider-owned repository connection domain schemas in `packages/domain/src/repository-connection.ts`.
 - [x] Added Convex `connectedRepositoryAccounts`, `connectedRepositories`, and `githubConnectionIntents` tables with indexes for workspace listing, pending install state, and GitHub webhook routing.
 - [x] Added authenticated Convex repository connection mutations/queries plus system-secret webhook route lookup in `packages/backend/convex/connectedRepositories.ts`.
@@ -572,11 +576,13 @@ Completed implementation:
 - [x] Live-smoked the direct Convex-backed Daytona/Pi path from `StartWorkflowFromIntake` through `workflowStarts:createFromExternalIntake`, `RunSandboxAgentForWorkflow`, and `workflowStarts:recordSandboxExecution`.
 
 Remaining hardening:
+
 - [ ] Add a reusable `smoke:convex-sandbox` script for the live Convex + Daytona/Pi path instead of relying on an inline command.
 - [ ] Add browser E2E for Connect GitHub once stable hosted credentials are available.
 - [ ] Add richer dashboard aggregation for latest verification status per connected repository.
 
 Acceptance criteria:
+
 - [x] No CLI required for hosted onboarding.
 - [x] No manual GitHub App creation required.
 - [x] No webhook URL copy/paste required.
@@ -588,6 +594,7 @@ Acceptance criteria:
 - [ ] Dashboard shows connected repo, latest verification run, and status.
 
 Goal:
+
 ```
 Hosted:
 Sign in → Connect GitHub → Select repo on GitHub screen → Open PR → PatchPlane verifies → PR trust report + dashboard run
@@ -673,7 +680,7 @@ First dashboard scope:
 - [x] Full-page logs, sandbox evidence, artifacts, review, and raw evidence tabs.
 - [ ] Review split view once candidate patches exist.
 - [x] Approve/reject/request-changes controls with required comment UI.
-- [ ] Persist minimal review decisions, or defer durable review-run persistence explicitly to M10.
+- [x] Persist minimal review decisions and durable review-run data through the M10 storage model.
 
 Acceptance criteria:
 
@@ -717,9 +724,10 @@ Tasks:
 
 Implementation evidence:
 
-- Daytona captures `git diff --binary` as a `diff` artifact when a sandbox run changes the worktree.
+- Daytona records the clone base SHA and captures `git diff --binary` against that base, including staged, committed, unstaged, and untracked worktree changes.
 - Daytona probes conventional test report files such as `.patchplane/test-report.json` and `.patchplane/test-report.xml` after the main run and optional producer command.
 - Daytona probes conventional browser screenshot files such as `.patchplane/browser-screenshot.png` after the main run and optional producer command.
+- Configured test and browser producer commands retain explicit success/failure outcomes; failed test verification becomes a durable review finding.
 - Core uploads sandbox-provided evidence through `CaptureEvidenceArtifact`, which stores raw bytes in R2 and metadata in Convex.
 - The client Evidence tab opens persisted evidence artifacts through authenticated signed URLs.
 
@@ -733,7 +741,7 @@ Acceptance criteria:
 
 ### M9.9 — Minimal Landing Page Packaging Slice
 
-**Status:** Planned, public alpha packaging only
+**Status:** Complete for the public alpha packaging slice
 
 Purpose:
 
@@ -741,24 +749,27 @@ Make the public product message understandable before broader alpha demos.
 
 Scope:
 
-- Keep language product-focused and developer-facing.
-- Avoid heavy architecture-first copy.
-- Explain the trust loop clearly.
-- Link to the OSS repo/docs.
-- Avoid pricing/commercial details in OSS docs.
+- [x] Keep language product-focused and developer-facing.
+- [x] Avoid heavy architecture-first copy.
+- [x] Explain the trust loop clearly.
+- [x] Link to the OSS repo/docs.
+- [x] Avoid pricing/commercial details in OSS docs.
 
-Suggested minimal sections:
+Minimal sections:
 
-- Hero: what PatchPlane does in one sentence.
-- Trust loop: agent patch → sandbox → evidence → human decision → publication.
-- Why it exists: AI coding output needs verification and provenance before entering trusted workflows.
-- Alpha status: focused on one GitHub/Daytona/Pi loop.
-- OSS/developer section: inspect, run, contribute, or follow development.
+- [x] Hero: explain the pain and outcome in one sentence.
+- [x] Problem: show why AI-generated changes need evidence before trust.
+- [x] Review flow: capture → isolated verification → evidence → human decision → GitHub result.
+- [x] Trust report preview: show product states without fictional commands or unsupported capability claims.
+- [x] Open-source alpha: state the focused GitHub workflow without putting provider or architecture details on the landing page.
+- [x] OSS/developer links: current capabilities, quick start, contributing, and roadmap.
 
 Acceptance criteria:
 
-- A developer can understand the alpha promise quickly.
-- The landing page does not overpromise broad platform capabilities before alpha proof.
+- [x] A developer can understand the alpha promise quickly.
+- [x] The landing page does not overpromise broad platform capabilities before alpha proof.
+- [x] English and German landing copy has matching keys and product intent.
+- [x] Client tests and the production client build pass after a frozen-lockfile dependency refresh.
 
 ---
 
@@ -766,7 +777,7 @@ Acceptance criteria:
 
 ### M10 — Evidence-backed decision and publication loop
 
-**Status:** Alpha demo finish line
+**Status:** In progress; the deployed evidence/review loop is live-verified, with the authenticated human decision and resulting GitHub publication replay still open
 
 Purpose:
 
@@ -781,10 +792,13 @@ Tasks:
 - [x] Implement `ProposeMergeDecision`.
 - [x] Persist minimal human decision linked to the Patch Report.
 - [x] Require a comment for approve/reject/request-changes decisions.
-- [ ] Update Patch Report status from the durable decision.
-- [ ] Add operator approval/rejection/request-changes path.
-- [ ] Publish updated GitHub comment/check/draft PR result after decision.
-- [ ] Record provenance linking prompt, actor/workspace, repository, sandbox, runtime session, commands/tests, candidate patch, Patch Report, review result, decision, and publication result.
+- [x] Update Patch Report status from the durable decision.
+- [x] Add operator approval/rejection/request-changes path.
+- [x] Publish updated GitHub comment and check-run results after decision.
+- [ ] Publish a draft PR result once candidate branches can be pushed and represented durably.
+- [x] Record workflow-scoped provenance for prompt/actor/workspace/repository, sandbox/runtime activity, commands/tests, candidate patch, review/policy result, human decision, and publication result.
+- [x] Keep Patch Report as a deterministic projection over durable workflow, evidence, review, decision, publication, and provenance records; avoid a second stale snapshot truth.
+- [ ] Revalidate the complete deployed trust loop against one real repository after the decision/publication changes.
 
 Implementation evidence:
 
@@ -793,7 +807,21 @@ Implementation evidence:
 - System-ingestion mutations record candidate patches, automated review/policy output, and publication results.
 - Authenticated human decisions require a non-empty comment and `decision:approve` or `decision:reject` permission.
 - Core now has `ReviewService`, `PolicyService`, alpha deterministic review/policy layers, and `ProposeMergeDecision`.
-- The first reviewer records failed sandbox execution and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
+- The first reviewer records failed sandbox execution, failed configured test verification, and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
+- The Patch Report read model derives its current status and decision section from the latest durable `HumanDecision`.
+- Maintainers and operators can approve, reject, or request changes through the authenticated UI/server path with a required comment and replay-safe decision idempotency key.
+- Decision publication creates durable pending/result records before and after GitHub calls, publishes issue comments and check runs, and reconciles retries through comment markers and check-run `external_id` values.
+- Aggregate publication provenance can transition from failed to succeeded after retry while retaining links to all publication result records.
+- A system-secret acceptance snapshot exposes only workflow statuses, evidence hashes, publication IDs, and aggregate counts for live verification without bypassing WorkOS authorization on full workflow detail.
+
+Current validation:
+
+- Domain, core, plugin, backend, architecture, and webhook suites pass with the durable decision/publication changes.
+- Plugin tests cover the clone-base diff command; a local Git probe confirmed it captures staged, committed, unstaged, and untracked candidate changes.
+- GitHub adapter tests verify retry reconciliation for both issue comments and check runs.
+- The 2026-07-10 Convex deployment was refreshed after CLI authentication. The hosted smoke then completed GitHub intake, Daytona/Pi JSON execution, runtime-event persistence, R2 evidence capture, candidate-patch capture, automated review, policy evaluation, provenance persistence, and Patch Report publication for workflow `ms75nyt9d572v6p7ab98vrq7158a8kgx` on test PR 96.
+- GitHub API readback confirmed the workflow-specific Patch Report comment. The dedicated Daytona/Pi RPC smoke separately verifies runtime-session persistence because hosted JSON-mode executions intentionally have no RPC session.
+- A final deployed WorkOS-authenticated human-decision-to-GitHub run and publication replay against that workflow remain required before marking M10 complete.
 
 Acceptance criteria:
 
@@ -860,18 +888,18 @@ Acceptance criteria:
 - [x] Add static plugin metadata registry with env requirements/defaults.
 - [x] Add local CLI support for plugin listing, env template/check, doctor, and init.
 - [x] Use root `patchplane.config.json` as CLI-managed non-secret project config.
-- [ ] Add Cloudflare R2 config to plugin metadata.
-- [ ] Add Cloudflare AI Gateway config to plugin metadata.
+- [x] Add Cloudflare R2 config to plugin metadata.
+- [x] Add Cloudflare AI Gateway config to plugin metadata.
 - [ ] Add app startup/config smoke for all required alpha environment variables.
-- [ ] Add a bundle-boundary regression check that the hosted web app does not include the in-process Pi SDK runtime.
-- [ ] Add a Daytona Pi smoke/eval that runs `pi --mode json` or `pi --mode rpc` in a sandbox and validates parseable normalized runtime output.
+- [x] Add a bundle-boundary regression check that the hosted web app does not include the in-process Pi SDK runtime.
+- [x] Add a Daytona Pi smoke/eval that runs `pi --mode rpc` in a sandbox and validates parseable normalized runtime output.
 
 ### Observability
 
 - [x] Add structured context fields for the foundation path.
 - [x] Add initial Effect log spans for the foundation path.
-- [ ] Add consistent `runtimeSessionId`, `pluginName`, and `operation` fields across runtime/sandbox/artifact plugins.
-- [ ] Add Sentry-backed `TelemetryService` plugin.
+- [x] Add consistent `runtimeSessionId`, `pluginName`, and `operation` fields across runtime/sandbox/artifact plugins.
+- [x] Add Sentry-backed `TelemetryService` plugin.
 - [ ] Add OTLP export only when a real collector/backend is introduced.
 - [ ] Keep ClickHouse deferred until high-volume trace analytics become necessary.
 
@@ -884,21 +912,25 @@ Acceptance criteria:
 
 ### Artifacts
 
-- [ ] Define `EvidenceArtifact` domain schema.
-- [ ] Store raw artifacts in Cloudflare R2.
-- [ ] Store artifact metadata, hashes, and references in Convex.
-- [ ] Add authenticated/signed access to artifact downloads.
-- [ ] Add retention/lifecycle policy for alpha artifacts where useful.
+- [x] Define `EvidenceArtifact` domain schema.
+- [x] Store raw artifacts in Cloudflare R2.
+- [x] Store artifact metadata, hashes, and references in Convex.
+- [x] Add authenticated/signed access to artifact downloads.
+- [x] Add retention/lifecycle policy for alpha artifacts where useful.
 
 ### Testing
+
+Milestone acceptance criteria and their executable evidence are tracked in
+[`docs/acceptance-tests.md`](docs/acceptance-tests.md). A checked roadmap item does not by itself
+mean that a credentialed live acceptance path has passed for the current release candidate.
 
 - [x] Foundation core/domain/plugin tests pass.
 - [x] Backend Convex tests cover authenticated and external-ingestion paths.
 - [x] GitHub plugin tests cover repository access, comments, and webhook signatures.
 - [x] CLI integration tests cover command parsing, init, env, plugin validation, and doctor failures.
 - [x] Add Daytona sandbox plugin tests with safe mocks/fakes.
-- [ ] Add R2 artifact plugin tests.
-- [ ] Add Pi runtime event normalization tests.
+- [x] Add R2 artifact plugin tests.
+- [x] Add Pi runtime event normalization tests.
 - [ ] Add true external browser/AuthKit/Convex E2E once stable test credentials exist.
 
 ### Security
@@ -907,9 +939,9 @@ Acceptance criteria:
 - [x] User-facing workflow starts require WorkOS JWT validation and mirrored permission checks.
 - [x] Convex reads require WorkOS identity and mirrored membership permissions.
 - [x] No long-lived credentials in sandboxes.
-- [ ] Treat every runtime-produced patch and artifact as untrusted until sandbox review and approval complete.
+- [x] Treat every runtime-produced patch and artifact as untrusted until sandbox review and approval complete.
 - [x] Sandbox profiles have explicit network and lifecycle policy.
-- [ ] Artifact access is authenticated or signed.
+- [x] Artifact access is authenticated or signed.
 - [ ] Replace shared-secret ingestion with HMAC or equivalent request signing before production exposure if needed.
 - [ ] Add resource-scoped authorization when repository/project resources are introduced.
 
