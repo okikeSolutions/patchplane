@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { CheckIcon, MessageSquareWarningIcon, XIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
   const [comment, setComment] = useState('')
   const [submittingStatus, setSubmittingStatus] = useState<HumanDecisionStatus | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const submissionAttempt = useRef<{ readonly fingerprint: string; readonly idempotencyKey: string } | undefined>(undefined)
   const hasComment = comment.trim().length > 0
   const trustState = deriveWorkflowTrustState(detail)
   const isSubmitting = submittingStatus !== undefined
@@ -25,18 +26,26 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
     setSubmittingStatus(status)
     setError(undefined)
     try {
+      const fingerprint = `${detail.workflowRun.id}:${status}:${trimmedComment}`
+      if (submissionAttempt.current?.fingerprint !== fingerprint) {
+        submissionAttempt.current = {
+          fingerprint,
+          idempotencyKey: `${detail.workflowRun.id}:${status}:${globalThis.crypto.randomUUID()}`,
+        }
+      }
       const response = await submitReviewDecisionServerFn({
         data: {
           workflowRunId: detail.workflowRun.id,
           status,
           comment: trimmedComment,
-          idempotencyKey: `${detail.workflowRun.id}:${status}:${globalThis.crypto.randomUUID()}`,
+          idempotencyKey: submissionAttempt.current.idempotencyKey,
         },
       })
       if (!response.ok) {
         setError(response.error)
         return
       }
+      submissionAttempt.current = undefined
       setComment('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to record decision')

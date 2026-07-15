@@ -1779,6 +1779,91 @@ export const recordHumanDecision = mutation({
   },
 })
 
+export const getTrustLoopAcceptanceSnapshot = query({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+  },
+  returns: v.object({
+    workflowRunId: v.string(),
+    traceId: v.string(),
+    workflowStatus: v.union(v.literal('queued'), v.literal('running'), v.literal('reviewed')),
+    hasRuntimeEvents: v.boolean(),
+    hasRuntimeSessions: v.boolean(),
+    sandboxExecutionStatuses: v.array(v.union(v.literal('succeeded'), v.literal('failed'))),
+    evidenceArtifacts: v.array(v.object({
+      kind: evidenceArtifactKindArg,
+      storageKey: v.string(),
+      sizeBytes: v.number(),
+      sha256: v.string(),
+    })),
+    candidatePatchStatuses: v.array(candidatePatchSetStatusArg),
+    reviewRunStatuses: v.array(reviewRunStatusArg),
+    policyDecisionStatuses: v.array(policyDecisionStatusArg),
+    humanDecisions: v.array(v.object({
+      id: v.string(),
+      status: decisionStatusArg,
+      idempotencyKey: v.optional(v.string()),
+    })),
+    publicationResults: v.array(v.object({
+      kind: publicationResultKindArg,
+      status: publicationResultStatusArg,
+      externalId: v.optional(v.string()),
+      url: v.optional(v.string()),
+      idempotencyKey: v.optional(v.string()),
+    })),
+    hasProvenanceEvents: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    const [runtimeEvents, runtimeSessions, sandboxExecutions, evidenceArtifacts, candidatePatchSets, reviewRuns, policyDecisions, humanDecisions, publicationResults, provenanceEvents] = await Promise.all([
+      ctx.db.query('runtimeEvents').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).take(1),
+      ctx.db.query('runtimeSessions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).take(1),
+      ctx.db.query('sandboxExecutions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('evidenceArtifacts').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(128),
+      ctx.db.query('candidatePatchSets').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('reviewRuns').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('policyDecisions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('humanDecisions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('publicationResults').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(64),
+      ctx.db.query('provenanceEvents').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).take(1),
+    ])
+
+    return {
+      workflowRunId: workflowRun._id,
+      traceId: workflowRun.traceId ?? 'legacy',
+      workflowStatus: workflowRun.status,
+      hasRuntimeEvents: runtimeEvents.length > 0,
+      hasRuntimeSessions: runtimeSessions.length > 0,
+      sandboxExecutionStatuses: sandboxExecutions.map((execution) => execution.status),
+      evidenceArtifacts: evidenceArtifacts.map((artifact) => ({
+        kind: artifact.kind,
+        storageKey: artifact.storageKey,
+        sizeBytes: artifact.sizeBytes,
+        sha256: artifact.sha256,
+      })),
+      candidatePatchStatuses: candidatePatchSets.map((patchSet) => patchSet.status),
+      reviewRunStatuses: reviewRuns.map((reviewRun) => reviewRun.status),
+      policyDecisionStatuses: policyDecisions.map((decision) => decision.status),
+      humanDecisions: humanDecisions.map((decision) => ({
+        // oxlint-disable-next-line eslint/no-underscore-dangle -- Convex document IDs are exposed as `_id`.
+        id: decision._id,
+        status: decision.status,
+        ...(decision.idempotencyKey === undefined ? {} : { idempotencyKey: decision.idempotencyKey }),
+      })),
+      publicationResults: publicationResults.map((result) => ({
+        kind: result.kind,
+        status: result.status,
+        ...(result.externalId === undefined ? {} : { externalId: result.externalId }),
+        ...(result.url === undefined ? {} : { url: result.url }),
+        ...(result.idempotencyKey === undefined ? {} : { idempotencyKey: result.idempotencyKey }),
+      })),
+      hasProvenanceEvents: provenanceEvents.length > 0,
+    }
+  },
+})
+
 export const getDetail = query({
   args: {
     workflowRunId: v.id('workflowRuns'),

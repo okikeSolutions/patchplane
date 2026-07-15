@@ -58,6 +58,12 @@ const getWorkflowDetail = makeFunctionReference<
   WorkflowDetailResult
 >('workflowStarts:getDetail')
 
+const getTrustLoopAcceptanceSnapshot = makeFunctionReference<
+  'query',
+  { systemSecret: string; workflowRunId: string },
+  Record<string, unknown>
+>('workflowStarts:getTrustLoopAcceptanceSnapshot')
+
 const authorizeRuntimeControl = makeFunctionReference<
   'query',
   { workflowRunId: string },
@@ -614,6 +620,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       externalId: '12345',
       url: 'https://github.com/patchplane/demo/runs/12345',
       summary: 'Published PatchPlane decision check.',
+      idempotencyKey: `${String(humanDecision.id)}:check-run`,
       createdAt: 16,
     })
 
@@ -641,6 +648,43 @@ describe('workflowStarts trusted boundary and authz', () => {
     expect(detail.humanDecisions).toHaveLength(1)
     expect(detail.humanDecisions?.[0]).toMatchObject({ id: humanDecision.id })
     expect(detail.publicationResults?.[0]).toMatchObject({ id: publication.id })
+
+    const snapshot = await t.query(getTrustLoopAcceptanceSnapshot, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+    expect(snapshot).toMatchObject({
+      workflowRunId: workflowStart.workflowRun.id,
+      hasRuntimeEvents: false,
+      hasRuntimeSessions: false,
+      sandboxExecutionStatuses: ['failed'],
+      evidenceArtifacts: [{
+        kind: 'diff',
+        storageKey: 'workflow-1/diff.patch',
+        sizeBytes: 42,
+        sha256: 'e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
+      }],
+      candidatePatchStatuses: ['captured'],
+      reviewRunStatuses: ['completed'],
+      policyDecisionStatuses: ['changes-requested'],
+      humanDecisions: [{
+        id: humanDecision.id,
+        status: 'changes-requested',
+        idempotencyKey: 'decision-attempt-1',
+      }],
+      publicationResults: [{
+        kind: 'check-run',
+        status: 'published',
+        externalId: '12345',
+        idempotencyKey: `${String(humanDecision.id)}:check-run`,
+      }],
+      hasProvenanceEvents: true,
+    })
+
+    await expect(t.query(getTrustLoopAcceptanceSnapshot, {
+      systemSecret: 'wrong-secret',
+      workflowRunId: workflowStart.workflowRun.id,
+    })).rejects.toThrow('System ingestion secret required')
   })
 
   test('human decisions require a non-empty comment and matching decision permission', async () => {
