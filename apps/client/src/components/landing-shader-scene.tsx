@@ -1,9 +1,14 @@
+import { useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { ShaderGradient, ShaderGradientCanvas } from '@shadergradient/react'
+
 interface LandingShaderSceneProps {
-  readonly dark: boolean
+  readonly onFirstFrame?: () => void
 }
 
-export default function LandingShaderScene({ dark }: LandingShaderSceneProps) {
+export default function LandingShaderScene({
+  onFirstFrame,
+}: LandingShaderSceneProps) {
   return (
     <div className="landing-shader-canvas absolute inset-0 h-full w-full opacity-80">
       <ShaderGradientCanvas
@@ -19,18 +24,19 @@ export default function LandingShaderScene({ dark }: LandingShaderSceneProps) {
         lazyLoad={false}
         preserveDrawingBuffer={false}
       >
+        <ShaderReadyProbe onFirstFrame={onFirstFrame} />
         <ShaderGradient
           animate="on"
           type="plane"
           shader="defaults"
           color1="#f8ae41"
-          color2={dark ? '#101421' : '#f5f2f0'}
-          color3={dark ? '#263753' : '#d9c7aa'}
+          color2="#f5f2f0"
+          color3="#d9c7aa"
           uSpeed={0.18}
           uStrength={4}
           uDensity={1.3}
           uFrequency={5.5}
-          brightness={dark ? 0.92 : 1.12}
+          brightness={1.12}
           grain="on"
           lightType="3d"
           cDistance={3.6}
@@ -43,4 +49,23 @@ export default function LandingShaderScene({ dark }: LandingShaderSceneProps) {
       </ShaderGradientCanvas>
     </div>
   )
+}
+
+function ShaderReadyProbe({
+  onFirstFrame,
+}: {
+  readonly onFirstFrame?: () => void
+}) {
+  const reported = useRef(false)
+
+  useFrame(() => {
+    if (reported.current || !onFirstFrame) return
+
+    reported.current = true
+    requestAnimationFrame(() => {
+      requestAnimationFrame(onFirstFrame)
+    })
+  })
+
+  return null
 }

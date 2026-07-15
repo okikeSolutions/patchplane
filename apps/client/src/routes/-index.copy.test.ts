@@ -21,6 +21,11 @@ const landingSource = readFileSync(
   new URL('./index.tsx', import.meta.url),
   'utf8',
 )
+const landingFooterSource = readFileSync(
+  new URL('../components/footer.tsx', import.meta.url),
+  'utf8',
+)
+const landingSurfaceSource = `${landingSource}\n${landingFooterSource}`
 
 const landingCopy = (messages: Record<string, string>) =>
   Object.entries(messages)
@@ -42,8 +47,8 @@ describe('M9.9 landing copy', () => {
   })
 
   test('links the open-source paths developers need', () => {
-    expect(landingSource).toContain('#quick-start')
-    expect(landingSource).toContain('CONTRIBUTING.md')
-    expect(landingSource).toContain('ROADMAP.md')
+    expect(landingSurfaceSource).toContain('#quick-start')
+    expect(landingSurfaceSource).toContain('CONTRIBUTING.md')
+    expect(landingSurfaceSource).toContain('ROADMAP.md')
   })
 })
