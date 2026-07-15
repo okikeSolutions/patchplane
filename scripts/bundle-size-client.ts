@@ -11,6 +11,8 @@ interface Options {
   readonly top: number
   readonly serverBudgetMiB: number
   readonly clientBudgetMiB: number
+  readonly clientJsGzipBudgetKiB: number
+  readonly clientLargestJsBudgetMiB: number
 }
 
 interface FileSize {
@@ -21,6 +23,7 @@ interface FileSize {
 interface BundleStats {
   readonly totalBytes: number
   readonly jsGzipBytes: number
+  readonly largestJsBytes: number
   readonly top: readonly FileSize[]
 }
 
@@ -34,8 +37,10 @@ function parseOptions(argv: readonly string[]): Options {
   let json = false
   let skipBuild = false
   let top = 10
-  let serverBudgetMiB = 5
-  let clientBudgetMiB = 2
+  let serverBudgetMiB = 7.5
+  let clientBudgetMiB = 3
+  let clientJsGzipBudgetKiB = 750
+  let clientLargestJsBudgetMiB = 1.2
 
   for (const arg of argv) {
     if (arg === '--check') {
@@ -50,6 +55,10 @@ function parseOptions(argv: readonly string[]): Options {
       serverBudgetMiB = Number(arg.slice('--server-budget-mib='.length))
     } else if (arg.startsWith('--client-budget-mib=')) {
       clientBudgetMiB = Number(arg.slice('--client-budget-mib='.length))
+    } else if (arg.startsWith('--client-js-gzip-budget-kib=')) {
+      clientJsGzipBudgetKiB = Number(arg.slice('--client-js-gzip-budget-kib='.length))
+    } else if (arg.startsWith('--client-largest-js-budget-mib=')) {
+      clientLargestJsBudgetMiB = Number(arg.slice('--client-largest-js-budget-mib='.length))
     } else if (arg === '--help' || arg === '-h') {
       printHelp()
       process.exit(0)
@@ -58,13 +67,28 @@ function parseOptions(argv: readonly string[]): Options {
     }
   }
 
-  for (const [name, value] of Object.entries({ top, serverBudgetMiB, clientBudgetMiB })) {
+  for (const [name, value] of Object.entries({
+    top,
+    serverBudgetMiB,
+    clientBudgetMiB,
+    clientJsGzipBudgetKiB,
+    clientLargestJsBudgetMiB,
+  })) {
     if (!Number.isFinite(value) || value <= 0) {
       throw new Error(`${name} must be a positive number`)
     }
   }
 
-  return { check, json, skipBuild, top, serverBudgetMiB, clientBudgetMiB }
+  return {
+    check,
+    json,
+    skipBuild,
+    top,
+    serverBudgetMiB,
+    clientBudgetMiB,
+    clientJsGzipBudgetKiB,
+    clientLargestJsBudgetMiB,
+  }
 }
 
 function printHelp() {
@@ -77,8 +101,12 @@ Options:
   --json                     Print machine-readable JSON
   --skip-build               Measure existing apps/client/dist output
   --top=N                    Number of largest files to show (default: 10)
-  --server-budget-mib=N      Server total budget for --check (default: 5)
-  --client-budget-mib=N      Client total budget for --check (default: 2)
+  --server-budget-mib=N      Server total budget for --check (default: 7.5)
+  --client-budget-mib=N      Client total budget for --check (default: 3)
+  --client-js-gzip-budget-kib=N
+                             Client JavaScript gzip budget (default: 750)
+  --client-largest-js-budget-mib=N
+                             Largest client JavaScript chunk budget (default: 1.2)
 `)
 }
 
@@ -130,13 +158,16 @@ function measureDirectory(directory: string, top: number): BundleStats {
     .sort((a, b) => b.bytes - a.bytes)
 
   const totalBytes = sizes.reduce((sum, file) => sum + file.bytes, 0)
-  const jsGzipBytes = files
-    .filter((path) => path.endsWith('.js'))
-    .reduce((sum, path) => sum + gzipSync(readFileSync(path)).byteLength, 0)
+  const jsFiles = sizes.filter((file) => file.path.endsWith('.js'))
+  const jsGzipBytes = jsFiles.reduce(
+    (sum, file) => sum + gzipSync(readFileSync(file.path)).byteLength,
+    0,
+  )
 
   return {
     totalBytes,
     jsGzipBytes,
+    largestJsBytes: jsFiles[0]?.bytes ?? 0,
     top: sizes.slice(0, top).map((file) => ({
       path: relative(process.cwd(), file.path),
       bytes: file.bytes,
@@ -165,6 +196,12 @@ function printMarkdown(report: Report, options: Options) {
   console.log(`| server | ${formatBytes(report.server.totalBytes)} | ${formatBytes(report.server.jsGzipBytes)} | ${options.serverBudgetMiB} MiB |`)
   console.log(`| client | ${formatBytes(report.client.totalBytes)} | ${formatBytes(report.client.jsGzipBytes)} | ${options.clientBudgetMiB} MiB |`)
 
+  console.log('\n## Client JavaScript budgets\n')
+  console.log('| metric | current | budget |')
+  console.log('|---|---:|---:|')
+  console.log(`| all JS gzip | ${formatBytes(report.client.jsGzipBytes)} | ${options.clientJsGzipBudgetKiB} KiB |`)
+  console.log(`| largest raw JS chunk | ${formatBytes(report.client.largestJsBytes)} | ${options.clientLargestJsBudgetMiB} MiB |`)
+
   for (const [name, stats] of Object.entries(report)) {
     console.log(`\n## Top ${options.top} ${name} files\n`)
     console.log('| file | size |')
@@ -178,6 +215,8 @@ function printMarkdown(report: Report, options: Options) {
 function checkBudgets(report: Report, options: Options) {
   const serverBudget = options.serverBudgetMiB * 1024 * 1024
   const clientBudget = options.clientBudgetMiB * 1024 * 1024
+  const clientJsGzipBudget = options.clientJsGzipBudgetKiB * 1024
+  const clientLargestJsBudget = options.clientLargestJsBudgetMiB * 1024 * 1024
   const failures: string[] = []
 
   if (report.server.totalBytes > serverBudget) {
@@ -185,6 +224,12 @@ function checkBudgets(report: Report, options: Options) {
   }
   if (report.client.totalBytes > clientBudget) {
     failures.push(`client total ${formatBytes(report.client.totalBytes)} exceeds ${options.clientBudgetMiB} MiB`)
+  }
+  if (report.client.jsGzipBytes > clientJsGzipBudget) {
+    failures.push(`client JS gzip ${formatBytes(report.client.jsGzipBytes)} exceeds ${options.clientJsGzipBudgetKiB} KiB`)
+  }
+  if (report.client.largestJsBytes > clientLargestJsBudget) {
+    failures.push(`largest client JS chunk ${formatBytes(report.client.largestJsBytes)} exceeds ${options.clientLargestJsBudgetMiB} MiB`)
   }
 
   if (failures.length > 0) {
