@@ -4,9 +4,9 @@ import * as Effect from 'effect/Effect'
 import { expect } from '@effect/vitest'
 import PatchPlaneInfra from '../../alchemy.run'
 
-const liveInfraTest = false
-const destroyAfterLiveTest = false
-const liveStage = 'test'
+const liveInfraTest = process.env.PATCHPLANE_LIVE_INFRA_TEST === 'true'
+const destroyAfterLiveTest = process.env.PATCHPLANE_DESTROY_AFTER_LIVE_INFRA_TEST === 'true'
+const liveStage = process.env.PATCHPLANE_LIVE_INFRA_STAGE ?? 'test'
 
 const { test, deploy, destroy } = Test.make({
   providers: Cloudflare.providers(),
