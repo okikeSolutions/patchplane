@@ -8,7 +8,7 @@ export const Route = createFileRoute('/api/auth/callback')({
           await import('@workos/authkit-tanstack-react-start')
 
         return handleCallbackRoute({
-          errorRedirectUrl: '/app?auth=failed',
+          errorRedirectUrl: '/?auth=failed',
         })(args)
       },
     },
