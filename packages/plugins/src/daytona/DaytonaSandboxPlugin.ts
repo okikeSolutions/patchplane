@@ -378,84 +378,93 @@ export function makeDaytonaSandboxLayer(
     Effect.gen(function* () {
       const config = yield* DaytonaConfig
 
+      const withDaytonaClient = <A, E, R>(
+        use: (daytona: DaytonaClientLike) => Effect.Effect<A, E, R>,
+      ) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => makeClient(config)),
+          use,
+          (daytona) => Effect.tryPromise({
+            try: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
+            catch: sandboxBoundaryError('daytona.disposeClient', 'Daytona client disposal failed'),
+          }).pipe(Effect.ignore),
+        )
+
       const runWithSandbox = <A>(input: {
         readonly traceId: string
         readonly repositoryFullName: string
         readonly envVars?: Record<string, string> | undefined
         readonly retainAfterUse?: boolean | undefined
       }, use: (sandbox: DaytonaSandboxLike) => Effect.Effect<A, unknown>) =>
-        Effect.acquireUseRelease(
-          Effect.gen(function* () {
-            const daytona = makeClient(config)
-            const retainSandboxes = shouldRetainDaytonaSandboxes(config)
-            const sandbox = yield* Effect.tryPromise({
+        withDaytonaClient((daytona) => {
+          const retainSandboxes = shouldRetainDaytonaSandboxes(config)
+          return Effect.acquireUseRelease(
+            Effect.tryPromise({
               try: () => daytona.create(
                 toDaytonaCreateSandboxParams(config, input),
                 { timeout: DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS },
               ),
               catch: sandboxBoundaryError('daytona.createSandbox', 'Daytona failed to create sandbox'),
-            })
-
-            yield* Effect.logInfo('Created Daytona sandbox', {
-              traceId: input.traceId,
-              sandboxId: sandbox.id,
-              sandboxName: sandbox.name,
-              target: sandbox.target,
-              retainSandboxes: retainSandboxes || input.retainAfterUse === true,
-            })
-
-            yield* Effect.tryPromise({
-              try: () => sandbox.waitUntilStarted(DAYTONA_DEFAULT_START_TIMEOUT_SECONDS),
-              catch: sandboxBoundaryError('daytona.waitUntilStarted', 'Daytona sandbox failed to start'),
-            })
-
-            yield* Effect.logInfo('Started Daytona sandbox', {
-              traceId: input.traceId,
-              sandboxId: sandbox.id,
-              state: sandbox.state,
-            })
-
-            return { daytona, sandbox, retainSandboxes }
-          }),
-          ({ sandbox }) => use(sandbox),
-          ({ daytona, sandbox, retainSandboxes }) =>
-            Effect.gen(function* () {
-              if (retainSandboxes || input.retainAfterUse === true) {
-                yield* Effect.logInfo('Retaining Daytona sandbox for inspection', {
+            }),
+            (sandbox) =>
+              Effect.gen(function* () {
+                yield* Effect.logInfo('Created Daytona sandbox', {
                   traceId: input.traceId,
                   sandboxId: sandbox.id,
+                  sandboxName: sandbox.name,
+                  target: sandbox.target,
+                  retainSandboxes: retainSandboxes || input.retainAfterUse === true,
                 })
-              } else {
-                const deleteExit = yield* deleteSandboxWithRetries({
-                  daytona,
-                  sandbox,
-                  traceId: input.traceId,
-                  timeoutSeconds: DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS,
-                  retryAttempts: DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS,
-                }).pipe(
-                  Effect.mapError(sandboxBoundaryError('daytona.deleteSandbox', 'Daytona failed to delete sandbox')),
-                  Effect.exit,
-                )
 
-                if (Exit.isSuccess(deleteExit)) {
-                  yield* Effect.logInfo('Deleted Daytona sandbox', {
+                yield* Effect.tryPromise({
+                  try: () => sandbox.waitUntilStarted(DAYTONA_DEFAULT_START_TIMEOUT_SECONDS),
+                  catch: sandboxBoundaryError('daytona.waitUntilStarted', 'Daytona sandbox failed to start'),
+                })
+
+                yield* Effect.logInfo('Started Daytona sandbox', {
+                  traceId: input.traceId,
+                  sandboxId: sandbox.id,
+                  state: sandbox.state,
+                })
+
+                return yield* use(sandbox)
+              }),
+            (sandbox, exit) =>
+              Effect.gen(function* () {
+                const shouldRetain = retainSandboxes ||
+                  (input.retainAfterUse === true && Exit.isSuccess(exit))
+                if (shouldRetain) {
+                  yield* Effect.logInfo('Retaining Daytona sandbox for inspection', {
                     traceId: input.traceId,
                     sandboxId: sandbox.id,
                   })
                 } else {
-                  yield* Effect.logWarning('Failed to delete Daytona sandbox after retries', {
+                  const deleteExit = yield* deleteSandboxWithRetries({
+                    daytona,
+                    sandbox,
                     traceId: input.traceId,
-                    sandboxId: sandbox.id,
-                  })
-                }
-              }
+                    timeoutSeconds: DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS,
+                    retryAttempts: DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS,
+                  }).pipe(
+                    Effect.mapError(sandboxBoundaryError('daytona.deleteSandbox', 'Daytona failed to delete sandbox')),
+                    Effect.exit,
+                  )
 
-              yield* Effect.tryPromise({
-                try: () => daytona[Symbol.asyncDispose]?.call(daytona) ?? Promise.resolve(),
-                catch: sandboxBoundaryError('daytona.disposeClient', 'Daytona client disposal failed'),
-              }).pipe(Effect.ignore)
-            }),
-        )
+                  if (Exit.isSuccess(deleteExit)) {
+                    yield* Effect.logInfo('Deleted Daytona sandbox', {
+                      traceId: input.traceId,
+                      sandboxId: sandbox.id,
+                    })
+                  } else {
+                    yield* Effect.logWarning('Failed to delete Daytona sandbox after retries', {
+                      traceId: input.traceId,
+                      sandboxId: sandbox.id,
+                    })
+                  }
+                }
+              }),
+          )
+        })
 
       const cloneRepository = (sandbox: DaytonaSandboxLike, input: {
         readonly repositoryUrl: string
@@ -653,75 +662,76 @@ export function makeDaytonaSandboxLayer(
             ),
           ),
         abortRuntimeSession: (input) =>
-          Effect.gen(function* () {
-            const daytona = makeClient(config)
-            const sandbox = yield* Effect.tryPromise({
-              try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-              catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime abort'),
+          withDaytonaClient((daytona) =>
+            Effect.gen(function* () {
+              const sandbox = yield* Effect.tryPromise({
+                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime abort'),
+              })
+              const pi = makePiRpcCommandSender({
+                sendInput: (data) => Effect.tryPromise({
+                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
+                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send abort to runtime session'),
+                }),
+              })
+              yield* pi.abort({ id: `${input.traceId}:abort` })
+              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
             })
-            const pi = makePiRpcCommandSender({
-              sendInput: (data) => Effect.tryPromise({
-                try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send abort to runtime session'),
-              }),
-            })
-            yield* pi.abort({ id: `${input.traceId}:abort` })
-            return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-          }).pipe(Effect.ensuring(Effect.tryPromise({
-            try: () => makeClient(config)[Symbol.asyncDispose]?.() ?? Promise.resolve(),
-            catch: sandboxBoundaryError('daytona.disposeClient', 'Daytona client disposal failed'),
-          }).pipe(Effect.ignore))),
+          ),
         steerRuntimeSession: (input) =>
-          Effect.gen(function* () {
-            const daytona = makeClient(config)
-            const sandbox = yield* Effect.tryPromise({
-              try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-              catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime steering'),
+          withDaytonaClient((daytona) =>
+            Effect.gen(function* () {
+              const sandbox = yield* Effect.tryPromise({
+                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime steering'),
+              })
+              const pi = makePiRpcCommandSender({
+                sendInput: (data) => Effect.tryPromise({
+                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
+                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send steering to runtime session'),
+                }),
+              })
+              yield* pi.steer({ id: `${input.traceId}:steer`, message: input.message })
+              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
             })
-            const pi = makePiRpcCommandSender({
-              sendInput: (data) => Effect.tryPromise({
-                try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send steering to runtime session'),
-              }),
-            })
-            yield* pi.steer({ id: `${input.traceId}:steer`, message: input.message })
-            return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-          }),
+          ),
         followUpRuntimeSession: (input) =>
-          Effect.gen(function* () {
-            const daytona = makeClient(config)
-            const sandbox = yield* Effect.tryPromise({
-              try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-              catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime follow-up'),
+          withDaytonaClient((daytona) =>
+            Effect.gen(function* () {
+              const sandbox = yield* Effect.tryPromise({
+                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime follow-up'),
+              })
+              const pi = makePiRpcCommandSender({
+                sendInput: (data) => Effect.tryPromise({
+                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
+                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send follow-up to runtime session'),
+                }),
+              })
+              yield* pi.followUp({ id: `${input.traceId}:follow-up`, message: input.message })
+              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
             })
-            const pi = makePiRpcCommandSender({
-              sendInput: (data) => Effect.tryPromise({
-                try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send follow-up to runtime session'),
-              }),
-            })
-            yield* pi.followUp({ id: `${input.traceId}:follow-up`, message: input.message })
-            return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-          }),
+          ),
         terminateRuntimeSession: (input) =>
-          Effect.gen(function* () {
-            const daytona = makeClient(config)
-            const sandbox = yield* Effect.tryPromise({
-              try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-              catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime termination'),
+          withDaytonaClient((daytona) =>
+            Effect.gen(function* () {
+              const sandbox = yield* Effect.tryPromise({
+                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime termination'),
+              })
+              yield* Effect.tryPromise({
+                try: async () => {
+                  try {
+                    await sandbox.process.deleteSession(input.sessionId)
+                  } catch (cause) {
+                    if (!isDaytonaNotFoundCause(cause)) throw cause
+                  }
+                },
+                catch: sandboxBoundaryError('daytona.deleteSession', 'Daytona failed to terminate runtime session'),
+              })
+              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'terminated' as const }
             })
-            yield* Effect.tryPromise({
-              try: async () => {
-                try {
-                  await sandbox.process.deleteSession(input.sessionId)
-                } catch (cause) {
-                  if (!isDaytonaNotFoundCause(cause)) throw cause
-                }
-              },
-              catch: sandboxBoundaryError('daytona.deleteSession', 'Daytona failed to terminate runtime session'),
-            })
-            return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'terminated' as const }
-          }),
+          ),
         runRepositoryCommand: (input) =>
           Effect.gen(function* () {
             const startedAt = Date.now()

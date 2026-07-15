@@ -62,10 +62,12 @@ function fakeClient(sandbox: DaytonaSandboxLike, overrides: Partial<DaytonaClien
 }
 
 function testLayer(client: DaytonaClientLike, env: Record<string, string> = {}) {
-  return makeDaytonaSandboxLayer(() => client).pipe(
-    Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-      env: { DAYTONA_API_KEY: 'daytona-key', ...env },
-    }))),
+  const configProvider = ConfigProvider.layer(ConfigProvider.fromEnv({
+    env: { DAYTONA_API_KEY: 'daytona-key', ...env },
+  }))
+  return Layer.merge(
+    makeDaytonaSandboxLayer(() => client).pipe(Layer.provide(configProvider)),
+    configProvider,
   )
 }
 
@@ -178,6 +180,22 @@ describe('Daytona sandbox boundary adapters', () => {
     }),
   )
 
+  it.effect('deletes sandbox and disposes the client when startup fails', () => {
+    const sandbox = fakeSandbox({
+      waitUntilStarted: vi.fn(async () => { throw new Error('start failed') }),
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const exit = yield* service.runRepositoryCommand(commandInput).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
   it.effect('deletes sandbox when repository clone fails', () => {
     const sandbox = fakeSandbox({
       git: { clone: vi.fn(async () => { throw new Error('clone failed') }) },
@@ -200,6 +218,56 @@ describe('Daytona sandbox boundary adapters', () => {
       expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
       expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
     }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('deletes an automatically retained RPC sandbox when setup fails', () => {
+    const sandbox = fakeSandbox({
+      git: { clone: vi.fn(async () => { throw new Error('clone failed') }) },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const exit = yield* service.runRepositoryAgent({
+        traceId: 'trace-rpc-failure',
+        repositoryUrl: commandInput.repositoryUrl,
+        repositoryFullName: commandInput.repositoryFullName,
+        prompt: 'Inspect the repository.',
+        provider: 'openai',
+        model: 'gpt-5.5',
+        mode: 'rpc',
+      }).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
+    }).pipe(Effect.provide(testLayer(client, { OPENAI_API_KEY: 'test-key' })))
+  })
+
+  it.effect('preserves an RPC sandbox on failure when inspection retention is explicit', () => {
+    const sandbox = fakeSandbox({
+      git: { clone: vi.fn(async () => { throw new Error('clone failed') }) },
+    })
+    const client = fakeClient(sandbox)
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      yield* service.runRepositoryAgent({
+        traceId: 'trace-rpc-retained-failure',
+        repositoryUrl: commandInput.repositoryUrl,
+        repositoryFullName: commandInput.repositoryFullName,
+        prompt: 'Inspect the repository.',
+        provider: 'openai',
+        model: 'gpt-5.5',
+        mode: 'rpc',
+      }).pipe(Effect.exit)
+
+      expect(client.delete).not.toHaveBeenCalled()
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
+    }).pipe(Effect.provide(testLayer(client, {
+      DAYTONA_RETAIN_SANDBOXES: 'true',
+      OPENAI_API_KEY: 'test-key',
+    })))
   })
 
   it.effect('deletes sandbox and command session when command execution throws', () => {
@@ -609,6 +677,7 @@ describe('Daytona sandbox boundary adapters', () => {
 
       expect(result.status).toBe('terminated')
       expect(sandbox.process.deleteSession).toHaveBeenCalledWith('session-1')
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
     }).pipe(Effect.provide(testLayer(client)))
   })
 
