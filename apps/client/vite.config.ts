@@ -23,23 +23,13 @@ const config = defineConfig({
             return 'react-vendor'
           }
 
-          if (
-            id.includes('/@shadergradient/') ||
-            id.includes('/@react-three/') ||
-            id.includes('/three/') ||
-            id.includes('/three-stdlib/') ||
-            id.includes('/camera-controls/')
-          ) {
-            return 'shader-gradient'
-          }
-
           return undefined
         },
       },
     },
   },
   server: {
-    allowedHosts: ['.ngrok-free.app'],
+    allowedHosts: ['.ngrok-free.app', 'cmux-loopback.localtest.me'],
   },
   plugins: [
     devtools(),
