@@ -6,7 +6,6 @@ import {
   LifeBuoyIcon,
   ScrollTextIcon,
   Settings2Icon,
-  ShieldCheckIcon,
   WorkflowIcon,
 } from 'lucide-react'
 import * as m from '@/paraglide/messages'
@@ -38,14 +37,14 @@ const navMain = [
 ]
 
 const navSecondary = [
-  { title: 'Trust model', href: '/about', icon: ShieldCheckIcon },
   { title: 'Support', href: '#support', icon: LifeBuoyIcon },
   { title: 'Settings', href: '#settings', icon: Settings2Icon },
 ]
 
 export function AppSidebar() {
   const { user, signOut } = useAuth()
-  const displayName = user?.firstName ?? user?.email ?? m.app_operator_fallback()
+  const displayName =
+    user?.firstName ?? user?.email ?? m.app_operator_fallback()
 
   return (
     <Sidebar className="border-sidebar-border/60" collapsible="icon">

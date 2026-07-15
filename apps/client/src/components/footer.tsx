@@ -1,4 +1,3 @@
-import { Link } from '@tanstack/react-router'
 import * as m from '@/paraglide/messages'
 import { BrandLogo } from './brand-logo'
 import { GitHubIcon } from './github-icon'
@@ -19,27 +18,36 @@ export default function Footer() {
             aria-label="Footer navigation"
             className="flex flex-wrap gap-4 text-muted-foreground"
           >
-            <Link to="/" className="transition-colors hover:text-foreground">
-              {m.header_nav_landing()}
-            </Link>
-            <Link to="/app" className="transition-colors hover:text-foreground">
-              {m.header_nav_product()}
-            </Link>
-            <Link
-              to="/about"
-              className="transition-colors hover:text-foreground"
-            >
-              {m.header_nav_architecture()}
-            </Link>
             <a
               href="https://github.com/okikeSolutions/patchplane"
-              target="_blank"
-              rel="noreferrer"
               className="inline-flex items-center gap-2 transition-colors hover:text-foreground"
             >
               <GitHubIcon className="size-4" />
               GitHub
-              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+            <a
+              href="https://github.com/okikeSolutions/patchplane#readme"
+              className="transition-colors hover:text-foreground"
+            >
+              {m.landing_capabilities()}
+            </a>
+            <a
+              href="https://github.com/okikeSolutions/patchplane#quick-start"
+              className="transition-colors hover:text-foreground"
+            >
+              {m.landing_quick_start()}
+            </a>
+            <a
+              href="https://github.com/okikeSolutions/patchplane/blob/main/CONTRIBUTING.md"
+              className="transition-colors hover:text-foreground"
+            >
+              {m.landing_contributing()}
+            </a>
+            <a
+              href="https://github.com/okikeSolutions/patchplane/blob/main/ROADMAP.md"
+              className="transition-colors hover:text-foreground"
+            >
+              {m.landing_roadmap()}
             </a>
           </nav>
           <p className="m-0 text-muted-foreground">&copy; {year} patchplane</p>

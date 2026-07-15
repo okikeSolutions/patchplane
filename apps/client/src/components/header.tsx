@@ -1,22 +1,12 @@
-import { Link, useRouterState } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import * as m from '@/paraglide/messages'
 import { buttonVariants } from '@/components/ui/button'
-import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-} from '@/components/ui/navigation-menu'
 import LocaleSwitcher from './locale-switcher'
 import { ModeToggle } from './mode-toggle'
 import { BrandLogo } from './brand-logo'
 import { GitHubIcon } from './github-icon'
 
 export default function Header() {
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
-  })
-
   return (
     <header className="sticky top-0 z-50 min-h-(--header-height) border-b border-(--landing-border) bg-(--surface-veil) backdrop-blur-[18px]">
       <a
@@ -25,7 +15,7 @@ export default function Header() {
       >
         Skip to main content
       </a>
-      <nav className="mx-auto flex min-h-(--header-height) w-[min(1120px,calc(100%-2rem))] items-center justify-between gap-4 py-[0.85rem] max-[720px]:flex-col max-[720px]:items-start">
+      <nav className="mx-auto flex min-h-(--header-height) w-[min(1120px,calc(100%-2rem))] items-center justify-between gap-4 py-[0.85rem]">
         <div className="flex min-w-0 flex-col gap-[0.2rem]">
           <Link
             to="/"
@@ -38,39 +28,7 @@ export default function Header() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-[0.6rem] max-[720px]:w-full max-[720px]:justify-start">
-          <NavigationMenu className="min-w-0 flex-none justify-start">
-            <NavigationMenuList className="gap-1">
-              <NavigationMenuItem>
-                <NavigationMenuLink
-                  render={<Link to="/" />}
-                  active={pathname === '/'}
-                  className="rounded-full px-3"
-                >
-                  {m.header_nav_landing()}
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink
-                  render={<Link to="/app" />}
-                  active={pathname.startsWith('/app')}
-                  className="rounded-full px-3"
-                >
-                  {m.header_nav_product()}
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink
-                  render={<Link to="/about" />}
-                  active={pathname.startsWith('/about')}
-                  className="rounded-full px-3"
-                >
-                  {m.header_nav_architecture()}
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-            </NavigationMenuList>
-          </NavigationMenu>
-
+        <div className="flex flex-wrap items-center justify-end gap-[0.6rem]">
           <a
             href="/api/auth/sign-in?returnPathname=/app"
             className={buttonVariants({ variant: 'default', size: 'sm' })}
@@ -80,8 +38,6 @@ export default function Header() {
 
           <a
             href="https://github.com/okikeSolutions/patchplane"
-            target="_blank"
-            rel="noreferrer"
             className={buttonVariants({
               variant: 'ghost',
               size: 'icon-sm',

@@ -55,10 +55,6 @@ export const translatedPathnames = createTranslatedPathnames({
     en: '/',
     de: '/',
   },
-  '/about': {
-    en: '/about',
-    de: '/ueber',
-  },
   '/app': {
     en: '/app',
     de: '/app',

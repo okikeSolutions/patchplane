@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 
-import {
-  cleanup,
-  render,
-  screen,
-} from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from './app-sidebar'
@@ -57,7 +53,9 @@ describe('AppSidebar', () => {
     )
 
     const sidebar = document.querySelector('[data-slot="sidebar"]')
-    const sidebarContainer = document.querySelector('[data-slot="sidebar-container"]')
+    const sidebarContainer = document.querySelector(
+      '[data-slot="sidebar-container"]',
+    )
 
     expect(sidebar?.getAttribute('data-variant')).toBe('sidebar')
     expect(sidebarContainer?.className).toContain('border-sidebar-border/60')
@@ -68,7 +66,7 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: 'Sources' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Sandboxes' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Logs' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Trust model' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Trust model' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Architecture' })).toBeNull()
   })
