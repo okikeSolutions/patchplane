@@ -43,14 +43,16 @@ export function LandingShaderBackground() {
   }, [revealShader])
 
   useEffect(() => {
-    if (!isRevealing) return
+    if (!isRevealing) return undefined
 
     const removalTimeout = window.setTimeout(
       () => setIsLoaderVisible(false),
       loaderExitDurationMs,
     )
 
-    return () => window.clearTimeout(removalTimeout)
+    return () => {
+      window.clearTimeout(removalTimeout)
+    }
   }, [isRevealing])
 
   return (
@@ -68,12 +70,16 @@ export function LandingShaderBackground() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_38%,rgb(245_242_240/0.12)_0%,rgb(245_242_240/0.04)_38%,transparent_68%)] dark:bg-[radial-gradient(ellipse_at_50%_38%,transparent_0%,rgb(10_14_24/0.08)_55%,rgb(10_14_24/0.2)_100%)]" />
       </div>
 
-      {isMounted && isLoaderVisible
-        ? createPortal(
+      {isLoaderVisible ? (
+        isMounted ? (
+          createPortal(
             <ShaderLoader isRevealing={isRevealing} />,
             document.body,
           )
-        : null}
+        ) : (
+          <ShaderLoader isRevealing={isRevealing} />
+        )
+      ) : null}
     </>
   )
 }

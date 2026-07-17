@@ -71,7 +71,7 @@ const timelineSteps = [
   },
 ] as const
 
-function LandingPage() {
+export function LandingPage() {
   return (
     <main
       id="main-content"

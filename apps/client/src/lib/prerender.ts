@@ -1,7 +1,7 @@
-import { localizeHref } from '../paraglide/runtime'
+import { locales, localizeHref } from '../paraglide/runtime'
 
-export const prerenderRoutes = ['/'].map((path) => ({
-  path: localizeHref(path),
+export const prerenderRoutes = locales.map((locale) => ({
+  path: localizeHref('/', { locale }),
   prerender: {
     enabled: true,
   },

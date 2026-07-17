@@ -6,10 +6,14 @@ import {
   useEffect,
   useState,
 } from 'react'
-import { setThemeServerFn, type T as Theme } from '@/lib/theme'
+import type { T as Theme } from '@/lib/theme'
 
 type ThemeContextVal = { theme: Theme; setTheme: (val: Theme) => void }
-type Props = PropsWithChildren<{ theme: Theme }>
+type Props = PropsWithChildren<{
+  theme: Theme
+  persistence?: 'local' | 'server'
+  persistTheme?: (theme: Theme) => Promise<unknown>
+}>
 
 const ThemeContext = createContext<ThemeContextVal | null>(null)
 
@@ -32,13 +36,33 @@ function applyTheme(theme: Theme) {
   root.classList.add(resolvedTheme)
 }
 
-export function ThemeProvider({ children, theme }: Props) {
+const localThemeKey = 'patchplane-theme'
+
+export function ThemeProvider({
+  children,
+  theme,
+  persistence = 'server',
+  persistTheme,
+}: Props) {
   const router = useRouter()
   const [currentTheme, setCurrentTheme] = useState(theme)
 
   useEffect(() => {
     setCurrentTheme(theme)
   }, [theme])
+
+  useEffect(() => {
+    if (persistence === 'local') {
+      const storedTheme = window.localStorage.getItem(localThemeKey)
+      if (
+        storedTheme === 'light' ||
+        storedTheme === 'dark' ||
+        storedTheme === 'system'
+      ) {
+        setCurrentTheme(storedTheme)
+      }
+    }
+  }, [persistence])
 
   useEffect(() => {
     applyTheme(currentTheme)
@@ -56,7 +80,16 @@ export function ThemeProvider({ children, theme }: Props) {
 
   function setTheme(val: Theme) {
     setCurrentTheme(val)
-    void setThemeServerFn({ data: val }).then(() => router.invalidate())
+    if (persistence === 'local') {
+      window.localStorage.setItem(localThemeKey, val)
+      return
+    }
+
+    if (persistTheme === undefined) {
+      throw new Error('Server theme persistence requires persistTheme')
+    }
+
+    void persistTheme(val).then(() => router.invalidate())
   }
 
   return (

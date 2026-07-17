@@ -6,9 +6,11 @@ import { devtools } from '@tanstack/devtools-vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { prerenderRoutes } from './src/lib/prerender.ts'
 import { translatedPathnames } from './src/lib/translated-pathnames.ts'
 
 const configDir = dirname(fileURLToPath(import.meta.url))
+const isLandingBuild = process.env.VITE_PATCHPLANE_SURFACE === 'landing'
 const cloudflareWorkersTestStub = resolve(
   configDir,
   'src/test/cloudflare-workers.ts',
@@ -40,9 +42,30 @@ const config = defineConfig({
       outputStructure: 'message-modules',
       cookieName: 'PARAGLIDE_LOCALE',
       strategy: ['url', 'cookie', 'preferredLanguage', 'baseLocale'],
-      urlPatterns: translatedPathnames,
+      urlPatterns: isLandingBuild
+        ? translatedPathnames.filter(({ pattern }) => pattern === '')
+        : translatedPathnames,
     }),
-    tanstackStart(),
+    tanstackStart(
+      isLandingBuild
+        ? {
+            router: {
+              entry: 'landing/router',
+              routesDirectory: 'landing/routes',
+              generatedRouteTree: 'landing/routeTree.gen.ts',
+            },
+            start: { entry: 'landing/start' },
+            prerender: {
+              enabled: true,
+              autoStaticPathsDiscovery: false,
+              crawlLinks: false,
+              failOnError: true,
+            },
+            pages: prerenderRoutes,
+            sitemap: { enabled: false },
+          }
+        : undefined,
+    ),
     viteReact(),
   ],
   resolve: {

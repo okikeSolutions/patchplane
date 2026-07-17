@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "bun run i18n:compile && vite build",
+    "build:landing": "bun run i18n:compile && VITE_PATCHPLANE_SURFACE=landing vite build && bun src/scripts/check-landing-build.ts",
     "preview": "vite preview",
     "test": "bun run i18n:compile && vitest run",
     "smoke": "bun src/scripts/smoke-workflow.ts",

@@ -2,6 +2,8 @@ import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import { Path } from 'effect/Path'
 import { clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
 import { createPhysicalName } from './apps/infra/utils.ts'
@@ -25,11 +27,46 @@ export default Alchemy.Stack(
   Effect.gen(function* () {
     const rawStage = yield* Alchemy.Stage
     const stage = createPhysicalName({ id: '', stage: rawStage, prefix: rawStage, fallback: 'dev' })
+    const isLandingStage =
+      rawStage === 'prod' || rawStage.startsWith('landing-')
+    const path = yield* Path
+
+    if (isLandingStage) {
+      const fileSystem = yield* FileSystem.FileSystem
+      const publicDirectory = path.resolve(import.meta.dirname, 'apps/client/public')
+      const [headers, redirects] = yield* Effect.all([
+        fileSystem.readFileString(path.join(publicDirectory, '_headers')),
+        fileSystem.readFileString(path.join(publicDirectory, '_redirects')),
+      ])
+      const configuredProductionDomain = yield* Config.option(
+        Config.string('PATCHPLANE_PRODUCTION_DOMAIN'),
+      )
+      const productionDomain =
+        Option.getOrUndefined(configuredProductionDomain)?.trim() || undefined
+      const client = yield* Cloudflare.Website.StaticSite('Client', {
+        cwd: path.resolve(import.meta.dirname, 'apps/client'),
+        command: 'bun run build:landing',
+        outdir: 'dist/client',
+        domain: rawStage === 'prod' ? productionDomain : undefined,
+        assets: {
+          headers,
+          redirects,
+          htmlHandling: 'drop-trailing-slash',
+          notFoundHandling: '404-page',
+        },
+      })
+
+      return {
+        stage,
+        surface: 'landing' as const,
+        clientUrl: client.url,
+      }
+    }
+
     const retentionDays = Math.max(1, Math.floor(artifactRetentionDays))
     const retentionSeconds = retentionDays * 24 * 60 * 60
     const rateLimitPerMinute = Math.max(1, Math.floor(aiGatewayRateLimitPerMinute))
     const collectAiGatewayLogs = aiGatewayCollectLogs
-    const path = yield* Path
 
     const evidenceBucket = yield* Cloudflare.R2.Bucket('EvidenceArtifacts', {
       name: createPhysicalName({
@@ -107,6 +144,7 @@ export default Alchemy.Stack(
 
     return {
       stage,
+      surface: 'full' as const,
       evidenceBucketName: evidenceBucket.bucketName,
       evidenceBucketAccountId: evidenceBucket.accountId,
       evidenceRetentionDays: retentionDays,

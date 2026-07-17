@@ -35,7 +35,10 @@ import {
 import { cn } from '@/lib/utils'
 
 const repositoryUrl = 'https://github.com/okikeSolutions/patchplane'
-const signInUrl = '/api/auth/sign-in?returnPathname=/app'
+const signInUrl =
+  import.meta.env.VITE_PATCHPLANE_SURFACE === 'landing'
+    ? undefined
+    : '/api/auth/sign-in?returnPathname=/app'
 
 const navigationItems = [
   { href: '#how-it-works', label: m.header_nav_how },
@@ -43,7 +46,11 @@ const navigationItems = [
   { href: '#open-source', label: m.header_nav_open_source },
 ] as const
 
-export default function Header() {
+export default function Header({
+  showSignIn = true,
+}: {
+  readonly showSignIn?: boolean
+}) {
   return (
     <header className="relative z-50 border-b border-(--landing-border) bg-background">
       <a
@@ -75,12 +82,14 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-1.5 max-[860px]:hidden">
-          <a
-            href={signInUrl}
-            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-          >
-            {m.app_sign_in()}
-          </a>
+          {showSignIn && signInUrl !== undefined ? (
+            <a
+              href={signInUrl}
+              className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+            >
+              {m.app_sign_in()}
+            </a>
+          ) : null}
           <a
             href={repositoryUrl}
             className={cn(buttonVariants({ size: 'sm' }), 'rounded-full px-4')}
@@ -102,14 +111,14 @@ export default function Header() {
             <GitHubIcon data-icon="inline-start" />
             GitHub
           </a>
-          <MobileNavigation />
+          <MobileNavigation showSignIn={showSignIn} />
         </div>
       </nav>
     </header>
   )
 }
 
-function MobileNavigation() {
+function MobileNavigation({ showSignIn }: { readonly showSignIn: boolean }) {
   return (
     <Sheet>
       <SheetTrigger render={<Button variant="ghost" size="icon-sm" />}>
@@ -134,6 +143,7 @@ function MobileNavigation() {
               render={
                 <a
                   href={item.href}
+                  aria-label={item.label()}
                   className="group flex items-center justify-between rounded-lg px-3 py-4 text-xl tracking-[-0.035em] transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                 />
               }
@@ -152,15 +162,17 @@ function MobileNavigation() {
             <GitHubIcon data-icon="inline-start" />
             {m.landing_view_github()}
           </a>
-          <a
-            href={signInUrl}
-            className={cn(
-              buttonVariants({ variant: 'outline' }),
-              'w-full rounded-full',
-            )}
-          >
-            {m.app_sign_in()}
-          </a>
+          {showSignIn && signInUrl !== undefined ? (
+            <a
+              href={signInUrl}
+              className={cn(
+                buttonVariants({ variant: 'outline' }),
+                'w-full rounded-full',
+              )}
+            >
+              {m.app_sign_in()}
+            </a>
+          ) : null}
           <HeaderPreferencesMenu showLabel />
         </SheetFooter>
       </SheetContent>

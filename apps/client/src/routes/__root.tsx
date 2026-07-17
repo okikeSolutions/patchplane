@@ -22,7 +22,7 @@ import Header from "@/components/header";
 import { ThemeProvider } from "@/components/theme-provider";
 import appCss from "../styles.css?url";
 import { cn } from "@/lib/utils";
-import { getThemeServerFn } from "@/lib/theme";
+import { getThemeServerFn, setThemeServerFn } from "@/lib/theme";
 import { getInitialAuthServerFn } from "@/lib/workos-initial-auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -103,7 +103,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="min-h-screen wrap-anywhere bg-background bg-[radial-gradient(circle_at_top_left,var(--hero-glow),transparent_30rem),radial-gradient(circle_at_85%_15%,var(--hero-glow-soft),transparent_24rem),linear-gradient(180deg,rgb(255_255_255/0.02),transparent_28rem)] bg-fixed font-sans text-foreground antialiased selection:bg-primary/28">
-        <ThemeProvider theme={theme}>
+        <ThemeProvider
+          theme={theme}
+          persistTheme={(nextTheme) =>
+            setThemeServerFn({ data: nextTheme })
+          }
+        >
           <TooltipProvider>
             <AuthKitProvider initialAuth={initialAuth}>
               <ConvexProviderWithAuthKit
