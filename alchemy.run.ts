@@ -1,6 +1,7 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Config from 'effect/Config'
+import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
@@ -34,9 +35,15 @@ export default Alchemy.Stack(
     if (isLandingStage) {
       const fileSystem = yield* FileSystem.FileSystem
       const publicDirectory = path.resolve(import.meta.dirname, 'apps/client/public')
+      const readStaticAsset = (fileName: string) =>
+        fileSystem.readFileString(path.join(publicDirectory, fileName)).pipe(
+          Effect.mapError((error) => new Config.ConfigError(new ConfigProvider.SourceError({
+            message: error.message,
+          }))),
+        )
       const [headers, redirects] = yield* Effect.all([
-        fileSystem.readFileString(path.join(publicDirectory, '_headers')),
-        fileSystem.readFileString(path.join(publicDirectory, '_redirects')),
+        readStaticAsset('_headers'),
+        readStaticAsset('_redirects'),
       ])
       const configuredProductionDomain = yield* Config.option(
         Config.string('PATCHPLANE_PRODUCTION_DOMAIN'),
@@ -47,7 +54,7 @@ export default Alchemy.Stack(
         cwd: path.resolve(import.meta.dirname, 'apps/client'),
         command: 'bun run build:landing',
         outdir: 'dist/client',
-        domain: rawStage === 'prod' ? productionDomain : undefined,
+        ...(rawStage === 'prod' && productionDomain !== undefined ? { domain: productionDomain } : {}),
         assets: {
           headers,
           redirects,

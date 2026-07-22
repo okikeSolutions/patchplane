@@ -12,7 +12,7 @@
 	url = https://github.com/workos/workos-node.git
 [submodule "vendor/effect"]
 	path = vendor/effect
-	url = https://github.com/Effect-TS/effect-smol.git
+	url = https://github.com/Effect-TS/effect.git
 [submodule "vendor/alchemy"]
 	path = vendor/alchemy
 	url = https://github.com/alchemy-run/alchemy-effect.git

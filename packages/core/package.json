@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "@patchplane/domain": "workspace:*",
-    "effect": "4.0.0-beta.90"
+    "effect": "4.0.0-beta.100"
   },
   "devDependencies": {
     "@patchplane/typescript-config": "workspace:*",

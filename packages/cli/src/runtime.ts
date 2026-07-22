@@ -6,7 +6,7 @@ import { CliEnvFile } from './services/env-file'
 import { CliGlobalOptions, type CliGlobalOptionsValue } from './services/global-options'
 import { CliInteractivityLive } from './services/interactivity'
 
-const makeBaseCliLayer = (globalOptionsLayer: Layer.Layer<CliGlobalOptions, never, any>) =>
+const makeBaseCliLayer = <R>(globalOptionsLayer: Layer.Layer<CliGlobalOptions, never, R>) =>
   Layer.mergeAll(
     CliInteractivityLive,
     CliEnvFile.Live,

@@ -20,6 +20,10 @@ test.skipIf(!liveInfraTest)(
     const output = yield* deploy(PatchPlaneInfra, { stage: liveStage })
 
     expect(output.stage).toBe(liveStage)
+    expect(output.surface).toBe('full')
+    if (output.surface !== 'full') {
+      return
+    }
     expect(output.evidenceBucketName).toContain('patchplane')
     expect(output.evidenceBucketName).toContain('evidence-artifacts')
     expect(output.aiGatewayId).toContain('patchplane')
