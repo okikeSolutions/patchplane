@@ -465,7 +465,7 @@ Explicit non-goals:
 - Do not move runtime execution to Cloudflare Workers for alpha.
 - Do not replace Octokit/GitHub App runtime integration.
 - Do not manage customer repositories as Alchemy resources.
-- Do not add Cloudflare D1, Queues, Workflows, Vectorize, AutoRAG, or broader Cloudflare platform scope for alpha.
+- Do not add Cloudflare Queues, Workflows, Vectorize, AutoRAG, or broader Cloudflare platform scope for alpha.
 
 Tasks:
 
@@ -844,7 +844,6 @@ Potential future targets:
 - Postgres via Effect SQL
 - SQLite Node for local/self-hosted deployments
 - MySQL after schema portability is proven
-- D1 only if a Cloudflare deployment target creates a clear need
 
 Tasks:
 

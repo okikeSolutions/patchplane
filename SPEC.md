@@ -504,7 +504,6 @@ Later plugins may include:
 - Postgres Workflow Storage Plugin,
 - MySQL Workflow Storage Plugin,
 - SQLite Workflow Storage Plugin,
-- D1 Workflow Storage Plugin,
 - additional runtime plugins,
 - additional sandbox plugins,
 - GitLab Provider Plugin,
