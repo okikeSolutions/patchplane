@@ -22,6 +22,8 @@ Core docs:
 - [packages/cli/README.md](./packages/cli/README.md): CLI onboarding, env templates, and diagnostics
 - [packages/plugins/README.md](./packages/plugins/README.md): infrastructure plugin and sandbox-backed Pi runtime architecture
 - [CONTRIBUTING.md](./CONTRIBUTING.md): development and contribution guide
+- [AGENTS.md](./AGENTS.md): repository map, trust boundaries, and automation protocol
+- [REVIEW.md](./REVIEW.md): risk-based review checklist for Patchplane changes
 - [SECURITY.md](./SECURITY.md): security reporting and secret-handling policy
 
 ## Quick start
@@ -198,14 +200,13 @@ bun run --cwd packages/plugins smoke:daytona-rpc | tee .patchplane/logs/daytona-
 Useful checks before committing:
 
 ```bash
-bun run typecheck
-bun run lint
-bun run --cwd packages/core test
-bun run --cwd packages/plugins test
-bun run --cwd packages/cli test
-bun run --cwd packages/backend test
-bun run --cwd apps/client build
+bun run verify:fast
+bun run verify
 ```
+
+`verify` is the complete non-credentialed repository gate and runs on every
+pull request. Credentialed smoke checks remain opt-in; see
+[`docs/acceptance-tests.md`](./docs/acceptance-tests.md) for their scope.
 
 A post-build client bundle guard should not find server-only secrets or SDKs:
 

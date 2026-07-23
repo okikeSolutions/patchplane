@@ -1,9 +1,6 @@
 {
   "name": "patchplane-monorepo",
   "private": true,
-  "engines": {
-    "node": ">=22.19.0"
-  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -31,7 +28,8 @@
     "test:infra": "bun run --cwd apps/infra test",
     "test:architecture": "vitest run tests/architecture/architecture-boundaries.test.ts",
     "test:all": "bun run test:domain && bun run test:core && bun run test:plugins && bun run test:backend && bun run test:cli && bun run test:client && bun run test:infra && bun run test:architecture && bun run test:infra-patches",
-    "verify": "bun run typecheck && bun run lint && bun run test:all && bun run eval:cli && bun run build:client && bun run bundle:check:client",
+    "verify:fast": "bun run typecheck && bun run lint && bun run test:all && bun run eval:cli",
+    "verify": "bun run verify:fast && bun run build:client && bun run bundle:check:client",
     "eval:cli": "vitest run tests/evals/cli-friendliness.test.ts --project default",
     "smoke:foundation": "bun run --cwd apps/client smoke",
     "smoke:daytona-rpc": "bun --env-file=.env.local packages/plugins/src/daytona/live-rpc-smoke.ts",
@@ -64,6 +62,9 @@
     "pngjs": "^7.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   },
   "packageManager": "bun@1.3.10",
   "patchedDependencies": {

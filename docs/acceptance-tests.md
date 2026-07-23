@@ -4,7 +4,7 @@ This matrix is the source of truth for claims that an alpha milestone is tested.
 
 Status meanings:
 
-- `Automated`: runs in `bun run verify` without external credentials.
+- `Automated`: runs in the non-credentialed PR CI or `bun run verify`.
 - `Live`: repeatable script using real provider credentials.
 - `Historical`: manually verified previously, but not continuously repeatable in the default suite.
 - `Missing`: implementation or repeatable verification is still required.
@@ -22,20 +22,20 @@ Status meanings:
 
 ## M0-M3: architecture and core contracts
 
-| Milestone | Acceptance criterion                                                  | Evidence                                             | Status     |
-| --------- | --------------------------------------------------------------------- | ---------------------------------------------------- | ---------- |
-| M0        | Required domain/core/plugin/client/backend structure exists           | `tests/architecture/architecture-boundaries.test.ts` | Automated  |
-| M0        | Core imports only PatchPlane domain/core dependencies and Effect      | architecture boundary suite                          | Automated  |
-| M0        | Vendor research does not leak into runtime imports                    | architecture boundary suite                          | Automated  |
-| M1        | `bun install` succeeds                                                | lockfile/install in CI or local bootstrap            | Historical |
-| M1        | Root typecheck reaches all packages                                   | `bun run typecheck`                                  | Automated  |
-| M1        | Core does not import app/plugin/vendor SDKs                           | architecture boundary suite                          | Automated  |
-| M2        | Domain schemas decode unknown input                                   | domain schema tests                                  | Automated  |
-| M2        | External/plugin input has a decode path                               | domain, GitHub, WorkOS, and Convex adapter tests     | Automated  |
-| M2        | Typed errors remain PatchPlane-owned                                  | core/plugin error tests plus architecture boundaries | Automated  |
-| M3        | Core workflows depend on services rather than SDKs                    | core workflow and architecture tests                 | Automated  |
-| M3        | Boundary failures map to typed PatchPlane errors                      | core and plugin tests                                | Automated  |
-| M3        | Timeline/event persistence is represented by PatchPlane-owned schemas | decision/review and backend tests                    | Automated  |
+| Milestone | Acceptance criterion                                                  | Evidence                                             | Status    |
+| --------- | --------------------------------------------------------------------- | ---------------------------------------------------- | --------- |
+| M0        | Required domain/core/plugin/client/backend structure exists           | `tests/architecture/architecture-boundaries.test.ts` | Automated |
+| M0        | Core imports only PatchPlane domain/core dependencies and Effect      | architecture boundary suite                          | Automated |
+| M0        | Vendor research does not leak into runtime imports                    | architecture boundary suite                          | Automated |
+| M1        | `bun install` succeeds                                                | frozen lockfile install in PR CI                     | Automated |
+| M1        | Root typecheck reaches all packages                                   | `bun run typecheck`                                  | Automated |
+| M1        | Core does not import app/plugin/vendor SDKs                           | architecture boundary suite                          | Automated |
+| M2        | Domain schemas decode unknown input                                   | domain schema tests                                  | Automated |
+| M2        | External/plugin input has a decode path                               | domain, GitHub, WorkOS, and Convex adapter tests     | Automated |
+| M2        | Typed errors remain PatchPlane-owned                                  | core/plugin error tests plus architecture boundaries | Automated |
+| M3        | Core workflows depend on services rather than SDKs                    | core workflow and architecture tests                 | Automated |
+| M3        | Boundary failures map to typed PatchPlane errors                      | core and plugin tests                                | Automated |
+| M3        | Timeline/event persistence is represented by PatchPlane-owned schemas | decision/review and backend tests                    | Automated |
 
 ## M4-M6.5: Convex, application composition, and authorization
 
@@ -104,13 +104,13 @@ Status meanings:
 
 ## M9.9: public alpha landing page
 
-| Milestone | Acceptance criterion                                                            | Evidence                                                                         | Status    |
-| --------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------- |
-| M9.9      | Hero communicates the developer pain and product outcome quickly                | landing copy test and copy review                                                | Automated |
-| M9.9      | Trust flow and illustrative report avoid unsupported commands/claims            | landing copy test                                                                | Automated |
-| M9.9      | GitHub, current capabilities, quick start, contribution, and roadmap are linked | landing copy test                                                                | Automated |
-| M9.9      | English and German landing message keys remain aligned                          | landing copy test                                                                | Automated |
-| M9.9      | Production client bundle builds and stays within the client bundle budget       | `bun run build:client`; `bun scripts/bundle-size-client.ts --skip-build --check` | Local     |
+| Milestone | Acceptance criterion                                                            | Evidence                          | Status    |
+| --------- | ------------------------------------------------------------------------------- | --------------------------------- | --------- |
+| M9.9      | Hero communicates the developer pain and product outcome quickly                | landing copy test and copy review | Automated |
+| M9.9      | Trust flow and illustrative report avoid unsupported commands/claims            | landing copy test                 | Automated |
+| M9.9      | GitHub, current capabilities, quick start, contribution, and roadmap are linked | landing copy test                 | Automated |
+| M9.9      | English and German landing message keys remain aligned                          | landing copy test                 | Automated |
+| M9.9      | Production client bundle builds and stays within the client bundle budget       | `bun run verify` in PR CI         | Automated |
 
 ## M10: evidence-backed decision and publication
 

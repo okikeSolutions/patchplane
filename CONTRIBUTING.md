@@ -15,21 +15,21 @@ Use `bun run patchplane env template --surface app` or `--surface githubWebhook`
 
 ## Before opening a PR
 
-Run the checks that match your change:
+Use the repository gates rather than assembling an ad-hoc command list:
 
 ```bash
-bun run typecheck
-bun run lint
-bun run --cwd packages/cli test
-bun run --cwd packages/plugins test
-bun run --cwd packages/backend test
+bun install --frozen-lockfile
+bun run verify:fast
+bun run verify
 ```
 
-For client changes, also run:
+`verify:fast` covers typechecking, linting, tests, and the CLI eval. `verify`
+is the complete non-credentialed gate and additionally validates the production
+client and Cloudflare bundle budgets. GitHub runs `verify` on every pull
+request; a passing local run keeps feedback fast.
 
-```bash
-bun run --cwd apps/client build
-```
+Use [AGENTS.md](./AGENTS.md) for the contribution protocol and
+[REVIEW.md](./REVIEW.md) for Patchplane-specific trust-boundary checks.
 
 ## Project boundaries
 
