@@ -28,7 +28,8 @@ is the complete non-credentialed gate and additionally validates the production
 client and Cloudflare bundle budgets. GitHub runs `verify` on every pull
 request; a passing local run keeps feedback fast.
 
-Use [AGENTS.md](./AGENTS.md) for the contribution protocol and
+Use [docs/philosophy.md](./docs/philosophy.md) for product and developer-experience
+decision principles, [AGENTS.md](./AGENTS.md) for the contribution protocol, and
 [REVIEW.md](./REVIEW.md) for Patchplane-specific trust-boundary checks.
 
 ## Project boundaries

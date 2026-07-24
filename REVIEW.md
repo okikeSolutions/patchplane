@@ -12,6 +12,32 @@ change, not a ritual of running unrelated credentialed checks.
 - Configuration, documentation, and acceptance claims match the implementation.
 - The diff contains no secrets, generated local state, logs, or temporary files.
 
+## Product and developer experience
+
+Use [`docs/philosophy.md`](./docs/philosophy.md) as the decision framework. For
+changes that affect a user journey, interface, public contract, or product
+claim, confirm the relevant points:
+
+- The change makes evidence understandable without requiring knowledge of
+  Patchplane's providers or internal architecture.
+- The path to a first credible Patch Report has not gained an unnecessary step;
+  any added friction has a clear trust, security, or user-value reason.
+- Documentation and the acceptance matrix change with the behavior or claim.
+- Failure remains safe, recoverable, visible, and free of leaked resources or
+  duplicate publication.
+- User-visible schemas, states, errors, and replay behavior remain predictable;
+  compatibility or migration impact is documented when needed.
+- User-facing performance is measured at the relevant layer and remains within
+  its budget on realistic hardware and network assumptions.
+- Copy, status, accessibility, hashes, evidence links, and decision attribution
+  cannot imply more trust than the persisted evidence supports.
+- A repeated finding or operator step has been encoded as a type, check, test,
+  CI gate, script, or colocated instruction whenever it is mechanically safe.
+
+For onboarding work, record the steps and elapsed time to the first Patch
+Report. For performance-sensitive work, record the before/after metric rather
+than relying on subjective impressions.
+
 ## Trust, security, and provider changes
 
 - External input is verified and decoded before it enters core workflows.
