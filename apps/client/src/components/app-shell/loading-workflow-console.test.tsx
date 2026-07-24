@@ -10,6 +10,11 @@ import { LoadingWorkflowConsole } from './loading-workflow-console'
 
 vi.mock('convex/react', () => ({
   useQuery: () => undefined,
+  usePaginatedQuery: () => ({
+    results: [],
+    status: 'Exhausted',
+    loadMore: () => undefined,
+  }),
 }))
 
 describe('LoadingWorkflowConsole', () => {

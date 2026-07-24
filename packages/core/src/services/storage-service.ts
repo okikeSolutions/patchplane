@@ -135,6 +135,8 @@ export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
 
 export interface RecordReviewRunInput extends TelemetryContextFields {
   readonly workflowRunId: string
+  readonly sandboxExecutionId?: string | undefined
+  readonly candidatePatchSetId?: string | undefined
   readonly kind: ReviewRunKind
   readonly reviewer: string
   readonly status: ReviewRunStatus

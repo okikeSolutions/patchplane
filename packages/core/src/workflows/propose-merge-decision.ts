@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import type { CandidatePatchSet } from '@patchplane/domain/decision-review'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxVerificationResult } from '../services/sandbox-service'
@@ -10,6 +11,7 @@ import type { TelemetryContextFields } from '../services/telemetry-service'
 export interface ProposeMergeDecisionInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly sandboxExecution?: SandboxExecution | undefined
+  readonly candidatePatchSet?: CandidatePatchSet | undefined
   readonly evidenceArtifacts: ReadonlyArray<EvidenceArtifact>
   readonly verificationResults?: ReadonlyArray<SandboxVerificationResult> | undefined
 }
@@ -26,6 +28,8 @@ export const ProposeMergeDecision = Effect.fn(
   const completedAt = Date.now()
   const reviewRun = yield* storage.recordReviewRun({
     workflowRunId: input.workflowRunId,
+    ...(input.sandboxExecution === undefined ? {} : { sandboxExecutionId: input.sandboxExecution.id }),
+    ...(input.candidatePatchSet === undefined ? {} : { candidatePatchSetId: input.candidatePatchSet.id }),
     kind: review.kind,
     reviewer: review.reviewer,
     status: 'completed',

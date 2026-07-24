@@ -223,6 +223,8 @@ const recordReviewRunMutation = makeFunctionReference<
   {
     systemSecret: string
     workflowRunId: string
+    sandboxExecutionId?: string
+    candidatePatchSetId?: string
     kind: RecordReviewRunInput['kind']
     reviewer: string
     status: RecordReviewRunInput['status']
@@ -855,6 +857,8 @@ export const ConvexStoragePlugin = {
               return client.mutation(recordReviewRunMutation, {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: input.sandboxExecutionId }),
+                ...(input.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: input.candidatePatchSetId }),
                 kind: input.kind,
                 reviewer: input.reviewer,
                 status: input.status,

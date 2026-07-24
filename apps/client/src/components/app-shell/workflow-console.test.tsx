@@ -16,6 +16,11 @@ import { WorkflowDetailPage } from './workflow-detail-page'
 
 vi.mock('convex/react', () => ({
   useQuery: () => undefined,
+  usePaginatedQuery: () => ({
+    results: [],
+    status: 'Exhausted',
+    loadMore: () => undefined,
+  }),
 }))
 
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test fixtures use stable fake Convex IDs.
@@ -90,10 +95,39 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
       },
     ],
     evidenceArtifacts: [],
-    candidatePatchSets: [],
-    reviewRuns: [],
+    candidatePatchSets: [
+      {
+        id: 'candidate_patch_1',
+        workflowRunId: row.workflowRun.id,
+        status: 'captured',
+        createdAt: 1_778_000_310_000,
+      },
+    ],
+    reviewRuns: [
+      {
+        id: 'review_run_1',
+        workflowRunId: row.workflowRun.id,
+        sandboxExecutionId: 'sandbox_execution_1',
+        candidatePatchSetId: 'candidate_patch_1',
+        kind: 'test',
+        reviewer: 'patchplane:test-reviewer',
+        status: 'completed',
+        startedAt: 1_778_000_320_000,
+        completedAt: 1_778_000_321_000,
+        createdAt: 1_778_000_320_000,
+      },
+    ],
     reviewFindings: [],
-    policyDecisions: [],
+    policyDecisions: [
+      {
+        id: 'policy_decision_1',
+        workflowRunId: row.workflowRun.id,
+        reviewRunId: 'review_run_1',
+        status: 'changes-requested',
+        summary: 'Typecheck must pass before approval.',
+        createdAt: 1_778_000_322_000,
+      },
+    ],
     humanDecisions: [],
     publicationResults: [],
     provenanceEvents: [],

@@ -49,6 +49,8 @@ export type ReviewRunStatus = Schema.Schema.Type<typeof ReviewRunStatus>
 export const ReviewRun = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
+  sandboxExecutionId: Schema.optional(Schema.String),
+  candidatePatchSetId: Schema.optional(Schema.String),
   kind: ReviewRunKind,
   reviewer: Schema.String,
   status: ReviewRunStatus,
@@ -121,6 +123,10 @@ export type PolicyDecision = Schema.Schema.Type<typeof PolicyDecision>
 export const HumanDecision = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
+  sandboxExecutionId: Schema.optional(Schema.String),
+  candidatePatchSetId: Schema.optional(Schema.String),
+  reviewRunId: Schema.optional(Schema.String),
+  policyDecisionId: Schema.optional(Schema.String),
   actorId: ActorId,
   status: DecisionStatus,
   comment: Schema.String,

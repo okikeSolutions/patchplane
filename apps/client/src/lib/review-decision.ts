@@ -11,6 +11,10 @@ import { getWorkOSAuthRequest } from './workos-auth-request'
 
 const ReviewDecisionInput = Schema.Struct({
   workflowRunId: Schema.String,
+  sandboxExecutionId: Schema.String,
+  candidatePatchSetId: Schema.String,
+  reviewRunId: Schema.String,
+  policyDecisionId: Schema.String,
   status: Schema.Literals(['approved', 'rejected', 'changes-requested']),
   comment: Schema.String,
   idempotencyKey: Schema.String,
@@ -20,6 +24,10 @@ const recordHumanDecisionMutation = makeFunctionReference<
   'mutation',
   {
     workflowRunId: string
+    sandboxExecutionId: string
+    candidatePatchSetId: string
+    reviewRunId: string
+    policyDecisionId: string
     status: typeof ReviewDecisionInput.Type.status
     comment: string
     idempotencyKey?: string
@@ -53,8 +61,8 @@ type SourceControlPublishDecisionResponse = Schema.Schema.Type<typeof SourceCont
 interface WorkflowDetailForPublication {
   readonly promptRequest: Record<string, unknown>
   readonly workflowRun: { readonly id: string; readonly traceId: string; readonly promptRequestId: string; readonly workspaceId: string; readonly status: string; readonly createdAt: number }
-  readonly sandboxExecutions: ReadonlyArray<Record<string, unknown> & { readonly startedAt?: number }>
-  readonly candidatePatchSets: ReadonlyArray<Record<string, unknown> & { readonly createdAt?: number }>
+  readonly sandboxExecutions: ReadonlyArray<Record<string, unknown> & { readonly id?: string; readonly startedAt?: number; readonly completedAt?: number }>
+  readonly candidatePatchSets: ReadonlyArray<Record<string, unknown> & { readonly id?: string; readonly createdAt?: number }>
   readonly humanDecisions: ReadonlyArray<Record<string, unknown> & { readonly id: string; readonly decidedAt?: number }>
   readonly publicationResults: ReadonlyArray<Record<string, unknown>>
 }
@@ -73,6 +81,30 @@ function latestBy<A>(items: ReadonlyArray<A>, value: (item: A) => number | undef
     const latestValue = latest === undefined ? Number.NEGATIVE_INFINITY : value(latest) ?? Number.NEGATIVE_INFINITY
     return itemValue > latestValue ? item : latest
   }, undefined)
+}
+
+export function decisionRecord<A extends { readonly id?: string }>(
+  items: ReadonlyArray<A>,
+  decision: Record<string, unknown>,
+  idField: 'sandboxExecutionId' | 'candidatePatchSetId',
+  timestamp: (item: A) => number | undefined,
+) {
+  const linkedId = decision[idField]
+  if (typeof linkedId === 'string') {
+    const linked = items.find((item) => item.id === linkedId)
+    if (linked === undefined) {
+      throw new Error(`Decision ${idField} is missing from workflow detail`)
+    }
+    return linked
+  }
+
+  const decidedAt = decision['decidedAt']
+  return latestBy(
+    typeof decidedAt === 'number'
+      ? items.filter((item) => (timestamp(item) ?? Number.POSITIVE_INFINITY) <= decidedAt)
+      : items,
+    timestamp,
+  )
 }
 
 async function publishDecisionToSourceControl(input: {
@@ -98,8 +130,18 @@ async function publishDecisionToSourceControl(input: {
           traceId: input.traceId,
           workflowStart,
           humanDecision: input.humanDecision,
-          sandboxExecution: latestBy(input.detail.sandboxExecutions, (execution) => execution.startedAt),
-          candidatePatchSet: latestBy(input.detail.candidatePatchSets, (patchSet) => patchSet.createdAt),
+          sandboxExecution: decisionRecord(
+            input.detail.sandboxExecutions,
+            input.humanDecision,
+            'sandboxExecutionId',
+            (execution) => execution.completedAt ?? execution.startedAt,
+          ),
+          candidatePatchSet: decisionRecord(
+            input.detail.candidatePatchSets,
+            input.humanDecision,
+            'candidatePatchSetId',
+            (patchSet) => patchSet.createdAt,
+          ),
           publicationResults: input.detail.publicationResults,
         }), 'application/json'),
       }),
@@ -129,6 +171,10 @@ export const submitReviewDecisionServerFn = effectServerFn({
 
       const decision = await convex.mutation(recordHumanDecisionMutation, {
         workflowRunId: input.workflowRunId,
+        sandboxExecutionId: input.sandboxExecutionId,
+        candidatePatchSetId: input.candidatePatchSetId,
+        reviewRunId: input.reviewRunId,
+        policyDecisionId: input.policyDecisionId,
         status: input.status,
         comment,
         idempotencyKey: input.idempotencyKey,

@@ -1,35 +1,76 @@
+#!/usr/bin/env bun
 import { createHmac, randomUUID } from 'node:crypto'
-import { ConvexHttpClient } from 'convex/browser'
-import { makeFunctionReference } from 'convex/server'
-import { Config, Effect, Redacted, Schema } from 'effect'
+import { NodeServices } from '@effect/platform-node'
+import { SourceControlService } from '@patchplane/core/services/source-control-service'
+import {
+  HumanDecision,
+  PublicationResult,
+} from '@patchplane/domain/decision-review'
+import { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { makeGitHubApp } from '@patchplane/plugins/github/app'
 import {
   GitHubConfig,
   type GitHubConfig as GitHubConfigType,
 } from '@patchplane/plugins/github/config'
+import { GitHubProviderPlugin } from '@patchplane/plugins/github/provider-plugin'
+import { ConvexHttpClient } from 'convex/browser'
+import { makeFunctionReference } from 'convex/server'
+import { Config, Effect, Layer, ManagedRuntime, Redacted, Schema } from 'effect'
+import { sourceControlConfigLayer } from '../github/config'
+import {
+  formatSmokePreflightSummary,
+  inspectSmokePreflight,
+} from './smoke-preflight'
 
-interface AcceptanceSnapshot {
+export interface AcceptanceSnapshot {
   readonly workflowRunId: string
   readonly workflowStatus: 'queued' | 'running' | 'reviewed'
   readonly hasRuntimeEvents: boolean
   readonly hasRuntimeSessions: boolean
   readonly sandboxExecutionStatuses: ReadonlyArray<'succeeded' | 'failed'>
+  readonly latestSandboxExecution?: {
+    readonly id: string
+    readonly status: 'succeeded' | 'failed'
+    readonly completedAt: number
+  }
   readonly evidenceArtifacts: ReadonlyArray<{
+    readonly id: string
     readonly kind: string
     readonly storageKey: string
     readonly sizeBytes: number
     readonly sha256: string
+    readonly createdAt: number
   }>
   readonly candidatePatchStatuses: ReadonlyArray<
     'captured' | 'empty' | 'failed'
   >
+  readonly latestCandidatePatchSet?: {
+    readonly id: string
+    readonly status: 'captured' | 'empty' | 'failed'
+    readonly diffArtifactId?: string
+    readonly headSha?: string
+    readonly createdAt: number
+  }
   readonly reviewRunStatuses: ReadonlyArray<
     'queued' | 'running' | 'completed' | 'failed'
   >
+  readonly latestReviewRun?: {
+    readonly id: string
+    readonly sandboxExecutionId?: string
+    readonly candidatePatchSetId?: string
+    readonly status: 'queued' | 'running' | 'completed' | 'failed'
+    readonly createdAt: number
+  }
   readonly policyDecisionStatuses: ReadonlyArray<string>
+  readonly latestPolicyDecision?: {
+    readonly status: string
+    readonly reviewRunId?: string
+    readonly createdAt: number
+  }
   readonly humanDecisions: ReadonlyArray<{
     readonly id: string
     readonly status: string
+    readonly decidedAt: number
     readonly idempotencyKey?: string
   }>
   readonly publicationResults: ReadonlyArray<{
@@ -41,6 +82,16 @@ interface AcceptanceSnapshot {
   }>
   readonly hasProvenanceEvents: boolean
 }
+
+const DecisionPublicationReplayFixture = Schema.Struct({
+  workflowStart: WorkflowStart,
+  humanDecision: HumanDecision,
+  candidateHeadSha: Schema.optional(Schema.String),
+  publicationResults: Schema.Array(PublicationResult),
+})
+type DecisionPublicationReplayFixture = Schema.Schema.Type<
+  typeof DecisionPublicationReplayFixture
+>
 
 const CloudflareScriptsResponse = Schema.Struct({
   result: Schema.optional(
@@ -69,12 +120,44 @@ const decodeCloudflareSubdomainResponse = Schema.decodeUnknownSync(
 const decodeTrustLoopWebhookResponse = Schema.decodeUnknownSync(
   TrustLoopWebhookResponse,
 )
+export const decodeDecisionPublicationReplayFixture = Schema.decodeUnknownSync(
+  DecisionPublicationReplayFixture,
+)
 
 const getAcceptanceSnapshot = makeFunctionReference<
   'query',
   { systemSecret: string; workflowRunId: string },
   AcceptanceSnapshot
 >('workflowStarts:getTrustLoopAcceptanceSnapshot')
+
+const getDecisionPublicationReplayFixture = makeFunctionReference<
+  'query',
+  {
+    systemSecret: string
+    workflowRunId: string
+    humanDecisionId: string
+  },
+  unknown
+>('workflowStarts:getDecisionPublicationReplayFixture')
+
+type GitHubApp = ReturnType<typeof makeGitHubApp>['app']
+type GitHubInstallationClient = Awaited<
+  ReturnType<GitHubApp['getInstallationOctokit']>
+>
+
+interface GitHubPublicationInventory {
+  readonly issueComment: ReadonlyArray<string>
+  readonly checkRun: ReadonlyArray<string>
+}
+
+function emit(value: unknown) {
+  console.log(JSON.stringify(value))
+}
+
+function publicUrlLocation(value: string) {
+  const url = new URL(value)
+  return `${url.origin}${url.pathname}`
+}
 
 function required(name: string) {
   const value = process.env[name]?.trim()
@@ -85,6 +168,12 @@ function required(name: string) {
 
 function requiredSecret(name: string) {
   return Redacted.value(Effect.runSync(Config.redacted(name)))
+}
+
+function convexClient() {
+  return new ConvexHttpClient(
+    (process.env.CONVEX_URL ?? required('VITE_CONVEX_URL')).replace(/\/$/, ''),
+  )
 }
 
 async function resolveWebhookUrl() {
@@ -123,51 +212,83 @@ async function resolveWebhookUrl() {
   return `https://${worker}.${subdomain.result.subdomain}.workers.dev/api/github/webhook`
 }
 
-function assertSnapshot(snapshot: AcceptanceSnapshot) {
+export function assertSnapshot(snapshot: AcceptanceSnapshot) {
   if (snapshot.workflowStatus !== 'reviewed')
     throw new Error('Workflow did not reach reviewed status')
   if (!snapshot.hasRuntimeEvents)
     throw new Error('Workflow did not persist Pi runtime events')
-  if (snapshot.sandboxExecutionStatuses.length < 1)
+
+  const sandbox = snapshot.latestSandboxExecution
+  if (sandbox === undefined)
     throw new Error('Workflow did not persist a sandbox execution')
-  if (!snapshot.candidatePatchStatuses.includes('captured'))
-    throw new Error('Workflow did not capture a candidate patch')
-  if (!snapshot.reviewRunStatuses.includes('completed'))
-    throw new Error('Workflow review did not complete')
-  if (snapshot.policyDecisionStatuses.length < 1)
+
+  const candidate = snapshot.latestCandidatePatchSet
+  if (candidate?.status !== 'captured')
+    throw new Error('Latest workflow candidate patch was not captured')
+  if (candidate.createdAt < sandbox.completedAt) {
+    throw new Error('Candidate patch predates the latest sandbox execution')
+  }
+
+  const review = snapshot.latestReviewRun
+  if (review?.status !== 'completed')
+    throw new Error('Latest workflow review did not complete')
+  if (
+    review.sandboxExecutionId !== sandbox.id ||
+    review.candidatePatchSetId !== candidate.id
+  ) {
+    throw new Error(
+      'Latest review is not linked to the latest sandbox and candidate patch',
+    )
+  }
+
+  const policy = snapshot.latestPolicyDecision
+  if (policy === undefined)
     throw new Error('Workflow did not persist a policy decision')
+  if (policy.reviewRunId !== review.id) {
+    throw new Error('Latest policy decision is not linked to the latest review')
+  }
+  if (policy.createdAt < review.createdAt) {
+    throw new Error('Policy decision predates the latest review')
+  }
   if (!snapshot.hasProvenanceEvents)
     throw new Error('Workflow did not persist provenance')
+
   const diff = snapshot.evidenceArtifacts.find(
-    (artifact) => artifact.kind === 'diff',
+    (artifact) => artifact.id === candidate.diffArtifactId,
   )
   if (
-    diff === undefined ||
+    diff?.kind !== 'diff' ||
     diff.sizeBytes < 1 ||
     !/^[a-f0-9]{64}$/.test(diff.sha256)
   ) {
-    throw new Error('Workflow did not persist a non-empty hashed diff artifact')
+    throw new Error(
+      'Latest candidate does not reference a non-empty hashed diff artifact',
+    )
   }
 }
 
-function convexClient() {
-  return new ConvexHttpClient(
-    (process.env.CONVEX_URL ?? required('VITE_CONVEX_URL')).replace(/\/$/, ''),
+export function latestPublishedHumanDecision(snapshot: AcceptanceSnapshot) {
+  const latestDecision = snapshot.humanDecisions.reduce<
+    AcceptanceSnapshot['humanDecisions'][number] | undefined
+  >(
+    (latest, decision) =>
+      latest === undefined || decision.decidedAt > latest.decidedAt
+        ? decision
+        : latest,
+    undefined,
   )
+  if (latestDecision === undefined) return undefined
+  return snapshot.publicationResults.some(
+    (publication) =>
+      publication.status === 'published' &&
+      publication.externalId !== undefined &&
+      publication.idempotencyKey?.startsWith(`${latestDecision.id}:`) === true,
+  )
+    ? latestDecision
+    : undefined
 }
 
-function publishedHumanDecision(snapshot: AcceptanceSnapshot) {
-  return snapshot.humanDecisions.find((decision) =>
-    snapshot.publicationResults.some(
-      (publication) =>
-        publication.status === 'published' &&
-        publication.externalId !== undefined &&
-        publication.idempotencyKey?.startsWith(`${decision.id}:`) === true,
-    ),
-  )
-}
-
-async function verifyReviewedWorkflow(
+async function readAcceptanceSnapshot(
   workflowRunId: string,
   systemSecret: string,
 ) {
@@ -176,55 +297,390 @@ async function verifyReviewedWorkflow(
     workflowRunId,
   })
   assertSnapshot(snapshot)
-  if (publishedHumanDecision(snapshot) === undefined) {
+  return snapshot
+}
+
+async function readReplayFixture(
+  workflowRunId: string,
+  humanDecisionId: string,
+  systemSecret: string,
+) {
+  const value = await convexClient().query(
+    getDecisionPublicationReplayFixture,
+    { systemSecret, workflowRunId, humanDecisionId },
+  )
+  return decodeDecisionPublicationReplayFixture(value)
+}
+
+function expectedPublicationTargets(fixture: DecisionPublicationReplayFixture) {
+  const ref = fixture.workflowStart.promptRequest.externalRef
+  const targets: Array<'issue-comment' | 'check-run'> = []
+  if (ref?.issueNumber !== undefined) targets.push('issue-comment')
+  if (
+    fixture.candidateHeadSha !== undefined ||
+    ref?.pullRequestHeadSha !== undefined
+  ) {
+    targets.push('check-run')
+  }
+  if (targets.length === 0) {
+    throw new Error('Decision has no GitHub publication targets')
+  }
+  return targets
+}
+
+function publicationKey(
+  decisionId: string,
+  kind: 'issue-comment' | 'check-run',
+) {
+  return `${decisionId}:${kind}`
+}
+
+function assertPublishedFixture(fixture: DecisionPublicationReplayFixture) {
+  if (
+    fixture.humanDecision.idempotencyKey === undefined ||
+    fixture.humanDecision.idempotencyKey.length === 0
+  ) {
+    throw new Error('Human decision has no durable idempotency key')
+  }
+  if (
+    fixture.humanDecision.workflowRunId !== fixture.workflowStart.workflowRun.id
+  ) {
+    throw new Error('Human decision does not belong to workflow')
+  }
+
+  const expected = expectedPublicationTargets(fixture)
+  const byKey = new Map(
+    fixture.publicationResults.flatMap((publication) =>
+      publication.idempotencyKey === undefined
+        ? []
+        : [[publication.idempotencyKey, publication] as const],
+    ),
+  )
+  for (const kind of expected) {
+    const result = byKey.get(publicationKey(fixture.humanDecision.id, kind))
+    if (
+      result === undefined ||
+      result.kind !== kind ||
+      result.status !== 'published' ||
+      result.externalId === undefined
+    ) {
+      throw new Error(`Expected ${kind} is not durably published`)
+    }
+  }
+  if (byKey.size !== expected.length) {
+    throw new Error('Replay fixture contains unexpected publication results')
+  }
+  return expected
+}
+
+function durablePublicationIds(fixture: DecisionPublicationReplayFixture) {
+  return Object.fromEntries(
+    fixture.publicationResults.map((publication) => [
+      publication.idempotencyKey,
+      {
+        kind: publication.kind,
+        status: publication.status,
+        externalId: publication.externalId,
+      },
+    ]),
+  )
+}
+
+function githubCoordinates(fixture: DecisionPublicationReplayFixture) {
+  const ref = fixture.workflowStart.promptRequest.externalRef
+  if (
+    ref?.repositoryProvider !== 'github' ||
+    ref.repositoryInstallationId === undefined ||
+    ref.repositoryOwner === undefined ||
+    ref.repositoryName === undefined
+  ) {
+    throw new Error(
+      'Replay fixture has no durable GitHub repository coordinates',
+    )
+  }
+  const installationId = Number(ref.repositoryInstallationId)
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+    throw new Error('Replay fixture has an invalid GitHub installation ID')
+  }
+  return {
+    installationId,
+    owner: ref.repositoryOwner,
+    repositoryName: ref.repositoryName,
+    issueNumber: ref.issueNumber,
+    headSha: fixture.candidateHeadSha ?? ref.pullRequestHeadSha,
+  }
+}
+
+function issueCommentMarker(idempotencyKey: string) {
+  return `<!-- patchplane-publication:${encodeURIComponent(idempotencyKey)} -->`
+}
+
+async function readGitHubPublicationInventory(
+  octokit: GitHubInstallationClient,
+  fixture: DecisionPublicationReplayFixture,
+): Promise<GitHubPublicationInventory> {
+  const coordinates = githubCoordinates(fixture)
+  const decisionId = fixture.humanDecision.id
+  const issueComment =
+    coordinates.issueNumber === undefined
+      ? []
+      : (
+          await octokit.paginate(octokit.rest.issues.listComments, {
+            owner: coordinates.owner,
+            repo: coordinates.repositoryName,
+            issue_number: coordinates.issueNumber,
+            per_page: 100,
+          })
+        )
+          .filter((comment) =>
+            comment.body?.includes(
+              issueCommentMarker(publicationKey(decisionId, 'issue-comment')),
+            ),
+          )
+          .map((comment) => String(comment.id))
+
+  const checkRun =
+    coordinates.headSha === undefined
+      ? []
+      : (
+          await octokit.paginate(octokit.rest.checks.listForRef, {
+            owner: coordinates.owner,
+            repo: coordinates.repositoryName,
+            ref: coordinates.headSha,
+            check_name: 'PatchPlane Review',
+            filter: 'all',
+            per_page: 100,
+          })
+        )
+          .filter(
+            (check) =>
+              check.external_id === publicationKey(decisionId, 'check-run'),
+          )
+          .map((check) => String(check.id))
+
+  return { issueComment, checkRun }
+}
+
+export function assertGitHubPublicationReadback(
+  fixture: DecisionPublicationReplayFixture,
+  inventory: GitHubPublicationInventory,
+) {
+  const expected = assertPublishedFixture(fixture)
+  for (const kind of expected) {
+    const ids =
+      kind === 'issue-comment' ? inventory.issueComment : inventory.checkRun
+    const durable = fixture.publicationResults.find(
+      (publication) =>
+        publication.idempotencyKey ===
+        publicationKey(fixture.humanDecision.id, kind),
+    )
+    if (
+      ids.length !== 1 ||
+      durable?.externalId === undefined ||
+      ids[0] !== durable.externalId
+    ) {
+      throw new Error(
+        `GitHub ${kind} readback did not match its durable external ID`,
+      )
+    }
+  }
+}
+
+function haveSameIds(
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>,
+) {
+  return (
+    before.length === after.length && before.every((id) => after.includes(id))
+  )
+}
+
+function assertIdenticalReplayState(
+  beforeFixture: DecisionPublicationReplayFixture,
+  afterFixture: DecisionPublicationReplayFixture,
+  beforeInventory: GitHubPublicationInventory,
+  afterInventory: GitHubPublicationInventory,
+) {
+  if (
+    JSON.stringify(durablePublicationIds(beforeFixture)) !==
+    JSON.stringify(durablePublicationIds(afterFixture))
+  ) {
+    throw new Error('Durable publication IDs changed during replay')
+  }
+  if (
+    !haveSameIds(beforeInventory.issueComment, afterInventory.issueComment) ||
+    !haveSameIds(beforeInventory.checkRun, afterInventory.checkRun)
+  ) {
+    throw new Error('GitHub publication IDs or counts changed during replay')
+  }
+}
+
+async function verifyPostDecision(
+  githubConfig: GitHubConfigType,
+  workflowRunId: string,
+  systemSecret: string,
+  replay: boolean,
+) {
+  const snapshot = await readAcceptanceSnapshot(workflowRunId, systemSecret)
+  const correlatedDecision = latestPublishedHumanDecision(snapshot)
+  if (correlatedDecision === undefined) {
     throw new Error(
       'Workflow has no durable GitHub publication correlated to an authenticated human decision',
     )
   }
-  return snapshot
-}
 
-async function main(githubConfig: GitHubConfigType) {
-  const systemSecret = requiredSecret('PATCHPLANE_SYSTEM_INGESTION_SECRET')
-  const existingWorkflowRunId =
-    process.env.PATCHPLANE_SMOKE_WORKFLOW_RUN_ID?.trim()
-  if (existingWorkflowRunId !== undefined && existingWorkflowRunId.length > 0) {
-    const snapshot = await verifyReviewedWorkflow(
-      existingWorkflowRunId,
+  const beforeFixture = await readReplayFixture(
+    workflowRunId,
+    correlatedDecision.id,
+    systemSecret,
+  )
+  assertPublishedFixture(beforeFixture)
+  const { app } = makeGitHubApp(githubConfig)
+  const coordinates = githubCoordinates(beforeFixture)
+  const octokit = await app.getInstallationOctokit(coordinates.installationId)
+  const beforeInventory = await readGitHubPublicationInventory(
+    octokit,
+    beforeFixture,
+  )
+  assertGitHubPublicationReadback(beforeFixture, beforeInventory)
+
+  if (replay) {
+    const replayLayer = Layer.mergeAll(
+      GitHubProviderPlugin.layer,
+      NodeServices.layer,
+    ).pipe(Layer.provide(sourceControlConfigLayer(process.env)))
+    const runtime = ManagedRuntime.make(replayLayer, {
+      memoMap: Layer.makeMemoMapUnsafe(),
+    })
+    try {
+      const replayResults = await runtime.runPromise(
+        Effect.gen(function* () {
+          const sourceControl = yield* SourceControlService
+          const results: Array<{
+            readonly kind: 'issue-comment' | 'check-run'
+            readonly externalId?: string
+          }> = []
+          for (const kind of expectedPublicationTargets(beforeFixture)) {
+            const idempotencyKey = publicationKey(
+              beforeFixture.humanDecision.id,
+              kind,
+            )
+            const published =
+              kind === 'issue-comment'
+                ? yield* sourceControl.createIssueComment({
+                    provider: 'github',
+                    installationId: String(coordinates.installationId),
+                    owner: coordinates.owner,
+                    name: coordinates.repositoryName,
+                    issueNumber: coordinates.issueNumber!,
+                    body: 'PatchPlane acceptance replay; existing publication must be reused.',
+                    idempotencyKey,
+                    traceId: beforeFixture.workflowStart.workflowRun.traceId,
+                    operation: 'trustLoopSmoke.replayIssueComment',
+                  })
+                : yield* sourceControl.createCheckRun({
+                    provider: 'github',
+                    installationId: String(coordinates.installationId),
+                    owner: coordinates.owner,
+                    name: coordinates.repositoryName,
+                    headSha: coordinates.headSha!,
+                    checkName: 'PatchPlane Review',
+                    status: 'completed',
+                    conclusion:
+                      beforeFixture.humanDecision.status === 'rejected'
+                        ? 'failure'
+                        : beforeFixture.humanDecision.status ===
+                            'changes-requested'
+                          ? 'action_required'
+                          : 'success',
+                    title: `PatchPlane: ${beforeFixture.humanDecision.status}`,
+                    summary:
+                      'PatchPlane acceptance replay; existing publication must be reused.',
+                    idempotencyKey,
+                    traceId: beforeFixture.workflowStart.workflowRun.traceId,
+                    operation: 'trustLoopSmoke.replayCheckRun',
+                  })
+            results.push({
+              kind,
+              ...(published.externalId === undefined
+                ? {}
+                : { externalId: published.externalId }),
+            })
+          }
+          return results
+        }),
+      )
+      for (const result of replayResults) {
+        const durable = beforeFixture.publicationResults.find(
+          (publication) => publication.kind === result.kind,
+        )
+        if (
+          result.externalId === undefined ||
+          result.externalId !== durable?.externalId
+        ) {
+          throw new Error(
+            `Provider replay did not reuse the durable ${result.kind} external ID`,
+          )
+        }
+      }
+    } finally {
+      await runtime.dispose()
+    }
+
+    const afterFixture = await readReplayFixture(
+      workflowRunId,
+      correlatedDecision.id,
       systemSecret,
     )
-    console.log(
-      JSON.stringify({
-        type: 'trust_loop_complete',
-        workflowRunId: existingWorkflowRunId,
-        humanDecisions: snapshot.humanDecisions,
-        publicationResults: snapshot.publicationResults,
-      }),
+    const afterInventory = await readGitHubPublicationInventory(
+      octokit,
+      afterFixture,
     )
-    return
+    assertGitHubPublicationReadback(afterFixture, afterInventory)
+    assertIdenticalReplayState(
+      beforeFixture,
+      afterFixture,
+      beforeInventory,
+      afterInventory,
+    )
+    emit({
+      type: 'trust_loop_publication_replayed',
+      workflowRunId,
+      humanDecisionId: correlatedDecision.id,
+      issueCommentCount: afterInventory.issueComment.length,
+      checkRunCount: afterInventory.checkRun.length,
+      externalIdsUnchanged: true,
+    })
   }
 
-  const repositoryFullName = required('PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME')
-  const [owner, repositoryName] = repositoryFullName.split('/')
-  if (owner === undefined || repositoryName === undefined) {
-    throw new Error(
-      'PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME must be owner/repository',
-    )
-  }
+  emit({
+    type: 'trust_loop_complete',
+    workflowRunId,
+    humanDecisionId: correlatedDecision.id,
+    humanDecisionStatus: beforeFixture.humanDecision.status,
+    publicationResults: beforeFixture.publicationResults.map((publication) => ({
+      kind: publication.kind,
+      status: publication.status,
+      externalId: publication.externalId,
+      idempotencyKey: publication.idempotencyKey,
+    })),
+    githubReadback: {
+      issueCommentCount: beforeInventory.issueComment.length,
+      checkRunCount: beforeInventory.checkRun.length,
+    },
+    replayed: replay,
+  })
+}
 
-  const { app } = makeGitHubApp(githubConfig)
+async function findInstallation(app: GitHubApp, repositoryFullName: string) {
   const installations = await app.octokit.paginate(
     app.octokit.rest.apps.listInstallations,
     { per_page: 100 },
   )
-  let installationId: number | undefined
-  let octokit:
-    | Awaited<ReturnType<typeof app.getInstallationOctokit>>
-    | undefined
   for (const installation of installations) {
-    const client = await app.getInstallationOctokit(installation.id)
-    const repositories = await client.paginate(
-      client.rest.apps.listReposAccessibleToInstallation,
+    const octokit = await app.getInstallationOctokit(installation.id)
+    const repositories = await octokit.paginate(
+      octokit.rest.apps.listReposAccessibleToInstallation,
       { per_page: 100 },
     )
     if (
@@ -234,15 +690,34 @@ async function main(githubConfig: GitHubConfigType) {
           repositoryFullName.toLowerCase(),
       )
     ) {
-      installationId = installation.id
-      octokit = client
-      break
+      return { installationId: installation.id, octokit }
     }
   }
-  if (installationId === undefined || octokit === undefined) {
-    throw new Error(`GitHub App is not installed for ${repositoryFullName}`)
+  throw new Error(`GitHub App is not installed for ${repositoryFullName}`)
+}
+
+async function runFresh(
+  githubConfig: GitHubConfigType,
+  reviewReadyOnly: boolean,
+) {
+  const systemSecret = requiredSecret('PATCHPLANE_SYSTEM_INGESTION_SECRET')
+  const repositoryFullName = required('PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME')
+  const [owner, repositoryName, extra] = repositoryFullName.split('/')
+  if (
+    owner === undefined ||
+    repositoryName === undefined ||
+    extra !== undefined
+  ) {
+    throw new Error(
+      'PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME must be owner/repository',
+    )
   }
 
+  const { app } = makeGitHubApp(githubConfig)
+  const { installationId, octokit } = await findInstallation(
+    app,
+    repositoryFullName,
+  )
   const configuredPullRequest = process.env.PATCHPLANE_SMOKE_PULL_REQUEST_NUMBER
   const pullRequestNumber =
     configuredPullRequest === undefined
@@ -256,8 +731,8 @@ async function main(githubConfig: GitHubConfigType) {
         ).data[0]?.number
       : Number(configuredPullRequest)
   if (
-    !Number.isSafeInteger(pullRequestNumber) ||
-    pullRequestNumber === undefined
+    pullRequestNumber === undefined ||
+    !Number.isSafeInteger(pullRequestNumber)
   ) {
     throw new Error(
       `${repositoryFullName} needs an open pull request for the trust-loop smoke`,
@@ -313,15 +788,13 @@ async function main(githubConfig: GitHubConfigType) {
     .update(payload)
     .digest('hex')}`
   const webhookUrl = await resolveWebhookUrl()
-  console.log(
-    JSON.stringify({
-      type: 'trust_loop_started',
-      webhookUrl,
-      repositoryFullName,
-      pullRequestNumber,
-      deliveryId,
-    }),
-  )
+  emit({
+    type: 'trust_loop_started',
+    webhookUrl: publicUrlLocation(webhookUrl),
+    repositoryFullName,
+    pullRequestNumber,
+    deliveryId,
+  })
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: {
@@ -342,16 +815,14 @@ async function main(githubConfig: GitHubConfigType) {
     result.workflowRunId === undefined
   ) {
     throw new Error(
-      `Trust-loop webhook failed (${response.status}): ${result.error ?? JSON.stringify(result)}`,
+      `Trust-loop webhook failed (${response.status}): ${result.error ?? 'unknown error'}`,
     )
   }
 
-  const snapshot = await convexClient().query(getAcceptanceSnapshot, {
+  const snapshot = await readAcceptanceSnapshot(
+    result.workflowRunId,
     systemSecret,
-    workflowRunId: result.workflowRunId,
-  })
-  assertSnapshot(snapshot)
-
+  )
   const commentsAfter = await octokit.paginate(
     octokit.rest.issues.listComments,
     {
@@ -375,27 +846,130 @@ async function main(githubConfig: GitHubConfigType) {
     )
   }
 
-  console.log(
-    JSON.stringify({
-      type: 'trust_loop_review_ready',
-      workflowRunId: result.workflowRunId,
-      sandboxStatus: result.sandboxStatus,
-      hasRuntimeEvents: snapshot.hasRuntimeEvents,
-      hasRuntimeSessions: snapshot.hasRuntimeSessions,
-      artifactCount: snapshot.evidenceArtifacts.length,
-      hasProvenanceEvents: snapshot.hasProvenanceEvents,
-      publicationUrl: publication.html_url,
-    }),
-  )
+  emit({
+    type: 'trust_loop_review_ready',
+    workflowRunId: result.workflowRunId,
+    sandboxStatus: result.sandboxStatus,
+    hasRuntimeEvents: snapshot.hasRuntimeEvents,
+    hasRuntimeSessions: snapshot.hasRuntimeSessions,
+    artifactCount: snapshot.evidenceArtifacts.length,
+    hasProvenanceEvents: snapshot.hasProvenanceEvents,
+    publicationUrl: publication.html_url,
+  })
 
-  if (publishedHumanDecision(snapshot) === undefined) {
-    throw new Error(
-      [
-        'Pre-decision trust loop passed, but full M10 acceptance still requires an authenticated human decision.',
-        `Open the deployed client workflow ${result.workflowRunId}, submit a decision, then rerun acceptance against that workflow.`,
-      ].join(' '),
-    )
+  if (reviewReadyOnly) {
+    if (snapshot.latestSandboxExecution?.status !== 'succeeded') {
+      throw new Error(
+        'Convex sandbox smoke requires the latest sandbox execution to succeed',
+      )
+    }
+    emit({
+      type: 'trust_loop_summary',
+      ok: true,
+      mode: 'fresh',
+      completion: 'review-ready',
+      m10Complete: false,
+      workflowRunId: result.workflowRunId,
+    })
+    return true
+  }
+
+  emit({
+    type: 'trust_loop_human_decision_required',
+    ok: false,
+    workflowRunId: result.workflowRunId,
+    instruction:
+      'Submit an authenticated decision in the deployed client, then rerun with PATCHPLANE_SMOKE_WORKFLOW_RUN_ID.',
+  })
+  emit({
+    type: 'trust_loop_summary',
+    ok: false,
+    mode: 'fresh',
+    completion: 'human-decision-required',
+    m10Complete: false,
+    workflowRunId: result.workflowRunId,
+  })
+  return false
+}
+
+export async function orchestrate(
+  argv: readonly string[] = process.argv.slice(2),
+) {
+  const acceptedArguments = new Set(['--review-ready-only'])
+  const unsupportedArgument = argv.find(
+    (argument) => !acceptedArguments.has(argument),
+  )
+  if (unsupportedArgument !== undefined) {
+    emit({
+      type: 'trust_loop_summary',
+      ok: false,
+      completion: 'invalid-arguments',
+      m10Complete: false,
+    })
+    return false
+  }
+  const reviewReadyOnly = argv.includes('--review-ready-only')
+  const workflowRunId = process.env.PATCHPLANE_SMOKE_WORKFLOW_RUN_ID?.trim()
+  const replay = process.env.PATCHPLANE_SMOKE_REPLAY_PUBLICATION === 'true'
+  const target = reviewReadyOnly ? 'convex-sandbox' : 'trust-loop'
+  const preflight = inspectSmokePreflight(target, process.env)
+  console.log(formatSmokePreflightSummary(preflight))
+  if (!preflight.ok) {
+    emit({
+      type: 'trust_loop_summary',
+      ok: false,
+      mode: preflight.mode,
+      completion: 'preflight-failed',
+      m10Complete: false,
+    })
+    return false
+  }
+  if (replay && (workflowRunId === undefined || workflowRunId.length === 0)) {
+    emit({
+      type: 'trust_loop_summary',
+      ok: false,
+      mode: preflight.mode,
+      completion: 'replay-requires-workflow',
+      m10Complete: false,
+    })
+    return false
+  }
+
+  try {
+    const githubConfig = Effect.runSync(GitHubConfig)
+    if (workflowRunId !== undefined && workflowRunId.length > 0) {
+      await verifyPostDecision(
+        githubConfig,
+        workflowRunId,
+        requiredSecret('PATCHPLANE_SYSTEM_INGESTION_SECRET'),
+        replay,
+      )
+      emit({
+        type: 'trust_loop_summary',
+        ok: true,
+        mode: 'post-decision',
+        completion: replay ? 'publication-replayed' : 'verified',
+        automatedChecksComplete: replay,
+        m10Complete: false,
+        requiresHumanUiReadback: replay,
+        workflowRunId,
+      })
+      return true
+    }
+    return await runFresh(githubConfig, reviewReadyOnly)
+  } catch {
+    emit({
+      type: 'trust_loop_summary',
+      ok: false,
+      mode: preflight.mode,
+      completion: 'failed',
+      m10Complete: false,
+      errorCategory: 'acceptance-check-failed',
+    })
+    return false
   }
 }
 
-await main(Effect.runSync(GitHubConfig))
+if (import.meta.main) {
+  process.exitCode = (await orchestrate()) ? 0 : 1
+}

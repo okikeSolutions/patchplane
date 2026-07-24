@@ -57,10 +57,39 @@ const detail: WorkflowDetail = {
     },
   ],
   evidenceArtifacts: [],
-  candidatePatchSets: [],
-  reviewRuns: [],
+  candidatePatchSets: [
+    {
+      id: 'candidate-1',
+      workflowRunId,
+      status: 'captured',
+      createdAt: 3,
+    },
+  ],
+  reviewRuns: [
+    {
+      id: 'review-1',
+      workflowRunId,
+      sandboxExecutionId: 'execution-1',
+      candidatePatchSetId: 'candidate-1',
+      kind: 'test',
+      reviewer: 'patchplane:test-reviewer',
+      status: 'completed',
+      startedAt: 4,
+      completedAt: 5,
+      createdAt: 4,
+    },
+  ],
   reviewFindings: [],
-  policyDecisions: [],
+  policyDecisions: [
+    {
+      id: 'policy-1',
+      workflowRunId,
+      reviewRunId: 'review-1',
+      status: 'approved',
+      summary: 'Ready for human review.',
+      createdAt: 5,
+    },
+  ],
   humanDecisions: [],
   publicationResults: [],
   provenanceEvents: [],
@@ -97,6 +126,10 @@ describe('WorkflowReviewPanel', () => {
       expect(submitReviewDecision).toHaveBeenCalledWith({
         data: {
           workflowRunId: 'workflow-1',
+          sandboxExecutionId: 'execution-1',
+          candidatePatchSetId: 'candidate-1',
+          reviewRunId: 'review-1',
+          policyDecisionId: 'policy-1',
           status,
           comment: 'Reviewed evidence.',
           idempotencyKey: expect.stringMatching(/^workflow-1:/),
@@ -104,6 +137,28 @@ describe('WorkflowReviewPanel', () => {
       })
     },
   )
+
+  test('keeps decisions disabled when the displayed review is not linked to the latest candidate', () => {
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          reviewRuns: detail.reviewRuns.map((review) => ({
+            ...review,
+            candidatePatchSetId: 'candidate-old',
+          })),
+        }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Required comment'), {
+      target: { value: 'Reviewed evidence.' },
+    })
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+  })
 
   test('reuses the same idempotency key when a failed submission is retried', async () => {
     submitReviewDecision
@@ -113,13 +168,55 @@ describe('WorkflowReviewPanel', () => {
         decision: { id: 'decision-1', status: 'approved' },
         publications: [],
       })
-    render(<WorkflowReviewPanel detail={detail} />)
+    const { rerender } = render(<WorkflowReviewPanel detail={detail} />)
 
     fireEvent.change(screen.getByLabelText('Required comment'), {
       target: { value: 'Reviewed evidence.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     await screen.findByText('Publication failed')
+    rerender(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          sandboxExecutions: [
+            ...detail.sandboxExecutions,
+            {
+              ...detail.sandboxExecutions[0],
+              id: 'execution-2',
+              completedAt: 20,
+            },
+          ],
+          candidatePatchSets: [
+            ...detail.candidatePatchSets,
+            {
+              ...detail.candidatePatchSets[0],
+              id: 'candidate-2',
+              createdAt: 20,
+            },
+          ],
+          reviewRuns: [
+            ...detail.reviewRuns,
+            {
+              ...detail.reviewRuns[0],
+              id: 'review-2',
+              sandboxExecutionId: 'execution-2',
+              candidatePatchSetId: 'candidate-2',
+              createdAt: 21,
+            },
+          ],
+          policyDecisions: [
+            ...detail.policyDecisions,
+            {
+              ...detail.policyDecisions[0],
+              id: 'policy-2',
+              reviewRunId: 'review-2',
+              createdAt: 22,
+            },
+          ],
+        }}
+      />,
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(2))
 
@@ -127,5 +224,11 @@ describe('WorkflowReviewPanel', () => {
     const secondKey =
       submitReviewDecision.mock.calls[1]?.[0].data.idempotencyKey
     expect(secondKey).toBe(firstKey)
+    expect(submitReviewDecision.mock.calls[1]?.[0].data).toMatchObject({
+      sandboxExecutionId: 'execution-1',
+      candidatePatchSetId: 'candidate-1',
+      reviewRunId: 'review-1',
+      policyDecisionId: 'policy-1',
+    })
   })
 })

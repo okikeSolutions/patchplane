@@ -8,18 +8,63 @@ import { submitReviewDecisionServerFn } from '@/lib/review-decision'
 import type { WorkflowDetail } from './types'
 import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-trust-state'
 
+function latestBy<A>(items: ReadonlyArray<A>, timestamp: (item: A) => number) {
+  return items.reduce<A | undefined>(
+    (latest, item) =>
+      latest === undefined || timestamp(item) > timestamp(latest) ? item : latest,
+    undefined,
+  )
+}
+
 export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetail }) {
   const [comment, setComment] = useState('')
   const [submittingStatus, setSubmittingStatus] = useState<HumanDecisionStatus | undefined>()
   const [error, setError] = useState<string | undefined>()
-  const submissionAttempt = useRef<{ readonly fingerprint: string; readonly idempotencyKey: string } | undefined>(undefined)
+  const submissionAttempt = useRef<
+    | {
+        readonly fingerprint: string
+        readonly idempotencyKey: string
+        readonly sandboxExecutionId: string
+        readonly candidatePatchSetId: string
+        readonly reviewRunId: string
+        readonly policyDecisionId: string
+      }
+    | undefined
+  >(undefined)
   const hasComment = comment.trim().length > 0
   const trustState = deriveWorkflowTrustState(detail)
   const isSubmitting = submittingStatus !== undefined
+  const sandboxExecution = latestBy(
+    detail.sandboxExecutions,
+    (execution) => execution.completedAt,
+  )
+  const candidatePatchSet = latestBy(
+    detail.candidatePatchSets,
+    (candidate) => candidate.createdAt,
+  )
+  const reviewRun = latestBy(detail.reviewRuns, (review) => review.createdAt)
+  const policyDecision = latestBy(
+    detail.policyDecisions,
+    (decision) => decision.createdAt,
+  )
+  const hasCurrentProjection =
+    sandboxExecution !== undefined &&
+    candidatePatchSet !== undefined &&
+    reviewRun?.sandboxExecutionId === sandboxExecution.id &&
+    reviewRun.candidatePatchSetId === candidatePatchSet.id &&
+    policyDecision?.reviewRunId === reviewRun.id
 
   const submitDecision = async (status: HumanDecisionStatus) => {
     const trimmedComment = comment.trim()
-    if (trimmedComment.length === 0 || isSubmitting) {
+    if (
+      trimmedComment.length === 0 ||
+      isSubmitting ||
+      !hasCurrentProjection ||
+      sandboxExecution === undefined ||
+      candidatePatchSet === undefined ||
+      reviewRun === undefined ||
+      policyDecision === undefined
+    ) {
       return
     }
 
@@ -31,11 +76,19 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         submissionAttempt.current = {
           fingerprint,
           idempotencyKey: `${detail.workflowRun.id}:${status}:${globalThis.crypto.randomUUID()}`,
+          sandboxExecutionId: sandboxExecution.id,
+          candidatePatchSetId: candidatePatchSet.id,
+          reviewRunId: reviewRun.id,
+          policyDecisionId: policyDecision.id,
         }
       }
       const response = await submitReviewDecisionServerFn({
         data: {
           workflowRunId: detail.workflowRun.id,
+          sandboxExecutionId: submissionAttempt.current.sandboxExecutionId,
+          candidatePatchSetId: submissionAttempt.current.candidatePatchSetId,
+          reviewRunId: submissionAttempt.current.reviewRunId,
+          policyDecisionId: submissionAttempt.current.policyDecisionId,
           status,
           comment: trimmedComment,
           idempotencyKey: submissionAttempt.current.idempotencyKey,
@@ -94,7 +147,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={!hasComment || isSubmitting}
+          disabled={!hasComment || isSubmitting || !hasCurrentProjection}
           onClick={() => void submitDecision('approved')}
         >
           <CheckIcon data-icon="inline-start" />
@@ -103,7 +156,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <Button
           type="button"
           variant="secondary"
-          disabled={!hasComment || isSubmitting}
+          disabled={!hasComment || isSubmitting || !hasCurrentProjection}
           onClick={() => void submitDecision('changes-requested')}
         >
           <MessageSquareWarningIcon data-icon="inline-start" />
@@ -112,7 +165,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <Button
           type="button"
           variant="destructive"
-          disabled={!hasComment || isSubmitting}
+          disabled={!hasComment || isSubmitting || !hasCurrentProjection}
           onClick={() => void submitDecision('rejected')}
         >
           <XIcon data-icon="inline-start" />

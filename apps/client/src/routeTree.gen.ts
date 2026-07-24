@@ -9,44 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/app'
-import { Route as ApiArtifactsUrlRouteImport } from './routes/api/artifacts/url'
-import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
-import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
-import { Route as ApiGithubWebhookRouteImport } from './routes/api/github/webhook'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppWorkflowsWorkflowRunIdRouteImport } from './routes/app.workflows.$workflowRunId'
-import { Route as ApiGithubInstallCallbackRouteImport } from './routes/api/github/install/callback'
+import { Route as ApiGithubWebhookRouteImport } from './routes/api/github/webhook'
+import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
+import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
+import { Route as ApiArtifactsUrlRouteImport } from './routes/api/artifacts/url'
 import { Route as ApiGithubInstallStartRouteImport } from './routes/api/github/install/start'
+import { Route as ApiGithubInstallCallbackRouteImport } from './routes/api/github/install/callback'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiArtifactsUrlRoute = ApiArtifactsUrlRouteImport.update({
-  id: '/api/artifacts/url',
-  path: '/api/artifacts/url',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
-  id: '/api/auth/callback',
-  path: '/api/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAuthSignInRoute = ApiAuthSignInRouteImport.update({
-  id: '/api/auth/sign-in',
-  path: '/api/auth/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiGithubWebhookRoute = ApiGithubWebhookRouteImport.update({
-  id: '/api/github/webhook',
-  path: '/api/github/webhook',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppWorkflowsWorkflowRunIdRoute =
@@ -55,17 +35,37 @@ const AppWorkflowsWorkflowRunIdRoute =
     path: '/workflows/$workflowRunId',
     getParentRoute: () => AppRoute,
   } as any)
+const ApiGithubWebhookRoute = ApiGithubWebhookRouteImport.update({
+  id: '/api/github/webhook',
+  path: '/api/github/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSignInRoute = ApiAuthSignInRouteImport.update({
+  id: '/api/auth/sign-in',
+  path: '/api/auth/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
+  id: '/api/auth/callback',
+  path: '/api/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiArtifactsUrlRoute = ApiArtifactsUrlRouteImport.update({
+  id: '/api/artifacts/url',
+  path: '/api/artifacts/url',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubInstallStartRoute = ApiGithubInstallStartRouteImport.update({
+  id: '/api/github/install/start',
+  path: '/api/github/install/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiGithubInstallCallbackRoute =
   ApiGithubInstallCallbackRouteImport.update({
     id: '/api/github/install/callback',
     path: '/api/github/install/callback',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiGithubInstallStartRoute = ApiGithubInstallStartRouteImport.update({
-  id: '/api/github/install/start',
-  path: '/api/github/install/start',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -150,13 +150,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -164,32 +157,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/artifacts/url': {
-      id: '/api/artifacts/url'
-      path: '/api/artifacts/url'
-      fullPath: '/api/artifacts/url'
-      preLoaderRoute: typeof ApiArtifactsUrlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/callback': {
-      id: '/api/auth/callback'
-      path: '/api/auth/callback'
-      fullPath: '/api/auth/callback'
-      preLoaderRoute: typeof ApiAuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/sign-in': {
-      id: '/api/auth/sign-in'
-      path: '/api/auth/sign-in'
-      fullPath: '/api/auth/sign-in'
-      preLoaderRoute: typeof ApiAuthSignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/github/webhook': {
-      id: '/api/github/webhook'
-      path: '/api/github/webhook'
-      fullPath: '/api/github/webhook'
-      preLoaderRoute: typeof ApiGithubWebhookRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/workflows/$workflowRunId': {
@@ -199,11 +171,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkflowsWorkflowRunIdRouteImport
       parentRoute: typeof AppRoute
     }
-    '/api/github/install/callback': {
-      id: '/api/github/install/callback'
-      path: '/api/github/install/callback'
-      fullPath: '/api/github/install/callback'
-      preLoaderRoute: typeof ApiGithubInstallCallbackRouteImport
+    '/api/github/webhook': {
+      id: '/api/github/webhook'
+      path: '/api/github/webhook'
+      fullPath: '/api/github/webhook'
+      preLoaderRoute: typeof ApiGithubWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/sign-in': {
+      id: '/api/auth/sign-in'
+      path: '/api/auth/sign-in'
+      fullPath: '/api/auth/sign-in'
+      preLoaderRoute: typeof ApiAuthSignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/callback': {
+      id: '/api/auth/callback'
+      path: '/api/auth/callback'
+      fullPath: '/api/auth/callback'
+      preLoaderRoute: typeof ApiAuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/artifacts/url': {
+      id: '/api/artifacts/url'
+      path: '/api/artifacts/url'
+      fullPath: '/api/artifacts/url'
+      preLoaderRoute: typeof ApiArtifactsUrlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/github/install/start': {
@@ -211,6 +204,13 @@ declare module '@tanstack/react-router' {
       path: '/api/github/install/start'
       fullPath: '/api/github/install/start'
       preLoaderRoute: typeof ApiGithubInstallStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/install/callback': {
+      id: '/api/github/install/callback'
+      path: '/api/github/install/callback'
+      fullPath: '/api/github/install/callback'
+      preLoaderRoute: typeof ApiGithubInstallCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
   }

@@ -166,6 +166,8 @@ export interface CandidatePatchSetRow {
 export interface ReviewRunRow {
   id: string
   workflowRunId: Id<'workflowRuns'>
+  sandboxExecutionId?: string
+  candidatePatchSetId?: string
   kind: 'test' | 'lint' | 'policy' | 'manual'
   reviewer: string
   status: 'queued' | 'running' | 'completed' | 'failed'
@@ -202,6 +204,10 @@ export interface PolicyDecisionRow {
 export interface HumanDecisionRow {
   id: string
   workflowRunId: Id<'workflowRuns'>
+  sandboxExecutionId?: string
+  candidatePatchSetId?: string
+  reviewRunId?: string
+  policyDecisionId?: string
   actorId: string
   status: 'approved' | 'rejected' | 'changes-requested'
   comment: string

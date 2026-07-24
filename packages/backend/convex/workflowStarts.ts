@@ -227,6 +227,8 @@ const reviewRunStatusArg = v.union(
 const reviewRunReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
+  sandboxExecutionId: v.optional(v.string()),
+  candidatePatchSetId: v.optional(v.string()),
   kind: reviewRunKindArg,
   reviewer: v.string(),
   status: reviewRunStatusArg,
@@ -292,6 +294,10 @@ const policyDecisionReturn = v.object({
 const humanDecisionReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
+  sandboxExecutionId: v.optional(v.string()),
+  candidatePatchSetId: v.optional(v.string()),
+  reviewRunId: v.optional(v.string()),
+  policyDecisionId: v.optional(v.string()),
   actorId: v.string(),
   status: decisionStatusArg,
   comment: v.string(),
@@ -472,6 +478,13 @@ const workflowStartReturn = v.object({
     ),
     createdAt: v.number(),
   }),
+})
+
+const decisionPublicationReplayFixtureReturn = v.object({
+  workflowStart: workflowStartReturn,
+  humanDecision: humanDecisionReturn,
+  candidateHeadSha: v.optional(v.string()),
+  publicationResults: v.array(publicationResultReturn),
 })
 
 async function createWorkflowStartRecord(
@@ -860,6 +873,7 @@ export const createFromExternalIntake = mutation({
 
     await ctx.db.insert('externalWorkflowRefs', {
       ...args.externalRef,
+      workspaceId: args.workspaceId,
       promptRequestId: workflowStart.promptRequest.id,
       workflowRunId: workflowStart.workflowRun.id,
       createdAt: workflowStart.promptRequest.createdAt,
@@ -1265,6 +1279,8 @@ export const recordReviewRun = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
     kind: reviewRunKindArg,
     reviewer: v.string(),
     status: reviewRunStatusArg,
@@ -1278,9 +1294,24 @@ export const recordReviewRun = mutation({
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
 
+    if (args.sandboxExecutionId !== undefined) {
+      const sandboxExecution = await ctx.db.get('sandboxExecutions', args.sandboxExecutionId)
+      if (sandboxExecution === null || sandboxExecution.workflowRunId !== args.workflowRunId) {
+        throw new ConvexError('Sandbox execution does not belong to workflow')
+      }
+    }
+    if (args.candidatePatchSetId !== undefined) {
+      const candidatePatchSet = await ctx.db.get('candidatePatchSets', args.candidatePatchSetId)
+      if (candidatePatchSet === null || candidatePatchSet.workflowRunId !== args.workflowRunId) {
+        throw new ConvexError('Candidate patch set does not belong to workflow')
+      }
+    }
+
     const createdAt = args.createdAt ?? Date.now()
     const reviewRun = {
       workflowRunId: args.workflowRunId,
+      ...(args.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: args.sandboxExecutionId }),
+      ...(args.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: args.candidatePatchSetId }),
       kind: args.kind,
       reviewer: args.reviewer,
       status: args.status,
@@ -1299,7 +1330,11 @@ export const recordReviewRun = mutation({
       startedAt: args.startedAt,
       completedAt: args.completedAt ?? createdAt,
       summary: args.summary ?? `Review run ${args.kind} ${args.status}.`,
-      artifactRefs: [String(id)],
+      artifactRefs: [
+        String(id),
+        ...(args.sandboxExecutionId === undefined ? [] : [String(args.sandboxExecutionId)]),
+        ...(args.candidatePatchSetId === undefined ? [] : [String(args.candidatePatchSetId)]),
+      ],
       idempotencyKey: `${String(id)}:review-run`,
     })
 
@@ -1677,6 +1712,10 @@ export const authorizeRuntimeControl = query({
 export const recordHumanDecision = mutation({
   args: {
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    policyDecisionId: v.optional(v.id('policyDecisions')),
     status: decisionStatusArg,
     comment: v.string(),
     idempotencyKey: v.optional(v.string()),
@@ -1698,38 +1737,6 @@ export const recordHumanDecision = mutation({
       args.status === 'approved' ? 'decision:approve' : 'decision:reject',
     )
 
-    const sandboxExecution = await ctx.db
-      .query('sandboxExecutions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .first()
-    if (sandboxExecution === null) {
-      throw new ConvexError('Sandbox execution required before decision')
-    }
-
-    const candidatePatchSet = await ctx.db
-      .query('candidatePatchSets')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .first()
-    if (candidatePatchSet === null) {
-      throw new ConvexError('Candidate patch set required before decision')
-    }
-
-    const reviewRun = await ctx.db
-      .query('reviewRuns')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .first()
-    if (reviewRun === null) {
-      throw new ConvexError('Review run required before decision')
-    }
-
-    const policyDecision = await ctx.db
-      .query('policyDecisions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .first()
-    if (policyDecision === null) {
-      throw new ConvexError('Policy decision required before decision')
-    }
-
     if (args.idempotencyKey !== undefined) {
       const existing = await ctx.db
         .query('humanDecisions')
@@ -1741,9 +1748,23 @@ export const recordHumanDecision = mutation({
         .unique()
 
       if (existing !== null) {
+        if (
+          existing.status !== args.status ||
+          existing.comment !== comment ||
+          existing.sandboxExecutionId !== args.sandboxExecutionId ||
+          existing.candidatePatchSetId !== args.candidatePatchSetId ||
+          existing.reviewRunId !== args.reviewRunId ||
+          existing.policyDecisionId !== args.policyDecisionId
+        ) {
+          throw new ConvexError('Human decision idempotency key conflict')
+        }
         return {
           id: existing._id,
           workflowRunId: existing.workflowRunId,
+          ...(existing.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: existing.sandboxExecutionId }),
+          ...(existing.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: existing.candidatePatchSetId }),
+          ...(existing.reviewRunId === undefined ? {} : { reviewRunId: existing.reviewRunId }),
+          ...(existing.policyDecisionId === undefined ? {} : { policyDecisionId: existing.policyDecisionId }),
           actorId: existing.actorId,
           status: existing.status,
           comment: existing.comment,
@@ -1753,8 +1774,91 @@ export const recordHumanDecision = mutation({
       }
     }
 
+    if (
+      args.sandboxExecutionId === undefined ||
+      args.candidatePatchSetId === undefined ||
+      args.reviewRunId === undefined ||
+      args.policyDecisionId === undefined
+    ) {
+      throw new ConvexError('Displayed review projection IDs required')
+    }
+
+    const [
+      sandboxExecution,
+      candidatePatchSet,
+      reviewRun,
+      policyDecision,
+      sandboxExecutions,
+      candidatePatchSets,
+      reviewRuns,
+      policyDecisions,
+    ] = await Promise.all([
+      ctx.db.get('sandboxExecutions', args.sandboxExecutionId),
+      ctx.db.get('candidatePatchSets', args.candidatePatchSetId),
+      ctx.db.get('reviewRuns', args.reviewRunId),
+      ctx.db.get('policyDecisions', args.policyDecisionId),
+      ctx.db.query('sandboxExecutions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('candidatePatchSets').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('reviewRuns').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+      ctx.db.query('policyDecisions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).order('desc').take(32),
+    ])
+    if (sandboxExecution === null || sandboxExecution.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Sandbox execution does not belong to workflow')
+    }
+    if (candidatePatchSet === null || candidatePatchSet.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Candidate patch set does not belong to workflow')
+    }
+    if (reviewRun === null || reviewRun.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Review run does not belong to workflow')
+    }
+    if (policyDecision === null || policyDecision.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Policy decision does not belong to workflow')
+    }
+
+    const latestSandboxExecution = sandboxExecutions.reduce<(typeof sandboxExecutions)[number] | undefined>(
+      (latest, execution) => latest === undefined || execution.completedAt > latest.completedAt ? execution : latest,
+      undefined,
+    )
+    const latestCandidatePatchSet = candidatePatchSets.reduce<(typeof candidatePatchSets)[number] | undefined>(
+      (latest, candidate) => latest === undefined || candidate.createdAt > latest.createdAt ? candidate : latest,
+      undefined,
+    )
+    const latestReviewRun = reviewRuns.reduce<(typeof reviewRuns)[number] | undefined>(
+      (latest, review) => latest === undefined || review.createdAt > latest.createdAt ? review : latest,
+      undefined,
+    )
+    const latestPolicyDecision = policyDecisions.reduce<(typeof policyDecisions)[number] | undefined>(
+      (latest, decision) => latest === undefined || decision.createdAt > latest.createdAt ? decision : latest,
+      undefined,
+    )
+    if (
+      latestSandboxExecution?._id !== sandboxExecution._id ||
+      latestCandidatePatchSet?._id !== candidatePatchSet._id ||
+      latestReviewRun?._id !== reviewRun._id ||
+      latestPolicyDecision?._id !== policyDecision._id
+    ) {
+      throw new ConvexError('Displayed review projection is stale')
+    }
+
+    if (candidatePatchSet.createdAt < sandboxExecution.completedAt) {
+      throw new ConvexError('Candidate patch set predates latest sandbox execution')
+    }
+    if (
+      reviewRun.sandboxExecutionId !== sandboxExecution._id ||
+      reviewRun.candidatePatchSetId !== candidatePatchSet._id
+    ) {
+      throw new ConvexError('Review run must reference displayed sandbox and candidate patch')
+    }
+    if (policyDecision.reviewRunId !== reviewRun._id) {
+      throw new ConvexError('Policy decision must reference latest review run')
+    }
+
     const decision = {
       workflowRunId: args.workflowRunId,
+      sandboxExecutionId: sandboxExecution._id,
+      candidatePatchSetId: candidatePatchSet._id,
+      reviewRunId: reviewRun._id,
+      policyDecisionId: policyDecision._id,
       actorId: `workos:${identity.subject}`,
       status: args.status,
       comment,
@@ -1791,18 +1895,45 @@ export const getTrustLoopAcceptanceSnapshot = query({
     hasRuntimeEvents: v.boolean(),
     hasRuntimeSessions: v.boolean(),
     sandboxExecutionStatuses: v.array(v.union(v.literal('succeeded'), v.literal('failed'))),
+    latestSandboxExecution: v.optional(v.object({
+      id: v.string(),
+      status: v.union(v.literal('succeeded'), v.literal('failed')),
+      completedAt: v.number(),
+    })),
     evidenceArtifacts: v.array(v.object({
+      id: v.string(),
       kind: evidenceArtifactKindArg,
       storageKey: v.string(),
       sizeBytes: v.number(),
       sha256: v.string(),
+      createdAt: v.number(),
     })),
     candidatePatchStatuses: v.array(candidatePatchSetStatusArg),
+    latestCandidatePatchSet: v.optional(v.object({
+      id: v.string(),
+      status: candidatePatchSetStatusArg,
+      diffArtifactId: v.optional(v.string()),
+      headSha: v.optional(v.string()),
+      createdAt: v.number(),
+    })),
     reviewRunStatuses: v.array(reviewRunStatusArg),
+    latestReviewRun: v.optional(v.object({
+      id: v.string(),
+      sandboxExecutionId: v.optional(v.string()),
+      candidatePatchSetId: v.optional(v.string()),
+      status: reviewRunStatusArg,
+      createdAt: v.number(),
+    })),
     policyDecisionStatuses: v.array(policyDecisionStatusArg),
+    latestPolicyDecision: v.optional(v.object({
+      status: policyDecisionStatusArg,
+      reviewRunId: v.optional(v.string()),
+      createdAt: v.number(),
+    })),
     humanDecisions: v.array(v.object({
       id: v.string(),
       status: decisionStatusArg,
+      decidedAt: v.number(),
       idempotencyKey: v.optional(v.string()),
     })),
     publicationResults: v.array(v.object({
@@ -1830,6 +1961,31 @@ export const getTrustLoopAcceptanceSnapshot = query({
       ctx.db.query('provenanceEvents').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId)).take(1),
     ])
 
+    const latestSandboxExecution = sandboxExecutions.reduce<(typeof sandboxExecutions)[number] | undefined>(
+      (latest, execution) => latest === undefined || execution.completedAt > latest.completedAt
+        ? execution
+        : latest,
+      undefined,
+    )
+    const latestCandidatePatchSet = candidatePatchSets.reduce<(typeof candidatePatchSets)[number] | undefined>(
+      (latest, candidate) => latest === undefined || candidate.createdAt > latest.createdAt
+        ? candidate
+        : latest,
+      undefined,
+    )
+    const latestReviewRun = reviewRuns.reduce<(typeof reviewRuns)[number] | undefined>(
+      (latest, review) => latest === undefined || review.createdAt > latest.createdAt
+        ? review
+        : latest,
+      undefined,
+    )
+    const latestPolicyDecision = policyDecisions.reduce<(typeof policyDecisions)[number] | undefined>(
+      (latest, decision) => latest === undefined || decision.createdAt > latest.createdAt
+        ? decision
+        : latest,
+      undefined,
+    )
+
     return {
       workflowRunId: workflowRun._id,
       traceId: workflowRun.traceId ?? 'legacy',
@@ -1837,19 +1993,54 @@ export const getTrustLoopAcceptanceSnapshot = query({
       hasRuntimeEvents: runtimeEvents.length > 0,
       hasRuntimeSessions: runtimeSessions.length > 0,
       sandboxExecutionStatuses: sandboxExecutions.map((execution) => execution.status),
+      ...(latestSandboxExecution === undefined ? {} : {
+        latestSandboxExecution: {
+          id: latestSandboxExecution['_id'],
+          status: latestSandboxExecution.status,
+          completedAt: latestSandboxExecution.completedAt,
+        },
+      }),
       evidenceArtifacts: evidenceArtifacts.map((artifact) => ({
+        id: artifact['_id'],
         kind: artifact.kind,
         storageKey: artifact.storageKey,
         sizeBytes: artifact.sizeBytes,
         sha256: artifact.sha256,
+        createdAt: artifact.createdAt,
       })),
       candidatePatchStatuses: candidatePatchSets.map((patchSet) => patchSet.status),
+      ...(latestCandidatePatchSet === undefined ? {} : {
+        latestCandidatePatchSet: {
+          id: latestCandidatePatchSet['_id'],
+          status: latestCandidatePatchSet.status,
+          ...(latestCandidatePatchSet.diffArtifactId === undefined ? {} : { diffArtifactId: latestCandidatePatchSet.diffArtifactId }),
+          ...(latestCandidatePatchSet.headSha === undefined ? {} : { headSha: latestCandidatePatchSet.headSha }),
+          createdAt: latestCandidatePatchSet.createdAt,
+        },
+      }),
       reviewRunStatuses: reviewRuns.map((reviewRun) => reviewRun.status),
+      ...(latestReviewRun === undefined ? {} : {
+        latestReviewRun: {
+          id: latestReviewRun['_id'],
+          ...(latestReviewRun.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: latestReviewRun.sandboxExecutionId }),
+          ...(latestReviewRun.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: latestReviewRun.candidatePatchSetId }),
+          status: latestReviewRun.status,
+          createdAt: latestReviewRun.createdAt,
+        },
+      }),
       policyDecisionStatuses: policyDecisions.map((decision) => decision.status),
+      ...(latestPolicyDecision === undefined ? {} : {
+        latestPolicyDecision: {
+          status: latestPolicyDecision.status,
+          ...(latestPolicyDecision.reviewRunId === undefined ? {} : { reviewRunId: latestPolicyDecision.reviewRunId }),
+          createdAt: latestPolicyDecision.createdAt,
+        },
+      }),
       humanDecisions: humanDecisions.map((decision) => ({
         // oxlint-disable-next-line eslint/no-underscore-dangle -- Convex document IDs are exposed as `_id`.
         id: decision._id,
         status: decision.status,
+        decidedAt: decision.decidedAt,
         ...(decision.idempotencyKey === undefined ? {} : { idempotencyKey: decision.idempotencyKey }),
       })),
       publicationResults: publicationResults.map((result) => ({
@@ -1860,6 +2051,126 @@ export const getTrustLoopAcceptanceSnapshot = query({
         ...(result.idempotencyKey === undefined ? {} : { idempotencyKey: result.idempotencyKey }),
       })),
       hasProvenanceEvents: provenanceEvents.length > 0,
+    }
+  },
+})
+
+export const getDecisionPublicationReplayFixture = query({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    humanDecisionId: v.id('humanDecisions'),
+  },
+  returns: decisionPublicationReplayFixtureReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    const humanDecision = await ctx.db.get('humanDecisions', args.humanDecisionId)
+
+    if (humanDecision === null || humanDecision.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Human decision not found')
+    }
+
+    const publicationKeys = [
+      `${String(args.humanDecisionId)}:issue-comment`,
+      `${String(args.humanDecisionId)}:check-run`,
+    ] as const
+    const [promptRequest, candidatePatchSets, correlatedCandidatePatchSet] = await Promise.all([
+      ctx.db.get('promptRequests', workflowRun.promptRequestId),
+      ctx.db
+        .query('candidatePatchSets')
+        .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+        .order('desc')
+        .take(32),
+      humanDecision.candidatePatchSetId === undefined
+        ? Promise.resolve(null)
+        : ctx.db.get('candidatePatchSets', humanDecision.candidatePatchSetId),
+    ])
+    if (
+      correlatedCandidatePatchSet !== null &&
+      correlatedCandidatePatchSet.workflowRunId !== args.workflowRunId
+    ) {
+      throw new ConvexError('Decision candidate patch set does not belong to workflow')
+    }
+    // New decisions persist the exact candidate projection they reviewed.
+    // The timestamp fallback supports legacy decisions recorded before that link existed.
+    const candidatePatchSet = correlatedCandidatePatchSet ?? candidatePatchSets.reduce<(typeof candidatePatchSets)[number] | undefined>(
+      (latest, candidate) => candidate.createdAt <= humanDecision.decidedAt &&
+        (latest === undefined || candidate.createdAt > latest.createdAt)
+        ? candidate
+        : latest,
+      undefined,
+    )
+    const publications = await Promise.all(
+      publicationKeys.map((idempotencyKey) =>
+        ctx.db
+          .query('publicationResults')
+          .withIndex('by_workflow_publication_key', (q) =>
+            q
+              .eq('workflowRunId', args.workflowRunId)
+              .eq('idempotencyKey', idempotencyKey),
+          )
+          .unique(),
+      ),
+    )
+
+    if (promptRequest === null) {
+      throw new ConvexError('Workflow prompt request not found')
+    }
+
+    return {
+      workflowStart: {
+        promptRequest: {
+          id: promptRequest['_id'],
+          workspaceId: promptRequest.workspaceId,
+          actorId: promptRequest.actorId,
+          traceId: promptRequest.traceId ?? 'legacy',
+          source: promptRequest.source,
+          // Replay only needs repository coordinates and workflow identity.
+          // Do not expose the original prompt through the system-secret helper.
+          prompt: '[redacted for decision publication replay]',
+          ...(promptRequest.externalRef === undefined ? {} : { externalRef: promptRequest.externalRef }),
+          status: promptRequest.status,
+          createdAt: promptRequest.createdAt,
+        },
+        workflowRun: {
+          id: workflowRun['_id'],
+          promptRequestId: workflowRun.promptRequestId,
+          workspaceId: workflowRun.workspaceId,
+          traceId: workflowRun.traceId ?? 'legacy',
+          status: workflowRun.status,
+          createdAt: workflowRun.createdAt,
+        },
+      },
+      humanDecision: {
+        id: humanDecision['_id'],
+        workflowRunId: humanDecision.workflowRunId,
+        ...(humanDecision.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: humanDecision.sandboxExecutionId }),
+        ...(humanDecision.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: humanDecision.candidatePatchSetId }),
+        ...(humanDecision.reviewRunId === undefined ? {} : { reviewRunId: humanDecision.reviewRunId }),
+        ...(humanDecision.policyDecisionId === undefined ? {} : { policyDecisionId: humanDecision.policyDecisionId }),
+        actorId: humanDecision.actorId,
+        status: humanDecision.status,
+        comment: '[redacted for decision publication replay]',
+        decidedAt: humanDecision.decidedAt,
+        ...(humanDecision.idempotencyKey === undefined ? {} : { idempotencyKey: humanDecision.idempotencyKey }),
+      },
+      ...(candidatePatchSet?.headSha === undefined
+        ? {}
+        : { candidateHeadSha: candidatePatchSet.headSha }),
+      publicationResults: publications.flatMap((publication) => publication === null ? [] : [{
+        id: publication['_id'],
+        workflowRunId: publication.workflowRunId,
+        provider: publication.provider,
+        kind: publication.kind,
+        status: publication.status,
+        ...(publication.externalId === undefined ? {} : { externalId: publication.externalId }),
+        ...(publication.url === undefined ? {} : { url: publication.url }),
+        ...(publication.summary === undefined ? {} : { summary: publication.summary }),
+        ...(publication.error === undefined ? {} : { error: publication.error }),
+        createdAt: publication.createdAt,
+        ...(publication.idempotencyKey === undefined ? {} : { idempotencyKey: publication.idempotencyKey }),
+      }]),
     }
   },
 })
@@ -2044,6 +2355,8 @@ export const getDetail = query({
         .map((reviewRun) => ({
           id: reviewRun['_id'],
           workflowRunId: reviewRun.workflowRunId,
+          ...(reviewRun.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: reviewRun.sandboxExecutionId }),
+          ...(reviewRun.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: reviewRun.candidatePatchSetId }),
           kind: reviewRun.kind,
           reviewer: reviewRun.reviewer,
           status: reviewRun.status,
@@ -2080,6 +2393,10 @@ export const getDetail = query({
         .map((decision) => ({
           id: decision['_id'],
           workflowRunId: decision.workflowRunId,
+          ...(decision.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: decision.sandboxExecutionId }),
+          ...(decision.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: decision.candidatePatchSetId }),
+          ...(decision.reviewRunId === undefined ? {} : { reviewRunId: decision.reviewRunId }),
+          ...(decision.policyDecisionId === undefined ? {} : { policyDecisionId: decision.policyDecisionId }),
           actorId: decision.actorId,
           status: decision.status,
           comment: decision.comment,

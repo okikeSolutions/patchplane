@@ -179,6 +179,7 @@ export default defineSchema({
 
   externalWorkflowRefs: defineTable({
     provider: v.string(),
+    workspaceId: v.optional(v.string()),
     deliveryId: v.string(),
     eventKind: v.string(),
     repositoryProvider: v.optional(v.string()),
@@ -211,7 +212,16 @@ export default defineSchema({
       'issueExternalId',
       'eventKind',
     ])
-    .index('by_comment', ['provider', 'commentExternalId']),
+    .index('by_comment', ['provider', 'commentExternalId'])
+    .index('by_provider_and_repository_external_id', [
+      'provider',
+      'repositoryExternalId',
+    ])
+    .index('by_workspace_id_and_provider_and_repository_external_id', [
+      'workspaceId',
+      'provider',
+      'repositoryExternalId',
+    ]),
 
   runtimeEvents: defineTable({
     workflowRunId: v.id('workflowRuns'),
@@ -305,6 +315,8 @@ export default defineSchema({
 
   reviewRuns: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
     kind: reviewRunKind,
     reviewer: v.string(),
     status: reviewRunStatus,
@@ -342,6 +354,10 @@ export default defineSchema({
 
   humanDecisions: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
+    reviewRunId: v.optional(v.id('reviewRuns')),
+    policyDecisionId: v.optional(v.id('policyDecisions')),
     actorId: v.string(),
     status: decisionStatus,
     comment: v.string(),

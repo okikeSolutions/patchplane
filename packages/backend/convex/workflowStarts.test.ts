@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { makeFunctionReference } from 'convex/server'
+import type { Id } from './_generated/dataModel'
 import { convexTest } from 'convex-test'
 import { describe, expect, test } from 'vitest'
 import schema from './schema'
@@ -17,14 +18,14 @@ type CreateWorkflowStartArgs = Record<string, unknown> & {
 
 interface WorkflowStartResult {
   promptRequest: {
-    id: string
+    id: Id<'promptRequests'>
     workspaceId: string
     actorId: string
     source: string
     prompt: string
   }
   workflowRun: {
-    id: string
+    id: Id<'workflowRuns'>
   }
 }
 
@@ -64,6 +65,17 @@ const getTrustLoopAcceptanceSnapshot = makeFunctionReference<
   Record<string, unknown>
 >('workflowStarts:getTrustLoopAcceptanceSnapshot')
 
+
+const getDecisionPublicationReplayFixture = makeFunctionReference<
+  'query',
+  {
+    systemSecret: string
+    workflowRunId: string
+    humanDecisionId: string
+  },
+  Record<string, unknown>
+>('workflowStarts:getDecisionPublicationReplayFixture')
+
 const authorizeRuntimeControl = makeFunctionReference<
   'query',
   { workflowRunId: string },
@@ -79,7 +91,7 @@ const createWorkflowStartFromExternalIntake = makeFunctionReference<
 const recordSandboxExecution = makeFunctionReference<
   'mutation',
   Record<string, unknown>,
-  unknown
+  Record<string, unknown> & { id: Id<'sandboxExecutions'> }
 >('workflowStarts:recordSandboxExecution')
 
 const recordRuntimeEvents = makeFunctionReference<
@@ -229,7 +241,176 @@ async function createWorkflowStartForTest(
   return result
 }
 
+async function seedDecisionPublicationReplayFixture(
+  t: ReturnType<typeof authenticatedTest>,
+) {
+  const workflowStart = await createWorkflowStartForTest(t)
+  const workflowRunId = workflowStart.workflowRun.id
+  const records = await t.run(async (ctx) => {
+    await ctx.db.insert('sandboxExecutions', {
+      workflowRunId,
+      provider: 'daytona',
+      sandboxId: 'sandbox-old',
+      command: 'bun test',
+      status: 'failed',
+      stdout: 'old output',
+      startedAt: 1,
+      completedAt: 2,
+      createdAt: 2,
+    })
+    const sandboxExecutionId = await ctx.db.insert('sandboxExecutions', {
+      workflowRunId,
+      provider: 'daytona',
+      sandboxId: 'sandbox-latest',
+      command: 'bun test',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'latest output',
+      startedAt: 3,
+      completedAt: 4,
+      createdAt: 4,
+    })
+    await ctx.db.insert('candidatePatchSets', {
+      workflowRunId,
+      status: 'empty',
+      createdAt: 2,
+    })
+    const candidatePatchSetId = await ctx.db.insert('candidatePatchSets', {
+      workflowRunId,
+      status: 'captured',
+      headSha: 'head-sha',
+      createdAt: 4,
+    })
+    const humanDecisionId = await ctx.db.insert('humanDecisions', {
+      workflowRunId,
+      sandboxExecutionId,
+      candidatePatchSetId,
+      actorId: 'workos:user_123',
+      status: 'approved',
+      comment: 'Evidence is sufficient.',
+      decidedAt: 5,
+      idempotencyKey: 'decision-request-1',
+    })
+    await ctx.db.insert('candidatePatchSets', {
+      workflowRunId,
+      status: 'captured',
+      headSha: 'post-decision-head-sha',
+      createdAt: 6,
+    })
+    const issueCommentId = await ctx.db.insert('publicationResults', {
+      workflowRunId,
+      provider: 'github',
+      kind: 'issue-comment',
+      status: 'published',
+      externalId: 'comment-1',
+      createdAt: 6,
+      idempotencyKey: `${String(humanDecisionId)}:issue-comment`,
+    })
+    const checkRunId = await ctx.db.insert('publicationResults', {
+      workflowRunId,
+      provider: 'github',
+      kind: 'check-run',
+      status: 'failed',
+      error: 'retry me',
+      createdAt: 7,
+      idempotencyKey: `${String(humanDecisionId)}:check-run`,
+    })
+    await ctx.db.insert('publicationResults', {
+      workflowRunId,
+      provider: 'github',
+      kind: 'check-run',
+      status: 'published',
+      createdAt: 8,
+      idempotencyKey: `${String(humanDecisionId)}:check-run:unrelated`,
+    })
+
+    return {
+      humanDecisionId,
+      sandboxExecutionId,
+      candidatePatchSetId,
+      issueCommentId,
+      checkRunId,
+    }
+  })
+
+  return { workflowStart, ...records }
+}
+
 describe('workflowStarts trusted boundary and authz', () => {
+  test('returns a bounded decision publication replay fixture', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const seeded = await seedDecisionPublicationReplayFixture(t)
+
+    const fixture = await t.query(getDecisionPublicationReplayFixture, {
+      systemSecret: 'system_test',
+      workflowRunId: seeded.workflowStart.workflowRun.id,
+      humanDecisionId: seeded.humanDecisionId,
+    })
+
+    expect(fixture).toMatchObject({
+      workflowStart: {
+        promptRequest: {
+          prompt: '[redacted for decision publication replay]',
+        },
+        workflowRun: { id: seeded.workflowStart.workflowRun.id },
+      },
+      humanDecision: {
+        id: seeded.humanDecisionId,
+        workflowRunId: seeded.workflowStart.workflowRun.id,
+        sandboxExecutionId: seeded.sandboxExecutionId,
+        candidatePatchSetId: seeded.candidatePatchSetId,
+        status: 'approved',
+        comment: '[redacted for decision publication replay]',
+      },
+      // A retry captured after the decision must not replace its publication target.
+      candidateHeadSha: 'head-sha',
+      publicationResults: [
+        {
+          id: seeded.issueCommentId,
+          idempotencyKey: `${String(seeded.humanDecisionId)}:issue-comment`,
+        },
+        {
+          id: seeded.checkRunId,
+          idempotencyKey: `${String(seeded.humanDecisionId)}:check-run`,
+        },
+      ],
+    })
+    expect(fixture).not.toHaveProperty('evidenceArtifacts')
+    expect(fixture).not.toHaveProperty('sandboxExecution')
+    expect(fixture).not.toHaveProperty('candidatePatchSet')
+    expect(fixture.publicationResults).toHaveLength(2)
+  })
+
+  test('rejects a replay decision belonging to another workflow', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const seeded = await seedDecisionPublicationReplayFixture(t)
+    const otherWorkflow = await createWorkflowStartForTest(t)
+
+    await expect(
+      t.query(getDecisionPublicationReplayFixture, {
+        systemSecret: 'system_test',
+        workflowRunId: otherWorkflow.workflowRun.id,
+        humanDecisionId: seeded.humanDecisionId,
+      }),
+    ).rejects.toThrow('Human decision not found')
+  })
+
+  test('rejects an invalid system secret for a replay fixture', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const seeded = await seedDecisionPublicationReplayFixture(t)
+
+    await expect(
+      t.query(getDecisionPublicationReplayFixture, {
+        systemSecret: 'wrong-secret',
+        workflowRunId: seeded.workflowStart.workflowRun.id,
+        humanDecisionId: seeded.humanDecisionId,
+      }),
+    ).rejects.toThrow('System ingestion secret required')
+  })
+
   test('system external intake creates a workflow and dedupes redelivery', async () => {
     const t = convexTest(schema, modules)
     const args = {
@@ -522,7 +703,7 @@ describe('workflowStarts trusted boundary and authz', () => {
     })
     const workflowStart = await createWorkflowStartForTest(t)
 
-    await t.mutation(recordSandboxExecution, {
+    const sandboxExecution = await t.mutation(recordSandboxExecution, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
       provider: 'daytona',
@@ -565,6 +746,8 @@ describe('workflowStarts trusted boundary and authz', () => {
     const reviewRun = await t.mutation(recordReviewRun, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
       kind: 'test',
       reviewer: 'patchplane:test-reviewer',
       status: 'completed',
@@ -600,12 +783,20 @@ describe('workflowStarts trusted boundary and authz', () => {
 
     const humanDecision = await t.mutation(recordHumanDecision, {
       workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
       status: 'changes-requested',
       comment: 'Please fix the failing auth test first.',
       idempotencyKey: 'decision-attempt-1',
     })
     const replayedHumanDecision = await t.mutation(recordHumanDecision, {
       workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
       status: 'changes-requested',
       comment: 'Please fix the failing auth test first.',
       idempotencyKey: 'decision-attempt-1',
@@ -628,6 +819,10 @@ describe('workflowStarts trusted boundary and authz', () => {
     expect(finding).toMatchObject({ reviewRunId: reviewRun.id, evidenceArtifactId: diffArtifact.id })
     expect(policyDecision).toMatchObject({ status: 'changes-requested' })
     expect(humanDecision).toMatchObject({
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
       actorId: 'workos:user_123',
       comment: 'Please fix the failing auth test first.',
       idempotencyKey: 'decision-attempt-1',
@@ -658,15 +853,40 @@ describe('workflowStarts trusted boundary and authz', () => {
       hasRuntimeEvents: false,
       hasRuntimeSessions: false,
       sandboxExecutionStatuses: ['failed'],
+      latestSandboxExecution: {
+        id: sandboxExecution.id,
+        status: 'failed',
+        completedAt: 10,
+      },
       evidenceArtifacts: [{
+        id: diffArtifact.id,
         kind: 'diff',
         storageKey: 'workflow-1/diff.patch',
         sizeBytes: 42,
         sha256: 'e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
+        createdAt: 10,
       }],
       candidatePatchStatuses: ['captured'],
+      latestCandidatePatchSet: {
+        id: patchSet.id,
+        status: 'captured',
+        diffArtifactId: diffArtifact.id,
+        createdAt: 11,
+      },
       reviewRunStatuses: ['completed'],
+      latestReviewRun: {
+        id: reviewRun.id,
+        sandboxExecutionId: sandboxExecution.id,
+        candidatePatchSetId: patchSet.id,
+        status: 'completed',
+        createdAt: 12,
+      },
       policyDecisionStatuses: ['changes-requested'],
+      latestPolicyDecision: {
+        status: 'changes-requested',
+        reviewRunId: reviewRun.id,
+        createdAt: 14,
+      },
       humanDecisions: [{
         id: humanDecision.id,
         status: 'changes-requested',
@@ -680,6 +900,36 @@ describe('workflowStarts trusted boundary and authz', () => {
       }],
       hasProvenanceEvents: true,
     })
+
+    await t.mutation(recordCandidatePatchSet, {
+      systemSecret: 'system_test',
+      workflowRunId: workflowStart.workflowRun.id,
+      status: 'captured',
+      diffArtifactId: diffArtifact.id,
+      createdAt: 20,
+    })
+    const replayAfterProjectionAdvanced = await t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
+      status: 'changes-requested',
+      comment: 'Please fix the failing auth test first.',
+      idempotencyKey: 'decision-attempt-1',
+    })
+    expect(replayAfterProjectionAdvanced.id).toBe(humanDecision.id)
+
+    await expect(t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
+      status: 'approved',
+      comment: 'Approve the projection I previously saw.',
+      idempotencyKey: 'decision-attempt-stale',
+    })).rejects.toThrow('Displayed review projection is stale')
 
     await expect(t.query(getTrustLoopAcceptanceSnapshot, {
       systemSecret: 'wrong-secret',
@@ -710,7 +960,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       workflowRunId: workflowStart.workflowRun.id,
       status: 'approved',
       comment: 'Evidence looks good.',
-    })).rejects.toThrow('Sandbox execution required before decision')
+    })).rejects.toThrow('Displayed review projection IDs required')
   })
 
   test('review findings reject review runs and artifacts from a different workflow', async () => {

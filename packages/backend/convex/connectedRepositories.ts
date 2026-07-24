@@ -1,4 +1,8 @@
-import type { UserIdentity } from 'convex/server'
+import {
+  paginationOptsValidator,
+  paginationResultValidator,
+  type UserIdentity,
+} from 'convex/server'
 import { ConvexError, v } from 'convex/values'
 import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 
@@ -101,6 +105,28 @@ const connectedRepositoryReturn = v.object({
   permissionsJson: v.optional(v.string()),
   status: connectionStatus,
   connectedByActorId: v.string(),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+
+const latestRepositoryVerificationReturn = v.object({
+  workflowRunId: v.string(),
+  workflowStatus: v.union(
+    v.literal('queued'),
+    v.literal('running'),
+    v.literal('reviewed'),
+  ),
+  verificationStatus: v.union(
+    v.literal('queued'),
+    v.literal('running'),
+    v.literal('reviewed'),
+    v.literal('approved'),
+    v.literal('rejected'),
+    v.literal('changes-requested'),
+    v.literal('manual-review'),
+  ),
+  pullRequestNumber: v.optional(v.number()),
+  url: v.optional(v.string()),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
@@ -369,9 +395,154 @@ export const listForWorkspace = query({
     const repositories = await ctx.db
       .query('connectedRepositories')
       .withIndex('by_workspace', (q) => q.eq('workspaceId', args.workspaceId))
-      .collect()
+      .take(100)
 
     return repositories.map(toConnectedRepositoryReturn)
+  },
+})
+
+export const listForWorkspaceWithLatestVerification = query({
+  args: {
+    workspaceId: v.string(),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginationResultValidator(v.object({
+    repository: connectedRepositoryReturn,
+    latestVerification: v.optional(latestRepositoryVerificationReturn),
+  })),
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    requireWorkOSWorkspace(identity, args.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      args.workspaceId,
+      'workspace:view',
+    )
+    if (args.paginationOpts.numItems > 50) {
+      throw new ConvexError('Repository page size must not exceed 50')
+    }
+
+    const repositories = await ctx.db
+      .query('connectedRepositories')
+      .withIndex('by_workspace', (q) => q.eq('workspaceId', args.workspaceId))
+      .paginate(args.paginationOpts)
+
+    const page = await Promise.all(repositories.page.map(async (repository) => {
+      const indexedExternalRef = await ctx.db
+        .query('externalWorkflowRefs')
+        .withIndex('by_workspace_id_and_provider_and_repository_external_id', (q) =>
+          q
+            .eq('workspaceId', args.workspaceId)
+            .eq('provider', repository.provider)
+            .eq('repositoryExternalId', repository.repositoryExternalId),
+        )
+        .order('desc')
+        .first()
+      // Transitional fallback for references written before workspaceId was
+      // denormalized. It scans only the legacy index partition, remains
+      // bounded, and verifies each workflow workspace before returning data.
+      const legacyExternalRefs = indexedExternalRef === null
+        ? await ctx.db
+            .query('externalWorkflowRefs')
+            .withIndex('by_workspace_id_and_provider_and_repository_external_id', (q) =>
+              q
+                .eq('workspaceId', undefined)
+                .eq('provider', repository.provider)
+                .eq('repositoryExternalId', repository.repositoryExternalId),
+            )
+            .order('desc')
+            .take(32)
+        : []
+      let externalRef = indexedExternalRef ?? undefined
+      let workflowRun = externalRef === undefined
+        ? null
+        : await ctx.db.get('workflowRuns', externalRef.workflowRunId)
+      if (externalRef === undefined) {
+        for (const legacyExternalRef of legacyExternalRefs) {
+          const legacyWorkflowRun = await ctx.db.get(
+            'workflowRuns',
+            legacyExternalRef.workflowRunId,
+          )
+          if (legacyWorkflowRun?.workspaceId === args.workspaceId) {
+            externalRef = legacyExternalRef
+            workflowRun = legacyWorkflowRun
+            break
+          }
+        }
+      }
+      if (
+        externalRef === undefined ||
+        workflowRun === null ||
+        workflowRun.workspaceId !== args.workspaceId
+      ) {
+        if (legacyExternalRefs.length === 32) {
+          throw new ConvexError(
+            'Legacy repository verification references require workspace backfill',
+          )
+        }
+        return { repository: toConnectedRepositoryReturn(repository) }
+      }
+
+      const [humanDecision, policyDecision, reviewRun] = await Promise.all([
+        ctx.db
+          .query('humanDecisions')
+          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
+          .order('desc')
+          .first(),
+        ctx.db
+          .query('policyDecisions')
+          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
+          .order('desc')
+          .first(),
+        ctx.db
+          .query('reviewRuns')
+          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
+          .order('desc')
+          .first(),
+      ])
+      const coherentPolicyDecision =
+        reviewRun !== null && policyDecision?.reviewRunId === reviewRun._id
+          ? policyDecision
+          : null
+      const coherentHumanDecision =
+        coherentPolicyDecision !== null &&
+        humanDecision !== null &&
+        humanDecision.reviewRunId === reviewRun?._id &&
+        humanDecision.policyDecisionId === coherentPolicyDecision._id
+          ? humanDecision
+          : null
+      const verificationStatus:
+        | 'queued'
+        | 'running'
+        | 'reviewed'
+        | 'approved'
+        | 'rejected'
+        | 'changes-requested'
+        | 'manual-review' = workflowRun.status !== 'reviewed'
+        ? workflowRun.status
+        : coherentHumanDecision?.status ?? coherentPolicyDecision?.status ?? 'reviewed'
+      const updatedAt = workflowRun.status !== 'reviewed'
+        ? workflowRun.createdAt
+        : coherentHumanDecision?.decidedAt ?? coherentPolicyDecision?.createdAt ?? workflowRun.createdAt
+
+      return {
+        repository: toConnectedRepositoryReturn(repository),
+        latestVerification: {
+          workflowRunId: workflowRun._id,
+          workflowStatus: workflowRun.status,
+          verificationStatus,
+          ...(externalRef.pullRequestNumber === undefined
+            ? {}
+            : { pullRequestNumber: externalRef.pullRequestNumber }),
+          ...(externalRef.url === undefined ? {} : { url: externalRef.url }),
+          createdAt: workflowRun.createdAt,
+          updatedAt,
+        },
+      }
+    }))
+
+    return { ...repositories, page }
   },
 })
 

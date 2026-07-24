@@ -1,7 +1,7 @@
 import { api } from '@patchplane/backend/convex/_generated/api'
-import { useQuery } from 'convex/react'
+import { usePaginatedQuery } from 'convex/react'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   Card,
@@ -29,11 +29,41 @@ function GitHubLogo({ className }: { readonly className?: string }) {
   )
 }
 
+type VerificationStatus =
+  | 'queued'
+  | 'running'
+  | 'reviewed'
+  | 'approved'
+  | 'rejected'
+  | 'changes-requested'
+  | 'manual-review'
+
 interface ConnectedRepositoryRow {
-  id: string
-  repositoryFullName: string
-  status: 'active' | 'suspended' | 'removed' | 'reconnect_required'
-  private: boolean
+  repository: {
+    id: string
+    repositoryFullName: string
+    status: 'active' | 'suspended' | 'removed' | 'reconnect_required'
+    private: boolean
+  }
+  latestVerification?: {
+    workflowRunId: string
+    workflowStatus: 'queued' | 'running' | 'reviewed'
+    verificationStatus: VerificationStatus
+    pullRequestNumber?: number
+    url?: string
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+const verificationLabels: Readonly<Record<VerificationStatus, string>> = {
+  queued: 'Queued',
+  running: 'Running',
+  reviewed: 'Reviewed',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  'changes-requested': 'Changes requested',
+  'manual-review': 'Manual review',
 }
 
 export function GitHubRepositoryConnections({
@@ -41,10 +71,23 @@ export function GitHubRepositoryConnections({
 }: {
   readonly workspaceId: string | undefined
 }) {
-  const repositories = useQuery(
-    api.connectedRepositories.listForWorkspace,
+  const {
+    results: repositories,
+    status: paginationStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.connectedRepositories.listForWorkspaceWithLatestVerification,
     workspaceId === undefined ? 'skip' : { workspaceId },
-  ) as ReadonlyArray<ConnectedRepositoryRow> | undefined
+    { initialNumItems: 20 },
+  ) as {
+    readonly results: ReadonlyArray<ConnectedRepositoryRow>
+    readonly status:
+      | 'LoadingFirstPage'
+      | 'CanLoadMore'
+      | 'LoadingMore'
+      | 'Exhausted'
+    readonly loadMore: (numItems: number) => void
+  }
 
   return (
     <Card className="border-border/60 bg-card/80 shadow-none">
@@ -56,8 +99,8 @@ export function GitHubRepositoryConnections({
               GitHub repositories
             </CardTitle>
             <CardDescription>
-              Connect a GitHub App installation so patchplane can route PR events
-              to this workspace.
+              Connect a GitHub App installation so patchplane can route PR
+              events to this workspace.
             </CardDescription>
           </div>
           <a
@@ -77,7 +120,7 @@ export function GitHubRepositoryConnections({
           <p className="text-sm text-muted-foreground">
             Select an active WorkOS organization before connecting GitHub.
           </p>
-        ) : repositories === undefined ? (
+        ) : paginationStatus === 'LoadingFirstPage' ? (
           <p className="text-sm text-muted-foreground">Loading repositories…</p>
         ) : repositories.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -86,7 +129,7 @@ export function GitHubRepositoryConnections({
           </p>
         ) : (
           <div className="grid gap-2">
-            {repositories.map((repository) => (
+            {repositories.map(({ repository, latestVerification }) => (
               <div
                 key={repository.id}
                 className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
@@ -96,14 +139,81 @@ export function GitHubRepositoryConnections({
                     {repository.repositoryFullName}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {repository.private ? 'Private repository' : 'Public repository'}
+                    {repository.private
+                      ? 'Private repository'
+                      : 'Public repository'}
                   </p>
+                  {latestVerification === undefined ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      No verification run yet
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Latest verification
+                      {latestVerification.pullRequestNumber === undefined
+                        ? ''
+                        : ` · PR #${latestVerification.pullRequestNumber}`}
+                      {' · '}
+                      <time
+                        dateTime={new Date(
+                          latestVerification.updatedAt,
+                        ).toISOString()}
+                      >
+                        {new Date(
+                          latestVerification.updatedAt,
+                        ).toLocaleString()}
+                      </time>
+                      {' · '}
+                      <a
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                        data-latest-verification-status={
+                          latestVerification.verificationStatus
+                        }
+                        data-latest-verification-workflow-run-id={
+                          latestVerification.workflowRunId
+                        }
+                        href={`/app/workflows/${encodeURIComponent(latestVerification.workflowRunId)}`}
+                      >
+                        View run
+                      </a>
+                    </p>
+                  )}
                 </div>
-                <Badge variant={repository.status === 'active' ? 'secondary' : 'outline'}>
-                  {repository.status === 'active' ? 'Connected' : 'Reconnect required'}
-                </Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge
+                    variant={
+                      repository.status === 'active' ? 'secondary' : 'outline'
+                    }
+                  >
+                    {repository.status === 'active'
+                      ? 'Connected'
+                      : 'Reconnect required'}
+                  </Badge>
+                  {latestVerification === undefined ? null : (
+                    <Badge variant="outline">
+                      {
+                        verificationLabels[
+                          latestVerification.verificationStatus
+                        ]
+                      }
+                    </Badge>
+                  )}
+                </div>
               </div>
             ))}
+            {paginationStatus === 'CanLoadMore' ||
+            paginationStatus === 'LoadingMore' ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={paginationStatus === 'LoadingMore'}
+                onClick={() => loadMore(20)}
+              >
+                {paginationStatus === 'LoadingMore'
+                  ? 'Loading repositories…'
+                  : 'Load more repositories'}
+              </Button>
+            ) : null}
           </div>
         )}
       </CardContent>
