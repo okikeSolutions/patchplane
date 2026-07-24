@@ -529,7 +529,7 @@ Evidence:
 
 ### M8.6 — Hosted GitHub Repo Connection Slice
 
-**Status:** Implemented and live-smoke verified for the hosted GitHub App connection path
+**Status:** In progress — implementation, latest-verification aggregation, and provider-level live smoke are complete; browser acceptance remains open
 
 Goal:
 Make the hosted PatchPlane alpha usable without CLI setup and without asking users to manually install/configure their own GitHub App.
@@ -567,6 +567,7 @@ Completed implementation:
 - [x] Added `/api/github/install/start` to create a pending connection intent and redirect to the GitHub App installation URL.
 - [x] Added `/api/github/install/callback` to consume the install intent, list installation repositories, and store connected repositories in Convex.
 - [x] Added connected GitHub repository UI in the authenticated app shell with a Connect GitHub button and connected repository status list.
+- [x] Aggregated each connected repository's latest workspace-scoped verification run and decision status, with a direct workflow-detail link and browser readback assertion.
 - [x] Updated `/api/github/webhook` to route hosted webhooks through Convex connected repository lookup, while preserving the env allowlist fallback for OSS/local self-hosted routing.
 - [x] PR opened/synchronize events now start the existing verification path and publish the sandbox trust report through the existing GitHub issue-comment publication path.
 - [x] Added tests for Convex repository connection storage/routing/intents, PR webhook normalization/intake mapping, PR trust-report publication, Octokit installation listing/failures, install flow helpers, and webhook route workspace resolution.
@@ -577,17 +578,17 @@ Completed implementation:
 
 Remaining hardening:
 
-- [ ] Add a reusable `smoke:convex-sandbox` script for the live Convex + Daytona/Pi path instead of relying on an inline command.
+- [x] Add a reusable `smoke:convex-sandbox` script for the deployed GitHub → Convex → Daytona/Pi path instead of relying on an inline command.
 - [ ] Add browser E2E for Connect GitHub once stable hosted credentials are available.
-- [ ] Add richer dashboard aggregation for latest verification status per connected repository.
+- [x] Add richer dashboard aggregation for latest verification status per connected repository.
 
 Acceptance criteria:
 
 - [x] No CLI required for hosted onboarding.
 - [x] No manual GitHub App creation required.
 - [x] No webhook URL copy/paste required.
-- [x] User can connect GitHub through PatchPlane.
-- [x] User can select repositories on GitHub's screens.
+- [ ] User can connect GitHub through PatchPlane in the release-candidate browser acceptance flow.
+- [ ] User can select repositories on GitHub's screens in the release-candidate browser acceptance flow.
 - [x] PatchPlane can list connected repositories.
 - [x] PatchPlane reacts to PR opened/synchronize events.
 - [x] PatchPlane posts a clear PR trust report.
@@ -889,7 +890,7 @@ Acceptance criteria:
 - [x] Use root `patchplane.config.json` as CLI-managed non-secret project config.
 - [x] Add Cloudflare R2 config to plugin metadata.
 - [x] Add Cloudflare AI Gateway config to plugin metadata.
-- [ ] Add app startup/config smoke for all required alpha environment variables.
+- [x] Add fail-closed startup/config preflight for trust-loop and Convex/Daytona live smokes before provider work begins.
 - [x] Add a bundle-boundary regression check that the hosted web app does not include the in-process Pi SDK runtime.
 - [x] Add a Daytona Pi smoke/eval that runs `pi --mode rpc` in a sandbox and validates parseable normalized runtime output.
 
@@ -930,7 +931,8 @@ mean that a credentialed live acceptance path has passed for the current release
 - [x] Add Daytona sandbox plugin tests with safe mocks/fakes.
 - [x] Add R2 artifact plugin tests.
 - [x] Add Pi runtime event normalization tests.
-- [ ] Add true external browser/AuthKit/Convex E2E once stable test credentials exist.
+- [x] Fail CI when a roadmap milestone claims completion while its acceptance matrix still contains a `Missing` row.
+- [ ] Add true external browser/AuthKit/Convex E2E once stable test credentials exist. An opt-in headed Playwright acceptance helper now encodes the real AuthKit and Connect GitHub flow without placing credentials in CI.
 
 ### Security
 

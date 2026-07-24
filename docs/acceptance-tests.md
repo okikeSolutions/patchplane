@@ -11,14 +11,22 @@ Status meanings:
 
 ## Verification commands
 
-| Scope                           | Command                                                          |
-| ------------------------------- | ---------------------------------------------------------------- |
-| Complete non-live gate          | `bun run verify`                                                 |
-| Daytona/Pi RPC runtime          | `bun run smoke:daytona-rpc`                                      |
-| Authenticated Convex foundation | `bun --env-file=.env.local run smoke:foundation`                 |
-| Full product trust loop         | `bun --env-file=.env.local run smoke:trust-loop` (required)      |
-| Post-decision verification      | `PATCHPLANE_SMOKE_WORKFLOW_RUN_ID=<id> bun run smoke:trust-loop` |
-| Live Cloudflare provisioning    | `PATCHPLANE_LIVE_INFRA_TEST=true bun run test:infra` (required)  |
+| Scope                           | Command                                                                                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Complete non-live gate          | `bun run verify`                                                                                          |
+| Daytona/Pi RPC runtime          | `bun run smoke:daytona-rpc`                                                                               |
+| Authenticated Convex foundation | `bun --env-file=.env.local run smoke:foundation`                                                          |
+| Full product trust loop         | `bun --env-file=.env.local run smoke:trust-loop` (required)                                               |
+| Post-decision verification      | `PATCHPLANE_SMOKE_WORKFLOW_RUN_ID=<id> bun run smoke:trust-loop`                                          |
+| Publication replay              | `PATCHPLANE_SMOKE_WORKFLOW_RUN_ID=<id> PATCHPLANE_SMOKE_REPLAY_PUBLICATION=true bun run smoke:trust-loop` |
+| Deployed Convex sandbox path    | `bun run smoke:convex-sandbox`                                                                            |
+| AuthKit/GitHub browser helper   | `PATCHPLANE_LIVE_BROWSER_TEST=true bun run smoke:browser`                                                 |
+| Roadmap/acceptance consistency  | `bun run check:roadmap-acceptance`                                                                        |
+| Live Cloudflare provisioning    | `PATCHPLANE_LIVE_INFRA_TEST=true bun run test:infra` (required)                                           |
+
+Follow the [M10 acceptance runbook](./m10-acceptance-runbook.md) for the exact
+review-ready run, authenticated human-decision pause, publication replay,
+diagnosis, and cleanup procedure.
 
 ## M0-M3: architecture and core contracts
 
@@ -52,7 +60,7 @@ Status meanings:
 | M6        | CLI commands use PatchPlane service layers                              | CLI integration and CLI eval suites                       | Automated  |
 | M6.5      | Workflow starts require WorkOS/Convex identity and permission           | WorkOS integration and backend Convex tests               | Automated  |
 | M6.5      | WorkOS SDK objects do not cross into core                               | architecture boundary suite                               | Automated  |
-| M6.5      | Real browser AuthKit callback and Convex persistence work together      | full trust-loop browser setup                             | Missing    |
+| M6.5      | Real browser AuthKit callback and Convex persistence work together      | `smoke:browser` AuthKit and persisted-workflow journey    | Missing    |
 
 ## M7-M8.6: GitHub, telemetry, Daytona, infrastructure, and visibility
 
@@ -76,11 +84,11 @@ Status meanings:
 | M8.6      | Hosted onboarding requires no CLI                                     | install-flow helper tests and historical live smoke    | Historical |
 | M8.6      | Hosted user need not create a GitHub App manually                     | deployed product configuration                         | Historical |
 | M8.6      | Hosted user need not copy a webhook URL                               | deployed product configuration                         | Historical |
-| M8.6      | User can connect GitHub and select repositories                       | browser install flow                                   | Missing    |
+| M8.6      | User can connect GitHub and select repositories                       | `smoke:browser` GitHub connection journey              | Missing    |
 | M8.6      | PatchPlane lists connected repositories                               | backend and component tests                            | Automated  |
 | M8.6      | PatchPlane reacts to PR open/synchronize events                       | GitHub normalization/webhook tests                     | Automated  |
 | M8.6      | PatchPlane posts a clear PR trust report                              | publication tests and hosted trust-loop smoke          | Live       |
-| M8.6      | Dashboard shows connected repository and latest verification          | browser/component coverage after aggregation work      | Missing    |
+| M8.6      | Dashboard shows connected repository and latest verification          | backend/component tests plus `smoke:browser` readback  | Missing    |
 
 ## M9-M9.75: remote runtime, investigation UI, and evidence
 
@@ -94,7 +102,7 @@ Status meanings:
 | M9        | Daytona consumes the PatchPlane Pi runtime-session facade                          | architecture/source boundary test                    | Automated |
 | M9.5      | Existing PatchPlane shell remains the dashboard foundation                         | component tests                                      | Automated |
 | M9.5      | Real workflow details are understandable                                           | component tests; deployed browser run still required | Automated |
-| M9.5      | Review ergonomics support maintainer dogfooding                                    | browser trust-loop E2E                               | Missing   |
+| M9.5      | Review ergonomics support maintainer dogfooding                                    | `smoke:browser` typed workflow readback confirmation | Missing   |
 | M9.75     | Patch Report answers what changed/ran/passed and current decision                  | Patch Report domain and workflow component tests     | Automated |
 | M9.75     | Workflow stores raw artifacts in R2                                                | R2 tests and live RPC artifact write                 | Live      |
 | M9.75     | Convex stores artifact metadata/hashes/references                                  | backend Convex tests                                 | Automated |
@@ -114,15 +122,17 @@ Status meanings:
 
 ## M10: evidence-backed decision and publication
 
-| Milestone | Acceptance criterion                                                                               | Evidence                                                       | Status    |
-| --------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------- |
-| M10       | Patch stays untrusted until execution, evidence, and review complete                               | policy, Patch Report, backend precondition tests               | Automated |
-| M10       | Human can approve/reject/request changes before publication                                        | backend and client decision tests                              | Automated |
-| M10       | Decision rationale is backed by persisted evidence/provenance                                      | backend/core/component tests                                   | Automated |
-| M10       | Real authenticated decision updates GitHub and reads back in UI                                    | full trust-loop E2E                                            | Missing   |
-| M10       | Publication retry creates no duplicate GitHub output                                               | core/GitHub adapter tests; live replay required                | Automated |
-| M10       | Durable normalized records deterministically assemble a Patch Report linked to complete provenance | domain, backend, and component tests                           | Automated |
-| M10       | GitHub publication emits an evidence-backed result                                                 | check-run/comment publication tests and live trust-loop replay | Automated |
+| Milestone | Acceptance criterion                                                                               | Evidence                                                         | Status    |
+| --------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------- |
+| M10       | Patch stays untrusted until execution, evidence, and review complete                               | policy, Patch Report, backend precondition tests                 | Automated |
+| M10       | Human can approve/reject/request changes before publication                                        | backend and client decision tests                                | Automated |
+| M10       | Decision rationale is backed by persisted evidence/provenance                                      | backend/core/component tests                                     | Automated |
+| M10       | Review-ready acceptance uses the latest coherent execution, candidate, review, and policy records  | backend and trust-loop smoke regression tests                    | Automated |
+| M10       | Decision publication remains pinned to the candidate projection reviewed by the human              | backend and client decision-publication tests                    | Automated |
+| M10       | Real authenticated decision updates GitHub and reads back in UI                                    | `smoke:trust-loop` replay plus `smoke:browser` readback          | Missing   |
+| M10       | Publication retry creates no duplicate GitHub output                                               | core/GitHub adapter tests and `smoke:trust-loop` provider replay | Live      |
+| M10       | Durable normalized records deterministically assemble a Patch Report linked to complete provenance | domain, backend, and component tests                             | Automated |
+| M10       | GitHub publication emits an evidence-backed result                                                 | check-run/comment publication tests and live trust-loop replay   | Automated |
 
 ## Completion rule
 

@@ -22,6 +22,8 @@ Core docs:
 - [packages/cli/README.md](./packages/cli/README.md): CLI onboarding, env templates, and diagnostics
 - [packages/plugins/README.md](./packages/plugins/README.md): infrastructure plugin and sandbox-backed Pi runtime architecture
 - [CONTRIBUTING.md](./CONTRIBUTING.md): development and contribution guide
+- [docs/philosophy.md](./docs/philosophy.md): product and developer-experience decision principles
+- [docs/m10-acceptance-runbook.md](./docs/m10-acceptance-runbook.md): repeatable human-gated trust-loop acceptance
 - [AGENTS.md](./AGENTS.md): repository map, trust boundaries, and automation protocol
 - [REVIEW.md](./REVIEW.md): risk-based review checklist for Patchplane changes
 - [SECURITY.md](./SECURITY.md): security reporting and secret-handling policy
@@ -118,6 +120,8 @@ GitHub webhook
 → Convex workflowStarts:createFromExternalIntake
 → promptRequests + workflowRuns + externalWorkflowRefs
 ```
+
+The authenticated dashboard lists connected GitHub repositories and their latest workspace-scoped verification status, with a direct link to the durable workflow investigation view.
 
 GitHub, WorkOS, Convex, and Daytona SDK usage is server/plugin-side only. For the alpha `daytona-pi` path, Pi runs inside the Daytona sandbox rather than being bundled into the web/control-plane runtime. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
 
