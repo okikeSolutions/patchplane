@@ -8,6 +8,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  color-scheme: light;
   --brand-navy: #101421;
   --brand-orange: #f8ae41;
   --brand-cream: #f5f2f0;
@@ -22,13 +23,13 @@
   --secondary: oklch(0.95 0.02 92);
   --secondary-foreground: oklch(0.23 0.03 252);
   --muted: oklch(0.95 0.015 95);
-  --muted-foreground: oklch(0.36 0.035 252);
+  --muted-foreground: oklch(0.32 0.025 252);
   --accent: oklch(0.93 0.03 82);
   --accent-foreground: oklch(0.23 0.03 252);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.88 0.02 85);
-  --input: oklch(0.88 0.02 85);
+  --border: #aaa39c;
+  --input: #736e69;
   --ring: oklch(0.72 0.12 72);
   --chart-1: oklch(0.81 0.1 252);
   --chart-2: oklch(0.62 0.19 260);
@@ -83,44 +84,47 @@
   --hero-grid: rgb(169 125 57 / 0.1);
   --hero-glow: rgb(248 174 65 / 0.24);
   --hero-glow-soft: rgb(248 174 65 / 0.14);
-  --brand-readable: oklch(0.45 0.12 72);
-  --success-readable: oklch(0.42 0.13 150);
+  --brand-readable: #8a5200;
+  --success-readable: #0d6634;
+  --destructive-readable: #a51d24;
+  --surface-nested: #e2ddd8;
   --landing-border: rgb(16 20 33 / 0.2);
 }
 
 .dark {
-  --background: var(--brand-navy);
-  --foreground: var(--brand-cream);
-  --card: oklch(0.18 0.006 255);
-  --card-foreground: var(--brand-cream);
-  --popover: oklch(0.18 0.006 255);
-  --popover-foreground: var(--brand-cream);
+  color-scheme: dark;
+  --background: #0b0b0c;
+  --foreground: #f2f2f3;
+  --card: #171719;
+  --card-foreground: #f2f2f3;
+  --popover: #1d1d20;
+  --popover-foreground: #f7f7f8;
   --primary: var(--brand-orange);
-  --primary-foreground: var(--brand-navy);
-  --secondary: oklch(0.245 0.007 255);
-  --secondary-foreground: oklch(0.95 0.01 90);
-  --muted: oklch(0.225 0.006 255);
-  --muted-foreground: oklch(0.74 0.015 90);
-  --accent: oklch(0.28 0.007 255);
-  --accent-foreground: oklch(0.95 0.01 90);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.215 0.005 255);
-  --input: oklch(0.225 0.005 255);
-  --ring: oklch(0.68 0.12 72);
-  --chart-1: oklch(0.81 0.1 252);
-  --chart-2: oklch(0.62 0.19 260);
-  --chart-3: oklch(0.55 0.22 263);
-  --chart-4: oklch(0.49 0.22 264);
-  --chart-5: oklch(0.42 0.18 266);
-  --sidebar: var(--brand-navy);
-  --sidebar-foreground: var(--brand-cream);
+  --primary-foreground: #17120a;
+  --secondary: #29292d;
+  --secondary-foreground: #f0f0f1;
+  --muted: #242428;
+  --muted-foreground: #b8b8be;
+  --accent: #303035;
+  --accent-foreground: #fafafa;
+  --destructive: #ff766f;
+  --destructive-foreground: #160706;
+  --border: #505058;
+  --input: #8f8f99;
+  --ring: #f2b45a;
+  --chart-1: #62a6ff;
+  --chart-2: #4cc9a2;
+  --chart-3: #b993ff;
+  --chart-4: #ff9d66;
+  --chart-5: #f5d25f;
+  --sidebar: #101012;
+  --sidebar-foreground: #f2f2f3;
   --sidebar-primary: var(--brand-orange);
-  --sidebar-primary-foreground: var(--brand-navy);
-  --sidebar-accent: oklch(0.22 0.006 255);
-  --sidebar-accent-foreground: oklch(0.95 0.01 90);
-  --sidebar-border: oklch(0.205 0.005 255);
-  --sidebar-ring: oklch(0.68 0.12 72);
+  --sidebar-primary-foreground: #17120a;
+  --sidebar-accent: #28282c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #424248;
+  --sidebar-ring: #f2b45a;
   --font-sans:
     'Geist Variable', ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
@@ -158,8 +162,10 @@
   --hero-grid: rgb(237 190 100 / 0.11);
   --hero-glow: rgb(248 174 65 / 0.18);
   --hero-glow-soft: rgb(67 97 143 / 0.18);
-  --brand-readable: oklch(0.86 0.11 72);
-  --success-readable: oklch(0.88 0.1 150);
+  --brand-readable: #ffc56f;
+  --success-readable: #77e5ad;
+  --destructive-readable: #ff8d87;
+  --surface-nested: #303036;
   --landing-border: rgb(245 242 240 / 0.16);
 }
 
