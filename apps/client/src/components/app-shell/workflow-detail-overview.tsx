@@ -83,7 +83,7 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
               ['Patch report', patchReport.id],
               ['Workflow run', patchReport.workflowRunId],
               ['Trace', detail.workflowRun.traceId],
-              ['Verification', patchReport.execution.status],
+              ['Sandbox execution', patchReport.execution.status],
               ['Command', patchReport.execution.command ?? 'not run'],
               ['Exit code', patchReport.execution.exitCode === undefined ? 'unknown' : String(patchReport.execution.exitCode)],
               ['Checks', String(patchReport.checks.length)],
@@ -152,10 +152,10 @@ function patchReportStatusLabel(status: PatchReportStatus) {
   switch (status) {
     case 'pending':
       return 'Patch report pending'
-    case 'verification-passed':
-      return 'Verification passed'
-    case 'verification-failed':
-      return 'Verification failed'
+    case 'sandbox-completed':
+      return 'Sandbox agent completed'
+    case 'sandbox-failed':
+      return 'Sandbox agent failed'
     case 'approved':
       return 'Approved'
     case 'rejected':

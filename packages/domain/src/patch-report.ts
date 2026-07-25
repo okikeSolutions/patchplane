@@ -15,8 +15,8 @@ import type { WorkflowStart } from './workflow-start'
  */
 export const PatchReportStatus = Schema.Literals([
   'pending',
-  'verification-passed',
-  'verification-failed',
+  'sandbox-completed',
+  'sandbox-failed',
   'approved',
   'rejected',
   'changes-requested',
@@ -80,7 +80,7 @@ export const PatchReport = Schema.Struct({
     sandboxProvider: Schema.optional(Schema.String),
     sandboxId: Schema.optional(Schema.String),
     command: Schema.optional(Schema.String),
-    status: Schema.Literals(['not-run', 'passed', 'failed', 'running', 'unknown']),
+    status: Schema.Literals(['not-run', 'completed', 'failed', 'running', 'unknown']),
     exitCode: Schema.optional(Schema.Number),
     startedAt: Schema.optional(Schema.Number),
     completedAt: Schema.optional(Schema.Number),
@@ -163,8 +163,8 @@ function patchReportStatus(
   }
 
   return latestExecution.status === 'succeeded'
-    ? 'verification-passed'
-    : 'verification-failed'
+    ? 'sandbox-completed'
+    : 'sandbox-failed'
 }
 
 function decisionSection(
@@ -193,25 +193,17 @@ function executionSection(latestExecution: SandboxExecution | undefined): PatchR
     sandboxProvider: latestExecution.provider,
     sandboxId: latestExecution.sandboxId,
     command: latestExecution.command,
-    status: latestExecution.status === 'succeeded' ? 'passed' : 'failed',
+    status: latestExecution.status === 'succeeded' ? 'completed' : 'failed',
     ...optional('exitCode', latestExecution.exitCode),
     startedAt: latestExecution.startedAt,
     completedAt: latestExecution.completedAt,
   }
 }
 
-function checksSection(latestExecution: SandboxExecution | undefined): ReadonlyArray<PatchReportCheck> {
-  if (latestExecution === undefined) {
-    return []
-  }
-
-  return [
-    {
-      name: latestExecution.command,
-      status: latestExecution.status === 'succeeded' ? 'passed' : 'failed',
-      summary: `exit ${latestExecution.exitCode ?? 'unknown'}`,
-    },
-  ]
+function checksSection(_latestExecution: SandboxExecution | undefined): ReadonlyArray<PatchReportCheck> {
+  // A sandbox agent process exiting successfully is not independent check evidence.
+  // Populate checks only after verification results are part of this read model.
+  return []
 }
 
 function evidenceSection(

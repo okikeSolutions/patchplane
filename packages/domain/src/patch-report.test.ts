@@ -89,7 +89,7 @@ const evidenceArtifact: EvidenceArtifact = {
 }
 
 describe('assemblePatchReportV0', () => {
-  it('assembles a verification-passed report from existing workflow evidence', () => {
+  it('does not mistake successful sandbox agent completion for verification', () => {
     const report = assemblePatchReportV0({
       workflowStart,
       runtimeEvents: [runtimeEvent],
@@ -100,19 +100,19 @@ describe('assemblePatchReportV0', () => {
     expect(report).toMatchObject({
       id: 'patch-report:workflow-1',
       workflowRunId: workflowRunId,
-      status: 'verification-passed',
+      status: 'sandbox-completed',
       repository: 'patchplane/demo',
       promptSummary: 'Fix the failing tests and explain the evidence.',
       execution: {
         sandboxProvider: 'daytona',
         sandboxId: 'sandbox-1',
         command: 'bun test',
-        status: 'passed',
+        status: 'completed',
         exitCode: 0,
         startedAt: 4,
         completedAt: 6,
       },
-      checks: [{ name: 'bun test', status: 'passed', summary: 'exit 0' }],
+      checks: [],
       evidence: [
         { kind: 'runtime-event', label: 'Agent started', summary: 'pi · agent.started' },
         { kind: 'stdout', label: 'Sandbox stdout', summary: '2 bytes inline in sandbox execution' },
@@ -122,7 +122,7 @@ describe('assemblePatchReportV0', () => {
     })
   })
 
-  it('reports pending when no sandbox verification has run', () => {
+  it('reports pending when no sandbox execution has run', () => {
     const report = assemblePatchReportV0({
       workflowStart,
       runtimeEvents: [],
@@ -136,7 +136,7 @@ describe('assemblePatchReportV0', () => {
     expect(report.evidence).toEqual([])
   })
 
-  it('uses the latest sandbox execution for verification status', () => {
+  it('uses the latest sandbox execution for execution status', () => {
     const olderFailure: SandboxExecution = {
       ...sandboxExecution,
       id: 'sandbox-execution-older',
@@ -153,7 +153,7 @@ describe('assemblePatchReportV0', () => {
       sandboxExecutions: [olderFailure, sandboxExecution],
     })
 
-    expect(report.status).toBe('verification-passed')
+    expect(report.status).toBe('sandbox-completed')
     expect(report.execution.exitCode).toBe(0)
   })
 
