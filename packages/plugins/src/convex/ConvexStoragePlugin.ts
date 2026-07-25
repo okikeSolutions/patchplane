@@ -316,9 +316,14 @@ const recordPolicyDecisionMutation = makeFunctionReference<
     systemSecret: string
     workflowRunId: string
     reviewRunId?: string
+    candidatePatchSetId?: string
     status: RecordPolicyDecisionInput['status']
     summary: string
     reason?: string
+    policyVersion?: string
+    inputDigest?: string
+    verificationResultIds?: ReadonlyArray<string>
+    missingRequirementIds?: ReadonlyArray<string>
     createdAt?: number
   },
   unknown
@@ -1103,9 +1108,14 @@ export const ConvexStoragePlugin = {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
                 ...(input.reviewRunId === undefined ? {} : { reviewRunId: input.reviewRunId }),
+                ...(input.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: input.candidatePatchSetId }),
                 status: input.status,
                 summary: input.summary,
                 ...(input.reason === undefined ? {} : { reason: input.reason }),
+                ...(input.policyVersion === undefined ? {} : { policyVersion: input.policyVersion }),
+                ...(input.inputDigest === undefined ? {} : { inputDigest: input.inputDigest }),
+                ...(input.verificationResultIds === undefined ? {} : { verificationResultIds: input.verificationResultIds }),
+                ...(input.missingRequirementIds === undefined ? {} : { missingRequirementIds: input.missingRequirementIds }),
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               })
             },

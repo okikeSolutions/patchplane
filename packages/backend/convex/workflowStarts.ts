@@ -2005,9 +2005,14 @@ export const recordPolicyDecision = mutation({
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
     reviewRunId: v.optional(v.id('reviewRuns')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
     status: policyDecisionStatusArg,
     summary: v.string(),
     reason: v.optional(v.string()),
+    policyVersion: v.optional(v.string()),
+    inputDigest: v.optional(v.string()),
+    verificationResultIds: v.optional(v.array(v.id('verificationResults'))),
+    missingRequirementIds: v.optional(v.array(v.id('verificationRequirements'))),
     createdAt: v.optional(v.number()),
   },
   returns: policyDecisionReturn,
@@ -2017,14 +2022,38 @@ export const recordPolicyDecision = mutation({
     if (args.reviewRunId !== undefined) {
       await requireReviewRunForWorkflow(ctx, args.reviewRunId, args.workflowRunId)
     }
+    if ((args.verificationResultIds?.length ?? 0) > 128 || (args.missingRequirementIds?.length ?? 0) > 64) {
+      throw new ConvexError('Policy evidence references exceed limit')
+    }
+    const [candidate, verificationResults, missingRequirements] = await Promise.all([
+      args.candidatePatchSetId === undefined
+        ? Promise.resolve(null)
+        : ctx.db.get('candidatePatchSets', args.candidatePatchSetId),
+      Promise.all((args.verificationResultIds ?? []).map((id) => ctx.db.get('verificationResults', id))),
+      Promise.all((args.missingRequirementIds ?? []).map((id) => ctx.db.get('verificationRequirements', id))),
+    ])
+    if (args.candidatePatchSetId !== undefined && (candidate === null || candidate.workflowRunId !== args.workflowRunId)) {
+      throw new ConvexError('Policy candidate does not belong to workflow')
+    }
+    if (verificationResults.some((result) => result === null || result.workflowRunId !== args.workflowRunId)) {
+      throw new ConvexError('Policy verification result does not belong to workflow')
+    }
+    if (missingRequirements.some((requirement) => requirement === null || requirement.workflowRunId !== args.workflowRunId)) {
+      throw new ConvexError('Policy verification requirement does not belong to workflow')
+    }
 
     const createdAt = args.createdAt ?? Date.now()
     const decision = {
       workflowRunId: args.workflowRunId,
       ...(args.reviewRunId === undefined ? {} : { reviewRunId: args.reviewRunId }),
+      ...(args.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: args.candidatePatchSetId }),
       status: args.status,
       summary: args.summary,
       ...(args.reason === undefined ? {} : { reason: args.reason }),
+      ...(args.policyVersion === undefined ? {} : { policyVersion: args.policyVersion }),
+      ...(args.inputDigest === undefined ? {} : { inputDigest: args.inputDigest }),
+      ...(args.verificationResultIds === undefined ? {} : { verificationResultIds: args.verificationResultIds }),
+      ...(args.missingRequirementIds === undefined ? {} : { missingRequirementIds: args.missingRequirementIds }),
       createdAt,
     }
     const id = await ctx.db.insert('policyDecisions', decision)
@@ -3117,9 +3146,14 @@ export const getDetail = query({
           id: decision['_id'],
           workflowRunId: decision.workflowRunId,
           ...(decision.reviewRunId === undefined ? {} : { reviewRunId: decision.reviewRunId }),
+          ...(decision.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: decision.candidatePatchSetId }),
           status: decision.status,
           summary: decision.summary,
           ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+          ...(decision.policyVersion === undefined ? {} : { policyVersion: decision.policyVersion }),
+          ...(decision.inputDigest === undefined ? {} : { inputDigest: decision.inputDigest }),
+          ...(decision.verificationResultIds === undefined ? {} : { verificationResultIds: decision.verificationResultIds }),
+          ...(decision.missingRequirementIds === undefined ? {} : { missingRequirementIds: decision.missingRequirementIds }),
           createdAt: decision.createdAt,
         })),
       policyDecisionsTruncated,
