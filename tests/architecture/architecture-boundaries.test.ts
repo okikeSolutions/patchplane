@@ -181,7 +181,7 @@ describe('architecture boundaries', () => {
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
-  it.effect('keeps Sentry imports isolated to Sentry plugin and tests', () =>
+  it.effect('keeps Sentry imports isolated to Sentry plugin, client integration, and tests', () =>
     Effect.gen(function* () {
       const imports = yield* importsForFiles([
         ...yield* sourceFilesUnder('apps'),
@@ -193,12 +193,20 @@ describe('architecture boundaries', () => {
         }
         return !(
           file.startsWith('packages/plugins/src/sentry/') ||
+          (file.startsWith('apps/client/') &&
+            specifier.startsWith('@sentry/tanstackstart-react')) ||
           file.endsWith('.test.ts') ||
           file.endsWith('.test.tsx')
         )
       })
 
+      const effectRuntimeTargetViolations = imports.filter(({ file, specifier }) =>
+        file.startsWith('packages/plugins/src/sentry/') &&
+        !file.endsWith('.test.ts') &&
+        (specifier === '@sentry/effect' || specifier === '@sentry/effect/client'))
+
       expect(violations).toEqual([])
+      expect(effectRuntimeTargetViolations).toEqual([])
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 

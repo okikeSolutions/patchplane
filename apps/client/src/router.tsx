@@ -1,4 +1,6 @@
-import { createRouter } from '@tanstack/react-router'
+import { useEffect } from 'react'
+import * as Sentry from '@sentry/tanstackstart-react'
+import { createRouter, ErrorComponent } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { routerWithQueryClient } from '@tanstack/react-router-with-query'
 import { ConvexQueryClient } from '@convex-dev/react-query'
@@ -27,6 +29,7 @@ export function getRouter() {
   const router = routerWithQueryClient(
     createRouter({
       routeTree,
+      defaultErrorComponent: SentryRouteError,
       defaultPreload: 'intent',
       context: { queryClient, convexClient: convexQueryClient.convexClient },
       scrollRestoration: true,
@@ -38,5 +41,21 @@ export function getRouter() {
     queryClient,
   )
 
+  if (!router.isServer) {
+    Sentry.addIntegration(
+      Sentry.tanstackRouterBrowserTracingIntegration(router),
+    )
+  }
+
   return router
+}
+
+function SentryRouteError({ error }: { readonly error: Error }) {
+  useEffect(() => {
+    Sentry.captureException(error, {
+      tags: { surface: 'client-router' },
+    })
+  }, [error])
+
+  return <ErrorComponent error={error} />
 }

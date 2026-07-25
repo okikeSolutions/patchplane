@@ -27,6 +27,7 @@
     "@patchplane/domain": "workspace:*",
     "@patchplane/plugins": "workspace:*",
     "@react-three/fiber": "9.6.1",
+    "@sentry/tanstackstart-react": "10.62.0",
     "@shadergradient/react": "2.4.20",
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/react-devtools": "latest",

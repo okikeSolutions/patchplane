@@ -335,7 +335,19 @@ export const patchPlanePlugins = {
         name: 'SENTRY_DSN',
         required: false,
         secret: true,
-        description: 'Optional Sentry DSN. When omitted, the telemetry plugin runs as a no-op service.',
+        description: 'Optional Sentry DSN for the Effect-managed telemetry runtime. When omitted, the telemetry plugin runs as a no-op service.',
+      },
+      {
+        name: 'CLOUDFLARE_SENTRY_DSN',
+        required: false,
+        secret: true,
+        description: 'Optional dedicated Sentry DSN for request-scoped Cloudflare Worker error capture.',
+      },
+      {
+        name: 'TANSTACK_SENTRY_DSN',
+        required: false,
+        secret: true,
+        description: 'Optional dedicated Sentry DSN for TanStack Start browser errors and route tracing.',
       },
       {
         name: 'SENTRY_ENABLED',

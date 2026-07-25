@@ -1,4 +1,8 @@
 import {
+  sentryGlobalFunctionMiddleware,
+  sentryGlobalRequestMiddleware,
+} from '@sentry/tanstackstart-react'
+import {
   createCsrfMiddleware,
   createMiddleware,
   createStart,
@@ -50,5 +54,10 @@ const workosAuthkitMiddleware = createMiddleware().server(async (args) => {
 })
 
 export const startInstance = createStart(() => ({
-  requestMiddleware: [csrfMiddleware, workosAuthkitMiddleware],
+  functionMiddleware: [sentryGlobalFunctionMiddleware],
+  requestMiddleware: [
+    sentryGlobalRequestMiddleware,
+    csrfMiddleware,
+    workosAuthkitMiddleware,
+  ],
 }))

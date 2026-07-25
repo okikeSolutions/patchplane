@@ -12,6 +12,21 @@ import { createPhysicalName } from './apps/infra/utils.ts'
 const artifactRetentionDays = 14
 const aiGatewayCollectLogs = false
 const aiGatewayRateLimitPerMinute = 120
+const devWorkerObservability = {
+  enabled: true,
+  headSamplingRate: 1,
+  logs: {
+    enabled: true,
+    invocationLogs: false,
+    headSamplingRate: 1,
+    persist: true,
+  },
+  traces: {
+    enabled: true,
+    headSamplingRate: 1,
+    persist: true,
+  },
+} as const
 const evidenceR2AccessKeyId = Config.redacted('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID').pipe(
   Config.orElse(() => Config.redacted('CLOUDFLARE_ACCESS_KEY_ID')),
 )
@@ -115,6 +130,7 @@ export default Alchemy.Stack(
       main: path.resolve(import.meta.dirname, 'apps/source-control/src/worker.ts'),
       url: false,
       compatibility: { flags: ['nodejs_compat'] },
+      observability: devWorkerObservability,
       env: {
         ...sourceControlRuntimeEnv,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
@@ -127,6 +143,7 @@ export default Alchemy.Stack(
     const githubWebhookWorker = yield* Cloudflare.Worker('GitHubWebhookWorker', {
       main: path.resolve(import.meta.dirname, 'apps/source-control/src/webhook-worker.ts'),
       compatibility: { flags: ['nodejs_compat'] },
+      observability: devWorkerObservability,
       env: {
         SOURCE_CONTROL_WORKER: sourceControlWorker,
       },
@@ -135,8 +152,10 @@ export default Alchemy.Stack(
     const client = yield* Cloudflare.Website.Vite('Client', {
       rootDir: path.resolve(import.meta.dirname, 'apps/client'),
       compatibility: { flags: ['nodejs_compat'] },
+      observability: devWorkerObservability,
       env: {
         ...clientRuntimeEnv,
+        PATCHPLANE_DEBUG_LOGGING: true,
         SOURCE_CONTROL_WORKER: sourceControlWorker,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,

@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/effect'
+import * as Sentry from '@sentry/effect/server'
 import {
   TelemetryService,
   telemetryAttributes,
