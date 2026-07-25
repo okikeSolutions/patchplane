@@ -4,6 +4,7 @@ import {
   createStart,
   type RequestMiddlewareServerFnResult,
 } from '@tanstack/react-start'
+import { resolveWorkOSRedirectUri } from './lib/workos-redirect-uri'
 
 type WorkOSMiddlewareServer = (
   input: unknown,
@@ -34,16 +35,11 @@ const csrfMiddleware = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === 'serverFn',
 })
 
-function authRedirectUri(request: Request) {
-  const url = new URL(request.url)
-  return `${url.origin}/api/auth/callback`
-}
-
 const workosAuthkitMiddleware = createMiddleware().server(async (args) => {
   const { authkitMiddleware } =
     await import('@workos/authkit-tanstack-react-start')
   const middleware: unknown = authkitMiddleware({
-    redirectUri: authRedirectUri(args.request),
+    redirectUri: resolveWorkOSRedirectUri(args.request),
   })
 
   if (hasMiddlewareServer(middleware) && middleware.options.server) {
