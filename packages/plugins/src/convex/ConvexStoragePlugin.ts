@@ -14,6 +14,7 @@ import { decodeEvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
 import { decodeRuntimeSession } from '@patchplane/domain/runtime-session'
 import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
+import { decodeVerificationRequirement, decodeVerificationResult } from '@patchplane/domain/verification'
 import {
   decodeWorkflowStart,
   decodeWorkflowStarts,
@@ -32,6 +33,8 @@ import {
   type RecordPublicationResultInput,
   type RecordReviewFindingInput,
   type RecordReviewRunInput,
+  type RecordVerificationRequirementInput,
+  type RecordVerificationResultInput,
   type RecordRuntimeEventInput,
   type RecordRuntimeSessionStartedInput,
   type RecordSandboxExecutionInput,
@@ -172,6 +175,8 @@ const recordEvidenceArtifactMutation = makeFunctionReference<
   {
     systemSecret: string
     workflowRunId: string
+    producer?: string
+    subjectDigest?: string
     traceId?: string
     kind: RecordEvidenceArtifactInput['kind']
     label?: string
@@ -201,7 +206,9 @@ const recordCandidatePatchSetMutation = makeFunctionReference<
   {
     systemSecret: string
     workflowRunId: string
+    sandboxExecutionId?: string
     status: RecordCandidatePatchSetInput['status']
+    candidateDigest?: string
     baseRef?: string
     baseSha?: string
     headRef?: string
@@ -213,10 +220,59 @@ const recordCandidatePatchSetMutation = makeFunctionReference<
       additions: number
       deletions: number
     }
+    idempotencyKey: string
     createdAt?: number
   },
   unknown
 >('workflowStarts:recordCandidatePatchSet')
+
+const recordVerificationRequirementMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    key: string
+    label: string
+    kind: RecordVerificationRequirementInput['kind']
+    required: boolean
+    command?: string
+    platform?: RecordVerificationRequirementInput['platform']
+    architecture?: string
+    requiredArtifactKinds: RecordVerificationRequirementInput['requiredArtifactKinds']
+    source: RecordVerificationRequirementInput['source']
+    createdAt?: number
+  },
+  unknown
+>('workflowStarts:recordVerificationRequirement')
+
+const recordVerificationResultMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    requirementId: string
+    candidatePatchSetId: string
+    sandboxExecutionId?: string
+    provider: string
+    command?: string
+    platform: RecordVerificationResultInput['platform']
+    architecture: string
+    environmentImage?: string
+    status: RecordVerificationResultInput['status']
+    exitCode?: number
+    summary?: string
+    passedCount?: number
+    failedCount?: number
+    skippedCount?: number
+    artifactIds: RecordVerificationResultInput['artifactIds']
+    candidateDigestBefore: string
+    candidateDigestAfter?: string
+    startedAt: number
+    completedAt?: number
+    idempotencyKey: string
+  },
+  unknown
+>('workflowStarts:recordVerificationResult')
 
 const recordReviewRunMutation = makeFunctionReference<
   'mutation',
@@ -720,6 +776,8 @@ export const ConvexStoragePlugin = {
               return client.mutation(recordEvidenceArtifactMutation, {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.producer === undefined ? {} : { producer: input.producer }),
+                ...(input.subjectDigest === undefined ? {} : { subjectDigest: input.subjectDigest }),
                 ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
                 kind: input.kind,
                 ...(input.label === undefined ? {} : { label: input.label }),
@@ -811,7 +869,9 @@ export const ConvexStoragePlugin = {
               return client.mutation(recordCandidatePatchSetMutation, {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: input.sandboxExecutionId }),
                 status: input.status,
+                ...(input.candidateDigest === undefined ? {} : { candidateDigest: input.candidateDigest }),
                 ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
                 ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
                 ...(input.headRef === undefined ? {} : { headRef: input.headRef }),
@@ -819,6 +879,7 @@ export const ConvexStoragePlugin = {
                 ...(input.diffArtifactId === undefined ? {} : { diffArtifactId: input.diffArtifactId }),
                 ...(input.summary === undefined ? {} : { summary: input.summary }),
                 ...(input.stats === undefined ? {} : { stats: input.stats }),
+                idempotencyKey: input.idempotencyKey,
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               })
             },
@@ -837,6 +898,98 @@ export const ConvexStoragePlugin = {
                 cause,
               })
             ),
+          )
+        }))
+
+      const recordVerificationRequirement = Effect.fn(
+        '@patchplane/plugins/convex/recordVerificationRequirement',
+      )((input: RecordVerificationRequirementInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordVerificationRequirement.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record verification requirements',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => new ConvexHttpClient(convexUrl).mutation(recordVerificationRequirementMutation, {
+              systemSecret: Redacted.value(systemIngestionSecret),
+              workflowRunId: input.workflowRunId,
+              key: input.key,
+              label: input.label,
+              kind: input.kind,
+              required: input.required,
+              ...(input.command === undefined ? {} : { command: input.command }),
+              ...(input.platform === undefined ? {} : { platform: input.platform }),
+              ...(input.architecture === undefined ? {} : { architecture: input.architecture }),
+              requiredArtifactKinds: input.requiredArtifactKinds,
+              source: input.source,
+              ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+            }),
+            catch: (cause) => new StorageError({
+              operation: 'recordVerificationRequirement',
+              message: 'Convex failed to record verification requirement',
+              cause,
+            }),
+          })
+          return yield* decodeVerificationRequirement(value).pipe(
+            Effect.mapError((cause) => new StorageError({
+              operation: 'recordVerificationRequirement.decode',
+              message: 'Convex returned invalid verification requirement',
+              cause,
+            })),
+          )
+        }))
+
+      const recordVerificationResult = Effect.fn(
+        '@patchplane/plugins/convex/recordVerificationResult',
+      )((input: RecordVerificationResultInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'recordVerificationResult.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record verification results',
+              cause: undefined,
+            })
+          }
+          const value = yield* Effect.tryPromise({
+            try: () => new ConvexHttpClient(convexUrl).mutation(recordVerificationResultMutation, {
+              systemSecret: Redacted.value(systemIngestionSecret),
+              workflowRunId: input.workflowRunId,
+              requirementId: input.requirementId,
+              candidatePatchSetId: input.candidatePatchSetId,
+              ...(input.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: input.sandboxExecutionId }),
+              provider: input.provider,
+              ...(input.command === undefined ? {} : { command: input.command }),
+              platform: input.platform,
+              architecture: input.architecture,
+              ...(input.environmentImage === undefined ? {} : { environmentImage: input.environmentImage }),
+              status: input.status,
+              ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
+              ...(input.summary === undefined ? {} : { summary: input.summary }),
+              ...(input.passedCount === undefined ? {} : { passedCount: input.passedCount }),
+              ...(input.failedCount === undefined ? {} : { failedCount: input.failedCount }),
+              ...(input.skippedCount === undefined ? {} : { skippedCount: input.skippedCount }),
+              artifactIds: input.artifactIds,
+              candidateDigestBefore: input.candidateDigestBefore,
+              ...(input.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: input.candidateDigestAfter }),
+              startedAt: input.startedAt,
+              ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+              idempotencyKey: input.idempotencyKey,
+            }),
+            catch: (cause) => new StorageError({
+              operation: 'recordVerificationResult',
+              message: 'Convex failed to record verification result',
+              cause,
+            }),
+          })
+          return yield* decodeVerificationResult(value).pipe(
+            Effect.mapError((cause) => new StorageError({
+              operation: 'recordVerificationResult.decode',
+              message: 'Convex returned invalid verification result',
+              cause,
+            })),
           )
         }))
 
@@ -1081,6 +1234,8 @@ export const ConvexStoragePlugin = {
         recordEvidenceArtifact,
         getEvidenceArtifact,
         recordCandidatePatchSet,
+        recordVerificationRequirement,
+        recordVerificationResult,
         recordReviewRun,
         recordReviewFinding,
         recordPolicyDecision,

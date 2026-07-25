@@ -42,6 +42,8 @@ describe('PrepareRepositoryClone', () => {
             repositoryName: 'repo',
             repositoryFullName: 'owner/repo',
             repositoryExternalId: '456',
+            pullRequestHeadRef: 'feature/patch',
+            pullRequestHeadSha: 'webhook-head-sha',
           },
           status: 'created',
           createdAt: 1,
@@ -52,6 +54,8 @@ describe('PrepareRepositoryClone', () => {
           workspaceId: makeSystemWorkspaceId('workspace-1'),
           traceId: 'trace-1',
           status: 'queued',
+          modelVersion: 'v1',
+          sourceCommitSha: 'pinned-source-sha',
           createdAt: 1,
         },
       })
@@ -59,6 +63,8 @@ describe('PrepareRepositoryClone', () => {
       expect(clone).toEqual({
         repositoryUrl: 'https://github.com/owner/repo.git',
         repositoryFullName: 'owner/repo',
+        branch: 'feature/patch',
+        commitId: 'pinned-source-sha',
         gitUsername: 'x-access-token',
         gitPassword: 'github:123:456',
       })

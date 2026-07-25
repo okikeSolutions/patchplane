@@ -79,6 +79,13 @@ export interface SandboxVerificationResult {
   readonly status: 'succeeded' | 'failed'
   readonly exitCode?: number | undefined
   readonly message?: string | undefined
+  readonly provider?: string | undefined
+  readonly platform?: 'linux' | 'windows' | 'macos' | undefined
+  readonly architecture?: string | undefined
+  readonly candidateDigestBefore?: string | undefined
+  readonly candidateDigestAfter?: string | undefined
+  readonly startedAt?: number | undefined
+  readonly completedAt?: number | undefined
 }
 
 export interface SandboxCommandResult {
@@ -95,6 +102,7 @@ export interface SandboxCommandResult {
   readonly evidenceArtifacts?: ReadonlyArray<SandboxEvidenceArtifact> | undefined
   readonly verificationResults?: ReadonlyArray<SandboxVerificationResult> | undefined
   readonly baseSha?: string | undefined
+  readonly candidateStateDigest?: string | undefined
   readonly startedAt: number
   readonly completedAt: number
 }

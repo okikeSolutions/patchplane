@@ -1,11 +1,11 @@
 import { Effect, Layer } from 'effect'
-import { ReviewService } from './review-service'
+import { ReviewService, type ReviewCandidateInput } from './review-service'
 import { PolicyService } from './policy-service'
 
 export const AlphaReviewServiceLayer = Layer.succeed(
   ReviewService,
   ReviewService.of({
-    runReview: (input) =>
+    runReview: (input: ReviewCandidateInput) =>
       Effect.sync(() => {
         const findings = []
         const diffArtifact = input.evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
@@ -20,11 +20,12 @@ export const AlphaReviewServiceLayer = Layer.succeed(
         }
 
         for (const verification of verificationResults) {
-          if (verification.status === 'succeeded') continue
+          if (verification.status === 'passed') continue
+          const failed = verification.status === 'failed'
           findings.push({
-            severity: verification.kind === 'test' ? 'error' as const : 'warning' as const,
-            category: verification.kind === 'test' ? 'test' as const : 'quality' as const,
-            message: verification.message ?? `${verification.kind} verification command failed with exit ${verification.exitCode ?? 'unknown'}.`,
+            severity: failed ? 'error' as const : 'warning' as const,
+            category: 'test' as const,
+            message: verification.summary ?? `Verification ${verification.status} with exit ${verification.exitCode ?? 'unknown'}.`,
           })
         }
 
@@ -72,19 +73,32 @@ export const AlphaPolicyServiceLayer = Layer.succeed(
         )
         const hasWarning = input.reviewFindings.some((finding) => finding.severity === 'warning')
 
-        if (input.sandboxExecution?.status === 'failed' || hasError) {
+        if (
+          input.sandboxExecution?.status === 'failed' ||
+          input.verificationCoverage.status === 'failed' ||
+          hasError
+        ) {
           return {
             status: 'changes-requested' as const,
-            summary: 'PatchPlane found failing execution or error-level review findings.',
+            summary: 'PatchPlane found failing execution, verification, or error-level review findings.',
             reason: 'review:error',
           }
         }
 
-        if (input.sandboxExecution === undefined || hasWarning) {
+        if (
+          input.sandboxExecution === undefined ||
+          input.candidatePatchSet?.status !== 'captured' ||
+          input.verificationCoverage.status !== 'passed' ||
+          hasWarning
+        ) {
           return {
             status: 'manual-review' as const,
-            summary: 'PatchPlane needs human review before this patch can be trusted.',
-            reason: 'review:warning',
+            summary: input.verificationCoverage.status === 'passed'
+              ? 'PatchPlane needs human review before this patch can be trusted.'
+              : 'Verification is incomplete; PatchPlane needs human review before this patch can be trusted.',
+            reason: input.verificationCoverage.status === 'passed'
+              ? 'review:warning'
+              : 'verification:incomplete',
           }
         }
 

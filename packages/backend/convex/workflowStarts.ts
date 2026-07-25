@@ -1,10 +1,23 @@
 import type { UserIdentity } from 'convex/server'
-import type { Id } from './_generated/dataModel'
+import type { Doc, Id } from './_generated/dataModel'
 import { ConvexError, v } from 'convex/values'
 import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 
 const workflowDetailRuntimeEventLimit = 100
 const workflowDetailRuntimePayloadPreviewLength = 8_000
+const workflowDetailSandboxExecutionLimit = 32
+const workflowDetailSandboxOutputPreviewLength = 16_000
+const workflowDetailVerificationRequirementLimit = 64
+const workflowDetailVerificationResultLimit = 128
+const workflowDetailRuntimeSessionLimit = 32
+const workflowDetailEvidenceArtifactLimit = 64
+const workflowDetailCandidatePatchSetLimit = 32
+const workflowDetailReviewRunLimit = 32
+const workflowDetailReviewFindingLimit = 128
+const workflowDetailPolicyDecisionLimit = 32
+const workflowDetailHumanDecisionLimit = 32
+const workflowDetailPublicationResultLimit = 64
+const workflowDetailProvenanceEventLimit = 128
 
 function runtimePayloadPreview(payloadJson: string | undefined) {
   if (
@@ -15,6 +28,17 @@ function runtimePayloadPreview(payloadJson: string | undefined) {
   }
 
   return `${payloadJson.slice(0, workflowDetailRuntimePayloadPreviewLength)}\n…truncated; full runtime output remains in the workflow evidence artifact…`
+}
+
+function sandboxOutputPreview(output: string | undefined) {
+  if (
+    output === undefined ||
+    output.length <= workflowDetailSandboxOutputPreviewLength
+  ) {
+    return output
+  }
+
+  return `${output.slice(0, workflowDetailSandboxOutputPreviewLength)}\n…truncated; full sandbox output remains in the workflow evidence artifact…`
 }
 
 function workOSOrganizationId(identity: UserIdentity) {
@@ -186,6 +210,8 @@ const evidenceArtifactKindArg = v.union(
 const evidenceArtifactReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
+  producer: v.optional(v.string()),
+  subjectDigest: v.optional(v.string()),
   traceId: v.optional(v.string()),
   kind: evidenceArtifactKindArg,
   label: v.optional(v.string()),
@@ -213,7 +239,9 @@ const candidatePatchSetStatsArg = v.object({
 const candidatePatchSetReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
+  sandboxExecutionId: v.optional(v.string()),
   status: candidatePatchSetStatusArg,
+  candidateDigest: v.optional(v.string()),
   baseRef: v.optional(v.string()),
   baseSha: v.optional(v.string()),
   headRef: v.optional(v.string()),
@@ -221,7 +249,83 @@ const candidatePatchSetReturn = v.object({
   diffArtifactId: v.optional(v.string()),
   summary: v.optional(v.string()),
   stats: v.optional(candidatePatchSetStatsArg),
+  idempotencyKey: v.optional(v.string()),
   createdAt: v.number(),
+})
+
+const verificationRequirementKindArg = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('build'),
+  v.literal('browser'),
+  v.literal('security'),
+  v.literal('review'),
+)
+
+const verificationRequirementSourceArg = v.union(
+  v.literal('repository-config'),
+  v.literal('intake'),
+  v.literal('policy'),
+  v.literal('human'),
+)
+
+const verificationPlatformArg = v.union(
+  v.literal('linux'),
+  v.literal('windows'),
+  v.literal('macos'),
+)
+
+const verificationResultStatusArg = v.union(
+  v.literal('queued'),
+  v.literal('running'),
+  v.literal('passed'),
+  v.literal('failed'),
+  v.literal('error'),
+  v.literal('blocked'),
+  v.literal('cancelled'),
+  v.literal('skipped'),
+  v.literal('invalidated'),
+)
+
+const verificationRequirementReturn = v.object({
+  id: v.id('verificationRequirements'),
+  workflowRunId: v.id('workflowRuns'),
+  key: v.string(),
+  label: v.string(),
+  kind: verificationRequirementKindArg,
+  required: v.boolean(),
+  command: v.optional(v.string()),
+  platform: v.optional(verificationPlatformArg),
+  architecture: v.optional(v.string()),
+  requiredArtifactKinds: v.array(evidenceArtifactKindArg),
+  source: verificationRequirementSourceArg,
+  createdAt: v.number(),
+})
+
+const verificationResultReturn = v.object({
+  id: v.id('verificationResults'),
+  workflowRunId: v.id('workflowRuns'),
+  requirementId: v.id('verificationRequirements'),
+  candidatePatchSetId: v.id('candidatePatchSets'),
+  sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+  provider: v.string(),
+  command: v.optional(v.string()),
+  platform: verificationPlatformArg,
+  architecture: v.string(),
+  environmentImage: v.optional(v.string()),
+  status: verificationResultStatusArg,
+  exitCode: v.optional(v.number()),
+  summary: v.optional(v.string()),
+  passedCount: v.optional(v.number()),
+  failedCount: v.optional(v.number()),
+  skippedCount: v.optional(v.number()),
+  artifactIds: v.array(v.id('evidenceArtifacts')),
+  producedArtifactKinds: v.array(evidenceArtifactKindArg),
+  candidateDigestBefore: v.string(),
+  candidateDigestAfter: v.optional(v.string()),
+  startedAt: v.number(),
+  completedAt: v.optional(v.number()),
+  idempotencyKey: v.string(),
 })
 
 const reviewRunKindArg = v.union(
@@ -299,9 +403,14 @@ const policyDecisionReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
   reviewRunId: v.optional(v.string()),
+  candidatePatchSetId: v.optional(v.string()),
   status: policyDecisionStatusArg,
   summary: v.string(),
   reason: v.optional(v.string()),
+  policyVersion: v.optional(v.string()),
+  inputDigest: v.optional(v.string()),
+  verificationResultIds: v.optional(v.array(v.string())),
+  missingRequirementIds: v.optional(v.array(v.string())),
   createdAt: v.number(),
 })
 
@@ -449,20 +558,40 @@ const workflowDetailReturn = v.object({
       v.literal('running'),
       v.literal('reviewed'),
     ),
+    modelVersion: v.optional(v.literal('v1')),
+    parentWorkflowRunId: v.optional(v.id('workflowRuns')),
+    rootWorkflowRunId: v.optional(v.id('workflowRuns')),
+    attemptNumber: v.optional(v.number()),
+    trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    sourceCommitSha: v.optional(v.string()),
     createdAt: v.number(),
   }),
   runtimeEvents: v.array(runtimeEventReturn),
   runtimeEventsTruncated: v.boolean(),
   runtimeSessions: v.array(runtimeSessionReturn),
+  runtimeSessionsTruncated: v.boolean(),
   sandboxExecutions: v.array(sandboxExecutionReturn),
+  sandboxExecutionsTruncated: v.boolean(),
   evidenceArtifacts: v.array(evidenceArtifactReturn),
+  evidenceArtifactsTruncated: v.boolean(),
   candidatePatchSets: v.array(candidatePatchSetReturn),
+  candidatePatchSetsTruncated: v.boolean(),
+  verificationRequirements: v.array(verificationRequirementReturn),
+  verificationRequirementsTruncated: v.boolean(),
+  verificationResults: v.array(verificationResultReturn),
+  verificationResultsTruncated: v.boolean(),
   reviewRuns: v.array(reviewRunReturn),
+  reviewRunsTruncated: v.boolean(),
   reviewFindings: v.array(reviewFindingReturn),
+  reviewFindingsTruncated: v.boolean(),
   policyDecisions: v.array(policyDecisionReturn),
+  policyDecisionsTruncated: v.boolean(),
   humanDecisions: v.array(humanDecisionReturn),
+  humanDecisionsTruncated: v.boolean(),
   publicationResults: v.array(publicationResultReturn),
+  publicationResultsTruncated: v.boolean(),
   provenanceEvents: v.array(provenanceEventReturn),
+  provenanceEventsTruncated: v.boolean(),
 })
 
 const workflowStartReturn = v.object({
@@ -491,6 +620,22 @@ const workflowStartReturn = v.object({
       v.literal('running'),
       v.literal('reviewed'),
     ),
+    modelVersion: v.optional(v.literal('v1')),
+    parentWorkflowRunId: v.optional(v.id('workflowRuns')),
+    rootWorkflowRunId: v.optional(v.id('workflowRuns')),
+    attemptNumber: v.optional(v.number()),
+    trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    sourceCommitSha: v.optional(v.string()),
+    trustState: v.optional(v.union(
+      v.literal('queued'),
+      v.literal('running'),
+      v.literal('no-sandbox-run'),
+      v.literal('sandbox-failed'),
+      v.literal('needs-review'),
+      v.literal('approved'),
+      v.literal('rejected'),
+      v.literal('changes-requested'),
+    )),
     createdAt: v.number(),
   }),
 })
@@ -558,8 +703,15 @@ async function createWorkflowStartRecord(
       workspaceId: args.workspaceId,
       traceId: args.traceId,
       status: workflowRunStatus,
+      modelVersion: 'v1',
+      attemptNumber: 1,
+      trigger: 'intake',
+      ...(args.externalRef?.pullRequestHeadSha === undefined
+        ? {}
+        : { sourceCommitSha: args.externalRef.pullRequestHeadSha }),
       createdAt,
     })
+    await ctx.db.patch('workflowRuns', workflowRunId, { rootWorkflowRunId: workflowRunId })
 
     await insertProvenanceEvent(ctx, {
       workflowRunId,
@@ -600,6 +752,13 @@ async function createWorkflowStartRecord(
         workspaceId: args.workspaceId,
         traceId: args.traceId,
         status: workflowRunStatus,
+        modelVersion: 'v1' as const,
+        rootWorkflowRunId: workflowRunId,
+        attemptNumber: 1,
+        trigger: 'intake' as const,
+        ...(args.externalRef?.pullRequestHeadSha === undefined
+          ? {}
+          : { sourceCommitSha: args.externalRef.pullRequestHeadSha }),
         createdAt,
       },
     }
@@ -639,6 +798,12 @@ async function workflowStartFromIds(
       workspaceId: workflowRun.workspaceId,
       traceId: workflowRun.traceId ?? 'legacy',
       status: workflowRun.status,
+      ...(workflowRun.modelVersion === undefined ? {} : { modelVersion: workflowRun.modelVersion }),
+      ...(workflowRun.parentWorkflowRunId === undefined ? {} : { parentWorkflowRunId: workflowRun.parentWorkflowRunId }),
+      ...(workflowRun.rootWorkflowRunId === undefined ? {} : { rootWorkflowRunId: workflowRun.rootWorkflowRunId }),
+      ...(workflowRun.attemptNumber === undefined ? {} : { attemptNumber: workflowRun.attemptNumber }),
+      ...(workflowRun.trigger === undefined ? {} : { trigger: workflowRun.trigger }),
+      ...(workflowRun.sourceCommitSha === undefined ? {} : { sourceCommitSha: workflowRun.sourceCommitSha }),
       createdAt: workflowRun.createdAt,
     },
   }
@@ -895,6 +1060,96 @@ export const createFromExternalIntake = mutation({
     })
 
     return workflowStart
+  },
+})
+
+export const createRerun = mutation({
+  args: {
+    parentWorkflowRunId: v.id('workflowRuns'),
+    reason: v.string(),
+    idempotencyKey: v.string(),
+  },
+  returns: workflowStartReturn,
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    const parent = await requireWorkflowRun(ctx, args.parentWorkflowRunId)
+    requireWorkOSWorkspace(identity, parent.workspaceId)
+    await requireMembershipPermission(ctx, identity, parent.workspaceId, 'run:start')
+
+    const reason = args.reason.trim()
+    const idempotencyKey = args.idempotencyKey.trim()
+    if (reason.length === 0 || reason.length > 1_000) {
+      throw new ConvexError('Rerun reason must contain 1 to 1000 characters')
+    }
+    if (idempotencyKey.length === 0 || idempotencyKey.length > 200) {
+      throw new ConvexError('Rerun idempotency key must contain 1 to 200 characters')
+    }
+    if (parent.modelVersion !== 'v1' || parent.status !== 'reviewed') {
+      throw new ConvexError('Only a reviewed V1 workflow attempt can be rerun')
+    }
+
+    const existing = await ctx.db
+      .query('workflowRerunRequests')
+      .withIndex('by_parent_workflow_run_and_idempotency_key', (q) =>
+        q.eq('parentWorkflowRunId', args.parentWorkflowRunId).eq('idempotencyKey', idempotencyKey),
+      )
+      .unique()
+    if (existing !== null) {
+      return workflowStartFromIds(ctx, {
+        promptRequestId: parent.promptRequestId,
+        workflowRunId: existing.workflowRunId,
+      })
+    }
+
+    const priorChild = await ctx.db
+      .query('workflowRerunRequests')
+      .withIndex('by_parent_workflow_run', (q) => q.eq('parentWorkflowRunId', args.parentWorkflowRunId))
+      .first()
+    if (priorChild !== null) {
+      throw new ConvexError('Workflow attempt already has a rerun child')
+    }
+
+    const createdAt = Date.now()
+    const rootWorkflowRunId = parent.rootWorkflowRunId ?? parent._id
+    const workflowRunId = await ctx.db.insert('workflowRuns', {
+      promptRequestId: parent.promptRequestId,
+      workspaceId: parent.workspaceId,
+      traceId: `${parent.traceId ?? String(parent._id)}:rerun:${idempotencyKey}`,
+      status: 'queued',
+      modelVersion: 'v1',
+      parentWorkflowRunId: parent._id,
+      rootWorkflowRunId,
+      attemptNumber: (parent.attemptNumber ?? 1) + 1,
+      trigger: 'rerun',
+      ...(parent.sourceCommitSha === undefined ? {} : { sourceCommitSha: parent.sourceCommitSha }),
+      createdAt,
+    })
+    await ctx.db.insert('workflowRerunRequests', {
+      parentWorkflowRunId: parent._id,
+      workflowRunId,
+      workspaceId: parent.workspaceId,
+      requestedByActorId: `workos:${identity.subject}`,
+      reason,
+      idempotencyKey,
+      createdAt,
+    })
+    await insertProvenanceEvent(ctx, {
+      workflowRunId,
+      traceId: `${parent.traceId ?? String(parent._id)}:rerun:${idempotencyKey}`,
+      type: 'workflow-rerun',
+      operation: 'workflowStarts.createRerun',
+      status: 'succeeded',
+      startedAt: createdAt,
+      completedAt: createdAt,
+      summary: reason,
+      artifactRefs: [String(parent._id)],
+      idempotencyKey: `${String(workflowRunId)}:workflow-rerun`,
+    })
+
+    return workflowStartFromIds(ctx, {
+      promptRequestId: parent.promptRequestId,
+      workflowRunId,
+    })
   },
 })
 
@@ -1164,6 +1419,8 @@ export const getEvidenceArtifact = query({
     return {
       id: artifact['_id'],
       workflowRunId: artifact.workflowRunId,
+      ...(artifact.producer === undefined ? {} : { producer: artifact.producer }),
+      ...(artifact.subjectDigest === undefined ? {} : { subjectDigest: artifact.subjectDigest }),
       ...(artifact.traceId === undefined ? {} : { traceId: artifact.traceId }),
       kind: artifact.kind,
       ...(artifact.label === undefined ? {} : { label: artifact.label }),
@@ -1182,6 +1439,8 @@ export const recordEvidenceArtifact = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    producer: v.optional(v.string()),
+    subjectDigest: v.optional(v.string()),
     traceId: v.optional(v.string()),
     kind: evidenceArtifactKindArg,
     label: v.optional(v.string()),
@@ -1205,6 +1464,8 @@ export const recordEvidenceArtifact = mutation({
     const createdAt = args.createdAt ?? Date.now()
     const artifact = {
       workflowRunId: args.workflowRunId,
+      ...(args.producer === undefined ? {} : { producer: args.producer }),
+      ...(args.subjectDigest === undefined ? {} : { subjectDigest: args.subjectDigest }),
       ...(args.traceId === undefined ? {} : { traceId: args.traceId }),
       kind: args.kind,
       ...(args.label === undefined ? {} : { label: args.label }),
@@ -1238,7 +1499,9 @@ export const recordCandidatePatchSet = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
     status: candidatePatchSetStatusArg,
+    candidateDigest: v.optional(v.string()),
     baseRef: v.optional(v.string()),
     baseSha: v.optional(v.string()),
     headRef: v.optional(v.string()),
@@ -1246,20 +1509,85 @@ export const recordCandidatePatchSet = mutation({
     diffArtifactId: v.optional(v.id('evidenceArtifacts')),
     summary: v.optional(v.string()),
     stats: v.optional(candidatePatchSetStatsArg),
+    idempotencyKey: v.string(),
     createdAt: v.optional(v.number()),
   },
   returns: candidatePatchSetReturn,
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
-    if (args.diffArtifactId !== undefined) {
-      await requireEvidenceArtifactForWorkflow(ctx, args.diffArtifactId, args.workflowRunId)
+    const sandboxExecution = args.sandboxExecutionId === undefined
+      ? undefined
+      : await ctx.db.get('sandboxExecutions', args.sandboxExecutionId)
+    if (
+      args.sandboxExecutionId !== undefined &&
+      (sandboxExecution === null || sandboxExecution === undefined || sandboxExecution.workflowRunId !== args.workflowRunId)
+    ) {
+      throw new ConvexError('Sandbox execution does not belong to workflow')
+    }
+
+    const diffArtifact = args.diffArtifactId === undefined
+      ? undefined
+      : await requireEvidenceArtifactForWorkflow(ctx, args.diffArtifactId, args.workflowRunId)
+    if (args.status === 'captured') {
+      if (args.sandboxExecutionId === undefined) {
+        throw new ConvexError('Captured candidate requires its producing sandbox execution')
+      }
+      if (diffArtifact === undefined || diffArtifact.kind !== 'diff') {
+        throw new ConvexError('Captured candidate requires a diff artifact')
+      }
+      if (args.candidateDigest !== `sha256:${diffArtifact.sha256}`) {
+        throw new ConvexError('Candidate digest must match the defining diff artifact')
+      }
+      if (args.baseSha === undefined) {
+        throw new ConvexError('Captured candidate requires a base commit SHA')
+      }
+    } else if (args.diffArtifactId !== undefined || args.candidateDigest !== undefined) {
+      throw new ConvexError('Non-captured candidate cannot reference a defining diff')
+    }
+
+    const existingCandidates = await ctx.db
+      .query('candidatePatchSets')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .take(2)
+    const existing = existingCandidates.find((candidate) => candidate.idempotencyKey === args.idempotencyKey)
+    if (existing !== undefined) {
+      if (
+        existing.sandboxExecutionId !== args.sandboxExecutionId ||
+        existing.status !== args.status ||
+        existing.candidateDigest !== args.candidateDigest ||
+        existing.baseSha !== args.baseSha ||
+        existing.diffArtifactId !== args.diffArtifactId
+      ) {
+        throw new ConvexError('Candidate idempotency key conflict')
+      }
+      return {
+        id: existing._id,
+        workflowRunId: existing.workflowRunId,
+        ...(existing.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: existing.sandboxExecutionId }),
+        status: existing.status,
+        ...(existing.candidateDigest === undefined ? {} : { candidateDigest: existing.candidateDigest }),
+        ...(existing.baseRef === undefined ? {} : { baseRef: existing.baseRef }),
+        ...(existing.baseSha === undefined ? {} : { baseSha: existing.baseSha }),
+        ...(existing.headRef === undefined ? {} : { headRef: existing.headRef }),
+        ...(existing.headSha === undefined ? {} : { headSha: existing.headSha }),
+        ...(existing.diffArtifactId === undefined ? {} : { diffArtifactId: existing.diffArtifactId }),
+        ...(existing.summary === undefined ? {} : { summary: existing.summary }),
+        ...(existing.stats === undefined ? {} : { stats: existing.stats }),
+        ...(existing.idempotencyKey === undefined ? {} : { idempotencyKey: existing.idempotencyKey }),
+        createdAt: existing.createdAt,
+      }
+    }
+    if (workflowRun.modelVersion === 'v1' && existingCandidates.length > 0) {
+      throw new ConvexError('V1 workflow attempt already has a candidate')
     }
 
     const createdAt = args.createdAt ?? Date.now()
     const patchSet = {
       workflowRunId: args.workflowRunId,
+      ...(args.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: args.sandboxExecutionId }),
       status: args.status,
+      ...(args.candidateDigest === undefined ? {} : { candidateDigest: args.candidateDigest }),
       ...(args.baseRef === undefined ? {} : { baseRef: args.baseRef }),
       ...(args.baseSha === undefined ? {} : { baseSha: args.baseSha }),
       ...(args.headRef === undefined ? {} : { headRef: args.headRef }),
@@ -1267,6 +1595,7 @@ export const recordCandidatePatchSet = mutation({
       ...(args.diffArtifactId === undefined ? {} : { diffArtifactId: args.diffArtifactId }),
       ...(args.summary === undefined ? {} : { summary: args.summary }),
       ...(args.stats === undefined ? {} : { stats: args.stats }),
+      idempotencyKey: args.idempotencyKey,
       createdAt,
     }
     const id = await ctx.db.insert('candidatePatchSets', patchSet)
@@ -1287,6 +1616,260 @@ export const recordCandidatePatchSet = mutation({
     })
 
     return { id, ...patchSet }
+  },
+})
+
+export const recordVerificationRequirement = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    key: v.string(),
+    label: v.string(),
+    kind: verificationRequirementKindArg,
+    required: v.boolean(),
+    command: v.optional(v.string()),
+    platform: v.optional(verificationPlatformArg),
+    architecture: v.optional(v.string()),
+    requiredArtifactKinds: v.array(evidenceArtifactKindArg),
+    source: verificationRequirementSourceArg,
+    createdAt: v.optional(v.number()),
+  },
+  returns: verificationRequirementReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    await requireWorkflowRun(ctx, args.workflowRunId)
+    const key = args.key.trim()
+    const label = args.label.trim()
+    if (key.length === 0 || label.length === 0) {
+      throw new ConvexError('Verification requirement key and label are required')
+    }
+    if (args.requiredArtifactKinds.length > 16) {
+      throw new ConvexError('Verification requirement artifact kinds exceed limit')
+    }
+
+    const existing = await ctx.db
+      .query('verificationRequirements')
+      .withIndex('by_workflow_run_and_key', (q) =>
+        q.eq('workflowRunId', args.workflowRunId).eq('key', key),
+      )
+      .unique()
+    if (existing !== null) {
+      if (
+        existing.label !== label ||
+        existing.kind !== args.kind ||
+        existing.required !== args.required ||
+        existing.command !== args.command ||
+        existing.platform !== args.platform ||
+        existing.architecture !== args.architecture ||
+        existing.source !== args.source ||
+        JSON.stringify(existing.requiredArtifactKinds) !== JSON.stringify(args.requiredArtifactKinds)
+      ) {
+        throw new ConvexError('Verification requirement key conflict')
+      }
+      return {
+        id: existing._id,
+        workflowRunId: existing.workflowRunId,
+        key: existing.key,
+        label: existing.label,
+        kind: existing.kind,
+        required: existing.required,
+        ...(existing.command === undefined ? {} : { command: existing.command }),
+        ...(existing.platform === undefined ? {} : { platform: existing.platform }),
+        ...(existing.architecture === undefined ? {} : { architecture: existing.architecture }),
+        requiredArtifactKinds: existing.requiredArtifactKinds,
+        source: existing.source,
+        createdAt: existing.createdAt,
+      }
+    }
+
+    const requirement = {
+      workflowRunId: args.workflowRunId,
+      key,
+      label,
+      kind: args.kind,
+      required: args.required,
+      ...(args.command === undefined ? {} : { command: args.command }),
+      ...(args.platform === undefined ? {} : { platform: args.platform }),
+      ...(args.architecture === undefined ? {} : { architecture: args.architecture }),
+      requiredArtifactKinds: args.requiredArtifactKinds,
+      source: args.source,
+      createdAt: args.createdAt ?? Date.now(),
+    }
+    const id = await ctx.db.insert('verificationRequirements', requirement)
+    return { id, ...requirement }
+  },
+})
+
+export const recordVerificationResult = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    requirementId: v.id('verificationRequirements'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    provider: v.string(),
+    command: v.optional(v.string()),
+    platform: verificationPlatformArg,
+    architecture: v.string(),
+    environmentImage: v.optional(v.string()),
+    status: verificationResultStatusArg,
+    exitCode: v.optional(v.number()),
+    summary: v.optional(v.string()),
+    passedCount: v.optional(v.number()),
+    failedCount: v.optional(v.number()),
+    skippedCount: v.optional(v.number()),
+    artifactIds: v.array(v.id('evidenceArtifacts')),
+    candidateDigestBefore: v.string(),
+    candidateDigestAfter: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    idempotencyKey: v.string(),
+  },
+  returns: verificationResultReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    await requireWorkflowRun(ctx, args.workflowRunId)
+    if (args.artifactIds.length > 16) {
+      throw new ConvexError('Verification result artifacts exceed limit')
+    }
+    if (args.completedAt !== undefined && args.completedAt < args.startedAt) {
+      throw new ConvexError('Verification completion cannot predate its start')
+    }
+
+    const [requirement, candidate, sandboxExecution] = await Promise.all([
+      ctx.db.get('verificationRequirements', args.requirementId),
+      ctx.db.get('candidatePatchSets', args.candidatePatchSetId),
+      args.sandboxExecutionId === undefined
+        ? Promise.resolve(null)
+        : ctx.db.get('sandboxExecutions', args.sandboxExecutionId),
+    ])
+    const artifacts = await Promise.all(
+      args.artifactIds.map((artifactId) => ctx.db.get('evidenceArtifacts', artifactId)),
+    )
+    if (requirement === null || requirement.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Verification requirement does not belong to workflow')
+    }
+    if (candidate === null || candidate.workflowRunId !== args.workflowRunId) {
+      throw new ConvexError('Candidate patch set does not belong to workflow')
+    }
+    if (
+      args.sandboxExecutionId !== undefined &&
+      (sandboxExecution === null || sandboxExecution.workflowRunId !== args.workflowRunId)
+    ) {
+      throw new ConvexError('Sandbox execution does not belong to workflow')
+    }
+    if (artifacts.some((artifact) => artifact === null || artifact.workflowRunId !== args.workflowRunId)) {
+      throw new ConvexError('Verification artifact does not belong to workflow')
+    }
+    const producedArtifactKinds = Array.from(new Set(artifacts.flatMap((artifact) =>
+      artifact === null ? [] : [artifact.kind]
+    )))
+    const expectedProducer = `sandbox:${requirement.kind}`
+    const artifactsBoundToCandidate = artifacts.every((artifact) =>
+      artifact !== null &&
+      artifact.producer === expectedProducer &&
+      artifact.subjectDigest === candidate.candidateDigest
+    )
+    const requirementMatchesInvocation =
+      (requirement.command === undefined || requirement.command === args.command) &&
+      (requirement.platform === undefined || requirement.platform === args.platform) &&
+      (requirement.architecture === undefined || requirement.architecture === args.architecture)
+    if (
+      args.status === 'passed' &&
+      (candidate.status !== 'captured' ||
+        candidate.candidateDigest === undefined ||
+        args.sandboxExecutionId === undefined ||
+        candidate.sandboxExecutionId !== args.sandboxExecutionId ||
+        sandboxExecution === null ||
+        sandboxExecution.status !== 'succeeded' ||
+        sandboxExecution.exitCode !== 0 ||
+        args.completedAt === undefined ||
+        args.exitCode !== 0 ||
+        args.candidateDigestBefore !== candidate.candidateDigest ||
+        args.candidateDigestAfter !== candidate.candidateDigest ||
+        !requirementMatchesInvocation ||
+        !artifactsBoundToCandidate ||
+        requirement.requiredArtifactKinds.some((kind) => !producedArtifactKinds.includes(kind)))
+    ) {
+      throw new ConvexError('Passed verification result does not satisfy evidence invariants')
+    }
+
+    const existing = await ctx.db
+      .query('verificationResults')
+      .withIndex('by_workflow_run_and_idempotency_key', (q) =>
+        q.eq('workflowRunId', args.workflowRunId).eq('idempotencyKey', args.idempotencyKey),
+      )
+      .unique()
+    if (existing !== null) {
+      if (
+        existing.requirementId !== args.requirementId ||
+        existing.candidatePatchSetId !== args.candidatePatchSetId ||
+        existing.sandboxExecutionId !== args.sandboxExecutionId ||
+        existing.provider !== args.provider ||
+        existing.command !== args.command ||
+        existing.platform !== args.platform ||
+        existing.architecture !== args.architecture ||
+        existing.status !== args.status ||
+        existing.exitCode !== args.exitCode ||
+        existing.candidateDigestBefore !== args.candidateDigestBefore ||
+        existing.candidateDigestAfter !== args.candidateDigestAfter ||
+        JSON.stringify(existing.artifactIds) !== JSON.stringify(args.artifactIds)
+      ) {
+        throw new ConvexError('Verification result idempotency key conflict')
+      }
+      return {
+        id: existing._id,
+        workflowRunId: existing.workflowRunId,
+        requirementId: existing.requirementId,
+        candidatePatchSetId: existing.candidatePatchSetId,
+        ...(existing.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: existing.sandboxExecutionId }),
+        provider: existing.provider,
+        ...(existing.command === undefined ? {} : { command: existing.command }),
+        platform: existing.platform,
+        architecture: existing.architecture,
+        ...(existing.environmentImage === undefined ? {} : { environmentImage: existing.environmentImage }),
+        status: existing.status,
+        ...(existing.exitCode === undefined ? {} : { exitCode: existing.exitCode }),
+        ...(existing.summary === undefined ? {} : { summary: existing.summary }),
+        ...(existing.passedCount === undefined ? {} : { passedCount: existing.passedCount }),
+        ...(existing.failedCount === undefined ? {} : { failedCount: existing.failedCount }),
+        ...(existing.skippedCount === undefined ? {} : { skippedCount: existing.skippedCount }),
+        artifactIds: existing.artifactIds,
+        producedArtifactKinds: existing.producedArtifactKinds,
+        candidateDigestBefore: existing.candidateDigestBefore,
+        ...(existing.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: existing.candidateDigestAfter }),
+        startedAt: existing.startedAt,
+        ...(existing.completedAt === undefined ? {} : { completedAt: existing.completedAt }),
+        idempotencyKey: existing.idempotencyKey,
+      }
+    }
+
+    const result = {
+      workflowRunId: args.workflowRunId,
+      requirementId: args.requirementId,
+      candidatePatchSetId: args.candidatePatchSetId,
+      ...(args.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: args.sandboxExecutionId }),
+      provider: args.provider,
+      ...(args.command === undefined ? {} : { command: args.command }),
+      platform: args.platform,
+      architecture: args.architecture,
+      ...(args.environmentImage === undefined ? {} : { environmentImage: args.environmentImage }),
+      status: args.status,
+      ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      ...(args.passedCount === undefined ? {} : { passedCount: args.passedCount }),
+      ...(args.failedCount === undefined ? {} : { failedCount: args.failedCount }),
+      ...(args.skippedCount === undefined ? {} : { skippedCount: args.skippedCount }),
+      artifactIds: args.artifactIds,
+      producedArtifactKinds,
+      candidateDigestBefore: args.candidateDigestBefore,
+      ...(args.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: args.candidateDigestAfter }),
+      startedAt: args.startedAt,
+      ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
+      idempotencyKey: args.idempotencyKey,
+    }
+    const id = await ctx.db.insert('verificationResults', result)
+    return { id, ...result }
   },
 })
 
@@ -1752,8 +2335,9 @@ export const recordHumanDecision = mutation({
       args.status === 'approved' ? 'decision:approve' : 'decision:reject',
     )
 
+    let existingDecision: Doc<'humanDecisions'> | null = null
     if (args.idempotencyKey !== undefined) {
-      const existing = await ctx.db
+      existingDecision = await ctx.db
         .query('humanDecisions')
         .withIndex('by_workflow_decision_key', (q) =>
           q
@@ -1762,30 +2346,16 @@ export const recordHumanDecision = mutation({
         )
         .unique()
 
-      if (existing !== null) {
-        if (
-          existing.status !== args.status ||
-          existing.comment !== comment ||
-          existing.sandboxExecutionId !== args.sandboxExecutionId ||
-          existing.candidatePatchSetId !== args.candidatePatchSetId ||
-          existing.reviewRunId !== args.reviewRunId ||
-          existing.policyDecisionId !== args.policyDecisionId
-        ) {
-          throw new ConvexError('Human decision idempotency key conflict')
-        }
-        return {
-          id: existing._id,
-          workflowRunId: existing.workflowRunId,
-          ...(existing.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: existing.sandboxExecutionId }),
-          ...(existing.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: existing.candidatePatchSetId }),
-          ...(existing.reviewRunId === undefined ? {} : { reviewRunId: existing.reviewRunId }),
-          ...(existing.policyDecisionId === undefined ? {} : { policyDecisionId: existing.policyDecisionId }),
-          actorId: existing.actorId,
-          status: existing.status,
-          comment: existing.comment,
-          decidedAt: existing.decidedAt,
-          ...(existing.idempotencyKey === undefined ? {} : { idempotencyKey: existing.idempotencyKey }),
-        }
+      if (
+        existingDecision !== null &&
+        (existingDecision.status !== args.status ||
+          existingDecision.comment !== comment ||
+          existingDecision.sandboxExecutionId !== args.sandboxExecutionId ||
+          existingDecision.candidatePatchSetId !== args.candidatePatchSetId ||
+          existingDecision.reviewRunId !== args.reviewRunId ||
+          existingDecision.policyDecisionId !== args.policyDecisionId)
+      ) {
+        throw new ConvexError('Human decision idempotency key conflict')
       }
     }
 
@@ -1855,6 +2425,17 @@ export const recordHumanDecision = mutation({
       throw new ConvexError('Displayed review projection is stale')
     }
 
+    if (workflowRun.status !== 'reviewed') {
+      throw new ConvexError('Workflow must finish verification before a human decision')
+    }
+    if (
+      args.status === 'approved' &&
+      (sandboxExecution.status !== 'succeeded' ||
+        candidatePatchSet.status !== 'captured' ||
+        reviewRun.status !== 'completed')
+    ) {
+      throw new ConvexError('Approval requires successful execution, a captured candidate, and completed review')
+    }
     if (candidatePatchSet.createdAt < sandboxExecution.completedAt) {
       throw new ConvexError('Candidate patch set predates latest sandbox execution')
     }
@@ -1866,6 +2447,22 @@ export const recordHumanDecision = mutation({
     }
     if (policyDecision.reviewRunId !== reviewRun._id) {
       throw new ConvexError('Policy decision must reference latest review run')
+    }
+
+    if (existingDecision !== null) {
+      return {
+        id: existingDecision._id,
+        workflowRunId: existingDecision.workflowRunId,
+        ...(existingDecision.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: existingDecision.sandboxExecutionId }),
+        ...(existingDecision.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: existingDecision.candidatePatchSetId }),
+        ...(existingDecision.reviewRunId === undefined ? {} : { reviewRunId: existingDecision.reviewRunId }),
+        ...(existingDecision.policyDecisionId === undefined ? {} : { policyDecisionId: existingDecision.policyDecisionId }),
+        actorId: existingDecision.actorId,
+        status: existingDecision.status,
+        comment: existingDecision.comment,
+        decidedAt: existingDecision.decidedAt,
+        ...(existingDecision.idempotencyKey === undefined ? {} : { idempotencyKey: existingDecision.idempotencyKey }),
+      }
     }
 
     const decision = {
@@ -2154,6 +2751,12 @@ export const getDecisionPublicationReplayFixture = query({
           workspaceId: workflowRun.workspaceId,
           traceId: workflowRun.traceId ?? 'legacy',
           status: workflowRun.status,
+          ...(workflowRun.modelVersion === undefined ? {} : { modelVersion: workflowRun.modelVersion }),
+          ...(workflowRun.parentWorkflowRunId === undefined ? {} : { parentWorkflowRunId: workflowRun.parentWorkflowRunId }),
+          ...(workflowRun.rootWorkflowRunId === undefined ? {} : { rootWorkflowRunId: workflowRun.rootWorkflowRunId }),
+          ...(workflowRun.attemptNumber === undefined ? {} : { attemptNumber: workflowRun.attemptNumber }),
+          ...(workflowRun.trigger === undefined ? {} : { trigger: workflowRun.trigger }),
+          ...(workflowRun.sourceCommitSha === undefined ? {} : { sourceCommitSha: workflowRun.sourceCommitSha }),
           createdAt: workflowRun.createdAt,
         },
       },
@@ -2224,55 +2827,101 @@ export const getDetail = query({
     const runtimeEventsTruncated = runtimeEventPage.length > workflowDetailRuntimeEventLimit
     const runtimeEvents = runtimeEventPage.slice(0, workflowDetailRuntimeEventLimit)
 
-    const runtimeSessions = await ctx.db
+    const runtimeSessionPage = await ctx.db
       .query('runtimeSessions')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailRuntimeSessionLimit + 1)
+    const runtimeSessionsTruncated = runtimeSessionPage.length > workflowDetailRuntimeSessionLimit
+    const runtimeSessions = runtimeSessionPage.slice(0, workflowDetailRuntimeSessionLimit)
 
     const sandboxExecutions = await ctx.db
       .query('sandboxExecutions')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailSandboxExecutionLimit + 1)
+    const sandboxExecutionsTruncated = sandboxExecutions.length > workflowDetailSandboxExecutionLimit
+    const boundedSandboxExecutions = sandboxExecutions.slice(0, workflowDetailSandboxExecutionLimit)
 
-    const evidenceArtifacts = await ctx.db
+    const evidenceArtifactPage = await ctx.db
       .query('evidenceArtifacts')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailEvidenceArtifactLimit + 1)
+    const evidenceArtifactsTruncated = evidenceArtifactPage.length > workflowDetailEvidenceArtifactLimit
+    const evidenceArtifacts = evidenceArtifactPage.slice(0, workflowDetailEvidenceArtifactLimit)
 
-    const candidatePatchSets = await ctx.db
+    const candidatePatchSetPage = await ctx.db
       .query('candidatePatchSets')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailCandidatePatchSetLimit + 1)
+    const candidatePatchSetsTruncated = candidatePatchSetPage.length > workflowDetailCandidatePatchSetLimit
+    const candidatePatchSets = candidatePatchSetPage.slice(0, workflowDetailCandidatePatchSetLimit)
 
-    const reviewRuns = await ctx.db
+    const verificationRequirementPage = await ctx.db
+      .query('verificationRequirements')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .order('desc')
+      .take(workflowDetailVerificationRequirementLimit + 1)
+    const verificationRequirementsTruncated = verificationRequirementPage.length > workflowDetailVerificationRequirementLimit
+    const verificationRequirements = verificationRequirementPage.slice(0, workflowDetailVerificationRequirementLimit)
+
+    const verificationResultPage = await ctx.db
+      .query('verificationResults')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .order('desc')
+      .take(workflowDetailVerificationResultLimit + 1)
+    const verificationResultsTruncated = verificationResultPage.length > workflowDetailVerificationResultLimit
+    const verificationResults = verificationResultPage.slice(0, workflowDetailVerificationResultLimit)
+
+    const reviewRunPage = await ctx.db
       .query('reviewRuns')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailReviewRunLimit + 1)
+    const reviewRunsTruncated = reviewRunPage.length > workflowDetailReviewRunLimit
+    const reviewRuns = reviewRunPage.slice(0, workflowDetailReviewRunLimit)
 
-    const reviewFindings = await ctx.db
+    const reviewFindingPage = await ctx.db
       .query('reviewFindings')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailReviewFindingLimit + 1)
+    const reviewFindingsTruncated = reviewFindingPage.length > workflowDetailReviewFindingLimit
+    const reviewFindings = reviewFindingPage.slice(0, workflowDetailReviewFindingLimit)
 
-    const policyDecisions = await ctx.db
+    const policyDecisionPage = await ctx.db
       .query('policyDecisions')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailPolicyDecisionLimit + 1)
+    const policyDecisionsTruncated = policyDecisionPage.length > workflowDetailPolicyDecisionLimit
+    const policyDecisions = policyDecisionPage.slice(0, workflowDetailPolicyDecisionLimit)
 
-    const humanDecisions = await ctx.db
+    const humanDecisionPage = await ctx.db
       .query('humanDecisions')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailHumanDecisionLimit + 1)
+    const humanDecisionsTruncated = humanDecisionPage.length > workflowDetailHumanDecisionLimit
+    const humanDecisions = humanDecisionPage.slice(0, workflowDetailHumanDecisionLimit)
 
-    const publicationResults = await ctx.db
+    const publicationResultPage = await ctx.db
       .query('publicationResults')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailPublicationResultLimit + 1)
+    const publicationResultsTruncated = publicationResultPage.length > workflowDetailPublicationResultLimit
+    const publicationResults = publicationResultPage.slice(0, workflowDetailPublicationResultLimit)
 
-    const provenanceEvents = await ctx.db
+    const provenanceEventPage = await ctx.db
       .query('provenanceEvents')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailProvenanceEventLimit + 1)
+    const provenanceEventsTruncated = provenanceEventPage.length > workflowDetailProvenanceEventLimit
+    const provenanceEvents = provenanceEventPage.slice(0, workflowDetailProvenanceEventLimit)
 
     return {
       promptRequest: {
@@ -2294,6 +2943,12 @@ export const getDetail = query({
         workspaceId: workflowRun.workspaceId,
         traceId: workflowRun.traceId ?? 'legacy',
         status: workflowRun.status,
+        ...(workflowRun.modelVersion === undefined ? {} : { modelVersion: workflowRun.modelVersion }),
+        ...(workflowRun.parentWorkflowRunId === undefined ? {} : { parentWorkflowRunId: workflowRun.parentWorkflowRunId }),
+        ...(workflowRun.rootWorkflowRunId === undefined ? {} : { rootWorkflowRunId: workflowRun.rootWorkflowRunId }),
+        ...(workflowRun.attemptNumber === undefined ? {} : { attemptNumber: workflowRun.attemptNumber }),
+        ...(workflowRun.trigger === undefined ? {} : { trigger: workflowRun.trigger }),
+        ...(workflowRun.sourceCommitSha === undefined ? {} : { sourceCommitSha: workflowRun.sourceCommitSha }),
         createdAt: workflowRun.createdAt,
       },
       runtimeEvents: sortedByNumber(runtimeEvents, (event) => event.occurredAt)
@@ -2329,7 +2984,8 @@ export const getDetail = query({
           updatedAt: session.updatedAt,
           ...(session.completedAt === undefined ? {} : { completedAt: session.completedAt }),
         })),
-      sandboxExecutions: sortedByNumber(sandboxExecutions, (execution) => execution.startedAt)
+      runtimeSessionsTruncated,
+      sandboxExecutions: sortedByNumber(boundedSandboxExecutions, (execution) => execution.startedAt)
         .map((execution) => ({
           id: execution['_id'],
           workflowRunId: execution.workflowRunId,
@@ -2338,16 +2994,21 @@ export const getDetail = query({
           command: execution.command,
           status: execution.status,
           ...(execution.exitCode === undefined ? {} : { exitCode: execution.exitCode }),
-          stdout: execution.stdout,
-          ...(execution.stderr === undefined ? {} : { stderr: execution.stderr }),
+          stdout: sandboxOutputPreview(execution.stdout) ?? '',
+          ...(execution.stderr === undefined
+            ? {}
+            : { stderr: sandboxOutputPreview(execution.stderr) }),
           ...(execution.policy === undefined ? {} : { policy: execution.policy }),
           startedAt: execution.startedAt,
           completedAt: execution.completedAt,
         })),
+      sandboxExecutionsTruncated,
       evidenceArtifacts: sortedByNumber(evidenceArtifacts, (artifact) => artifact.createdAt)
         .map((artifact) => ({
           id: artifact['_id'],
           workflowRunId: artifact.workflowRunId,
+          ...(artifact.producer === undefined ? {} : { producer: artifact.producer }),
+          ...(artifact.subjectDigest === undefined ? {} : { subjectDigest: artifact.subjectDigest }),
           ...(artifact.traceId === undefined ? {} : { traceId: artifact.traceId }),
           kind: artifact.kind,
           ...(artifact.label === undefined ? {} : { label: artifact.label }),
@@ -2359,11 +3020,14 @@ export const getDetail = query({
           ...(artifact.retentionPolicy === undefined ? {} : { retentionPolicy: artifact.retentionPolicy }),
           createdAt: artifact.createdAt,
         })),
+      evidenceArtifactsTruncated,
       candidatePatchSets: sortedByNumber(candidatePatchSets, (patchSet) => patchSet.createdAt)
         .map((patchSet) => ({
           id: patchSet['_id'],
           workflowRunId: patchSet.workflowRunId,
+          ...(patchSet.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: patchSet.sandboxExecutionId }),
           status: patchSet.status,
+          ...(patchSet.candidateDigest === undefined ? {} : { candidateDigest: patchSet.candidateDigest }),
           ...(patchSet.baseRef === undefined ? {} : { baseRef: patchSet.baseRef }),
           ...(patchSet.baseSha === undefined ? {} : { baseSha: patchSet.baseSha }),
           ...(patchSet.headRef === undefined ? {} : { headRef: patchSet.headRef }),
@@ -2371,8 +3035,53 @@ export const getDetail = query({
           ...(patchSet.diffArtifactId === undefined ? {} : { diffArtifactId: patchSet.diffArtifactId }),
           ...(patchSet.summary === undefined ? {} : { summary: patchSet.summary }),
           ...(patchSet.stats === undefined ? {} : { stats: patchSet.stats }),
+          ...(patchSet.idempotencyKey === undefined ? {} : { idempotencyKey: patchSet.idempotencyKey }),
           createdAt: patchSet.createdAt,
         })),
+      candidatePatchSetsTruncated,
+      verificationRequirements: sortedByNumber(verificationRequirements, (requirement) => requirement.createdAt)
+        .map((requirement) => ({
+          id: requirement._id,
+          workflowRunId: requirement.workflowRunId,
+          key: requirement.key,
+          label: requirement.label,
+          kind: requirement.kind,
+          required: requirement.required,
+          ...(requirement.command === undefined ? {} : { command: requirement.command }),
+          ...(requirement.platform === undefined ? {} : { platform: requirement.platform }),
+          ...(requirement.architecture === undefined ? {} : { architecture: requirement.architecture }),
+          requiredArtifactKinds: requirement.requiredArtifactKinds,
+          source: requirement.source,
+          createdAt: requirement.createdAt,
+        })),
+      verificationRequirementsTruncated,
+      verificationResults: sortedByNumber(verificationResults, (result) => result.startedAt)
+        .map((result) => ({
+          id: result._id,
+          workflowRunId: result.workflowRunId,
+          requirementId: result.requirementId,
+          candidatePatchSetId: result.candidatePatchSetId,
+          ...(result.sandboxExecutionId === undefined ? {} : { sandboxExecutionId: result.sandboxExecutionId }),
+          provider: result.provider,
+          ...(result.command === undefined ? {} : { command: result.command }),
+          platform: result.platform,
+          architecture: result.architecture,
+          ...(result.environmentImage === undefined ? {} : { environmentImage: result.environmentImage }),
+          status: result.status,
+          ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+          ...(result.summary === undefined ? {} : { summary: result.summary }),
+          ...(result.passedCount === undefined ? {} : { passedCount: result.passedCount }),
+          ...(result.failedCount === undefined ? {} : { failedCount: result.failedCount }),
+          ...(result.skippedCount === undefined ? {} : { skippedCount: result.skippedCount }),
+          artifactIds: result.artifactIds,
+          producedArtifactKinds: result.producedArtifactKinds,
+          candidateDigestBefore: result.candidateDigestBefore,
+          ...(result.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: result.candidateDigestAfter }),
+          startedAt: result.startedAt,
+          ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
+          idempotencyKey: result.idempotencyKey,
+        })),
+      verificationResultsTruncated,
       reviewRuns: sortedByNumber(reviewRuns, (reviewRun) => reviewRun.startedAt)
         .map((reviewRun) => ({
           id: reviewRun['_id'],
@@ -2387,6 +3096,7 @@ export const getDetail = query({
           ...(reviewRun.completedAt === undefined ? {} : { completedAt: reviewRun.completedAt }),
           createdAt: reviewRun.createdAt,
         })),
+      reviewRunsTruncated,
       reviewFindings: sortedByNumber(reviewFindings, (finding) => finding.createdAt)
         .map((finding) => ({
           id: finding['_id'],
@@ -2401,6 +3111,7 @@ export const getDetail = query({
           ...(finding.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: finding.evidenceArtifactId }),
           createdAt: finding.createdAt,
         })),
+      reviewFindingsTruncated,
       policyDecisions: sortedByNumber(policyDecisions, (decision) => decision.createdAt)
         .map((decision) => ({
           id: decision['_id'],
@@ -2411,6 +3122,7 @@ export const getDetail = query({
           ...(decision.reason === undefined ? {} : { reason: decision.reason }),
           createdAt: decision.createdAt,
         })),
+      policyDecisionsTruncated,
       humanDecisions: sortedByNumber(humanDecisions, (decision) => decision.decidedAt)
         .map((decision) => ({
           id: decision['_id'],
@@ -2425,6 +3137,7 @@ export const getDetail = query({
           decidedAt: decision.decidedAt,
           ...(decision.idempotencyKey === undefined ? {} : { idempotencyKey: decision.idempotencyKey }),
         })),
+      humanDecisionsTruncated,
       publicationResults: sortedByNumber(publicationResults, (result) => result.createdAt)
         .map((result) => ({
           id: result['_id'],
@@ -2439,6 +3152,7 @@ export const getDetail = query({
           createdAt: result.createdAt,
           ...(result.idempotencyKey === undefined ? {} : { idempotencyKey: result.idempotencyKey }),
         })),
+      publicationResultsTruncated,
       provenanceEvents: sortedByNumber(provenanceEvents, (event) => event.sequence)
         .map((event) => ({
           id: event['_id'],
@@ -2457,6 +3171,7 @@ export const getDetail = query({
           ...(event.errorCategory === undefined ? {} : { errorCategory: event.errorCategory }),
           ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
         })),
+      provenanceEventsTruncated,
     }
   },
 })
@@ -2494,6 +3209,42 @@ export const listRecent = query({
         continue
       }
 
+      const [recentExecutions, latestCandidate, latestReview, latestPolicy, latestDecision] = await Promise.all([
+        ctx.db.query('sandboxExecutions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun['_id'])).order('desc').take(32),
+        ctx.db.query('candidatePatchSets').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun['_id'])).order('desc').first(),
+        ctx.db.query('reviewRuns').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun['_id'])).order('desc').first(),
+        ctx.db.query('policyDecisions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun['_id'])).order('desc').first(),
+        ctx.db.query('humanDecisions').withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun['_id'])).order('desc').first(),
+      ])
+      const latestExecution = recentExecutions.reduce<(typeof recentExecutions)[number] | undefined>(
+        (latest, execution) => latest === undefined || execution.completedAt > latest.completedAt ? execution : latest,
+        undefined,
+      )
+      const decisionIsCurrent =
+        latestDecision !== null &&
+        latestExecution !== undefined &&
+        latestCandidate !== null &&
+        latestReview !== null &&
+        latestPolicy !== null &&
+        latestDecision.sandboxExecutionId === latestExecution['_id'] &&
+        latestDecision.candidatePatchSetId === latestCandidate['_id'] &&
+        latestDecision.reviewRunId === latestReview['_id'] &&
+        latestDecision.policyDecisionId === latestPolicy['_id'] &&
+        latestReview.sandboxExecutionId === latestExecution['_id'] &&
+        latestReview.candidatePatchSetId === latestCandidate['_id'] &&
+        latestPolicy.reviewRunId === latestReview['_id']
+      const trustState = workflowRun.status === 'queued'
+        ? 'queued' as const
+        : workflowRun.status === 'running'
+          ? 'running' as const
+          : latestExecution === undefined
+            ? 'no-sandbox-run' as const
+            : latestExecution.status === 'failed'
+              ? 'sandbox-failed' as const
+              : decisionIsCurrent && latestDecision !== null
+                ? latestDecision.status
+                : 'needs-review' as const
+
       workflowStarts.push({
         promptRequest: {
           id: promptRequest['_id'],
@@ -2514,6 +3265,13 @@ export const listRecent = query({
           workspaceId: workflowRun.workspaceId,
           traceId: workflowRun.traceId ?? 'legacy',
           status: workflowRun.status,
+          ...(workflowRun.modelVersion === undefined ? {} : { modelVersion: workflowRun.modelVersion }),
+          ...(workflowRun.parentWorkflowRunId === undefined ? {} : { parentWorkflowRunId: workflowRun.parentWorkflowRunId }),
+          ...(workflowRun.rootWorkflowRunId === undefined ? {} : { rootWorkflowRunId: workflowRun.rootWorkflowRunId }),
+          ...(workflowRun.attemptNumber === undefined ? {} : { attemptNumber: workflowRun.attemptNumber }),
+          ...(workflowRun.trigger === undefined ? {} : { trigger: workflowRun.trigger }),
+          ...(workflowRun.sourceCommitSha === undefined ? {} : { sourceCommitSha: workflowRun.sourceCommitSha }),
+          trustState,
           createdAt: workflowRun.createdAt,
         },
       })

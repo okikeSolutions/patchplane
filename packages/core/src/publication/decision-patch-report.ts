@@ -19,8 +19,8 @@ export function formatDecisionPatchReportComment(input: {
   const executionStatus = execution === undefined
     ? 'not run'
     : execution.status === 'succeeded'
-    ? 'sandbox agent completed'
-    : 'sandbox agent failed'
+    ? 'sandbox execution completed'
+    : 'sandbox execution failed'
   const patch = input.candidatePatchSet
 
   return [
@@ -28,6 +28,7 @@ export function formatDecisionPatchReportComment(input: {
     '',
     `**Decision:** ${decisionLabel(input.humanDecision.status)}`,
     `**Execution:** ${executionStatus}`,
+    '**Verification:** incomplete — no durable candidate-bound verification result is recorded',
     '',
     `- Repository: ${repository}`,
     `- Source: ${sourceRef}`,
@@ -60,7 +61,10 @@ export function decisionCheckConclusion(input: {
     return 'action_required' as const
   }
 
-  return input.sandboxExecution?.status === 'failed' ? 'failure' as const : 'success' as const
+  // Human approval and successful agent execution are not verification evidence.
+  // Until a durable candidate-bound verification projection is supplied here,
+  // an approval requires action rather than a successful GitHub check.
+  return input.sandboxExecution?.status === 'failed' ? 'failure' as const : 'action_required' as const
 }
 
 function decisionLabel(status: HumanDecision['status']) {

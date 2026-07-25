@@ -327,6 +327,9 @@ describe('Daytona sandbox boundary adapters', () => {
       if (request.command.includes('bun test')) {
         return { exitCode: 0, stdout: 'ok', stderr: '' }
       }
+      if (request.command.includes('sha256sum')) {
+        return { exitCode: 0, stdout: `${'a'.repeat(64)}  -\n`, stderr: '' }
+      }
       if (request.command.includes('git diff --binary')) {
         return { exitCode: 0, stdout: 'diff --git a/file.ts b/file.ts\n+changed\n', stderr: '' }
       }
@@ -363,12 +366,6 @@ describe('Daytona sandbox boundary adapters', () => {
 
       expect(result.evidenceArtifacts).toEqual([
         expect.objectContaining({
-          kind: 'diff',
-          label: 'Candidate patch diff',
-          contentType: 'text/x-diff',
-          body: expect.stringContaining('diff --git'),
-        }),
-        expect.objectContaining({
           kind: 'test-report',
           label: 'Test report',
           contentType: 'application/json',
@@ -380,8 +377,15 @@ describe('Daytona sandbox boundary adapters', () => {
           contentType: 'image/png',
           body: Uint8Array.from([1, 2, 3]),
         }),
+        expect.objectContaining({
+          kind: 'diff',
+          label: 'Candidate patch diff',
+          contentType: 'text/x-diff',
+          body: expect.stringContaining('diff --git'),
+        }),
       ])
       expect(result.baseSha).toBe(repositoryBaseSha)
+      expect(result.candidateStateDigest).toBeDefined()
       expect(result.verificationResults).toEqual([
         expect.objectContaining({ kind: 'test', status: 'succeeded', exitCode: 0 }),
         expect.objectContaining({ kind: 'browser', status: 'succeeded', exitCode: 0 }),

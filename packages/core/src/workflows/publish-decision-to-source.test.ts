@@ -109,6 +109,8 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          recordVerificationRequirement: () => Effect.die('unused'),
+          recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               storageRecords.push({ type: 'publication', input })
@@ -214,6 +216,8 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          recordVerificationRequirement: () => Effect.die('unused'),
+          recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               const id = `publication-${recordedPublications.length + 1}`
@@ -313,6 +317,8 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          recordVerificationRequirement: () => Effect.die('unused'),
+          recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
             Effect.succeed({ id: `publication-${input.kind}`, ...input, createdAt: input.createdAt ?? 1 } as never),
           recordProvenanceEvent: (input) =>

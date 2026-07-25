@@ -40,6 +40,8 @@ describe('formatSandboxResultComment', () => {
     })
 
     expect(body).toContain('## PatchPlane Patch Report')
+    expect(body).toContain('**Execution:** sandbox execution failed')
+    expect(body).toContain('**Verification:** incomplete — execution completion is not durable candidate-bound verification')
     expect(body).toContain('This patch is not trusted until a maintainer reviews the evidence')
     expect(body).toContain('- Command: `echo \\`owned\\``')
     expect(body).toContain('`\u200b``md')

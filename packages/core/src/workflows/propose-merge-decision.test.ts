@@ -74,6 +74,8 @@ describe('ProposeMergeDecision', () => {
         recordEvidenceArtifact: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
         getEvidenceArtifact: () => Effect.die('unused'),
         recordCandidatePatchSet: (input) => Effect.succeed({ id: 'patch-set-1', ...input, createdAt: input.createdAt ?? 1 } as never),
+        recordVerificationRequirement: () => Effect.die('unused'),
+        recordVerificationResult: () => Effect.die('unused'),
         recordReviewRun: (input) =>
           Effect.suspend(() => {
             recorded.push({ type: 'reviewRun', value: input })
@@ -98,11 +100,23 @@ describe('ProposeMergeDecision', () => {
         sandboxExecution,
         evidenceArtifacts: [diffArtifact],
         verificationResults: [{
-          kind: 'test',
+          id: 'verification-result-1',
+          workflowRunId: 'workflow-1' as never,
+          requirementId: 'verification-requirement-1',
+          candidatePatchSetId: 'candidate-1',
+          sandboxExecutionId: 'execution-1',
+          provider: 'daytona',
           command: 'bun test',
+          platform: 'linux',
+          architecture: 'x64',
           status: 'failed',
           exitCode: 2,
-          message: 'Test verification command failed with exit 2.',
+          summary: 'Test verification command failed with exit 2.',
+          artifactIds: [],
+          producedArtifactKinds: [],
+          candidateDigestBefore: 'sha256:candidate',
+          startedAt: 2,
+          completedAt: 3,
         }],
       }).pipe(Effect.provide(Layer.mergeAll(storageLayer, AlphaReviewServiceLayer, AlphaPolicyServiceLayer)))
 

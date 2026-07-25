@@ -25,6 +25,7 @@
     "./sandbox-policy": "./src/sandbox-policy.ts",
     "./server-function": "./src/server-function.ts",
     "./start-workflow": "./src/start-workflow.ts",
+    "./verification": "./src/verification.ts",
     "./workflow-intake": "./src/workflow-intake.ts",
     "./workflow-run": "./src/workflow-run.ts",
     "./workflow-start": "./src/workflow-start.ts",

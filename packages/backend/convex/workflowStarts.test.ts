@@ -35,8 +35,18 @@ interface WorkflowDetailResult {
     readonly payloadJson?: string | undefined
   }>
   readonly runtimeEventsTruncated: boolean
+  readonly sandboxExecutions: ReadonlyArray<{
+    readonly sandboxId: string
+    readonly stdout: string
+    readonly stderr?: string | undefined
+  }>
+  readonly sandboxExecutionsTruncated: boolean
   readonly evidenceArtifacts?: ReadonlyArray<unknown> | undefined
   readonly candidatePatchSets?: ReadonlyArray<unknown> | undefined
+  readonly verificationRequirements: ReadonlyArray<unknown>
+  readonly verificationRequirementsTruncated: boolean
+  readonly verificationResults: ReadonlyArray<unknown>
+  readonly verificationResultsTruncated: boolean
   readonly reviewRuns?: ReadonlyArray<unknown> | undefined
   readonly reviewFindings?: ReadonlyArray<unknown> | undefined
   readonly policyDecisions?: ReadonlyArray<unknown> | undefined
@@ -98,6 +108,12 @@ const recordSandboxExecution = makeFunctionReference<
   Record<string, unknown> & { id: Id<'sandboxExecutions'> }
 >('workflowStarts:recordSandboxExecution')
 
+const createWorkflowRerun = makeFunctionReference<
+  'mutation',
+  { parentWorkflowRunId: string; reason: string; idempotencyKey: string },
+  unknown
+>('workflowStarts:createRerun')
+
 const recordRuntimeEvents = makeFunctionReference<
   'mutation',
   Record<string, unknown>,
@@ -139,6 +155,18 @@ const recordCandidatePatchSet = makeFunctionReference<
   Record<string, unknown>,
   Record<string, unknown>
 >('workflowStarts:recordCandidatePatchSet')
+
+const recordVerificationRequirement = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown> & { id: Id<'verificationRequirements'> }
+>('workflowStarts:recordVerificationRequirement')
+
+const recordVerificationResult = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown> & { id: Id<'verificationResults'> }
+>('workflowStarts:recordVerificationResult')
 
 const recordReviewRun = makeFunctionReference<
   'mutation',
@@ -339,6 +367,188 @@ async function seedDecisionPublicationReplayFixture(
 
   return { workflowStart, ...records }
 }
+
+describe('workflowStarts V1 rerun lineage', () => {
+  test('creates one idempotent child attempt with explicit lineage', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const parent = await createWorkflowStartForTest(t)
+    await t.run((ctx) => ctx.db.patch('workflowRuns', parent.workflowRun.id, { status: 'reviewed' }))
+
+    const first = await t.mutation(createWorkflowRerun, {
+      parentWorkflowRunId: parent.workflowRun.id,
+      reason: 'Gather native platform evidence.',
+      idempotencyKey: 'rerun-request-1',
+    })
+    const replay = await t.mutation(createWorkflowRerun, {
+      parentWorkflowRunId: parent.workflowRun.id,
+      reason: 'Gather native platform evidence.',
+      idempotencyKey: 'rerun-request-1',
+    })
+
+    expect(first).toMatchObject({
+      workflowRun: {
+        modelVersion: 'v1',
+        parentWorkflowRunId: parent.workflowRun.id,
+        rootWorkflowRunId: parent.workflowRun.id,
+        attemptNumber: 2,
+        trigger: 'rerun',
+      },
+    })
+    expect(replay).toMatchObject({ workflowRun: { id: (first as WorkflowStartResult).workflowRun.id } })
+  })
+})
+
+describe('workflowStarts candidate-bound verification evidence', () => {
+  test('persists a passed result only when candidate digest and required artifacts match', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+    const workflowRunId = workflowStart.workflowRun.id
+    const sandbox = await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      provider: 'daytona',
+      sandboxId: 'sandbox-1',
+      command: 'pi --mode json',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'done',
+      startedAt: 1,
+      completedAt: 2,
+    })
+    const diff = await t.mutation(recordEvidenceArtifact, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      kind: 'diff',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflows/run/diff.patch',
+      contentType: 'text/x-diff',
+      sizeBytes: 10,
+      sha256: 'abc123',
+    }) as { id: Id<'evidenceArtifacts'> }
+    const report = await t.mutation(recordEvidenceArtifact, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      kind: 'test-report',
+      producer: 'sandbox:test',
+      subjectDigest: 'sha256:abc123',
+      storageProvider: 'cloudflare-r2',
+      storageKey: 'workflows/run/test.json',
+      contentType: 'application/json',
+      sizeBytes: 10,
+      sha256: 'def456',
+    }) as { id: Id<'evidenceArtifacts'> }
+    const candidate = await t.mutation(recordCandidatePatchSet, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      sandboxExecutionId: sandbox.id,
+      status: 'captured',
+      candidateDigest: 'sha256:abc123',
+      baseSha: '0123456789012345678901234567890123456789',
+      diffArtifactId: diff.id,
+      idempotencyKey: 'sandbox-1:candidate',
+    }) as { id: Id<'candidatePatchSets'> }
+    const requirement = await t.mutation(recordVerificationRequirement, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      key: 'sandbox:test',
+      label: 'Configured tests',
+      kind: 'test',
+      required: true,
+      command: 'bun test',
+      platform: 'linux',
+      architecture: 'x64',
+      requiredArtifactKinds: ['test-report'],
+      source: 'policy',
+    })
+    const result = await t.mutation(recordVerificationResult, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      requirementId: requirement.id,
+      candidatePatchSetId: candidate.id,
+      sandboxExecutionId: sandbox.id,
+      provider: 'daytona',
+      command: 'bun test',
+      platform: 'linux',
+      architecture: 'x64',
+      status: 'passed',
+      exitCode: 0,
+      artifactIds: [report.id],
+      candidateDigestBefore: 'sha256:abc123',
+      candidateDigestAfter: 'sha256:abc123',
+      startedAt: 2,
+      completedAt: 3,
+      idempotencyKey: 'candidate:test:1',
+    })
+
+    expect(result).toMatchObject({ status: 'passed', candidatePatchSetId: candidate.id })
+    const detail = await t.query(getWorkflowDetail, { workflowRunId })
+    expect(detail.verificationRequirements).toHaveLength(1)
+    expect(detail.verificationResults).toHaveLength(1)
+    expect(detail.verificationRequirementsTruncated).toBe(false)
+    expect(detail.verificationResultsTruncated).toBe(false)
+  })
+
+  test('rejects a passed result when its candidate digest changed', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+    const workflowRunId = workflowStart.workflowRun.id
+    const seeded = await t.run(async (ctx) => {
+      const sandboxExecutionId = await ctx.db.insert('sandboxExecutions', {
+        workflowRunId,
+        provider: 'daytona',
+        sandboxId: 'sandbox-1',
+        command: 'pi',
+        status: 'succeeded',
+        exitCode: 0,
+        stdout: 'done',
+        startedAt: 1,
+        completedAt: 2,
+        createdAt: 2,
+      })
+      const candidatePatchSetId = await ctx.db.insert('candidatePatchSets', {
+        workflowRunId,
+        sandboxExecutionId,
+        status: 'captured',
+        candidateDigest: 'sha256:current',
+        baseSha: 'base',
+        createdAt: 2,
+      })
+      const requirementId = await ctx.db.insert('verificationRequirements', {
+        workflowRunId,
+        key: 'test',
+        label: 'Tests',
+        kind: 'test',
+        required: true,
+        requiredArtifactKinds: [],
+        source: 'policy',
+        createdAt: 2,
+      })
+      return { sandboxExecutionId, candidatePatchSetId, requirementId }
+    })
+
+    await expect(t.mutation(recordVerificationResult, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      requirementId: seeded.requirementId,
+      candidatePatchSetId: seeded.candidatePatchSetId,
+      sandboxExecutionId: seeded.sandboxExecutionId,
+      provider: 'daytona',
+      platform: 'linux',
+      architecture: 'x64',
+      status: 'passed',
+      exitCode: 0,
+      artifactIds: [],
+      candidateDigestBefore: 'sha256:stale',
+      candidateDigestAfter: 'sha256:stale',
+      startedAt: 2,
+      completedAt: 3,
+      idempotencyKey: 'stale',
+    })).rejects.toThrow('does not satisfy evidence invariants')
+  })
+})
 
 describe('workflowStarts trusted boundary and authz', () => {
   test('returns a bounded decision publication replay fixture', async () => {
@@ -736,7 +946,9 @@ describe('workflowStarts trusted boundary and authz', () => {
     const patchSet = await t.mutation(recordCandidatePatchSet, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
       status: 'captured',
+      candidateDigest: 'sha256:e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
       baseRef: 'main',
       baseSha: 'abc123',
       headRef: 'patchplane/workflow-1',
@@ -744,6 +956,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       diffArtifactId: diffArtifact.id,
       summary: 'Updates the auth callback.',
       stats: { filesChanged: 2, additions: 10, deletions: 3 },
+      idempotencyKey: 'sandbox-execution-1:candidate',
       createdAt: 11,
     })
 
@@ -905,14 +1118,17 @@ describe('workflowStarts trusted boundary and authz', () => {
       hasProvenanceEvents: true,
     })
 
-    await t.mutation(recordCandidatePatchSet, {
-      systemSecret: 'system_test',
+    await t.run((ctx) => ctx.db.insert('candidatePatchSets', {
       workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
       status: 'captured',
-      diffArtifactId: diffArtifact.id,
+      candidateDigest: 'sha256:e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
+      baseSha: 'abc123',
+      diffArtifactId: diffArtifact.id as Id<'evidenceArtifacts'>,
+      idempotencyKey: 'newer-test-fixture',
       createdAt: 20,
-    })
-    const replayAfterProjectionAdvanced = await t.mutation(recordHumanDecision, {
+    }))
+    await expect(t.mutation(recordHumanDecision, {
       workflowRunId: workflowStart.workflowRun.id,
       sandboxExecutionId: sandboxExecution.id,
       candidatePatchSetId: patchSet.id,
@@ -921,8 +1137,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       status: 'changes-requested',
       comment: 'Please fix the failing auth test first.',
       idempotencyKey: 'decision-attempt-1',
-    })
-    expect(replayAfterProjectionAdvanced.id).toBe(humanDecision.id)
+    })).rejects.toThrow('Displayed review projection is stale')
 
     await expect(t.mutation(recordHumanDecision, {
       workflowRunId: workflowStart.workflowRun.id,
@@ -1085,6 +1300,46 @@ describe('workflowStarts trusted boundary and authz', () => {
       'truncated; full runtime output remains in the workflow evidence artifact',
     )
     expect(detail.runtimeEvents[0]?.payloadJson?.length).toBeLessThan(8_200)
+  })
+
+  test('getDetail bounds sandbox executions and inline command output', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await t.run(async (ctx) => {
+      await Promise.all(
+        Array.from({ length: 34 }, (_, index) =>
+          ctx.db.insert('sandboxExecutions', {
+            workflowRunId: workflowStart.workflowRun.id,
+            provider: 'daytona',
+            sandboxId: `sandbox-${index}`,
+            command: 'bun test',
+            status: 'succeeded',
+            exitCode: 0,
+            stdout: `stdout-${index}-${'x'.repeat(20_000)}`,
+            stderr: `stderr-${index}-${'y'.repeat(20_000)}`,
+            startedAt: index,
+            completedAt: index + 1,
+            createdAt: index + 1,
+          }),
+        ),
+      )
+    })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+
+    expect(detail.sandboxExecutions).toHaveLength(32)
+    expect(detail.sandboxExecutionsTruncated).toBe(true)
+    expect(detail.sandboxExecutions[0]?.sandboxId).toBe('sandbox-2')
+    expect(detail.sandboxExecutions.at(-1)?.sandboxId).toBe('sandbox-33')
+    expect(detail.sandboxExecutions[0]?.stdout).toContain(
+      'truncated; full sandbox output remains in the workflow evidence artifact',
+    )
+    expect(detail.sandboxExecutions[0]?.stdout.length).toBeLessThan(16_200)
+    expect(detail.sandboxExecutions[0]?.stderr?.length).toBeLessThan(16_200)
   })
 
   test('recordPublicationResult updates failed retry rows without stale errors', async () => {

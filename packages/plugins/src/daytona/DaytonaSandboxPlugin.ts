@@ -256,48 +256,71 @@ function collectSandboxEvidenceArtifacts(
     const artifacts: Array<SandboxEvidenceArtifact> = []
     const verificationResults: Array<SandboxVerificationResult> = []
     const runCaptureCommand = (operation: string, command: string) =>
-      executeSandboxCommand(sandbox, {
-        command,
-        timeoutSeconds: evidenceCaptureTimeoutSeconds,
-        traceId: `${input.traceId}-${operation}`,
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning('Evidence artifact probe failed', {
-            traceId: input.traceId,
-            operation,
-            error: error.message,
-          }).pipe(Effect.as(undefined))
-        ),
-      )
-
-    const diff = yield* runCaptureCommand(
-      'diff',
-      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- .`,
-    )
-    if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
-      artifacts.push({
-        kind: 'diff',
-        label: 'Candidate patch diff',
-        contentType: 'text/x-diff',
-        body: diff.stdout,
-        retentionPolicy: 'alpha-14d',
+      Effect.suspend(() => {
+        const startedAt = Date.now()
+        return executeSandboxCommand(sandbox, {
+          command,
+          timeoutSeconds: evidenceCaptureTimeoutSeconds,
+          traceId: `${input.traceId}-${operation}`,
+        }).pipe(
+          Effect.map((result) => ({ ...result, startedAt, completedAt: Date.now() })),
+          Effect.catch((error) =>
+            Effect.logWarning('Evidence artifact probe failed', {
+              traceId: input.traceId,
+              operation,
+              error: error.message,
+            }).pipe(Effect.as(undefined))
+          ),
+        )
       })
-    }
+
+    const architectureProbe = yield* runCaptureCommand('architecture', 'uname -m')
+    const architecture = architectureProbe?.exitCode === 0 && architectureProbe.stdout.trim().length > 0
+      ? architectureProbe.stdout.trim()
+      : 'unknown'
+    const captureCandidateState = (operation: string) =>
+      runCaptureCommand(
+        operation,
+        `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . | sha256sum`,
+      ).pipe(Effect.map((result) => {
+        const digest = result?.stdout.trim().split(/\s+/, 1)[0]
+        return result?.exitCode === 0 && digest !== undefined && /^[0-9a-f]{64}$/i.test(digest)
+          ? `sha256:${digest.toLowerCase()}`
+          : undefined
+      }))
 
     if (nonEmpty(input.evidenceTestReportCommand)) {
+      yield* runCaptureCommand(
+        'test-report-clean',
+        "rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json",
+      )
+      const candidateDigestBefore = yield* captureCandidateState('test-candidate-before')
       const result = yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand)
+      const candidateDigestAfter = yield* captureCandidateState('test-candidate-after')
       verificationResults.push(result === undefined
         ? {
             kind: 'test',
             command: input.evidenceTestReportCommand,
             status: 'failed',
             message: 'Test verification command could not be executed.',
+            provider: 'daytona',
+            platform: 'linux',
+            architecture,
+            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
+            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
           }
         : {
             kind: 'test',
             command: input.evidenceTestReportCommand,
             status: result.exitCode === 0 ? 'succeeded' : 'failed',
             ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            provider: 'daytona',
+            platform: 'linux',
+            architecture,
+            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
+            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
+            startedAt: result.startedAt,
+            completedAt: result.completedAt,
             ...(result.exitCode === 0 ? {} : { message: `Test verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
           })
     }
@@ -326,19 +349,37 @@ function collectSandboxEvidenceArtifacts(
     }
 
     if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
+      yield* runCaptureCommand(
+        'browser-screenshot-clean',
+        "rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png",
+      )
+      const candidateDigestBefore = yield* captureCandidateState('browser-candidate-before')
       const result = yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand)
+      const candidateDigestAfter = yield* captureCandidateState('browser-candidate-after')
       verificationResults.push(result === undefined
         ? {
             kind: 'browser',
             command: input.evidenceBrowserScreenshotCommand,
             status: 'failed',
             message: 'Browser verification command could not be executed.',
+            provider: 'daytona',
+            platform: 'linux',
+            architecture,
+            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
+            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
           }
         : {
             kind: 'browser',
             command: input.evidenceBrowserScreenshotCommand,
             status: result.exitCode === 0 ? 'succeeded' : 'failed',
             ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            provider: 'daytona',
+            platform: 'linux',
+            architecture,
+            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
+            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
+            startedAt: result.startedAt,
+            completedAt: result.completedAt,
             ...(result.exitCode === 0 ? {} : { message: `Browser verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
           })
     }
@@ -366,7 +407,22 @@ function collectSandboxEvidenceArtifacts(
       }
     }
 
-    return { artifacts, verificationResults }
+    const diff = yield* runCaptureCommand(
+      'diff',
+      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- .`,
+    )
+    if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
+      artifacts.push({
+        kind: 'diff',
+        label: 'Candidate patch diff',
+        contentType: 'text/x-diff',
+        body: diff.stdout,
+        retentionPolicy: 'alpha-14d',
+      })
+    }
+    const candidateStateDigest = yield* captureCandidateState('candidate-final')
+
+    return { artifacts, verificationResults, candidateStateDigest }
   })
 }
 
@@ -575,7 +631,7 @@ export function makeDaytonaSandboxLayer(
                     Stream.runCollect,
                     Effect.map((events) => Array.from(events)),
                   )
-                  const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                  const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
                     sandbox,
                     { ...input, baseSha },
                   )
@@ -598,6 +654,7 @@ export function makeDaytonaSandboxLayer(
                     runtimeEvents: parsedRuntimeEvents,
                     evidenceArtifacts,
                     verificationResults,
+                    candidateStateDigest,
                     baseSha,
                     startedAt,
                     completedAt: Date.now(),
@@ -625,7 +682,7 @@ export function makeDaytonaSandboxLayer(
                     parseErrors: parsedRuntimeEvents.parseErrors,
                   })
                 }
-                const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
                   sandbox,
                   { ...input, baseSha },
                 )
@@ -646,6 +703,7 @@ export function makeDaytonaSandboxLayer(
                   runtimeEvents: parsedRuntimeEvents.events,
                   evidenceArtifacts,
                   verificationResults,
+                  candidateStateDigest,
                   baseSha,
                   startedAt,
                   completedAt: Date.now(),
@@ -749,7 +807,7 @@ export function makeDaytonaSandboxLayer(
                   timeoutSeconds,
                   traceId: input.traceId,
                 })
-                const { artifacts: evidenceArtifacts, verificationResults } = yield* collectSandboxEvidenceArtifacts(
+                const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
                   sandbox,
                   { ...input, baseSha },
                 )
@@ -764,6 +822,7 @@ export function makeDaytonaSandboxLayer(
                   policy: toSandboxPolicy(config, { timeoutSeconds }),
                   evidenceArtifacts,
                   verificationResults,
+                  candidateStateDigest,
                   baseSha,
                   startedAt,
                   completedAt: Date.now(),

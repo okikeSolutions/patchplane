@@ -51,6 +51,8 @@ describe('CaptureSandboxResultArtifacts', () => {
         ),
       getEvidenceArtifact: () => Effect.sync(() => undefined),
       recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+      recordVerificationRequirement: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+      recordVerificationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),

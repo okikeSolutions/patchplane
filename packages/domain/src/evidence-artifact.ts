@@ -31,6 +31,10 @@ export type EvidenceArtifactStorageProvider = Schema.Schema.Type<
 export const EvidenceArtifact = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
+  candidatePatchSetId: Schema.optional(Schema.String),
+  verificationResultId: Schema.optional(Schema.String),
+  producer: Schema.optional(Schema.String),
+  subjectDigest: Schema.optional(Schema.String),
   traceId: Schema.optional(Schema.String),
   kind: EvidenceArtifactKind,
   label: Schema.optional(Schema.String),

@@ -18,7 +18,9 @@ export type CandidatePatchSetStats = Schema.Schema.Type<typeof CandidatePatchSet
 export const CandidatePatchSet = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
+  sandboxExecutionId: Schema.optional(Schema.String),
   status: CandidatePatchSetStatus,
+  candidateDigest: Schema.optional(Schema.String),
   baseRef: Schema.optional(Schema.String),
   baseSha: Schema.optional(Schema.String),
   headRef: Schema.optional(Schema.String),
@@ -26,6 +28,7 @@ export const CandidatePatchSet = Schema.Struct({
   diffArtifactId: Schema.optional(Schema.String),
   summary: Schema.optional(Schema.String),
   stats: Schema.optional(CandidatePatchSetStats),
+  idempotencyKey: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 })
 export type CandidatePatchSet = Schema.Schema.Type<typeof CandidatePatchSet>
@@ -55,6 +58,9 @@ export const ReviewRun = Schema.Struct({
   reviewer: Schema.String,
   status: ReviewRunStatus,
   summary: Schema.optional(Schema.String),
+  externalId: Schema.optional(Schema.String),
+  externalUrl: Schema.optional(Schema.String),
+  reviewedRevision: Schema.optional(Schema.String),
   startedAt: Schema.Number,
   completedAt: Schema.optional(Schema.Number),
   createdAt: Schema.Number,
@@ -113,9 +119,14 @@ export const PolicyDecision = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
   reviewRunId: Schema.optional(Schema.String),
+  candidatePatchSetId: Schema.optional(Schema.String),
   status: PolicyDecisionStatus,
   summary: Schema.String,
   reason: Schema.optional(Schema.String),
+  policyVersion: Schema.optional(Schema.String),
+  inputDigest: Schema.optional(Schema.String),
+  verificationResultIds: Schema.optional(Schema.Array(Schema.String)),
+  missingRequirementIds: Schema.optional(Schema.Array(Schema.String)),
   createdAt: Schema.Number,
 })
 export type PolicyDecision = Schema.Schema.Type<typeof PolicyDecision>
@@ -153,6 +164,9 @@ export type PublicationResultStatus = Schema.Schema.Type<typeof PublicationResul
 export const PublicationResult = Schema.Struct({
   id: Schema.String,
   workflowRunId: WorkflowRunId,
+  humanDecisionId: Schema.optional(Schema.String),
+  candidatePatchSetId: Schema.optional(Schema.String),
+  targetSha: Schema.optional(Schema.String),
   provider: Schema.String,
   kind: PublicationResultKind,
   status: PublicationResultStatus,

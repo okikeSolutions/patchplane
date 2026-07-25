@@ -167,6 +167,8 @@ const smokeArtifactStorageLayer = Layer.succeed(
       } as never),
     getEvidenceArtifact: () => Effect.void as never,
     recordCandidatePatchSet: () => Effect.die('unused'),
+    recordVerificationRequirement: () => Effect.die('unused'),
+    recordVerificationResult: () => Effect.die('unused'),
     recordReviewRun: () => Effect.die('unused'),
     recordReviewFinding: () => Effect.die('unused'),
     recordPolicyDecision: () => Effect.die('unused'),

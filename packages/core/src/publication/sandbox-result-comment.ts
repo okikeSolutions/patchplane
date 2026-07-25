@@ -7,7 +7,7 @@ export function formatSandboxResultComment(input: {
   readonly maxOutputLength?: number
 }) {
   const execution = input.sandboxExecution
-  const status = execution.status === 'succeeded' ? 'sandbox agent completed' : 'sandbox agent failed'
+  const status = execution.status === 'succeeded' ? 'sandbox execution completed' : 'sandbox execution failed'
   const maxOutputLength = input.maxOutputLength ?? 5000
   const truncatedOutput = execution.stdout.length <= maxOutputLength
     ? execution.stdout
@@ -23,7 +23,8 @@ export function formatSandboxResultComment(input: {
   return [
     '## PatchPlane Patch Report',
     '',
-    `**Status:** ${status}`,
+    `**Execution:** ${status}`,
+    '**Verification:** incomplete — execution completion is not durable candidate-bound verification',
     '',
     'For this AI-generated patch:',
     '',

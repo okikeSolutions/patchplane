@@ -101,7 +101,7 @@ function storageKey(input: {
 }) {
   const suffix = input.hint === undefined || input.hint.trim().length === 0
     ? `${input.objectId}.${extensionForContentType(input.contentType)}`
-    : sanitizePathSegment(input.hint)
+    : `${input.objectId}-${sanitizePathSegment(input.hint)}`
 
   return [
     'workflows',
@@ -224,12 +224,12 @@ export function makeR2ArtifactsService(
           try: () => bucket.put(key, bytes, {
             httpMetadata: { contentType: input.contentType },
             customMetadata: {
+              ...input.metadata,
               workflowRunId: input.workflowRunId,
               ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
               kind: input.kind,
               sha256,
               ...(input.retentionPolicy === undefined ? {} : { retentionPolicy: input.retentionPolicy }),
-              ...input.metadata,
             },
             sha256: digest,
           }),

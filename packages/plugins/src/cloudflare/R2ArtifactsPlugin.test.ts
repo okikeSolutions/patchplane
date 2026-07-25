@@ -77,6 +77,38 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     }).pipe(Effect.provide(layer(bucket)))
   })
 
+  it.effect('keeps hinted keys immutable and reserved metadata authoritative', () => {
+    const bucket = new FakeBucket()
+    return Effect.gen(function* () {
+      const artifacts = yield* ArtifactsService
+      const input = {
+        workflowRunId: 'run_123',
+        traceId: 'trace_123',
+        kind: 'test-report' as const,
+        contentType: 'application/json',
+        body: '{"ok":true}',
+        storageKeyHint: 'report.json',
+        metadata: {
+          workflowRunId: 'attacker-run',
+          traceId: 'attacker-trace',
+          kind: 'diff',
+          sha256: 'attacker-hash',
+        },
+      }
+      const first = yield* artifacts.putArtifact(input)
+      const second = yield* artifacts.putArtifact(input)
+
+      expect(first.storageKey).not.toBe(second.storageKey)
+      expect(first.storageKey).toMatch(/^workflows\/run_123\/test-report\/.+-report\.json$/)
+      expect(bucket.objects.get(first.storageKey)?.object.customMetadata).toMatchObject({
+        workflowRunId: 'run_123',
+        traceId: 'trace_123',
+        kind: 'test-report',
+        sha256: first.sha256,
+      })
+    }).pipe(Effect.provide(layer(bucket)))
+  })
+
   it.effect('creates a presigned R2 read URL for a storage key', () =>
     Effect.gen(function* () {
       const artifacts = yield* ArtifactsService

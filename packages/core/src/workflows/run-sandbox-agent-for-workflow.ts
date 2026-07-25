@@ -6,6 +6,7 @@ import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
+import { PersistSandboxVerificationEvidence } from './persist-sandbox-verification-evidence'
 import { ProposeMergeDecision } from './propose-merge-decision'
 
 const inlineLogPreviewBytes = 16 * 1024
@@ -165,17 +166,31 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   })
 
   const diffArtifact = evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
+  const captured = diffArtifact !== undefined && result.baseSha !== undefined
   const candidatePatchSet = yield* storage.recordCandidatePatchSet({
     workflowRunId: input.workflowStart.workflowRun.id,
-    status: diffArtifact === undefined ? 'empty' : 'captured',
+    sandboxExecutionId: sandboxExecution.id,
+    status: captured ? 'captured' : 'empty',
+    ...(captured ? { candidateDigest: `sha256:${diffArtifact.sha256}` } : {}),
     ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
-    ...(diffArtifact === undefined ? {} : { diffArtifactId: diffArtifact.id }),
-    summary: diffArtifact === undefined
-      ? 'Sandbox completed without a captured candidate diff.'
-      : 'Captured candidate patch diff from sandbox worktree.',
+    ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
+    summary: captured
+      ? 'Captured candidate patch diff from sandbox worktree.'
+      : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
+    idempotencyKey: `${sandboxExecution.id}:candidate`,
     createdAt: result.completedAt,
     traceId: input.workflowStart.workflowRun.traceId,
     operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
+  })
+
+  const verificationEvidence = yield* PersistSandboxVerificationEvidence({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    sandboxExecution,
+    candidatePatchSet,
+    evidenceArtifacts,
+    sandboxResult: result,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxAgentForWorkflow.persistVerificationEvidence',
   })
 
   yield* ProposeMergeDecision({
@@ -183,7 +198,8 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     sandboxExecution,
     candidatePatchSet,
     evidenceArtifacts,
-    verificationResults: result.verificationResults,
+    verificationRequirements: verificationEvidence.requirements,
+    verificationResults: verificationEvidence.results,
     traceId: input.workflowStart.workflowRun.traceId,
     operation: 'runSandboxAgentForWorkflow.proposeMergeDecision',
   })

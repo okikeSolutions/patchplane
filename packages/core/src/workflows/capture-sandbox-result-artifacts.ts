@@ -13,9 +13,21 @@ export const CaptureSandboxResultArtifacts = Effect.fn(
 }) {
   const captured: Array<EvidenceArtifact> = []
   for (const artifact of input.result.evidenceArtifacts ?? []) {
+    const verificationKind = artifact.kind === 'test-report'
+      ? 'test'
+      : artifact.kind === 'screenshot' || artifact.kind === 'video'
+      ? 'browser'
+      : undefined
+    const verification = verificationKind === undefined
+      ? undefined
+      : input.result.verificationResults?.find((result) => result.kind === verificationKind)
+    const producer = verificationKind === undefined ? 'sandbox:candidate' : `sandbox:${verificationKind}`
+    const subjectDigest = verification?.candidateDigestAfter ?? input.result.candidateStateDigest
     const evidenceArtifact = yield* CaptureEvidenceArtifact({
       workflowRunId: input.workflowRunId,
       traceId: input.traceId,
+      producer,
+      ...(subjectDigest === undefined ? {} : { subjectDigest }),
       kind: artifact.kind,
       ...(artifact.label === undefined ? {} : { label: artifact.label }),
       contentType: artifact.contentType,

@@ -19,6 +19,40 @@ const candidatePatchSetStatus = v.union(
   v.literal('failed'),
 )
 
+const verificationRequirementKind = v.union(
+  v.literal('test'),
+  v.literal('lint'),
+  v.literal('build'),
+  v.literal('browser'),
+  v.literal('security'),
+  v.literal('review'),
+)
+
+const verificationRequirementSource = v.union(
+  v.literal('repository-config'),
+  v.literal('intake'),
+  v.literal('policy'),
+  v.literal('human'),
+)
+
+const verificationPlatform = v.union(
+  v.literal('linux'),
+  v.literal('windows'),
+  v.literal('macos'),
+)
+
+const verificationResultStatus = v.union(
+  v.literal('queued'),
+  v.literal('running'),
+  v.literal('passed'),
+  v.literal('failed'),
+  v.literal('error'),
+  v.literal('blocked'),
+  v.literal('cancelled'),
+  v.literal('skipped'),
+  v.literal('invalidated'),
+)
+
 const reviewRunKind = v.union(
   v.literal('test'),
   v.literal('lint'),
@@ -281,6 +315,8 @@ export default defineSchema({
 
   evidenceArtifacts: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    producer: v.optional(v.string()),
+    subjectDigest: v.optional(v.string()),
     traceId: v.optional(v.string()),
     kind: evidenceArtifactKind,
     label: v.optional(v.string()),
@@ -298,7 +334,9 @@ export default defineSchema({
 
   candidatePatchSets: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
     status: candidatePatchSetStatus,
+    candidateDigest: v.optional(v.string()),
     baseRef: v.optional(v.string()),
     baseSha: v.optional(v.string()),
     headRef: v.optional(v.string()),
@@ -310,8 +348,53 @@ export default defineSchema({
       additions: v.number(),
       deletions: v.number(),
     })),
+    idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
+
+  verificationRequirements: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    key: v.string(),
+    label: v.string(),
+    kind: verificationRequirementKind,
+    required: v.boolean(),
+    command: v.optional(v.string()),
+    platform: v.optional(verificationPlatform),
+    architecture: v.optional(v.string()),
+    requiredArtifactKinds: v.array(evidenceArtifactKind),
+    source: verificationRequirementSource,
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_run_and_key', ['workflowRunId', 'key']),
+
+  verificationResults: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    requirementId: v.id('verificationRequirements'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    provider: v.string(),
+    command: v.optional(v.string()),
+    platform: verificationPlatform,
+    architecture: v.string(),
+    environmentImage: v.optional(v.string()),
+    status: verificationResultStatus,
+    exitCode: v.optional(v.number()),
+    summary: v.optional(v.string()),
+    passedCount: v.optional(v.number()),
+    failedCount: v.optional(v.number()),
+    skippedCount: v.optional(v.number()),
+    artifactIds: v.array(v.id('evidenceArtifacts')),
+    producedArtifactKinds: v.array(evidenceArtifactKind),
+    candidateDigestBefore: v.string(),
+    candidateDigestAfter: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    idempotencyKey: v.string(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_candidate_patch_set', ['candidatePatchSetId'])
+    .index('by_workflow_run_and_idempotency_key', ['workflowRunId', 'idempotencyKey']),
 
   reviewRuns: defineTable({
     workflowRunId: v.id('workflowRuns'),
@@ -346,9 +429,14 @@ export default defineSchema({
   policyDecisions: defineTable({
     workflowRunId: v.id('workflowRuns'),
     reviewRunId: v.optional(v.id('reviewRuns')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
     status: policyDecisionStatus,
     summary: v.string(),
     reason: v.optional(v.string()),
+    policyVersion: v.optional(v.string()),
+    inputDigest: v.optional(v.string()),
+    verificationResultIds: v.optional(v.array(v.id('verificationResults'))),
+    missingRequirementIds: v.optional(v.array(v.id('verificationRequirements'))),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
 
@@ -464,10 +552,27 @@ export default defineSchema({
     .index('by_provider_installation', ['provider', 'installationId'])
     .index('by_workspace_full_name', ['workspaceId', 'repositoryFullName']),
 
-  workflowRuns: defineTable({
-    promptRequestId: v.id('promptRequests'),
+  workflowRerunRequests: defineTable({
+    parentWorkflowRunId: v.id('workflowRuns'),
+    workflowRunId: v.id('workflowRuns'),
+    workspaceId: v.string(),
+    requestedByActorId: v.string(),
+    reason: v.string(),
+    idempotencyKey: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_parent_workflow_run', ['parentWorkflowRunId'])
+    .index('by_parent_workflow_run_and_idempotency_key', ['parentWorkflowRunId', 'idempotencyKey']),
+
+  workflowRuns: defineTable({    promptRequestId: v.id('promptRequests'),
     workspaceId: v.string(),
     traceId: v.optional(v.string()),
+    modelVersion: v.optional(v.literal('v1')),
+    parentWorkflowRunId: v.optional(v.id('workflowRuns')),
+    rootWorkflowRunId: v.optional(v.id('workflowRuns')),
+    attemptNumber: v.optional(v.number()),
+    trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    sourceCommitSha: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('running'),

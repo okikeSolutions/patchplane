@@ -27,6 +27,14 @@ import type { RuntimeEvent as StoredRuntimeEvent } from '@patchplane/domain/runt
 import type { RuntimeSession, RuntimeSessionStatus } from '@patchplane/domain/runtime-session'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import type {
+  VerificationRequirement,
+  VerificationRequirementKind,
+  VerificationRequirementSource,
+  VerificationPlatform,
+  VerificationResult,
+  VerificationResultStatus,
+} from '@patchplane/domain/verification'
 import type { WorkflowIntake } from '@patchplane/domain/workflow-intake'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import type { TelemetryContextFields } from './telemetry-service'
@@ -98,6 +106,8 @@ export interface RecordRuntimeEventInput extends TelemetryContextFields {
 
 export interface RecordEvidenceArtifactInput extends TelemetryContextFields {
   readonly workflowRunId: string
+  readonly producer?: string | undefined
+  readonly subjectDigest?: string | undefined
   readonly traceId?: string | undefined
   readonly kind: EvidenceArtifactKind
   readonly label?: string | undefined
@@ -118,7 +128,9 @@ export interface GetEvidenceArtifactInput extends TelemetryContextFields {
 
 export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
   readonly workflowRunId: string
+  readonly sandboxExecutionId?: string | undefined
   readonly status: CandidatePatchSetStatus
+  readonly candidateDigest?: string | undefined
   readonly baseRef?: string | undefined
   readonly baseSha?: string | undefined
   readonly headRef?: string | undefined
@@ -130,7 +142,47 @@ export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
     readonly additions: number
     readonly deletions: number
   } | undefined
+  readonly idempotencyKey: string
   readonly createdAt?: number | undefined
+}
+
+export interface RecordVerificationRequirementInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly key: string
+  readonly label: string
+  readonly kind: VerificationRequirementKind
+  readonly required: boolean
+  readonly command?: string | undefined
+  readonly platform?: VerificationPlatform | undefined
+  readonly architecture?: string | undefined
+  readonly requiredArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
+  readonly source: VerificationRequirementSource
+  readonly createdAt?: number | undefined
+}
+
+export interface RecordVerificationResultInput extends TelemetryContextFields {
+  readonly workflowRunId: string
+  readonly requirementId: string
+  readonly candidatePatchSetId: string
+  readonly sandboxExecutionId?: string | undefined
+  readonly provider: string
+  readonly command?: string | undefined
+  readonly platform: VerificationPlatform
+  readonly architecture: string
+  readonly environmentImage?: string | undefined
+  readonly status: VerificationResultStatus
+  readonly exitCode?: number | undefined
+  readonly summary?: string | undefined
+  readonly passedCount?: number | undefined
+  readonly failedCount?: number | undefined
+  readonly skippedCount?: number | undefined
+  readonly artifactIds: ReadonlyArray<string>
+  readonly producedArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
+  readonly candidateDigestBefore: string
+  readonly candidateDigestAfter?: string | undefined
+  readonly startedAt: number
+  readonly completedAt?: number | undefined
+  readonly idempotencyKey: string
 }
 
 export interface RecordReviewRunInput extends TelemetryContextFields {
@@ -162,9 +214,14 @@ export interface RecordReviewFindingInput extends TelemetryContextFields {
 export interface RecordPolicyDecisionInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly reviewRunId?: string | undefined
+  readonly candidatePatchSetId?: string | undefined
   readonly status: PolicyDecisionStatus
   readonly summary: string
   readonly reason?: string | undefined
+  readonly policyVersion?: string | undefined
+  readonly inputDigest?: string | undefined
+  readonly verificationResultIds?: ReadonlyArray<string> | undefined
+  readonly missingRequirementIds?: ReadonlyArray<string> | undefined
   readonly createdAt?: number | undefined
 }
 
@@ -231,6 +288,12 @@ export class StorageService extends Context.Service<StorageService, {
   readonly recordCandidatePatchSet: (
     input: RecordCandidatePatchSetInput,
   ) => Effect.Effect<CandidatePatchSet, StorageError>
+  readonly recordVerificationRequirement: (
+    input: RecordVerificationRequirementInput,
+  ) => Effect.Effect<VerificationRequirement, StorageError>
+  readonly recordVerificationResult: (
+    input: RecordVerificationResultInput,
+  ) => Effect.Effect<VerificationResult, StorageError>
   readonly recordReviewRun: (
     input: RecordReviewRunInput,
   ) => Effect.Effect<ReviewRun, StorageError>

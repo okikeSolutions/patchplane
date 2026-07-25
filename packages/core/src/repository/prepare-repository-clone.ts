@@ -5,6 +5,8 @@ import { SourceControlService } from '../services/source-control-service'
 export interface PreparedRepositoryClone {
   readonly repositoryUrl: string
   readonly repositoryFullName: string
+  readonly branch?: string | undefined
+  readonly commitId?: string | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
 }
@@ -18,9 +20,12 @@ export const PrepareRepositoryClone = Effect.fn(
     return undefined
   }
 
+  const sourceCommitSha = workflowStart.workflowRun.sourceCommitSha ?? ref.pullRequestHeadSha
   const clone = {
     repositoryUrl: `https://github.com/${ref.repositoryFullName}.git`,
     repositoryFullName: ref.repositoryFullName,
+    ...(ref.pullRequestHeadRef === undefined ? {} : { branch: ref.pullRequestHeadRef }),
+    ...(sourceCommitSha === undefined ? {} : { commitId: sourceCommitSha }),
   }
 
   if (

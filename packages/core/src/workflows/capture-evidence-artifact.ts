@@ -4,6 +4,8 @@ import { StorageService } from '../services/storage-service'
 
 export interface CaptureEvidenceArtifactInput extends PutArtifactInput {
   readonly label?: string | undefined
+  readonly producer?: string | undefined
+  readonly subjectDigest?: string | undefined
 }
 
 export const CaptureEvidenceArtifact = Effect.fn(
@@ -15,6 +17,8 @@ export const CaptureEvidenceArtifact = Effect.fn(
 
   return yield* storage.recordEvidenceArtifact({
     workflowRunId: input.workflowRunId,
+    ...(input.producer === undefined ? {} : { producer: input.producer }),
+    ...(input.subjectDigest === undefined ? {} : { subjectDigest: input.subjectDigest }),
     ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
     kind: input.kind,
     ...(input.label === undefined ? {} : { label: input.label }),

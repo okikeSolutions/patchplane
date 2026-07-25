@@ -7,14 +7,14 @@ import type {
 import type { StorageError } from '@patchplane/domain/errors'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
-import type { SandboxVerificationResult } from './sandbox-service'
+import type { VerificationResult } from '@patchplane/domain/verification'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export interface ReviewCandidateInput extends TelemetryContextFields {
   readonly workflowRunId: string
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly evidenceArtifacts: ReadonlyArray<EvidenceArtifact>
-  readonly verificationResults?: ReadonlyArray<SandboxVerificationResult> | undefined
+  readonly verificationResults?: ReadonlyArray<VerificationResult> | undefined
 }
 
 export interface ProposedReviewFinding {

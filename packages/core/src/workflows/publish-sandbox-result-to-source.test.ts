@@ -96,7 +96,8 @@ describe('PublishSandboxResultToSource', () => {
         issueNumber: 12,
       })
       expect(comments[0]?.body).toContain('## PatchPlane Patch Report')
-      expect(comments[0]?.body).toContain('**Status:** sandbox agent completed')
+      expect(comments[0]?.body).toContain('**Execution:** sandbox execution completed')
+      expect(comments[0]?.body).toContain('**Verification:** incomplete')
       expect(comments[0]?.body).toContain('- Decision: pending human approval')
     }),
   )

@@ -39,6 +39,8 @@ function storageLayer(options: { readonly failRecord?: boolean } = {}) {
       : Effect.succeed({ id: 'artifact_1', ...input, createdAt: input.createdAt ?? 123 } as never),
     getEvidenceArtifact: () => Effect.void as never,
     recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordVerificationRequirement: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+    recordVerificationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
