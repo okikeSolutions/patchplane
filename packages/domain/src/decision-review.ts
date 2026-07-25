@@ -141,6 +141,8 @@ export const HumanDecision = Schema.Struct({
   actorId: ActorId,
   status: DecisionStatus,
   comment: Schema.String,
+  verificationOverride: Schema.optional(Schema.Boolean),
+  verificationOverrideReason: Schema.optional(Schema.String),
   decidedAt: Schema.Number,
   idempotencyKey: Schema.optional(Schema.String),
 })

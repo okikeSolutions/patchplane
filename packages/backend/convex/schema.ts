@@ -449,6 +449,8 @@ export default defineSchema({
     actorId: v.string(),
     status: decisionStatus,
     comment: v.string(),
+    verificationOverride: v.optional(v.boolean()),
+    verificationOverrideReason: v.optional(v.string()),
     decidedAt: v.number(),
     idempotencyKey: v.optional(v.string()),
   })

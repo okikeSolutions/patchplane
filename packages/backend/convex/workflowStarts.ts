@@ -424,6 +424,8 @@ const humanDecisionReturn = v.object({
   actorId: v.string(),
   status: decisionStatusArg,
   comment: v.string(),
+  verificationOverride: v.optional(v.boolean()),
+  verificationOverrideReason: v.optional(v.string()),
   decidedAt: v.number(),
   idempotencyKey: v.optional(v.string()),
 })
@@ -2345,13 +2347,18 @@ export const recordHumanDecision = mutation({
     policyDecisionId: v.optional(v.id('policyDecisions')),
     status: decisionStatusArg,
     comment: v.string(),
+    verificationOverrideReason: v.optional(v.string()),
     idempotencyKey: v.optional(v.string()),
   },
   returns: humanDecisionReturn,
   handler: async (ctx, args) => {
     const comment = args.comment.trim()
+    const verificationOverrideReason = args.verificationOverrideReason?.trim()
     if (comment.length === 0) {
       throw new ConvexError('Decision comment required')
+    }
+    if (verificationOverrideReason !== undefined && (verificationOverrideReason.length === 0 || verificationOverrideReason.length > 1_000)) {
+      throw new ConvexError('Verification override reason must contain 1 to 1000 characters')
     }
 
     const identity = await requireWorkOSIdentity(ctx)
@@ -2382,7 +2389,8 @@ export const recordHumanDecision = mutation({
           existingDecision.sandboxExecutionId !== args.sandboxExecutionId ||
           existingDecision.candidatePatchSetId !== args.candidatePatchSetId ||
           existingDecision.reviewRunId !== args.reviewRunId ||
-          existingDecision.policyDecisionId !== args.policyDecisionId)
+          existingDecision.policyDecisionId !== args.policyDecisionId ||
+          existingDecision.verificationOverrideReason !== verificationOverrideReason)
       ) {
         throw new ConvexError('Human decision idempotency key conflict')
       }
@@ -2477,6 +2485,39 @@ export const recordHumanDecision = mutation({
     if (policyDecision.reviewRunId !== reviewRun._id) {
       throw new ConvexError('Policy decision must reference latest review run')
     }
+    if (
+      workflowRun.modelVersion === 'v1' &&
+      policyDecision.candidatePatchSetId !== candidatePatchSet._id
+    ) {
+      throw new ConvexError('Policy decision must reference the displayed candidate')
+    }
+
+    const requiredRequirementPage = await ctx.db
+      .query('verificationRequirements')
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .take(workflowDetailVerificationRequirementLimit + 1)
+    if (requiredRequirementPage.length > workflowDetailVerificationRequirementLimit) {
+      throw new ConvexError('Verification requirements exceed decision evaluation limit')
+    }
+    const requiredRequirements = requiredRequirementPage.filter((requirement) => requirement.required)
+    const policyVerificationResults = await Promise.all(
+      (policyDecision.verificationResultIds ?? []).map((resultId) => ctx.db.get('verificationResults', resultId)),
+    )
+    const verificationComplete =
+      requiredRequirements.length > 0 &&
+      (policyDecision.missingRequirementIds?.length ?? 0) === 0 &&
+      requiredRequirements.every((requirement) =>
+        policyVerificationResults.some((result) =>
+          result !== null &&
+          result.requirementId === requirement._id &&
+          result.candidatePatchSetId === candidatePatchSet._id &&
+          result.status === 'passed'
+        )
+      )
+    const verificationOverride = args.status === 'approved' && !verificationComplete
+    if (verificationOverride && verificationOverrideReason === undefined) {
+      throw new ConvexError('Approval with incomplete verification requires an explicit override reason')
+    }
 
     if (existingDecision !== null) {
       return {
@@ -2489,6 +2530,8 @@ export const recordHumanDecision = mutation({
         actorId: existingDecision.actorId,
         status: existingDecision.status,
         comment: existingDecision.comment,
+        ...(existingDecision.verificationOverride === undefined ? {} : { verificationOverride: existingDecision.verificationOverride }),
+        ...(existingDecision.verificationOverrideReason === undefined ? {} : { verificationOverrideReason: existingDecision.verificationOverrideReason }),
         decidedAt: existingDecision.decidedAt,
         ...(existingDecision.idempotencyKey === undefined ? {} : { idempotencyKey: existingDecision.idempotencyKey }),
       }
@@ -2503,6 +2546,7 @@ export const recordHumanDecision = mutation({
       actorId: `workos:${identity.subject}`,
       status: args.status,
       comment,
+      ...(verificationOverride ? { verificationOverride: true, verificationOverrideReason } : {}),
       decidedAt: Date.now(),
       ...(args.idempotencyKey === undefined ? {} : { idempotencyKey: args.idempotencyKey }),
     }
@@ -2799,6 +2843,8 @@ export const getDecisionPublicationReplayFixture = query({
         actorId: humanDecision.actorId,
         status: humanDecision.status,
         comment: '[redacted for decision publication replay]',
+        ...(humanDecision.verificationOverride === undefined ? {} : { verificationOverride: humanDecision.verificationOverride }),
+        ...(humanDecision.verificationOverrideReason === undefined ? {} : { verificationOverrideReason: '[redacted override reason]' }),
         decidedAt: humanDecision.decidedAt,
         ...(humanDecision.idempotencyKey === undefined ? {} : { idempotencyKey: humanDecision.idempotencyKey }),
       },
@@ -3168,6 +3214,8 @@ export const getDetail = query({
           actorId: decision.actorId,
           status: decision.status,
           comment: decision.comment,
+          ...(decision.verificationOverride === undefined ? {} : { verificationOverride: decision.verificationOverride }),
+          ...(decision.verificationOverrideReason === undefined ? {} : { verificationOverrideReason: decision.verificationOverrideReason }),
           decidedAt: decision.decidedAt,
           ...(decision.idempotencyKey === undefined ? {} : { idempotencyKey: decision.idempotencyKey }),
         })),
