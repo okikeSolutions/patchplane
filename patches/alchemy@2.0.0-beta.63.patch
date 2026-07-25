@@ -1,0 +1,401 @@
+diff --git a/lib/Cloudflare/Workers/Assets.d.ts b/lib/Cloudflare/Workers/Assets.d.ts
+index d7d84371a8bea054f47ecbdacf1ce086842898ca..d11b01d478d1271579a644f95a040a4c58df269e 100644
+--- a/lib/Cloudflare/Workers/Assets.d.ts
++++ b/lib/Cloudflare/Workers/Assets.d.ts
+@@ -60,6 +60,14 @@ export declare class FailedToReadAssetError extends FailedToReadAssetError_base<
+     cause: PlatformError;
+ }> {
+ }
++declare const AssetUploadSessionError_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").VoidIfEmpty<{ readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }>) => import("effect/Cause").YieldableError & {
++    readonly _tag: "AssetUploadSessionError";
++} & Readonly<A>;
++export declare class AssetUploadSessionError extends AssetUploadSessionError_base<{
++    message: string;
++    workerName: string;
++}> {
++}
+ export declare const readAssets: (args_0: AssetsProps) => Effect.Effect<{
+     directory: string;
+     config: {
+@@ -81,7 +89,7 @@ export declare const readAssets: (args_0: AssetsProps) => Effect.Effect<{
+     hash: string;
+ }, AssetTooLargeError | PlatformError | TooManyAssetsError, FileSystem.FileSystem | Path.Path>;
+ export declare const uploadAssets: (accountId: string, workerName: string, assets: AssetReadResult, args_3: ScopedPlanStatusSession) => Effect.Effect<{
+-    jwt: string | undefined;
+-}, AssetNotFoundError | import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | FailedToReadAssetError | import("@distilled.cloud/axiom").GatewayTimeout | import("@distilled.cloud/axiom").InternalServerError | import("@distilled.cloud/cloudflare").InvalidRoute | workers.InvalidRoute | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, import("@distilled.cloud/cloudflare").Credentials | FileSystem.FileSystem | import("effect/unstable/http/HttpClient").HttpClient | Path.Path>;
++    jwt: string;
++}, AssetNotFoundError | AssetUploadSessionError | import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | FailedToReadAssetError | import("@distilled.cloud/axiom").GatewayTimeout | import("@distilled.cloud/axiom").InternalServerError | import("@distilled.cloud/cloudflare").InvalidRoute | workers.InvalidRoute | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, import("@distilled.cloud/cloudflare").Credentials | FileSystem.FileSystem | import("effect/unstable/http/HttpClient").HttpClient | Path.Path>;
+ export {};
+ //# sourceMappingURL=Assets.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Workers/Assets.d.ts.map b/lib/Cloudflare/Workers/Assets.d.ts.map
+index e505526eb41924e3b092a85376ca1c31d7480676..04b5b88a818b0c717b937574430bc0273398e133 100644
+--- a/lib/Cloudflare/Workers/Assets.d.ts.map
++++ b/lib/Cloudflare/Workers/Assets.d.ts.map
+@@ -1 +1 @@
+-{"version":3,"file":"Assets.d.ts","sourceRoot":"","sources":["../../../src/Cloudflare/Workers/Assets.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,OAAO,MAAM,qCAAqC,CAAC;AAE/D,OAAO,KAAK,MAAM,MAAM,eAAe,CAAC;AACxC,OAAO,KAAK,UAAU,MAAM,mBAAmB,CAAC;AAChD,OAAO,KAAK,IAAI,MAAM,aAAa,CAAC;AACpC,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,sBAAsB,CAAC;AAC1D,OAAO,KAAK,EAAE,uBAAuB,EAAE,MAAM,kBAAkB,CAAC;AAMhE,MAAM,WAAW,MAAM;IACrB,IAAI,EAAE,2BAA2B,CAAC;CACnC;AAED,eAAO,MAAM,QAAQ,UAAW,GAAG,KAAG,KAAK,IAAI,MACF,CAAC;AAE9C,MAAM,WAAW,YAAa,SAAQ,OAAO,CAC3C,OAAO,CAAC,OAAO,CAAC,gBAAgB,CAAC,UAAU,CAAC,CAAC,QAAQ,CAAC,EAAE,SAAS,CAAC,CAAC,QAAQ,CAAC,EAC5E,SAAS,CACV;CAAG;AAEJ,MAAM,WAAW,eAAe;IAC9B,SAAS,EAAE,MAAM,CAAC;IAClB,MAAM,EAAE,YAAY,GAAG,SAAS,CAAC;IACjC,QAAQ,EAAE,MAAM,CAAC,MAAM,EAAE;QAAE,IAAI,EAAE,MAAM,CAAC;QAAC,IAAI,EAAE,MAAM,CAAA;KAAE,CAAC,CAAC;IACzD,QAAQ,EAAE,MAAM,GAAG,SAAS,CAAC;IAC7B,UAAU,EAAE,MAAM,GAAG,SAAS,CAAC;IAC/B,IAAI,EAAE,MAAM,CAAC;CACd;AAED,MAAM,WAAW,WAAY,SAAQ,YAAY;IAC/C,SAAS,EAAE,MAAM,CAAC;CACnB;AAED,MAAM,MAAM,eAAe,GACvB,kBAAkB,GAClB,kBAAkB,GAClB,kBAAkB,GAClB,sBAAsB,CAAC;;;;AAE3B,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;IACb,IAAI,EAAE,MAAM,CAAC;CACd,CAAC;CAAG;;;;AAEL,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,SAAS,EAAE,MAAM,CAAC;IAClB,KAAK,EAAE,MAAM,CAAC;CACf,CAAC;CAAG;;;;AAEL,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;CACd,CAAC;CAAG;;;;AAEL,qBAAa,sBAAuB,SAAQ,4BAE1C;IACA,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;IACb,KAAK,EAAE,aAAa,CAAC;CACtB,CAAC;CAAG;AAqCL,eAAO,MAAM,UAAU;;;;;;;;;;;;kBAsBoB,MAAM;kBAAQ,MAAM;;;;;;8FAmE7D,CAAC;AAEH,eAAO,MAAM,YAAY;;ivBA6EvB,CAAC"}
+\ No newline at end of file
++{"version":3,"file":"Assets.d.ts","sourceRoot":"","sources":["../../../src/Cloudflare/Workers/Assets.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,OAAO,MAAM,qCAAqC,CAAC;AAE/D,OAAO,KAAK,MAAM,MAAM,eAAe,CAAC;AACxC,OAAO,KAAK,UAAU,MAAM,mBAAmB,CAAC;AAChD,OAAO,KAAK,IAAI,MAAM,aAAa,CAAC;AAEpC,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,sBAAsB,CAAC;AAC1D,OAAO,KAAK,EAAE,uBAAuB,EAAE,MAAM,kBAAkB,CAAC;AAMhE,MAAM,WAAW,MAAM;IACrB,IAAI,EAAE,2BAA2B,CAAC;CACnC;AAED,eAAO,MAAM,QAAQ,UAAW,GAAG,KAAG,KAAK,IAAI,MACF,CAAC;AAE9C,MAAM,WAAW,YAAa,SAAQ,OAAO,CAC3C,OAAO,CAAC,OAAO,CAAC,gBAAgB,CAAC,UAAU,CAAC,CAAC,QAAQ,CAAC,EAAE,SAAS,CAAC,CAAC,QAAQ,CAAC,EAC5E,SAAS,CACV;CAAG;AAEJ,MAAM,WAAW,eAAe;IAC9B,SAAS,EAAE,MAAM,CAAC;IAClB,MAAM,EAAE,YAAY,GAAG,SAAS,CAAC;IACjC,QAAQ,EAAE,MAAM,CAAC,MAAM,EAAE;QAAE,IAAI,EAAE,MAAM,CAAC;QAAC,IAAI,EAAE,MAAM,CAAA;KAAE,CAAC,CAAC;IACzD,QAAQ,EAAE,MAAM,GAAG,SAAS,CAAC;IAC7B,UAAU,EAAE,MAAM,GAAG,SAAS,CAAC;IAC/B,IAAI,EAAE,MAAM,CAAC;CACd;AAED,MAAM,WAAW,WAAY,SAAQ,YAAY;IAC/C,SAAS,EAAE,MAAM,CAAC;CACnB;AAED,MAAM,MAAM,eAAe,GACvB,kBAAkB,GAClB,kBAAkB,GAClB,kBAAkB,GAClB,sBAAsB,CAAC;;;;AAE3B,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;IACb,IAAI,EAAE,MAAM,CAAC;CACd,CAAC;CAAG;;;;AAEL,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,SAAS,EAAE,MAAM,CAAC;IAClB,KAAK,EAAE,MAAM,CAAC;CACf,CAAC;CAAG;;;;AAEL,qBAAa,kBAAmB,SAAQ,wBAAuC;IAC7E,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;CACd,CAAC;CAAG;;;;AAEL,qBAAa,sBAAuB,SAAQ,4BAE1C;IACA,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;IACb,KAAK,EAAE,aAAa,CAAC;CACtB,CAAC;CAAG;;;;AAEL,qBAAa,uBAAwB,SAAQ,6BAE3C;IACA,OAAO,EAAE,MAAM,CAAC;IAChB,UAAU,EAAE,MAAM,CAAC;CACpB,CAAC;CAAG;AAqCL,eAAO,MAAM,UAAU;;;;;;;;;;;;kBAsBoB,MAAM;kBAAQ,MAAM;;;;;;8FAmE7D,CAAC;AAEH,eAAO,MAAM,YAAY;;2wBAuHvB,CAAC"}
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Workers/Assets.js b/lib/Cloudflare/Workers/Assets.js
+index b48cc3f8d6ad69f920f387e63284a550c58f7fa4..ce23f21e13ca0097ca68f5bca3c4bcd776406b02 100644
+--- a/lib/Cloudflare/Workers/Assets.js
++++ b/lib/Cloudflare/Workers/Assets.js
+@@ -4,6 +4,7 @@ import * as Data from "effect/Data";
+ import * as Effect from "effect/Effect";
+ import * as FileSystem from "effect/FileSystem";
+ import * as Path from "effect/Path";
++import * as Schedule from "effect/Schedule";
+ import { sha256, sha256Object } from "../../Util/index.js";
+ const MAX_ASSET_SIZE = 1024 * 1024 * 25; // 25MB
+ const MAX_ASSET_COUNT = 20_000;
+@@ -16,6 +17,8 @@ export class AssetNotFoundError extends Data.TaggedError("AssetNotFoundError") {
+ }
+ export class FailedToReadAssetError extends Data.TaggedError("FailedToReadAssetError") {
+ }
++export class AssetUploadSessionError extends Data.TaggedError("AssetUploadSessionError") {
++}
+ const getContentType = (name) => {
+     if (name.endsWith(".html"))
+         return "text/html";
+@@ -132,59 +135,92 @@ export const uploadAssets = Effect.fn(function* (accountId, workerName, assets,
+     const path = yield* Path.Path;
+     const createScriptAssetUpload = yield* workers.createScriptAssetUpload;
+     const createAssetUpload = yield* workers.createAssetUpload;
+-    yield* note("Checking assets...");
+-    const session = yield* createScriptAssetUpload({
+-        accountId,
+-        scriptName: workerName,
+-        manifest: assets.manifest,
+-    });
+-    if (!session.buckets?.length) {
+-        return { jwt: session.jwt ?? undefined };
+-    }
+-    if (!session.jwt) {
+-        return { jwt: undefined };
+-    }
+-    const uploadJwt = session.jwt;
+-    let uploaded = 0;
+-    const total = session.buckets.flat().length;
+-    yield* note(`Uploaded ${uploaded} of ${total} assets...`);
+     const assetsByHash = new Map();
+     for (const [name, { hash }] of Object.entries(assets.manifest)) {
+         assetsByHash.set(hash, name);
+     }
+-    let jwt;
+     const directory = path.resolve(assets.directory);
+-    yield* Effect.forEach(session.buckets, Effect.fn(function* (bucket) {
+-        const body = {};
+-        yield* Effect.forEach(bucket, Effect.fn(function* (hash) {
+-            const name = assetsByHash.get(hash);
+-            if (!name) {
+-                return yield* new AssetNotFoundError({
+-                    message: `Asset ${hash} not found in manifest`,
+-                    hash,
++    // One full upload session: ask Cloudflare which assets are missing,
++    // upload each bucket, and return the completion JWT that putWorker
++    // must redeem. The session JWT can expire mid-upload on very large
++    // asset sets (Unauthorized), and the final bucket response has been
++    // observed in the wild to omit the completion JWT — both cases are
++    // retried below with a fresh session. Already-uploaded assets are
++    // not re-bucketed, so a retry resumes where the last session
++    // stopped, and a fresh session with nothing left to upload returns
++    // the completion JWT directly.
++    const runSession = Effect.fn(function* () {
++        yield* note("Checking assets...");
++        const session = yield* createScriptAssetUpload({
++            accountId,
++            scriptName: workerName,
++            manifest: assets.manifest,
++        });
++        if (!session.buckets?.length) {
++            if (!session.jwt) {
++                return yield* new AssetUploadSessionError({
++                    message: `Asset upload session for worker ${workerName} returned no completion token`,
++                    workerName,
+                 });
+             }
+-            const file = yield* fs.readFile(path.join(directory, name)).pipe(Effect.mapError((error) => new FailedToReadAssetError({
+-                message: `Failed to read asset ${name}: ${error.message}`,
+-                name,
+-                cause: error,
+-            })));
+-            body[hash] = new File([Buffer.from(file).toString("base64")], hash, {
+-                type: getContentType(name),
++            return session.jwt;
++        }
++        if (!session.jwt) {
++            return yield* new AssetUploadSessionError({
++                message: `Asset upload session for worker ${workerName} returned ${session.buckets.length} buckets to upload but no upload token`,
++                workerName,
+             });
+-        }));
+-        const result = yield* createAssetUpload({
+-            accountId,
+-            base64: true,
+-            body,
+-            jwtToken: uploadJwt,
+-        });
+-        uploaded += bucket.length;
++        }
++        const uploadJwt = session.jwt;
++        let uploaded = 0;
++        const total = session.buckets.flat().length;
+         yield* note(`Uploaded ${uploaded} of ${total} assets...`);
+-        if (result.jwt) {
+-            jwt = result.jwt;
++        let jwt;
++        yield* Effect.forEach(session.buckets, Effect.fn(function* (bucket) {
++            const body = {};
++            yield* Effect.forEach(bucket, Effect.fn(function* (hash) {
++                const name = assetsByHash.get(hash);
++                if (!name) {
++                    return yield* new AssetNotFoundError({
++                        message: `Asset ${hash} not found in manifest`,
++                        hash,
++                    });
++                }
++                const file = yield* fs.readFile(path.join(directory, name)).pipe(Effect.mapError((error) => new FailedToReadAssetError({
++                    message: `Failed to read asset ${name}: ${error.message}`,
++                    name,
++                    cause: error,
++                })));
++                body[hash] = new File([Buffer.from(file).toString("base64")], hash, {
++                    type: getContentType(name),
++                });
++            }));
++            const result = yield* createAssetUpload({
++                accountId,
++                base64: true,
++                body,
++                jwtToken: uploadJwt,
++            });
++            uploaded += bucket.length;
++            yield* note(`Uploaded ${uploaded} of ${total} assets...`);
++            if (result.jwt) {
++                jwt = result.jwt;
++            }
++        }));
++        if (!jwt) {
++            return yield* new AssetUploadSessionError({
++                message: `Uploaded ${total} assets for worker ${workerName} but Cloudflare did not return a completion token`,
++                workerName,
++            });
+         }
++        return jwt;
++    });
++    const jwt = yield* runSession().pipe(Effect.retry({
++        while: (error) => error._tag === "Unauthorized" ||
++            error._tag === "AssetUploadSessionError",
++        schedule: Schedule.exponential("1 second"),
++        times: 3,
+     }));
+-    return { jwt: jwt ?? undefined };
++    return { jwt };
+ });
+ //# sourceMappingURL=Assets.js.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Workers/Assets.js.map b/lib/Cloudflare/Workers/Assets.js.map
+index 6a70463075a4c7cb0d4f8c51015555d8a84dd8f3..2afbaf5141ceb3c86a8bf13ad1803dade7c31428 100644
+--- a/lib/Cloudflare/Workers/Assets.js.map
++++ b/lib/Cloudflare/Workers/Assets.js.map
+@@ -1 +1 @@
+-{"version":3,"file":"Assets.js","sourceRoot":"","sources":["../../../src/Cloudflare/Workers/Assets.ts"],"names":[],"mappings":"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"}
+\ No newline at end of file
++{"version":3,"file":"Assets.js","sourceRoot":"","sources":["../../../src/Cloudflare/Workers/Assets.ts"],"names":[],"mappings":"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"}
+\ No newline at end of file
+diff --git a/src/Cloudflare/Workers/Assets.ts b/src/Cloudflare/Workers/Assets.ts
+index c7393f9aa13dc341592b376942985bd706bbbf05..b8a40bdd6096a6ddc9e37fe3e29ea5a6501171ee 100644
+--- a/src/Cloudflare/Workers/Assets.ts
++++ b/src/Cloudflare/Workers/Assets.ts
+@@ -4,6 +4,7 @@ import * as Data from "effect/Data";
+ import * as Effect from "effect/Effect";
+ import * as FileSystem from "effect/FileSystem";
+ import * as Path from "effect/Path";
++import * as Schedule from "effect/Schedule";
+ import type { PlatformError } from "effect/PlatformError";
+ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
+ import { sha256, sha256Object } from "../../Util/index.ts";
+@@ -67,6 +68,13 @@ export class FailedToReadAssetError extends Data.TaggedError(
+   cause: PlatformError;
+ }> {}
+ 
++export class AssetUploadSessionError extends Data.TaggedError(
++  "AssetUploadSessionError",
++)<{
++  message: string;
++  workerName: string;
++}> {}
++
+ const getContentType = (name: string) => {
+   if (name.endsWith(".html")) return "text/html";
+   if (name.endsWith(".txt")) return "text/plain";
+@@ -204,70 +212,112 @@ export const uploadAssets = Effect.fn(function* (
+   const createScriptAssetUpload = yield* workers.createScriptAssetUpload;
+   const createAssetUpload = yield* workers.createAssetUpload;
+ 
+-  yield* note("Checking assets...");
+-  const session = yield* createScriptAssetUpload({
+-    accountId,
+-    scriptName: workerName,
+-    manifest: assets.manifest,
+-  });
+-  if (!session.buckets?.length) {
+-    return { jwt: session.jwt ?? undefined };
+-  }
+-  if (!session.jwt) {
+-    return { jwt: undefined };
+-  }
+-  const uploadJwt = session.jwt;
+-  let uploaded = 0;
+-  const total = session.buckets.flat().length;
+-  yield* note(`Uploaded ${uploaded} of ${total} assets...`);
+   const assetsByHash = new Map<string, string>();
+   for (const [name, { hash }] of Object.entries(assets.manifest)) {
+     assetsByHash.set(hash, name);
+   }
+-  let jwt: string | undefined | null;
+   const directory = path.resolve(assets.directory);
+-  yield* Effect.forEach(
+-    session.buckets,
+-    Effect.fn(function* (bucket) {
+-      const body: Record<string, File> = {};
+-      yield* Effect.forEach(
+-        bucket,
+-        Effect.fn(function* (hash) {
+-          const name = assetsByHash.get(hash);
+-          if (!name) {
+-            return yield* new AssetNotFoundError({
+-              message: `Asset ${hash} not found in manifest`,
++
++  // One full upload session: ask Cloudflare which assets are missing,
++  // upload each bucket, and return the completion JWT that putWorker
++  // must redeem. The session JWT can expire mid-upload on very large
++  // asset sets (Unauthorized), and the final bucket response has been
++  // observed in the wild to omit the completion JWT — both cases are
++  // retried below with a fresh session. Already-uploaded assets are
++  // not re-bucketed, so a retry resumes where the last session
++  // stopped, and a fresh session with nothing left to upload returns
++  // the completion JWT directly.
++  const runSession = Effect.fn(function* () {
++    yield* note("Checking assets...");
++    const session = yield* createScriptAssetUpload({
++      accountId,
++      scriptName: workerName,
++      manifest: assets.manifest,
++    });
++    if (!session.buckets?.length) {
++      if (!session.jwt) {
++        return yield* new AssetUploadSessionError({
++          message: `Asset upload session for worker ${workerName} returned no completion token`,
++          workerName,
++        });
++      }
++      return session.jwt;
++    }
++    if (!session.jwt) {
++      return yield* new AssetUploadSessionError({
++        message: `Asset upload session for worker ${workerName} returned ${session.buckets.length} buckets to upload but no upload token`,
++        workerName,
++      });
++    }
++    const uploadJwt = session.jwt;
++    let uploaded = 0;
++    const total = session.buckets.flat().length;
++    yield* note(`Uploaded ${uploaded} of ${total} assets...`);
++    let jwt: string | undefined | null;
++    yield* Effect.forEach(
++      session.buckets,
++      Effect.fn(function* (bucket) {
++        const body: Record<string, File> = {};
++        yield* Effect.forEach(
++          bucket,
++          Effect.fn(function* (hash) {
++            const name = assetsByHash.get(hash);
++            if (!name) {
++              return yield* new AssetNotFoundError({
++                message: `Asset ${hash} not found in manifest`,
++                hash,
++              });
++            }
++            const file = yield* fs.readFile(path.join(directory, name)).pipe(
++              Effect.mapError(
++                (error) =>
++                  new FailedToReadAssetError({
++                    message: `Failed to read asset ${name}: ${error.message}`,
++                    name,
++                    cause: error,
++                  }),
++              ),
++            );
++            body[hash] = new File(
++              [Buffer.from(file).toString("base64")],
+               hash,
+-            });
+-          }
+-          const file = yield* fs.readFile(path.join(directory, name)).pipe(
+-            Effect.mapError(
+-              (error) =>
+-                new FailedToReadAssetError({
+-                  message: `Failed to read asset ${name}: ${error.message}`,
+-                  name,
+-                  cause: error,
+-                }),
+-            ),
+-          );
+-          body[hash] = new File([Buffer.from(file).toString("base64")], hash, {
+-            type: getContentType(name),
+-          });
+-        }),
+-      );
+-      const result = yield* createAssetUpload({
+-        accountId,
+-        base64: true,
+-        body,
+-        jwtToken: uploadJwt,
++              {
++                type: getContentType(name),
++              },
++            );
++          }),
++        );
++        const result = yield* createAssetUpload({
++          accountId,
++          base64: true,
++          body,
++          jwtToken: uploadJwt,
++        });
++
++        uploaded += bucket.length;
++        yield* note(`Uploaded ${uploaded} of ${total} assets...`);
++        if (result.jwt) {
++          jwt = result.jwt;
++        }
++      }),
++    );
++    if (!jwt) {
++      return yield* new AssetUploadSessionError({
++        message: `Uploaded ${total} assets for worker ${workerName} but Cloudflare did not return a completion token`,
++        workerName,
+       });
++    }
++    return jwt;
++  });
+ 
+-      uploaded += bucket.length;
+-      yield* note(`Uploaded ${uploaded} of ${total} assets...`);
+-      if (result.jwt) {
+-        jwt = result.jwt;
+-      }
++  const jwt = yield* runSession().pipe(
++    Effect.retry({
++      while: (error): boolean =>
++        error._tag === "Unauthorized" ||
++        error._tag === "AssetUploadSessionError",
++      schedule: Schedule.exponential("1 second"),
++      times: 3,
+     }),
+   );
+-  return { jwt: jwt ?? undefined };
++  return { jwt };
+ });

@@ -7,12 +7,26 @@ const repoRoot = process.cwd()
 const readText = (path: string) => readFileSync(join(repoRoot, path), 'utf8')
 
 describe('Alchemy runtime patch coverage', () => {
-  test('does not use an external client dev server override', () => {
+  test('uses Alchemy Vite defaults for TanStack Start asset routing', () => {
     const alchemyRun = readText('alchemy.run.ts')
 
     expect(alchemyRun).not.toContain("mode: 'external'")
     expect(alchemyRun).not.toContain('mode: "external"')
     expect(alchemyRun).not.toContain('http://localhost:3000')
+    expect(alchemyRun).not.toContain('runWorkerFirst')
+  })
+
+  test('fails closed and retries incomplete Alchemy asset upload sessions', () => {
+    const pkg = JSON.parse(readText('package.json')) as {
+      patchedDependencies?: Record<string, string>
+    }
+    const patchPath = 'patches/alchemy@2.0.0-beta.63.patch'
+    const patch = readText(patchPath)
+
+    expect(pkg.patchedDependencies?.['alchemy@2.0.0-beta.63']).toBe(patchPath)
+    expect(patch).toContain('AssetUploadSessionError')
+    expect(patch).toContain('returned no completion token')
+    expect(patch).toContain('Schedule.exponential("1 second")')
   })
 
   test('keeps the local Cloudflare runtime patch registered', () => {

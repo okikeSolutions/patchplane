@@ -226,6 +226,9 @@
       "version": "0.0.0",
     },
   },
+  "patchedDependencies": {
+    "alchemy@2.0.0-beta.63": "patches/alchemy@2.0.0-beta.63.patch",
+  },
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.2.5", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-3NX/MpTdroi0aKz134A6RC2Gb2iXVECN4QaAXnvCIxxIm3C3AVB1mkUe8NaaiyvOpDfsrqWhYtj+Q6a62RrTsw=="],
 

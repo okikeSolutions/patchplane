@@ -76,6 +76,7 @@
   "packageManager": "bun@1.3.10",
   "patchedDependencies": {
     "@distilled.cloud/cloudflare-runtime@0.11.3": "patches/@distilled.cloud%2Fcloudflare-runtime@0.11.3.patch",
-    "@distilled.cloud/cloudflare-vite-plugin@0.11.3": "patches/@distilled.cloud%2Fcloudflare-vite-plugin@0.11.3.patch"
+    "@distilled.cloud/cloudflare-vite-plugin@0.11.3": "patches/@distilled.cloud%2Fcloudflare-vite-plugin@0.11.3.patch",
+    "alchemy@2.0.0-beta.63": "patches/alchemy@2.0.0-beta.63.patch"
   }
 }
