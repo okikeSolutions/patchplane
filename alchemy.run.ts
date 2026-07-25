@@ -6,7 +6,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import { Path } from 'effect/Path'
-import { clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
+import { clientAssetConfig, clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
 import { createPhysicalName } from './apps/infra/utils.ts'
 
 const artifactRetentionDays = 14
@@ -146,7 +146,7 @@ export default Alchemy.Stack(
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },
       dev: { port: 3000 },
-      assets: { runWorkerFirst: true },
+      assets: clientAssetConfig,
     })
 
     return {

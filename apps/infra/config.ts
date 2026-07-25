@@ -17,6 +17,10 @@ export const sourceControlRuntimeEnv = {
   SENTRY_DSN: Config.string('SENTRY_DSN'),
 } as const
 
+export const clientAssetConfig = {
+  runWorkerFirst: ['/api/*'],
+} satisfies { runWorkerFirst: string[] }
+
 export const clientRuntimeEnv = {
   CONVEX_URL: Config.string('CONVEX_URL'),
   VITE_CONVEX_URL: Config.string('VITE_CONVEX_URL'),
