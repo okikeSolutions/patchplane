@@ -49,6 +49,15 @@ export interface WorkflowRunRow {
   workspaceId: string
   traceId: string
   status: 'queued' | 'running' | 'reviewed'
+  trustState?:
+    | 'queued'
+    | 'running'
+    | 'no-sandbox-run'
+    | 'sandbox-failed'
+    | 'needs-review'
+    | 'approved'
+    | 'rejected'
+    | 'changes-requested'
   createdAt: number
 }
 
@@ -252,6 +261,7 @@ export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEventsTruncated: boolean
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
+  sandboxExecutionsTruncated?: boolean
   evidenceArtifacts: ReadonlyArray<EvidenceArtifactRow>
   candidatePatchSets: ReadonlyArray<CandidatePatchSetRow>
   reviewRuns: ReadonlyArray<ReviewRunRow>

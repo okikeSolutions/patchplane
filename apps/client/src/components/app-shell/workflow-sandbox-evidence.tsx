@@ -44,7 +44,7 @@ export function WorkflowSandboxEvidence({
           Daytona execution evidence for this workflow.
         </p>
       </div>
-      <div className="flex flex-col divide-y divide-border/10">
+      <div className="flex flex-col divide-y divide-border">
         {executions.map((execution) => (
           <div key={execution.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0">
             <div>
@@ -58,7 +58,7 @@ export function WorkflowSandboxEvidence({
                 {execution.provider} · {execution.sandboxId}
               </p>
             </div>
-            <div className="rounded-md bg-muted/25 p-3 font-mono text-xs">
+            <div className="rounded-md bg-[var(--surface-nested)] p-3 font-mono text-xs">
               {execution.command}
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -68,7 +68,7 @@ export function WorkflowSandboxEvidence({
             </div>
             {execution.policy === undefined ? null : (
               <>
-                <Separator className="bg-border/20" />
+                <Separator className="bg-border" />
                 <div className="grid gap-3 text-sm sm:grid-cols-3">
                   <Metadata label="Network" value={execution.policy.network.blockAll ? 'Blocked' : execution.policy.network.allowList ?? 'Default'} />
                   <Metadata label="CPU" value={execution.policy.resources.cpu === undefined ? 'Default' : String(execution.policy.resources.cpu)} />

@@ -1,5 +1,6 @@
 import { PanelRightIcon } from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { buttonVariants } from '@/components/ui/button'
 
 export function NoOrganizationAlert() {
   return (
@@ -7,9 +8,13 @@ export function NoOrganizationAlert() {
       <PanelRightIcon />
       <AlertTitle>No active WorkOS organization selected</AlertTitle>
       <AlertDescription>
-        Reconnect with WorkOS or select an organization from your WorkOS session
-        before starting authenticated workflows.
+        Select an organization in AuthKit so PatchPlane can scope repositories, workflows, and decisions safely.
       </AlertDescription>
+      <AlertAction>
+        <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/api/auth/sign-in?returnPathname=/app">
+          Choose organization
+        </a>
+      </AlertAction>
     </Alert>
   )
 }

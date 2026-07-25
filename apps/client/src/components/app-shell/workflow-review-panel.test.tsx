@@ -161,7 +161,7 @@ describe('WorkflowReviewPanel', () => {
     )
   })
 
-  test('reuses the same idempotency key when a failed submission is retried', async () => {
+  test('invalidates a failed publication retry when a newer projection appears', async () => {
     submitReviewDecision
       .mockResolvedValueOnce({ ok: false, error: 'Publication failed' })
       .mockResolvedValueOnce({
@@ -224,12 +224,12 @@ describe('WorkflowReviewPanel', () => {
     const firstKey = submitReviewDecision.mock.calls[0]?.[0].data.idempotencyKey
     const secondKey =
       submitReviewDecision.mock.calls[1]?.[0].data.idempotencyKey
-    expect(secondKey).toBe(firstKey)
+    expect(secondKey).not.toBe(firstKey)
     expect(submitReviewDecision.mock.calls[1]?.[0].data).toMatchObject({
-      sandboxExecutionId: 'execution-1',
-      candidatePatchSetId: 'candidate-1',
-      reviewRunId: 'review-1',
-      policyDecisionId: 'policy-1',
+      sandboxExecutionId: 'execution-2',
+      candidatePatchSetId: 'candidate-2',
+      reviewRunId: 'review-2',
+      policyDecisionId: 'policy-2',
     })
   })
 })

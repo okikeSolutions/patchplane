@@ -95,6 +95,7 @@ export const Route = createFileRoute('/api/artifacts/url')({
         const artifactId = url.searchParams.get('artifactId')?.trim()
         const workflowRunId = url.searchParams.get('workflowRunId')?.trim() || undefined
         const expires = Number(url.searchParams.get('expiresInSeconds') ?? '900')
+        const preview = url.searchParams.get('preview') === '1'
         if (!artifactId) {
           return jsonResponse({ ok: false, error: 'artifactId is required' }, { status: 400 })
         }
@@ -113,6 +114,27 @@ export const Route = createFileRoute('/api/artifacts/url')({
           storageKey: artifact.storageKey,
           expiresInSeconds: expires,
         })
+        if (preview) {
+          const previewLimitBytes = 200_000
+          const artifactResponse = await fetch(signed.url, {
+            headers: { range: `bytes=0-${previewLimitBytes}` },
+          })
+          if (!artifactResponse.ok) {
+            return jsonResponse({ ok: false, error: 'Artifact preview could not be read' }, { status: 502 })
+          }
+          const bytes = new Uint8Array(await artifactResponse.arrayBuffer())
+          if (bytes.includes(0)) {
+            return jsonResponse({ ok: false, error: 'Binary artifacts cannot be previewed inline' }, { status: 415 })
+          }
+          const truncated = artifact.sizeBytes > previewLimitBytes
+          const body = new TextDecoder().decode(bytes.slice(0, previewLimitBytes))
+          return new Response(truncated ? `${body}\n\n…preview truncated; open the full evidence artifact to inspect the remainder…` : body, {
+            headers: {
+              'content-type': 'text/plain; charset=utf-8',
+              'x-patchplane-preview-truncated': String(truncated),
+            },
+          })
+        }
         return jsonResponse({
           ok: true,
           artifactId: artifact.id,

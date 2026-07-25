@@ -1,113 +1,47 @@
-import { GitBranchIcon, PlayIcon, TerminalIcon, WorkflowIcon } from 'lucide-react'
+import { CheckCircle2Icon, CircleDashedIcon, GitBranchIcon, ShieldCheckIcon, TerminalIcon, UserCheckIcon, XCircleIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import type { RuntimeEventRow, SandboxExecutionRow, WorkflowDetail } from './types'
+import type { WorkflowDetail } from './types'
 
-type TimelineItem = {
-  readonly key: string
-  readonly occurredAt: number
-  readonly title: string
-  readonly detail: string
-  readonly kind: 'workflow' | 'source' | 'runtime' | 'sandbox'
-}
+type TimelineStatus = 'started' | 'succeeded' | 'failed' | 'blocked'
+type TimelineItem = { readonly key: string; readonly occurredAt: number; readonly title: string; readonly detail: string; readonly category: string; readonly status: TimelineStatus }
 
 function formatTimestamp(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
-}
-
-function runtimeItem(event: RuntimeEventRow): TimelineItem {
-  return {
-    key: `runtime:${event.id}`,
-    occurredAt: event.occurredAt,
-    title: event.summary ?? event.type,
-    detail: `${event.provider} · ${event.type}`,
-    kind: 'runtime',
-  }
-}
-
-function sandboxItems(execution: SandboxExecutionRow): ReadonlyArray<TimelineItem> {
-  return [
-    {
-      key: `sandbox:${execution.id}:started`,
-      occurredAt: execution.startedAt,
-      title: 'Sandbox command started',
-      detail: execution.command,
-      kind: 'sandbox',
-    },
-    {
-      key: `sandbox:${execution.id}:completed`,
-      occurredAt: execution.completedAt,
-      title: execution.status === 'failed' ? 'Sandbox command failed' : 'Sandbox command succeeded',
-      detail: `Exit code ${execution.exitCode ?? 'unknown'}`,
-      kind: 'sandbox',
-    },
-  ]
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
 function timelineItems(detail: WorkflowDetail): ReadonlyArray<TimelineItem> {
-  const sourceDetail = detail.promptRequest.externalRef?.repositoryFullName ?? detail.promptRequest.source
-  const baseItems: ReadonlyArray<TimelineItem> = [
-    {
-      key: 'prompt-created',
-      occurredAt: detail.promptRequest.createdAt,
-      title: 'Prompt received',
-      detail: sourceDetail,
-      kind: 'source',
-    },
-    {
-      key: 'workflow-created',
-      occurredAt: detail.workflowRun.createdAt,
-      title: 'Workflow queued',
-      detail: detail.workflowRun.id,
-      kind: 'workflow',
-    },
+  const items: Array<TimelineItem> = [
+    { key: 'prompt', occurredAt: detail.promptRequest.createdAt, title: 'Request received', detail: detail.promptRequest.externalRef?.repositoryFullName ?? detail.promptRequest.source, category: 'source', status: 'succeeded' },
+    ...detail.provenanceEvents.map((event) => ({ key: `provenance:${event.id}`, occurredAt: event.startedAt, title: event.summary ?? event.operation, detail: [event.pluginName, event.operation, event.errorCategory].filter(Boolean).join(' · '), category: event.type, status: event.status })),
+    ...detail.sandboxExecutions.flatMap((execution) => [
+      { key: `sandbox:${execution.id}:start`, occurredAt: execution.startedAt, title: 'Sandbox execution started', detail: execution.command, category: 'sandbox', status: 'started' as const },
+      { key: `sandbox:${execution.id}:end`, occurredAt: execution.completedAt, title: execution.status === 'failed' ? 'Sandbox execution failed' : 'Sandbox execution passed', detail: `Exit ${execution.exitCode ?? 'unknown'}`, category: 'sandbox', status: execution.status === 'failed' ? 'failed' as const : 'succeeded' as const },
+    ]),
+    ...detail.candidatePatchSets.map((candidate) => ({ key: `candidate:${candidate.id}`, occurredAt: candidate.createdAt, title: candidate.status === 'captured' ? 'Candidate patch captured' : 'Candidate patch unavailable', detail: candidate.summary ?? candidate.id, category: 'change', status: candidate.status === 'captured' ? 'succeeded' as const : 'failed' as const })),
+    ...detail.reviewRuns.map((review) => ({ key: `review:${review.id}`, occurredAt: review.completedAt ?? review.startedAt, title: `Automated ${review.kind} review ${review.status}`, detail: review.summary ?? review.reviewer, category: 'review', status: review.status === 'failed' ? 'failed' as const : review.status === 'completed' ? 'succeeded' as const : 'started' as const })),
+    ...detail.policyDecisions.map((policy) => ({ key: `policy:${policy.id}`, occurredAt: policy.createdAt, title: `Policy: ${policy.status}`, detail: policy.summary, category: 'policy', status: policy.status === 'approved' ? 'succeeded' as const : 'blocked' as const })),
+    ...detail.humanDecisions.map((decision) => ({ key: `decision:${decision.id}`, occurredAt: decision.decidedAt, title: `Human decision: ${decision.status}`, detail: `${decision.actorId} · ${decision.comment}`, category: 'decision', status: decision.status === 'approved' ? 'succeeded' as const : 'blocked' as const })),
+    ...detail.publicationResults.map((result) => ({ key: `publication:${result.id}`, occurredAt: result.createdAt, title: `GitHub ${result.kind}: ${result.status}`, detail: result.summary ?? result.error ?? result.externalId ?? 'Publication recorded', category: 'publication', status: result.status === 'failed' ? 'failed' as const : result.status === 'published' ? 'succeeded' as const : 'started' as const })),
   ]
-
-  const items = [
-    ...baseItems,
-    ...detail.runtimeEvents.map(runtimeItem),
-    ...detail.sandboxExecutions.flatMap(sandboxItems),
-  ]
+  const canonicalItems = detail.provenanceEvents.length > 0
+    ? items.filter((item) => item.key === 'prompt' || item.key.startsWith('provenance:'))
+    : items
   // oxlint-disable-next-line unicorn/no-array-sort -- TS target does not include toSorted.
-  items.sort((left, right) => left.occurredAt - right.occurredAt)
-  return items
+  canonicalItems.sort((left, right) => left.occurredAt - right.occurredAt)
+  return canonicalItems
 }
 
 export function WorkflowTimeline({ detail }: { readonly detail: WorkflowDetail }) {
   const items = timelineItems(detail)
-
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h3 className="text-sm font-medium">Timeline</h3>
-        <p className="m-0 mt-1 text-sm text-muted-foreground">
-          Breadcrumb-style evidence trail from intake through sandbox execution.
-        </p>
-      </div>
-      <div className="flex flex-col gap-0">
+      <div><h3 className="text-sm font-medium">Provenance timeline</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Durable intake, execution, review, decision, and publication history.{detail.sandboxExecutionsTruncated ? ' Older sandbox execution previews are omitted; durable evidence remains available in artifacts.' : ''}</p></div>
+      <div className="flex flex-col">
         {items.map((item, index) => (
           <div key={item.key} className="flex gap-3">
-            <div className="flex flex-col items-center">
-              <div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <TimelineIcon kind={item.kind} />
-              </div>
-              {index === items.length - 1 ? null : (
-                <Separator orientation="vertical" className="min-h-8 bg-border/20" />
-              )}
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1 pb-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{item.title}</span>
-                <Badge variant="secondary" className="bg-muted text-muted-foreground">
-                  {item.kind}
-                </Badge>
-              </div>
-              <span className="truncate text-sm text-muted-foreground">{item.detail}</span>
-              <span className="text-xs text-muted-foreground">{formatTimestamp(item.occurredAt)}</span>
-            </div>
+            <div className="flex flex-col items-center"><div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground"><TimelineIcon category={item.category} status={item.status} /></div>{index === items.length - 1 ? null : <Separator orientation="vertical" className="min-h-8 bg-border" />}</div>
+            <div className="min-w-0 flex-1 pb-4"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{item.title}</span><Badge variant={item.status === 'failed' ? 'destructive' : 'secondary'}>{item.status}</Badge></div><p className="m-0 mt-1 text-sm text-muted-foreground">{item.detail}</p><time className="text-xs text-muted-foreground" dateTime={new Date(item.occurredAt).toISOString()}>{formatTimestamp(item.occurredAt)}</time></div>
           </div>
         ))}
       </div>
@@ -115,17 +49,11 @@ export function WorkflowTimeline({ detail }: { readonly detail: WorkflowDetail }
   )
 }
 
-function TimelineIcon({ kind }: { readonly kind: TimelineItem['kind'] }) {
-  switch (kind) {
-    case 'source':
-      return <GitBranchIcon />
-    case 'workflow':
-      return <WorkflowIcon />
-    case 'runtime':
-      return <PlayIcon />
-    case 'sandbox':
-      return <TerminalIcon />
-    default:
-      return null
-  }
+function TimelineIcon({ category, status }: { readonly category: string; readonly status: TimelineStatus }) {
+  if (status === 'failed') return <XCircleIcon />
+  if (category.includes('decision')) return <UserCheckIcon />
+  if (category.includes('policy') || category.includes('review')) return <ShieldCheckIcon />
+  if (category.includes('sandbox') || category.includes('runtime')) return <TerminalIcon />
+  if (category.includes('source') || category.includes('publication')) return <GitBranchIcon />
+  return status === 'started' ? <CircleDashedIcon /> : <CheckCircle2Icon />
 }

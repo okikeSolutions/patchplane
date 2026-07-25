@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { GitHubRepositoryConnections } from './github-repository-connections'
 
@@ -41,6 +41,7 @@ describe('GitHubRepositoryConnections', () => {
     })
 
     render(<GitHubRepositoryConnections workspaceId="workos:org-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 repository' }))
 
     expect(screen.getByText('patchplane/example')).toBeTruthy()
     expect(
@@ -66,6 +67,7 @@ describe('GitHubRepositoryConnections', () => {
     })
 
     render(<GitHubRepositoryConnections workspaceId="workos:org-1" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 repository' }))
 
     expect(screen.getByText('No verification run yet')).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'View run' })).toBeNull()

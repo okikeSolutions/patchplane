@@ -22,9 +22,9 @@ export function WorkflowTrustStateBadge({
       className={cn(
         'border-transparent',
         state === 'sandbox-failed' || state === 'rejected'
-          ? 'bg-destructive/15 text-destructive'
+          ? 'bg-destructive/15 text-[var(--destructive-readable)]'
           : state === 'needs-review' || state === 'changes-requested'
-            ? 'bg-primary/15 text-primary'
+            ? 'bg-primary/15 text-[var(--brand-readable)]'
             : state === 'approved'
               ? 'bg-[color-mix(in_oklch,var(--success-readable),transparent_82%)] text-[var(--success-readable)]'
               : 'bg-muted text-muted-foreground',

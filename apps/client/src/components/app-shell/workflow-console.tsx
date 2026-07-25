@@ -14,6 +14,10 @@ import { WorkflowDetailSheet } from './workflow-detail-sheet'
 import { WorkflowInspector } from './workflow-inspector'
 import { WorkflowQueue } from './workflow-queue'
 
+function isWorkflowFilter(value: string | null): value is WorkflowFilter {
+  return value !== null && ['all', 'needs-review', 'running', 'queued', 'sandbox-failed', 'approved', 'rejected', 'changes-requested'].includes(value)
+}
+
 export function WorkflowConsole({
   detailOverrides,
   metrics,
@@ -32,10 +36,30 @@ export function WorkflowConsole({
   const rows = useMemo(() => workflows ?? [], [workflows])
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<WorkflowFilter>('all')
+  const [repository, setRepository] = useState('all')
   const [selectedWorkflowRunId, setSelectedWorkflowRunId] =
     useState<Id<'workflowRuns'> | undefined>(undefined)
   const [openWorkflowRunId, setOpenWorkflowRunId] =
     useState<Id<'workflowRuns'> | undefined>(undefined)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const storedFilter = params.get('filter')
+    if (isWorkflowFilter(storedFilter)) setFilter(storedFilter)
+    setQuery(params.get('query') ?? '')
+    setRepository(params.get('repository') ?? 'all')
+  }, [])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (query.length > 0) url.searchParams.set('query', query)
+    else url.searchParams.delete('query')
+    if (filter !== 'all') url.searchParams.set('filter', filter)
+    else url.searchParams.delete('filter')
+    if (repository !== 'all') url.searchParams.set('repository', repository)
+    else url.searchParams.delete('repository')
+    window.history.replaceState(null, '', url)
+  }, [filter, query, repository])
 
   useEffect(() => {
     if (selectedWorkflowRunId !== undefined) {
@@ -45,6 +69,11 @@ export function WorkflowConsole({
     setSelectedWorkflowRunId(rows[0]?.workflowRun.id)
   }, [rows, selectedWorkflowRunId])
 
+  const repositories = useMemo(() => {
+    const values = [...new Set(rows.map((row) => sourceLabel(row)).filter((source) => source.includes('/')))]
+    // oxlint-disable-next-line unicorn/no-array-sort -- values is a new local array.
+    return values.sort()
+  }, [rows])
   const visibleRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
 
@@ -59,7 +88,7 @@ export function WorkflowConsole({
         source.includes(normalizedQuery) ||
         id.includes(normalizedQuery)
 
-      if (!matchesQuery) {
+      if (!matchesQuery || (repository !== 'all' && sourceLabel(row) !== repository)) {
         return false
       }
 
@@ -69,7 +98,7 @@ export function WorkflowConsole({
 
       return state === filter
     })
-  }, [filter, query, rows])
+  }, [filter, query, repository, rows])
 
   const selectedRow = rows.find((row) => row.workflowRun.id === selectedWorkflowRunId)
   const queriedSelectedDetail = useQuery(
@@ -87,20 +116,33 @@ export function WorkflowConsole({
       ? selectedDetail
       : detailOverrides?.[openWorkflowRunId]
 
+  const returnTo = `/app${new URLSearchParams({
+    ...(query.length > 0 ? { query } : {}),
+    ...(filter !== 'all' ? { filter } : {}),
+    ...(repository !== 'all' ? { repository } : {}),
+  }).toString().length > 0 ? `?${new URLSearchParams({
+    ...(query.length > 0 ? { query } : {}),
+    ...(filter !== 'all' ? { filter } : {}),
+    ...(repository !== 'all' ? { repository } : {}),
+  }).toString()}` : ''}`
+
   function openWorkflow(id: Id<'workflowRuns'>) {
     setSelectedWorkflowRunId(id)
     setOpenWorkflowRunId(id)
   }
 
   return (
-    <div className="grid h-svh min-h-0 grid-rows-[auto_1fr] overflow-hidden bg-background">
+    <div className="grid min-h-0 flex-1 grid-rows-[auto_1fr] overflow-hidden bg-background">
       <WorkflowConsoleToolbar
         filter={filter}
         metrics={metrics}
         query={query}
+        repositories={repositories}
+        repository={repository}
         viewer={viewer}
         onFilterChange={setFilter}
         onQueryChange={setQuery}
+        onRepositoryChange={setRepository}
       />
       <div className="grid min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <WorkflowQueue
@@ -112,6 +154,7 @@ export function WorkflowConsole({
         />
         <WorkflowInspector
           detailOverride={selectedDetail}
+          returnTo={returnTo}
           workflowRunId={selectedWorkflowRunId}
           row={selectedRow}
         />
@@ -127,6 +170,7 @@ export function WorkflowConsole({
         {openWorkflowRunId === undefined ? null : (
           <WorkflowDetailSheet
             detailOverride={openDetail}
+            returnTo={returnTo}
             workflowRunId={openWorkflowRunId}
           />
         )}

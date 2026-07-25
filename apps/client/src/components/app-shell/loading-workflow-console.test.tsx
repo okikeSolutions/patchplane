@@ -22,14 +22,12 @@ describe('LoadingWorkflowConsole', () => {
     cleanup()
   })
 
-  test('uses the workflow console loading shell instead of metric cards', () => {
+  test('uses a non-interactive workflow loading skeleton', () => {
     render(<LoadingWorkflowConsole />)
 
-    expect(screen.getByRole('heading', { name: 'Workflows' })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Workflow queue' })).toBeTruthy()
-    expect(screen.getByPlaceholderText('Search workflows, repos, run IDs...')).toBeTruthy()
-    expect(screen.queryByText('Open workflows')).toBeNull()
-    expect(screen.queryByText('App prompts')).toBeNull()
-    expect(screen.queryByText('External intake')).toBeNull()
+    expect(screen.getByLabelText('Loading workflows').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByText('Loading workflow queue and report status.')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 })

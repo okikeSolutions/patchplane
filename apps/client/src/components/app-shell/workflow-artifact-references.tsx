@@ -52,12 +52,12 @@ export function WorkflowArtifactReferences({
           Evidence artifact references linked from runtime events.
         </p>
         {error === undefined ? null : (
-          <p className="m-0 mt-2 text-xs text-destructive">{error}</p>
+          <p className="m-0 mt-2 text-xs text-[var(--destructive-readable)]">{error}</p>
         )}
       </div>
       <div className="flex flex-col gap-2">
         {references.map((reference) => (
-          <Card key={reference.id} size="sm" className="ring-border/60">
+          <Card key={reference.id} id={`artifact-${reference.artifactId ?? reference.id}`} size="sm" className="scroll-mt-32 ring-border">
             <CardContent className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{reference.label}</div>

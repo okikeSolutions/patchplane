@@ -10,20 +10,43 @@ export type WorkflowTrustState =
   | 'rejected'
   | 'changes-requested'
 
+export function currentWorkflowProjection(detail: WorkflowDetail) {
+  const execution = detail.sandboxExecutions.reduce<(typeof detail.sandboxExecutions)[number] | undefined>(
+    (latest, item) => latest === undefined || item.completedAt > latest.completedAt ? item : latest,
+    undefined,
+  )
+  const candidate = detail.candidatePatchSets.reduce<(typeof detail.candidatePatchSets)[number] | undefined>(
+    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+    undefined,
+  )
+  const review = detail.reviewRuns.reduce<(typeof detail.reviewRuns)[number] | undefined>(
+    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+    undefined,
+  )
+  const latestPolicy = detail.policyDecisions.reduce<(typeof detail.policyDecisions)[number] | undefined>(
+    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+    undefined,
+  )
+  const policy = review !== undefined && latestPolicy?.reviewRunId === review.id ? latestPolicy : undefined
+  const decision = detail.humanDecisions.at(-1)
+  const decisionIsCurrent =
+    decision !== undefined &&
+    execution !== undefined &&
+    candidate !== undefined &&
+    review !== undefined &&
+    policy !== undefined &&
+    decision.sandboxExecutionId === execution.id &&
+    decision.candidatePatchSetId === candidate.id &&
+    decision.reviewRunId === review.id &&
+    decision.policyDecisionId === policy.id
+  return { execution, candidate, review, policy, decision, decisionIsCurrent }
+}
+
 export function deriveWorkflowTrustState(
   detail: WorkflowDetail | undefined,
 ): WorkflowTrustState {
   if (detail === undefined) {
     return 'queued'
-  }
-
-  const latestDecision = detail.humanDecisions.reduce(
-    (latest, decision) =>
-      latest === undefined || decision.decidedAt > latest.decidedAt ? decision : latest,
-    undefined as (typeof detail.humanDecisions)[number] | undefined,
-  )
-  if (latestDecision !== undefined) {
-    return latestDecision.status
   }
 
   if (detail.workflowRun.status === 'queued') {
@@ -34,11 +57,17 @@ export function deriveWorkflowTrustState(
     return 'running'
   }
 
+  const { execution: latestExecution, decision: latestDecision, decisionIsCurrent } = currentWorkflowProjection(detail)
+
+  if (decisionIsCurrent && latestDecision !== undefined) {
+    return latestDecision.status
+  }
+
   if (detail.sandboxExecutions.length === 0) {
     return 'no-sandbox-run'
   }
 
-  if (detail.sandboxExecutions.some((execution) => execution.status === 'failed')) {
+  if (latestExecution?.status === 'failed') {
     return 'sandbox-failed'
   }
 

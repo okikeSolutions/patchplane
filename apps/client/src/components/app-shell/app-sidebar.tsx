@@ -1,13 +1,5 @@
 import { useAuth } from '@workos/authkit-tanstack-react-start/client'
-import {
-  BoxesIcon,
-  ClipboardCheckIcon,
-  GitBranchIcon,
-  LifeBuoyIcon,
-  ScrollTextIcon,
-  Settings2Icon,
-  WorkflowIcon,
-} from 'lucide-react'
+import { BookOpenIcon, GitBranchIcon, WorkflowIcon } from 'lucide-react'
 import * as m from '@/paraglide/messages'
 import { NavMain } from './nav-main'
 import { NavSecondary } from './nav-secondary'
@@ -26,19 +18,23 @@ import {
 const navMain = [
   {
     title: 'Workflows',
-    href: '#overview',
+    href: '/app',
     icon: WorkflowIcon,
     isActive: true,
   },
-  { title: 'Reviews', href: '#reviews', icon: ClipboardCheckIcon },
-  { title: 'Sources', href: '#repositories', icon: GitBranchIcon },
-  { title: 'Sandboxes', href: '#sandboxes', icon: BoxesIcon },
-  { title: 'Logs', href: '#logs', icon: ScrollTextIcon },
 ]
 
 const navSecondary = [
-  { title: 'Support', href: '#support', icon: LifeBuoyIcon },
-  { title: 'Settings', href: '#settings', icon: Settings2Icon },
+  {
+    title: 'Documentation',
+    href: 'https://github.com/okikeSolutions/patchplane#readme',
+    icon: BookOpenIcon,
+  },
+  {
+    title: 'GitHub',
+    href: 'https://github.com/okikeSolutions/patchplane',
+    icon: GitBranchIcon,
+  },
 ]
 
 export function AppSidebar() {
@@ -53,12 +49,12 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<a href="#overview" aria-label="patchplane overview" />}
+              render={<a href="/app" aria-label="patchplane workflows" />}
             >
               <BrandMark className="size-8 shrink-0" />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">patchplane</span>
-                <span className="truncate text-xs">Workflow review</span>
+                <span className="truncate text-xs">Patch reports</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

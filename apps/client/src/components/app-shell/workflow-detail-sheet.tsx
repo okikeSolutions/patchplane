@@ -18,9 +18,11 @@ import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-tr
 export function WorkflowDetailSheet({
   detailOverride,
   workflowRunId,
+  returnTo,
 }: {
   readonly detailOverride?: WorkflowDetail
   readonly workflowRunId: Id<'workflowRuns'>
+  readonly returnTo: string
 }) {
   const queriedDetail = useQuery(
     api.workflowStarts.getDetail,
@@ -31,8 +33,8 @@ export function WorkflowDetailSheet({
   const detail = detailOverride ?? queriedDetail
 
   return (
-    <SheetContent className="gap-0 border-border/60 sm:max-w-3xl" side="right">
-      <SheetHeader className="border-b border-border/60">
+    <SheetContent className="gap-0 border-border sm:max-w-3xl" side="right">
+      <SheetHeader className="border-b border-border">
         {detail === undefined ? (
           <>
             <SheetTitle>Loading workflow</SheetTitle>
@@ -53,21 +55,21 @@ export function WorkflowDetailSheet({
       </SheetHeader>
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-4">
-          {detail === undefined ? <WorkflowDetailSkeleton /> : <WorkflowDetailPreview detail={detail} />}
+          {detail === undefined ? <WorkflowDetailSkeleton /> : <WorkflowDetailPreview detail={detail} returnTo={returnTo} />}
         </div>
       </ScrollArea>
     </SheetContent>
   )
 }
 
-function WorkflowDetailPreview({ detail }: { readonly detail: WorkflowDetail }) {
+function WorkflowDetailPreview({ detail, returnTo }: { readonly detail: WorkflowDetail; readonly returnTo: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
         <Button
           size="sm"
           nativeButton={false}
-          render={<a aria-label="Open full workflow" href={`/app/workflows/${detail.workflowRun.id}`} />}
+          render={<a aria-label="Open full workflow" href={`/app/workflows/${detail.workflowRun.id}?returnTo=${encodeURIComponent(returnTo)}`} />}
         >
           Open full workflow
         </Button>

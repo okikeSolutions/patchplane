@@ -45,7 +45,7 @@ export function WorkflowRuntimeSessions({
           Remote runtime process state captured from Daytona sessions.
         </p>
       </div>
-      <div className="flex flex-col divide-y divide-border/10">
+      <div className="flex flex-col divide-y divide-border">
         {sessions.map((session) => (
           <div key={session.id} className="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto]">
             <div className="min-w-0">

@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useAuth } from '@workos/authkit-tanstack-react-start/client'
 import { api } from '@patchplane/backend/convex/_generated/api'
 import { useMutation, useQuery } from 'convex/react'
+import { GitHubConnectionStatus } from './github-connection-status'
 import { GitHubRepositoryConnections } from './github-repository-connections'
 import { NoOrganizationAlert } from './no-organization-alert'
 import { WorkflowConsole } from './workflow-console'
@@ -39,11 +40,10 @@ export function WorkflowConsoleContent() {
   }, [visibleWorkflows])
 
   return (
-    <div className="flex min-h-[calc(100svh-1rem)] flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {user && !organizationId ? <NoOrganizationAlert /> : null}
-      <div className="border-b border-border/60 p-4">
-        <GitHubRepositoryConnections workspaceId={workspaceId} />
-      </div>
+      <GitHubConnectionStatus />
+      <GitHubRepositoryConnections workspaceId={workspaceId} />
       <WorkflowConsole
         metrics={metrics}
         viewer={viewer}

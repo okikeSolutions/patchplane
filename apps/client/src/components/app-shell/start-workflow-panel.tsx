@@ -52,7 +52,7 @@ function StartWorkflowForm() {
   const hasAuthenticatedWorkspace = Boolean(user) && Boolean(organizationId)
   const form = useForm({
     defaultValues: {
-      prompt: 'Review the recent authentication foundation and suggest one safe next patch.',
+      prompt: '',
     },
     validators: {
       onSubmit: startWorkflowPromptStandardSchema,
@@ -117,7 +117,7 @@ function StartWorkflowForm() {
                   aria-invalid={isInvalid}
                 />
                 <FieldDescription>
-                  Starts the WorkOS-authorized patchplane foundation workflow.
+                  Describe the change and acceptance criteria. Pull-request workflows use the repository and ref supplied by GitHub.
                 </FieldDescription>
                 {isInvalid ? <FieldError errors={toFieldErrors(field.state.meta.errors)} /> : null}
               </Field>
@@ -206,6 +206,12 @@ function WorkflowStartResult({
           {m.app_workflow_run_status()}{' '}
           <code className="font-mono">{result.workflowStatus}</code>
         </span>
+        <a
+          className="mt-2 inline-block font-medium underline underline-offset-4"
+          href={`/app/workflows/${encodeURIComponent(result.workflowRunId)}`}
+        >
+          Open Patch Report
+        </a>
       </AlertDescription>
     </Alert>
   )

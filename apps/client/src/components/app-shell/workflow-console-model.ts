@@ -3,7 +3,15 @@ import type { WorkflowDetail, WorkflowStartRow } from './types'
 import type { WorkflowTrustState } from './workflow-trust-state'
 import { workflowTrustStateLabel } from './workflow-trust-state'
 
-export type WorkflowFilter = 'all' | 'needs-review' | 'running' | 'queued'
+export type WorkflowFilter =
+  | 'all'
+  | 'needs-review'
+  | 'running'
+  | 'queued'
+  | 'sandbox-failed'
+  | 'approved'
+  | 'rejected'
+  | 'changes-requested'
 
 export interface WorkflowArtifactReference {
   readonly id: string
@@ -19,6 +27,10 @@ export function sourceLabel(row: WorkflowStartRow) {
 }
 
 export function trustStateForList(row: WorkflowStartRow): WorkflowTrustState {
+  if (row.workflowRun.trustState !== undefined) {
+    return row.workflowRun.trustState
+  }
+
   if (row.workflowRun.status === 'queued') {
     return 'queued'
   }

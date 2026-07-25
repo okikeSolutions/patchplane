@@ -26,7 +26,7 @@ export function SignedOutWorkflowConsole() {
           value={m.app_signed_out_decision_value()}
         />
       </div>
-      <Separator className="bg-border/60" />
+      <Separator className="bg-border" />
       <a href="/api/auth/sign-in?returnPathname=/app" className={buttonVariants({ className: 'w-fit' })}>
         {m.app_sign_in()}
       </a>
@@ -42,7 +42,7 @@ function StatusPreview({
   readonly value: string
 }) {
   return (
-    <Card size="sm" className="ring-border/60">
+    <Card size="sm" className="ring-border">
       <CardContent>
         <div className="text-xs text-muted-foreground">{label}</div>
         <div className="mt-1 font-medium">{value}</div>

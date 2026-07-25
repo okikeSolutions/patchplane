@@ -35,17 +35,19 @@ import { deriveWorkflowTrustState, workflowTrustStateDetail } from './workflow-t
 export function WorkflowInspector({
   detailOverride,
   workflowRunId,
+  returnTo,
   row,
 }: {
   readonly detailOverride?: WorkflowDetail
   readonly workflowRunId: Id<'workflowRuns'> | undefined
+  readonly returnTo: string
   readonly row: WorkflowStartRow | undefined
 }) {
   const detail = detailOverride
 
   if (workflowRunId === undefined || row === undefined) {
     return (
-      <aside className="hidden min-w-0 border-l border-border/60 bg-card xl:block">
+      <aside className="hidden min-h-0 min-w-0 border-l border-border bg-card xl:flex xl:flex-col">
         <div className="p-6">
           <Empty>
             <EmptyHeader>
@@ -67,8 +69,8 @@ export function WorkflowInspector({
   const externalRef = row.promptRequest.externalRef
 
   return (
-    <aside className="hidden min-w-0 border-l border-border/60 bg-card xl:block">
-      <ScrollArea className="h-[calc(100svh-4rem)]">
+    <aside className="hidden min-h-0 min-w-0 border-l border-border bg-card xl:flex xl:flex-col">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-5 p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -83,14 +85,14 @@ export function WorkflowInspector({
               variant="secondary"
               size="sm"
               nativeButton={false}
-              render={<a aria-label="Open workflow" href={`/app/workflows/${workflowRunId}`} />}
+              render={<a aria-label="Open workflow" href={`/app/workflows/${workflowRunId}?returnTo=${encodeURIComponent(returnTo)}`} />}
             >
               Open
               <ChevronRightIcon data-icon="inline-end" />
             </Button>
           </div>
 
-          <Card size="sm" className="bg-background ring-border/60">
+          <Card size="sm" className="bg-background ring-border">
             <CardContent>
               <div className="flex items-center justify-between gap-2">
                 <WorkflowTrustStateBadge state={trustState} />
@@ -193,7 +195,7 @@ function CompactTimeline({ detail }: { readonly detail: WorkflowDetail }) {
           <div className="flex flex-col items-center">
             <span className="mt-1 size-2 rounded-full bg-foreground/70" />
             {index === visibleItems.length - 1 ? null : (
-              <span className="my-1 w-px flex-1 bg-border/60" />
+              <span className="my-1 w-px flex-1 bg-border" />
             )}
           </div>
           <div className="min-w-0 pb-3">
@@ -220,7 +222,7 @@ function InspectorSection({
         <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {title}
         </h3>
-        <Separator className="flex-1 bg-border/60" />
+        <Separator className="flex-1 bg-border" />
       </div>
       <div className="flex flex-col gap-2">{children}</div>
     </section>
@@ -237,7 +239,7 @@ function InspectorRow({
   readonly value: string
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border border-transparent px-1 py-1.5 text-sm hover:border-border/40 hover:bg-background">
+    <div className="flex min-w-0 items-center gap-2 rounded-md border border-transparent px-1 py-1.5 text-sm hover:border-border hover:bg-background">
       <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">
         {icon}
       </span>

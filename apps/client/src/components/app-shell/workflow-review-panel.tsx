@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { CheckIcon, MessageSquareWarningIcon, XIcon } from 'lucide-react'
+import { CheckCircle2Icon, CheckIcon, CircleAlertIcon, MessageSquareWarningIcon, XIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
@@ -47,7 +47,13 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
     detail.policyDecisions,
     (decision) => decision.createdAt,
   )
+  const blockingFindings = detail.reviewFindings.filter(
+    (finding) => finding.reviewRunId === reviewRun?.id && (finding.severity === 'error' || finding.severity === 'critical'),
+  )
+  const reviewPassed = reviewRun?.status === 'completed' && blockingFindings.length === 0
+  const policyAllowsReview = policyDecision?.status === 'approved' || policyDecision?.status === 'manual-review'
   const hasCurrentProjection =
+    detail.workflowRun.status === 'reviewed' &&
     sandboxExecution !== undefined &&
     candidatePatchSet !== undefined &&
     reviewRun?.sandboxExecutionId === sandboxExecution.id &&
@@ -71,7 +77,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
     setSubmittingStatus(status)
     setError(undefined)
     try {
-      const fingerprint = `${detail.workflowRun.id}:${status}:${trimmedComment}`
+      const fingerprint = `${detail.workflowRun.id}:${sandboxExecution.id}:${candidatePatchSet.id}:${reviewRun.id}:${policyDecision.id}:${status}:${trimmedComment}`
       if (submissionAttempt.current?.fingerprint !== fingerprint) {
         submissionAttempt.current = {
           fingerprint,
@@ -122,6 +128,21 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
           Decisions are durable and become part of the Patch Report audit trail.
         </AlertDescription>
       </Alert>
+      <div className="grid gap-2 rounded-lg border border-border bg-[var(--surface-nested)] p-3 text-sm">
+        <EvidenceCheck label="Sandbox execution" ready={sandboxExecution?.status === 'succeeded'} detail={sandboxExecution === undefined ? 'Not recorded' : `${sandboxExecution.command} · exit ${sandboxExecution.exitCode ?? 'unknown'}`} />
+        <EvidenceCheck label="Candidate patch" ready={candidatePatchSet?.status === 'captured'} detail={candidatePatchSet?.summary ?? candidatePatchSet?.id ?? 'Not captured'} />
+        <EvidenceCheck label="Automated review" ready={reviewPassed} status={reviewRun === undefined ? 'missing' : reviewPassed ? 'passed' : reviewRun.status === 'completed' ? 'blocked' : reviewRun.status} detail={blockingFindings.length > 0 ? `${blockingFindings.length} blocking findings` : reviewRun?.summary ?? reviewRun?.reviewer ?? 'Not completed'} />
+        <EvidenceCheck label="Policy verdict" ready={policyAllowsReview} status={policyDecision?.status ?? 'missing'} detail={policyDecision?.summary ?? 'Not evaluated'} />
+      </div>
+      {hasCurrentProjection ? null : (
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>Decision unavailable</AlertTitle>
+          <AlertDescription>
+            The latest execution, candidate, review, and policy records do not form one coherent projection. Refresh after verification completes.
+          </AlertDescription>
+        </Alert>
+      )}
       {error === undefined ? null : (
         <Alert variant="destructive">
           <MessageSquareWarningIcon />
@@ -147,7 +168,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={!hasComment || isSubmitting || !hasCurrentProjection}
+          disabled={!hasComment || isSubmitting || !hasCurrentProjection || sandboxExecution.status !== 'succeeded' || candidatePatchSet.status !== 'captured' || reviewRun.status !== 'completed'}
           onClick={() => void submitDecision('approved')}
         >
           <CheckIcon data-icon="inline-start" />
@@ -173,6 +194,15 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         </Button>
       </div>
     </section>
+  )
+}
+
+function EvidenceCheck({ label, ready, status, detail }: { readonly label: string; readonly ready: boolean; readonly status?: string; readonly detail: string }) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      {ready ? <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[var(--success-readable)]" /> : <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-[var(--destructive-readable)]" />}
+      <div className="min-w-0"><div className="font-medium">{label} · <span className="font-normal text-muted-foreground">{status ?? (ready ? 'ready' : 'missing')}</span></div><div className="truncate text-xs text-muted-foreground">{detail}</div></div>
+    </div>
   )
 }
 

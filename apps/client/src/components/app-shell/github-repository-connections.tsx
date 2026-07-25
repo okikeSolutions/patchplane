@@ -1,7 +1,11 @@
+import { useState } from 'react'
 import { api } from '@patchplane/backend/convex/_generated/api'
 import { usePaginatedQuery } from 'convex/react'
+import { ChevronDownIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
   Card,
@@ -71,6 +75,7 @@ export function GitHubRepositoryConnections({
 }: {
   readonly workspaceId: string | undefined
 }) {
+  const [open, setOpen] = useState(false)
   const {
     results: repositories,
     status: paginationStatus,
@@ -90,34 +95,30 @@ export function GitHubRepositoryConnections({
   }
 
   return (
-    <Card className="border-border/60 bg-card/80 shadow-none">
-      <CardHeader className="gap-2 pb-3">
+    <Card className="shrink-0 rounded-none border-x-0 border-t-0 border-border bg-card/65 py-0 shadow-none ring-0">
+      <CardHeader className="gap-2 px-4 py-3 lg:px-6">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-sm">
               <GitHubLogo className="size-4" />
               GitHub repositories
             </CardTitle>
-            <CardDescription>
-              Connect a GitHub App installation so patchplane can route PR
-              events to this workspace.
+            <CardDescription className="line-clamp-1">
+              {repositories.length === 0
+                ? 'Connect a repository to receive evidence-backed Patch Reports for pull requests.'
+                : `${repositories.length} connected ${repositories.length === 1 ? 'repository' : 'repositories'} · status at a glance`}
             </CardDescription>
           </div>
-          <a
-            aria-disabled={workspaceId === undefined}
-            className={cn(
-              buttonVariants({ size: 'sm' }),
-              workspaceId === undefined && 'pointer-events-none opacity-50',
-            )}
-            href="/api/github/install/start?returnPathname=/app"
-          >
-            {repositories.length === 0
-              ? 'Connect GitHub'
-              : 'Manage GitHub repositories'}
-          </a>
+          {workspaceId === undefined ? (
+            <Button type="button" size="sm" disabled>Connect GitHub</Button>
+          ) : (
+            <a className={buttonVariants({ size: 'sm' })} href="/api/github/install/start?returnPathname=/app">
+              {repositories.length === 0 ? 'Connect GitHub' : 'Manage GitHub repositories'}
+            </a>
+          )}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-4 pb-3 lg:px-6">
         {workspaceId === undefined ? (
           <p className="text-sm text-muted-foreground">
             Select an active WorkOS organization before connecting GitHub.
@@ -130,11 +131,20 @@ export function GitHubRepositoryConnections({
             verification workflows.
           </p>
         ) : (
-          <div className="grid gap-2">
+          <Collapsible open={open} onOpenChange={setOpen}>
+            <CollapsibleTrigger
+              render={<Button type="button" variant="ghost" size="sm" className="mb-1 px-2" />}
+            >
+              {open ? 'Hide repositories' : `Show ${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'}`}
+              <ChevronDownIcon className={cn('transition-transform', open && 'rotate-180')} data-icon="inline-end" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-1">
+              <ScrollArea className="max-h-64">
+              <div className="grid gap-2 pr-2">
             {repositories.map(({ repository, latestVerification }) => (
               <div
                 key={repository.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
@@ -203,20 +213,22 @@ export function GitHubRepositoryConnections({
                 </div>
               </div>
             ))}
-            {paginationStatus === 'CanLoadMore' ||
-            paginationStatus === 'LoadingMore' ? (
+            {paginationStatus === 'CanLoadMore' || paginationStatus === 'LoadingMore' ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
+                size="sm"
+                className="w-fit"
                 disabled={paginationStatus === 'LoadingMore'}
                 onClick={() => loadMore(20)}
               >
-                {paginationStatus === 'LoadingMore'
-                  ? 'Loading repositories…'
-                  : 'Load more repositories'}
+                {paginationStatus === 'LoadingMore' ? 'Loading…' : 'Load more'}
               </Button>
             ) : null}
-          </div>
+              </div>
+              </ScrollArea>
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </CardContent>
     </Card>

@@ -46,19 +46,22 @@ export function WorkflowQueue({
   readonly onOpenWorkflow: (id: Id<'workflowRuns'>) => void
 }) {
   const columns = useMemo(
-    () => workflowQueueColumns({ selectedDetail, selectedWorkflowRunId }),
-    [selectedDetail, selectedWorkflowRunId],
+    () => workflowQueueColumns({ selectedDetail, selectedWorkflowRunId, onOpenWorkflow }),
+    [selectedDetail, selectedWorkflowRunId, onOpenWorkflow],
   )
+  // TanStack Table treats data identity as a change signal. An inline copy here
+  // causes an unbounded rerender loop whenever selection state changes.
+  const tableRows = useMemo(() => [...rows], [rows])
   const table = useReactTable({
-    data: [...rows],
+    data: tableRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.workflowRun.id,
   })
 
   return (
-    <section className="min-w-0 bg-background">
-      <div className="flex h-12 items-center justify-between border-b border-border/60 px-4 lg:px-6">
+    <section className="flex min-h-0 min-w-0 flex-col bg-background">
+      <div className="flex h-12 items-center justify-between border-b border-border px-4 lg:px-6">
         <div className="flex items-center gap-2">
           <ListFilterIcon className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Workflow queue</h2>
@@ -82,17 +85,17 @@ export function WorkflowQueue({
           </Empty>
         </div>
       ) : (
-        <ScrollArea className="h-[calc(100svh-7rem)]">
+        <ScrollArea className="min-h-0 flex-1">
           <Table className="table-fixed">
             <colgroup>
               <col />
-              <col className="w-28" />
-              <col className="w-36" />
-              <col className="w-44" />
+              <col className="hidden w-28 md:table-column" />
+              <col className="w-32" />
+              <col className="hidden w-44 lg:table-column" />
               <col className="hidden w-40 2xl:table-column" />
               <col className="hidden w-28 2xl:table-column" />
             </colgroup>
-            <TableHeader className="sticky top-0 z-10 bg-background/95 [&_tr]:border-border/60">
+            <TableHeader className="sticky top-0 z-10 bg-background/95 [&_tr]:border-border">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent [&_th]:text-muted-foreground">
                   {headerGroup.headers.map((header) => (
@@ -113,17 +116,7 @@ export function WorkflowQueue({
                     key={row.id}
                     aria-selected={selected}
                     data-state={selected ? 'selected' : undefined}
-                    tabIndex={0}
-                    className="cursor-pointer border-border/50 outline-none hover:bg-muted/35 focus-visible:bg-muted/40 data-[state=selected]:bg-muted/45"
-                    onClick={() => onOpenWorkflow(row.original.workflowRun.id)}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') {
-                        return
-                      }
-
-                      event.preventDefault()
-                      onOpenWorkflow(row.original.workflowRun.id)
-                    }}
+                    className="border-border data-[state=selected]:bg-muted/80"
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className={columnClassName(cell.column.id, true)}>
@@ -144,6 +137,7 @@ export function WorkflowQueue({
 function workflowQueueColumns(input: {
   readonly selectedDetail?: WorkflowDetail
   readonly selectedWorkflowRunId: Id<'workflowRuns'> | undefined
+  readonly onOpenWorkflow: (id: Id<'workflowRuns'>) => void
 }): Array<ColumnDef<WorkflowStartRow>> {
   return [
     {
@@ -155,11 +149,17 @@ function workflowQueueColumns(input: {
           <div className="flex min-w-0 items-start gap-3">
             <TrustMarker state={trustState} />
             <div className="min-w-0">
-              <div className="truncate font-medium">{row.original.promptRequest.prompt}</div>
+              <button
+                type="button"
+                className="block max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => input.onOpenWorkflow(row.original.workflowRun.id)}
+              >
+                {row.original.promptRequest.prompt}
+              </button>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 <code className="truncate font-mono">{row.original.workflowRun.id}</code>
                 <span>·</span>
-                <span>{row.original.promptRequest.source}</span>
+                <span className="truncate">{sourceLabel(row.original)}</span>
               </div>
             </div>
           </div>
@@ -217,8 +217,11 @@ function columnClassName(columnId: string, isCell = false) {
     case 'workflow':
       return isCell ? 'py-3 pl-4 lg:pl-6' : 'pl-4 lg:pl-6'
     case 'status':
+      return 'hidden overflow-hidden md:table-cell'
     case 'trust':
       return 'overflow-hidden'
+    case 'source':
+      return 'hidden overflow-hidden lg:table-cell'
     case 'lastEvent':
       return 'hidden text-sm text-muted-foreground 2xl:table-cell'
     case 'updated':

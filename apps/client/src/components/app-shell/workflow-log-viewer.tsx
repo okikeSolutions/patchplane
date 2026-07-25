@@ -94,7 +94,7 @@ function LogBlock({
           Copy
         </Button>
       </div>
-      <ScrollArea className="h-72 rounded-lg bg-muted/30">
+      <ScrollArea className="h-72 rounded-lg bg-[var(--surface-nested)]">
         <pre className="p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap">
           {value}
         </pre>
