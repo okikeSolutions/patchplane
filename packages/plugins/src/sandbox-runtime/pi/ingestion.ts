@@ -2,7 +2,7 @@ import { Stream } from 'effect'
 import type { SandboxRuntimeEvent } from '@patchplane/core/services/sandbox-service'
 import { decodePiJsonlLines, type PiJsonlLine } from './jsonl'
 import { parsePiRpcJsonLines, type PiRpcParsedLine } from './protocol'
-import { summarizePiEvent } from './events'
+import { isTransientPiEventType, summarizePiEvent } from './events'
 
 export interface PiRpcRuntimeEvent extends SandboxRuntimeEvent {
   readonly idempotencyKey: string
@@ -45,7 +45,9 @@ function rpcRecordToRuntimeEvent(record: PiRpcParsedLine, line: string, now: () 
 
   if (typeof record.value !== 'object' || record.value === null) return undefined
   const eventType = Reflect.get(record.value, 'type')
-  if (typeof eventType !== 'string') return undefined
+  if (typeof eventType !== 'string' || isTransientPiEventType(eventType)) {
+    return undefined
+  }
 
   return {
     provider: 'pi',

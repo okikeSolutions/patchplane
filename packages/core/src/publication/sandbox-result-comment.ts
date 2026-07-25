@@ -7,7 +7,7 @@ export function formatSandboxResultComment(input: {
   readonly maxOutputLength?: number
 }) {
   const execution = input.sandboxExecution
-  const status = execution.status === 'succeeded' ? 'verification passed' : 'verification failed'
+  const status = execution.status === 'succeeded' ? 'sandbox agent completed' : 'sandbox agent failed'
   const maxOutputLength = input.maxOutputLength ?? 5000
   const truncatedOutput = execution.stdout.length <= maxOutputLength
     ? execution.stdout

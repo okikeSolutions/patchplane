@@ -627,6 +627,8 @@ describe('Daytona sandbox boundary adapters', () => {
       const output = [
         JSON.stringify({ type: 'session', id: 'session-1', timestamp: '2026-06-28T00:00:00.000Z' }),
         JSON.stringify({ type: 'tool_execution_start', toolName: 'bash' }),
+        JSON.stringify({ type: 'message_update', message: { content: [{ text: 'partial' }] } }),
+        JSON.stringify({ type: 'tool_execution_update', toolName: 'bash', partialResult: 'partial' }),
         JSON.stringify({ type: 'message_end', message: { content: [{ text: 'All checks passed.' }] } }),
         'not-json',
       ].join('\n')

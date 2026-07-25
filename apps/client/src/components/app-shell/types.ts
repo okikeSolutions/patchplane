@@ -249,6 +249,7 @@ export interface ProvenanceEventRow {
 
 export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
+  runtimeEventsTruncated: boolean
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
   evidenceArtifacts: ReadonlyArray<EvidenceArtifactRow>

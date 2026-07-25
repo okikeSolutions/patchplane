@@ -80,6 +80,7 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
         }),
       },
     ],
+    runtimeEventsTruncated: false,
     runtimeSessions: [
       {
         id: 'runtime_session_1',

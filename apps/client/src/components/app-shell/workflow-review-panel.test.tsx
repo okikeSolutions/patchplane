@@ -41,6 +41,7 @@ const detail: WorkflowDetail = {
     createdAt: 1,
   },
   runtimeEvents: [],
+  runtimeEventsTruncated: false,
   runtimeSessions: [],
   sandboxExecutions: [
     {

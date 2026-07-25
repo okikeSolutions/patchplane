@@ -16,18 +16,18 @@ export function formatDecisionPatchReportComment(input: {
     ? `Issue #${externalRef.issueNumber}`
     : 'unknown'
   const execution = input.sandboxExecution
-  const verification = execution === undefined
+  const executionStatus = execution === undefined
     ? 'not run'
     : execution.status === 'succeeded'
-    ? 'verification passed'
-    : 'verification failed'
+    ? 'sandbox agent completed'
+    : 'sandbox agent failed'
   const patch = input.candidatePatchSet
 
   return [
     '## PatchPlane Decision Update',
     '',
     `**Decision:** ${decisionLabel(input.humanDecision.status)}`,
-    `**Verification:** ${verification}`,
+    `**Execution:** ${executionStatus}`,
     '',
     `- Repository: ${repository}`,
     `- Source: ${sourceRef}`,

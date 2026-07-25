@@ -125,7 +125,7 @@ The authenticated dashboard lists connected GitHub repositories and their latest
 
 GitHub, WorkOS, Convex, and Daytona SDK usage is server/plugin-side only. For the alpha `daytona-pi` path, Pi runs inside the Daytona sandbox rather than being bundled into the web/control-plane runtime. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
 
-The Pi runtime adapter is Effect-native at the PatchPlane boundary: `packages/plugins/src/sandbox-runtime/pi/contract.ts` defines the Effect RPC command contract, `runtime-session.ts` exposes a session facade, `transport.ts` translates typed commands to Pi JSONL, and `jsonl.ts`/`ingestion.ts` decode Daytona stdout streams into normalized runtime events. Raw Pi JSONL does not cross into core or UI state.
+The Pi runtime adapter is Effect-native at the PatchPlane boundary: `packages/plugins/src/sandbox-runtime/pi/contract.ts` defines the Effect RPC command contract, `runtime-session.ts` exposes a session facade, `transport.ts` translates typed commands to Pi JSONL, and `jsonl.ts`/`ingestion.ts` decode Daytona stdout streams into normalized runtime events. Raw Pi JSONL is retained as R2 evidence; transient token/tool deltas are omitted from normalized workflow truth, and client projections bound event counts and payload previews.
 
 ## Workspace
 
@@ -160,7 +160,7 @@ PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 DAYTONA_API_KEY
 ```
 
-The route verifies GitHub signatures against the raw request body, maps supported events into generic `WorkflowIntake`, verifies repository access through the GitHub App installation, and persists generic external refs in Convex.
+The route verifies GitHub signatures against the raw request body, maps supported events into generic `WorkflowIntake`, verifies repository access through the GitHub App installation, and persists generic external refs in Convex. Pi exiting successfully means only that the sandbox agent completed. Independent test evidence requires an explicit `PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND`; without one, Patchplane records a review warning and does not describe the run as verification passed.
 
 ## Live Daytona/Pi RPC smoke
 

@@ -111,7 +111,9 @@ export function GitHubRepositoryConnections({
             )}
             href="/api/github/install/start?returnPathname=/app"
           >
-            Connect GitHub
+            {repositories.length === 0
+              ? 'Connect GitHub'
+              : 'Manage GitHub repositories'}
           </a>
         </div>
       </CardHeader>

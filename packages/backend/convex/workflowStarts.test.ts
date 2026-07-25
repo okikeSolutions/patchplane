@@ -30,7 +30,11 @@ interface WorkflowStartResult {
 }
 
 interface WorkflowDetailResult {
-  readonly runtimeEvents?: ReadonlyArray<unknown> | undefined
+  readonly runtimeEvents: ReadonlyArray<{
+    readonly type: string
+    readonly payloadJson?: string | undefined
+  }>
+  readonly runtimeEventsTruncated: boolean
   readonly evidenceArtifacts?: ReadonlyArray<unknown> | undefined
   readonly candidatePatchSets?: ReadonlyArray<unknown> | undefined
   readonly reviewRuns?: ReadonlyArray<unknown> | undefined
@@ -1051,6 +1055,36 @@ describe('workflowStarts trusted boundary and authz', () => {
       sourceLine: 1,
       sourceOffset: 0,
     })
+  })
+
+  test('getDetail bounds runtime event payloads while raw evidence remains external', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const workflowStart = await createWorkflowStartForTest(t)
+
+    await t.mutation(recordRuntimeEvents, {
+      systemSecret: 'system_test',
+      events: Array.from({ length: 102 }, (_, index) => ({
+        workflowRunId: workflowStart.workflowRun.id,
+        provider: 'pi',
+        type: `pi.message_update.${index}`,
+        occurredAt: index,
+        payloadJson: JSON.stringify({ index, partial: 'x'.repeat(9_000) }),
+      })),
+    })
+
+    const detail = await t.query(getWorkflowDetail, {
+      workflowRunId: workflowStart.workflowRun.id,
+    })
+
+    expect(detail.runtimeEvents).toHaveLength(100)
+    expect(detail.runtimeEventsTruncated).toBe(true)
+    expect(detail.runtimeEvents[0]?.type).toBe('pi.message_update.2')
+    expect(detail.runtimeEvents.at(-1)?.type).toBe('pi.message_update.101')
+    expect(detail.runtimeEvents[0]?.payloadJson).toContain(
+      'truncated; full runtime output remains in the workflow evidence artifact',
+    )
+    expect(detail.runtimeEvents[0]?.payloadJson?.length).toBeLessThan(8_200)
   })
 
   test('recordPublicationResult updates failed retry rows without stale errors', async () => {

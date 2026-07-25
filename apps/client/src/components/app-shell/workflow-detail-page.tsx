@@ -59,7 +59,7 @@ export function WorkflowDetailPage({
             <WorkflowRunStatusBadge status={detail.workflowRun.status} />
             <WorkflowTrustStateBadge state={trustState} />
             <Badge variant="secondary" className="bg-muted text-muted-foreground">
-              {detail.runtimeEvents.length} runtime events
+              {detail.runtimeEventsTruncated ? 'Latest ' : ''}{detail.runtimeEvents.length} runtime events
             </Badge>
             <Badge variant="secondary" className="bg-muted text-muted-foreground">
               {detail.sandboxExecutions.length} sandbox runs
@@ -73,7 +73,7 @@ export function WorkflowDetailPage({
             <TabsTrigger value="overview">Patch report</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="runtime">Agent activity</TabsTrigger>
-            <TabsTrigger value="sandbox">Verification run</TabsTrigger>
+            <TabsTrigger value="sandbox">Sandbox run</TabsTrigger>
             <TabsTrigger value="logs">Logs</TabsTrigger>
             <TabsTrigger value="artifacts">Evidence</TabsTrigger>
             <TabsTrigger value="review">Decision</TabsTrigger>
@@ -92,7 +92,11 @@ export function WorkflowDetailPage({
             <WorkflowSandboxEvidence executions={detail.sandboxExecutions} />
           </TabsContent>
           <TabsContent value="logs">
-            <WorkflowLogViewer runtimeEvents={detail.runtimeEvents} sandboxExecutions={detail.sandboxExecutions} />
+            <WorkflowLogViewer
+              runtimeEvents={detail.runtimeEvents}
+              runtimeEventsTruncated={detail.runtimeEventsTruncated}
+              sandboxExecutions={detail.sandboxExecutions}
+            />
           </TabsContent>
           <TabsContent value="artifacts">
             <WorkflowArtifactReferences detail={detail} />

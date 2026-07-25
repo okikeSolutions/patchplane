@@ -4,6 +4,7 @@ import { StorageError } from '@patchplane/domain/errors'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import { AlphaPolicyServiceLayer, AlphaReviewServiceLayer } from '../services/alpha-review-policy'
+import { ReviewService } from '../services/review-service'
 import { StorageService } from '../services/storage-service'
 import { ProposeMergeDecision } from './propose-merge-decision'
 
@@ -35,6 +36,29 @@ const diffArtifact: EvidenceArtifact = {
 }
 
 describe('ProposeMergeDecision', () => {
+  it.effect('does not treat agent completion as independent test evidence', () =>
+    Effect.gen(function* () {
+      const reviewer = yield* ReviewService
+      const review = yield* reviewer.runReview({
+        workflowRunId: 'workflow-1',
+        sandboxExecution: {
+          ...sandboxExecution,
+          status: 'succeeded',
+          exitCode: 0,
+        },
+        evidenceArtifacts: [diffArtifact],
+        verificationResults: [],
+      })
+
+      expect(review.findings).toEqual([
+        expect.objectContaining({
+          severity: 'warning',
+          category: 'test',
+          message: 'No independent verification command was configured; agent completion is not test evidence.',
+        }),
+      ])
+    }).pipe(Effect.provide(AlphaReviewServiceLayer)))
+
   it.effect('records review findings and a conservative policy decision', () =>
     Effect.gen(function* () {
       const recorded: Array<{ readonly type: string; readonly value: unknown }> = []

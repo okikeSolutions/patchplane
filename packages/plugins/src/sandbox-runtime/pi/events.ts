@@ -5,6 +5,15 @@ const PiEventHeader = Schema.Struct({
   type: Schema.String,
 })
 
+const transientPiEventTypes: ReadonlySet<string> = new Set([
+  'message_update',
+  'tool_execution_update',
+])
+
+export function isTransientPiEventType(type: string) {
+  return transientPiEventTypes.has(type)
+}
+
 export interface PiRuntimeParseError {
   readonly line: number
   readonly message: string
@@ -82,7 +91,7 @@ function parsePiJsonRuntimeEventLine(input: {
   readonly line: string
   readonly lineNumber: number
   readonly now: () => number
-}): Effect.Effect<SandboxRuntimeEvent, PiRuntimeParseError> {
+}): Effect.Effect<SandboxRuntimeEvent | undefined, PiRuntimeParseError> {
   return Effect.gen(function* () {
     const event = yield* Effect.try({
       try: () => JSON.parse(input.line) as unknown,
@@ -99,6 +108,10 @@ function parsePiJsonRuntimeEventLine(input: {
         raw: input.line.slice(0, 500),
       })),
     )
+
+    if (isTransientPiEventType(header.type)) {
+      return undefined
+    }
 
     return {
       provider: 'pi',
@@ -132,7 +145,7 @@ export function parsePiJsonRuntimeEventsEffect(stdout: string, options: {
       }).pipe(Effect.exit)
 
       if (Exit.isSuccess(result)) {
-        events.push(result.value)
+        if (result.value !== undefined) events.push(result.value)
       } else {
         parseErrors.push({
           line: index + 1,

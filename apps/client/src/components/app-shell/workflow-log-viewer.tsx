@@ -18,9 +18,11 @@ function latestOutput(executions: ReadonlyArray<SandboxExecutionRow>) {
 
 export function WorkflowLogViewer({
   runtimeEvents,
+  runtimeEventsTruncated,
   sandboxExecutions,
 }: {
   readonly runtimeEvents: ReadonlyArray<RuntimeEventRow>
+  readonly runtimeEventsTruncated: boolean
   readonly sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
 }) {
   const latestExecution = latestOutput(sandboxExecutions)
@@ -45,6 +47,11 @@ export function WorkflowLogViewer({
           <TabsTrigger value="stderr">Stderr</TabsTrigger>
         </TabsList>
         <TabsContent value="runtime">
+          {runtimeEventsTruncated ? (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Showing the latest {runtimeEvents.length} normalized events. Full raw output remains in the evidence artifact.
+            </p>
+          ) : null}
           <LogBlock value={eventLog} emptyTitle="No runtime events" />
         </TabsContent>
         <TabsContent value="stdout">

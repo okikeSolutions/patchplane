@@ -36,6 +36,18 @@ describe('decodePiRpcRuntimeEvents', () => {
     expect(events[1]?.idempotencyKey).toMatch(/^session-1:command-1:stdout:2:/)
   })
 
+  test('drops transient token and tool progress updates', async () => {
+    const events = await collect([
+      `${JSON.stringify({ type: 'message_update', delta: 'partial' })}\n`,
+      `${JSON.stringify({ type: 'tool_execution_update', partialResult: 'partial' })}\n`,
+      `${JSON.stringify({ type: 'message_end', message: { content: [{ text: 'Done' }] } })}\n`,
+    ])
+
+    expect(events).toHaveLength(1)
+    expect(events[0]?.type).toBe('pi.message_end')
+    expect(events[0]?.sourceLine).toBe(3)
+  })
+
   test('uses strict LF JSONL framing', async () => {
     const line = JSON.stringify({ id: 'a', type: 'response', command: 'abort', success: true })
     const events = await collect([`${line}\r`, '\n'])

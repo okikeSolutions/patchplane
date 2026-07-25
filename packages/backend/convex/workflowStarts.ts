@@ -3,6 +3,20 @@ import type { Id } from './_generated/dataModel'
 import { ConvexError, v } from 'convex/values'
 import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
 
+const workflowDetailRuntimeEventLimit = 100
+const workflowDetailRuntimePayloadPreviewLength = 8_000
+
+function runtimePayloadPreview(payloadJson: string | undefined) {
+  if (
+    payloadJson === undefined ||
+    payloadJson.length <= workflowDetailRuntimePayloadPreviewLength
+  ) {
+    return payloadJson
+  }
+
+  return `${payloadJson.slice(0, workflowDetailRuntimePayloadPreviewLength)}\n…truncated; full runtime output remains in the workflow evidence artifact…`
+}
+
 function workOSOrganizationId(identity: UserIdentity) {
   const value =
     identity.organizationId ??
@@ -438,6 +452,7 @@ const workflowDetailReturn = v.object({
     createdAt: v.number(),
   }),
   runtimeEvents: v.array(runtimeEventReturn),
+  runtimeEventsTruncated: v.boolean(),
   runtimeSessions: v.array(runtimeSessionReturn),
   sandboxExecutions: v.array(sandboxExecutionReturn),
   evidenceArtifacts: v.array(evidenceArtifactReturn),
@@ -2201,10 +2216,13 @@ export const getDetail = query({
       throw new ConvexError('Workflow prompt request not found')
     }
 
-    const runtimeEvents = await ctx.db
+    const runtimeEventPage = await ctx.db
       .query('runtimeEvents')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
-      .collect()
+      .order('desc')
+      .take(workflowDetailRuntimeEventLimit + 1)
+    const runtimeEventsTruncated = runtimeEventPage.length > workflowDetailRuntimeEventLimit
+    const runtimeEvents = runtimeEventPage.slice(0, workflowDetailRuntimeEventLimit)
 
     const runtimeSessions = await ctx.db
       .query('runtimeSessions')
@@ -2279,21 +2297,25 @@ export const getDetail = query({
         createdAt: workflowRun.createdAt,
       },
       runtimeEvents: sortedByNumber(runtimeEvents, (event) => event.occurredAt)
-        .map((event) => ({
-          id: event['_id'],
-          workflowRunId: event.workflowRunId,
-          provider: event.provider,
-          type: event.type,
-          occurredAt: event.occurredAt,
-          ...(event.summary === undefined ? {} : { summary: event.summary }),
-          ...(event.payloadJson === undefined ? {} : { payloadJson: event.payloadJson }),
-          ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
-          ...(event.sourceSessionId === undefined ? {} : { sourceSessionId: event.sourceSessionId }),
-          ...(event.sourceCommandId === undefined ? {} : { sourceCommandId: event.sourceCommandId }),
-          ...(event.sourceStream === undefined ? {} : { sourceStream: event.sourceStream }),
-          ...(event.sourceLine === undefined ? {} : { sourceLine: event.sourceLine }),
-          ...(event.sourceOffset === undefined ? {} : { sourceOffset: event.sourceOffset }),
-        })),
+        .map((event) => {
+          const payloadJson = runtimePayloadPreview(event.payloadJson)
+          return {
+            id: event['_id'],
+            workflowRunId: event.workflowRunId,
+            provider: event.provider,
+            type: event.type,
+            occurredAt: event.occurredAt,
+            ...(event.summary === undefined ? {} : { summary: event.summary }),
+            ...(payloadJson === undefined ? {} : { payloadJson }),
+            ...(event.idempotencyKey === undefined ? {} : { idempotencyKey: event.idempotencyKey }),
+            ...(event.sourceSessionId === undefined ? {} : { sourceSessionId: event.sourceSessionId }),
+            ...(event.sourceCommandId === undefined ? {} : { sourceCommandId: event.sourceCommandId }),
+            ...(event.sourceStream === undefined ? {} : { sourceStream: event.sourceStream }),
+            ...(event.sourceLine === undefined ? {} : { sourceLine: event.sourceLine }),
+            ...(event.sourceOffset === undefined ? {} : { sourceOffset: event.sourceOffset }),
+          }
+        }),
+      runtimeEventsTruncated,
       runtimeSessions: sortedByNumber(runtimeSessions, (session) => session.startedAt)
         .map((session) => ({
           id: session['_id'],

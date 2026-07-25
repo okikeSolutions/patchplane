@@ -520,7 +520,7 @@ Evidence:
 - The console shows workflow status, source/repository, trust state, selected workflow inspector, sandbox/log/decision evidence, detail tabs, timeline, and artifact-reference state.
 - The selected queue row and inspector share the same detail-backed trust state, so sandbox failure is not hidden behind a generic reviewed/needs-review row.
 - Workflow rows open an object-specific detail sheet directly while keeping the selected inspector state in sync.
-- Convex `workflowStarts.getDetail` returns prompt, workflow run, runtime events, and sandbox executions for the detail surface.
+- Convex `workflowStarts.getDetail` returns prompt, workflow run, a bounded recent runtime-event projection, and sandbox executions for the detail surface; full raw runtime output remains R2 evidence so noisy Pi deltas cannot freeze the client.
 - `apps/client/src/components/app-shell/workflow-console.test.tsx` covers queue rendering, search/trust-state filtering, inspector evidence, row-open behavior, detail tabs, and artifact-reference display.
 - `apps/client/src/components/app-shell/start-workflow-panel.test.tsx` covers TanStack Form submission behavior, authenticated-workspace gating, and Effect Standard Schema validation blocking invalid prompts.
 - `apps/client/src/components/app-shell/loading-workflow-console.test.tsx` guards against the old metric-card loading dashboard returning.
@@ -808,7 +808,7 @@ Implementation evidence:
 - System-ingestion mutations record candidate patches, automated review/policy output, and publication results.
 - Authenticated human decisions require a non-empty comment and `decision:approve` or `decision:reject` permission.
 - Core now has `ReviewService`, `PolicyService`, alpha deterministic review/policy layers, and `ProposeMergeDecision`.
-- The first reviewer records failed sandbox execution, failed configured test verification, and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
+- The first reviewer records failed sandbox execution, failed configured test verification, missing independent verification configuration, and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
 - The Patch Report read model derives its current status and decision section from the latest durable `HumanDecision`.
 - Maintainers and operators can approve, reject, or request changes through the authenticated UI/server path with a required comment and replay-safe decision idempotency key.
 - Decision publication creates durable pending/result records before and after GitHub calls, publishes issue comments and check runs, and reconciles retries through comment markers and check-run `external_id` values.

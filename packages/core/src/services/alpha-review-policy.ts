@@ -9,8 +9,17 @@ export const AlphaReviewServiceLayer = Layer.succeed(
       Effect.sync(() => {
         const findings = []
         const diffArtifact = input.evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
+        const verificationResults = input.verificationResults ?? []
 
-        for (const verification of input.verificationResults ?? []) {
+        if (verificationResults.length === 0) {
+          findings.push({
+            severity: 'warning' as const,
+            category: 'test' as const,
+            message: 'No independent verification command was configured; agent completion is not test evidence.',
+          })
+        }
+
+        for (const verification of verificationResults) {
           if (verification.status === 'succeeded') continue
           findings.push({
             severity: verification.kind === 'test' ? 'error' as const : 'warning' as const,
