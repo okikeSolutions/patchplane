@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, test, vi } from 'vitest'
 
@@ -53,6 +54,21 @@ async function runBeforeLoad(href: string) {
 }
 
 describe('/app auth guard', () => {
+  test('renders child routes through the authenticated app layout', () => {
+    const layoutSource = readFileSync(
+      new URL('./app.tsx', import.meta.url),
+      'utf8',
+    )
+    const indexSource = readFileSync(
+      new URL('./app.index.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(layoutSource).toContain('component: Outlet')
+    expect(layoutSource).not.toContain('component: AppWorkflowConsolePage')
+    expect(indexSource).toContain('component: AppWorkflowConsolePage')
+  })
+
   test('redirects signed-out users to sign in with the original app path', async () => {
     authState.user = null
 

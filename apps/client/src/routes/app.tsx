@@ -1,5 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
-import { AppWorkflowConsolePage } from '@/components/app-shell/app-workflow-console-page'
+import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { getInitialAuthServerFn } from '@/lib/workos-initial-auth'
 
 export const Route = createFileRoute('/app')({
@@ -12,5 +11,5 @@ export const Route = createFileRoute('/app')({
       href: `/api/auth/sign-in?returnPathname=${returnPathname}`,
     })
   },
-  component: AppWorkflowConsolePage,
+  component: Outlet,
 })

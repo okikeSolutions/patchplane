@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as ApiArtifactsUrlRouteImport } from './routes/api/artifacts/url'
 import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 import { Route as ApiAuthSignInRouteImport } from './routes/api/auth/sign-in'
@@ -28,6 +29,11 @@ const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const ApiArtifactsUrlRoute = ApiArtifactsUrlRouteImport.update({
   id: '/api/artifacts/url',
@@ -70,6 +76,7 @@ const ApiGithubInstallStartRoute = ApiGithubInstallStartRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/': typeof AppIndexRoute
   '/api/artifacts/url': typeof ApiArtifactsUrlRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
@@ -80,7 +87,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/app': typeof AppRouteWithChildren
+  '/app': typeof AppIndexRoute
   '/api/artifacts/url': typeof ApiArtifactsUrlRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
@@ -93,6 +100,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/': typeof AppIndexRoute
   '/api/artifacts/url': typeof ApiArtifactsUrlRoute
   '/api/auth/callback': typeof ApiAuthCallbackRoute
   '/api/auth/sign-in': typeof ApiAuthSignInRoute
@@ -106,6 +114,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/app/'
     | '/api/artifacts/url'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/app/'
     | '/api/artifacts/url'
     | '/api/auth/callback'
     | '/api/auth/sign-in'
@@ -163,6 +173,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/app/': {
+      id: '/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/artifacts/url': {
       id: '/api/artifacts/url'
@@ -217,10 +234,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppIndexRoute: typeof AppIndexRoute
   AppWorkflowsWorkflowRunIdRoute: typeof AppWorkflowsWorkflowRunIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppIndexRoute: AppIndexRoute,
   AppWorkflowsWorkflowRunIdRoute: AppWorkflowsWorkflowRunIdRoute,
 }
 
