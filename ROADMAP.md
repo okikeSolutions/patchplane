@@ -11,7 +11,7 @@
 
 This roadmap tracks the public execution path for PatchPlane's first alpha: one end-to-end, human-gated trust-boundary workflow for AI-generated code changes.
 
-`SPEC.md` defines the product thesis, trust model, architecture boundaries, and alpha success criteria. This roadmap defines the implementation order, milestone status, and public acceptance criteria.
+`SPEC.md` defines the product thesis, trust model, architecture boundaries, and alpha success criteria. This roadmap defines the implementation order, milestone status, and public acceptance criteria. [`docs/critical-path.md`](docs/critical-path.md) connects those milestones into the shortest product and release path from intake to a reproducible Patch Report.
 
 This file is intentionally OSS-safe. It documents product and engineering direction only. It does not include pricing strategy, customer notes, sales pipeline, founder/company strategy, or private credentials.
 
@@ -384,15 +384,17 @@ Acceptance criteria:
 
 ### M7.5 — Minimal TelemetryService and operational visibility
 
-**Status:** Complete for alpha operational telemetry
+**Status:** In progress — foundational Sentry capture is complete; critical-path coverage and sensitive-data hardening are open
 
 Scope:
 
-- Add a minimal `TelemetryService` interface.
+- Keep a minimal, provider-neutral `TelemetryService` interface.
 - Keep Effect structured logs and span-like context.
-- Add Sentry integration for operational errors and debugging.
+- Use Sentry for operational errors, bounded critical-path breadcrumbs, and debugging.
+- Treat observability input as a data-egress boundary: only explicitly allowed metadata may leave PatchPlane for Sentry.
 - Keep OpenTelemetry-compatible naming where practical.
 - Do not add an OpenTelemetry collector/backend for alpha.
+- Keep Sentry operational only; telemetry is never Patch Report evidence or provenance truth.
 
 Tasks:
 
@@ -400,14 +402,31 @@ Tasks:
 - [x] Add Sentry plugin/layer for captured exceptions and failed operations.
 - [x] Add `traceId`, `workflowRunId`, `pluginName`, `operation`, and `runtimeSessionId` fields consistently across future plugins.
 - [x] Ensure Sentry traces/logs are operational visibility only, not provenance truth.
-- [x] Capture server-function and webhook runtime failures through `TelemetryService.captureError`.
+- [x] Capture server-function and initial GitHub webhook runtime failures through `TelemetryService.captureError`.
 - [x] Centralize Effect-native telemetry annotations and failure capture helpers.
 - [x] Add unit coverage for telemetry context helpers, Sentry no-DSN no-op behavior, and best-effort Sentry failure handling.
 - [x] Manually validate a `TelemetryService.captureError` test event reaches Sentry.
+- [x] Define and document a telemetry data classification and allowlist for identifiers, stage, status, provider, platform, counts, durations, and typed error codes in [`docs/telemetry-data-policy.md`](docs/telemetry-data-policy.md).
+- [ ] Add centralized, recursively bounded sanitization at every configured Sentry boundary using event, breadcrumb, log, metric, and span hooks; strip URL query/hash values and redact credentials, cookies, authorization data, OAuth codes, tokens, prompts, diffs, commands, stdout/stderr, webhook bodies, artifact contents, and provider response bodies. The shared hooks and direct unit tests exist; SDK transport-bound verification remains open.
+- [ ] Stop forwarding raw `Cause.pretty` output or arbitrary exception/provider messages to Sentry; preserve full operational detail only in an explicitly safe local or durable evidence destination, and send typed categories plus bounded sanitized summaries to Sentry.
+- [ ] Extend the provider-neutral telemetry contract with bounded critical-path breadcrumbs, without importing Sentry into core.
+- [ ] Add explicit breadcrumbs for intake acceptance, attempt creation/claim, requirement persistence, sandbox lifecycle, candidate freeze, verification, review, policy, human decision, rerun, and publication claim/result transitions.
+- [ ] Wrap both source-control Worker entry points with request-scoped Cloudflare Sentry capture and flushing.
+- [ ] Capture actionable handled failures in rerun execution, runtime control, Patch Report assembly, decision publication, and canonical publication instead of relying on uncaught-exception capture or logs alone.
+- [ ] Classify expected validation, authorization, duplicate-delivery, and policy outcomes so they remain bounded diagnostics rather than noisy Sentry issues.
+- [ ] Attach searchable safe correlation metadata when known, including root/attempt workflow IDs, sandbox execution ID, candidate patch-set ID, decision/publication IDs, operation, and critical-path stage.
+- [ ] Attach environment and release/deployment identity to browser, Effect, and Cloudflare telemetry without exposing deployment credentials.
+- [ ] Add automated sentinel-secret tests proving events, logs, breadcrumbs, request URLs, and captured handled failures are sanitized before Sentry transport.
+- [ ] Run a deliberate non-sensitive deployed failure on each browser, Effect, client Worker, and source-control Worker surface and verify the correct Sentry project receives the issue with bounded breadcrumbs and correlation metadata.
 
 Acceptance criteria:
 
-- [x] Runtime failures can be diagnosed without reading only local logs.
+- [x] Foundational browser, client Worker, server-function, and initial webhook failures have a Sentry capture path.
+- [ ] Every unexpected failure on the alpha critical path, including immutable rerun and canonical publication, creates one actionable Sentry issue or is linked to an already captured upstream issue.
+- [ ] A captured critical-path issue includes bounded stage breadcrumbs and safe correlation IDs sufficient to reconstruct the operational sequence without using Sentry as provenance truth.
+- [ ] Automated sentinel tests demonstrate that secrets, auth/session material, prompts, diffs, command/output content, webhook bodies, artifact content, provider response bodies, and URL query/hash values do not leave through Sentry events, logs, spans, or breadcrumbs.
+- [ ] Expected user, authorization, idempotency, policy, and evidence-incomplete outcomes do not create duplicate or high-noise error issues.
+- [ ] Browser, Effect, client Worker, and source-control Worker events identify the deployed environment/release and can be correlated by safe trace/workflow identifiers.
 - [x] Product provenance remains in PatchPlane-owned storage/timeline records.
 - [x] No OpenTelemetry collector, ClickHouse, or observability platform is required for alpha.
 

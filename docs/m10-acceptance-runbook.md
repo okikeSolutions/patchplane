@@ -5,6 +5,10 @@ decision and GitHub publication loop. It separates the automated, credentialed
 pre-decision run from the authenticated human decision that must remain a real
 trust-boundary pause.
 
+The ordered product and release stages are summarized in
+[`critical-path.md`](./critical-path.md). This runbook supplies their concrete
+credentialed acceptance procedure.
+
 The current smoke automates intake through review readiness, verifies the
 durable post-decision state against GitHub, and can actively replay publication
 from the same durable human decision. It does **not** authenticate as a WorkOS

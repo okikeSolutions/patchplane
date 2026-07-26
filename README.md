@@ -23,6 +23,8 @@ Core docs:
 - [packages/plugins/README.md](./packages/plugins/README.md): infrastructure plugin and sandbox-backed Pi runtime architecture
 - [CONTRIBUTING.md](./CONTRIBUTING.md): development and contribution guide
 - [docs/philosophy.md](./docs/philosophy.md): product and developer-experience decision principles
+- [docs/critical-path.md](./docs/critical-path.md): product path from intake through evidence, decision, publication, and release proof
+- [docs/telemetry-data-policy.md](./docs/telemetry-data-policy.md): Sentry allowlist, prohibited content, and sanitization requirements
 - [docs/m10-acceptance-runbook.md](./docs/m10-acceptance-runbook.md): repeatable human-gated trust-loop acceptance
 - [AGENTS.md](./AGENTS.md): repository map, trust boundaries, and automation protocol
 - [REVIEW.md](./REVIEW.md): risk-based review checklist for Patchplane changes

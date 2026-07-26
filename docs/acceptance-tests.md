@@ -1,6 +1,8 @@
 # M0-M10 acceptance-test traceability
 
 This matrix is the source of truth for claims that an alpha milestone is tested.
+See [`critical-path.md`](./critical-path.md) for the ordered product and release
+path that these claims support.
 
 Status meanings:
 
@@ -64,55 +66,60 @@ diagnosis, and cleanup procedure.
 
 ## M7-M8.6: GitHub, telemetry, Daytona, infrastructure, and visibility
 
-| Milestone | Acceptance criterion                                                  | Evidence                                               | Status     |
-| --------- | --------------------------------------------------------------------- | ------------------------------------------------------ | ---------- |
-| M7        | GitHub installation-token flow stays in plugins                       | GitHub plugin and architecture tests                   | Automated  |
-| M7        | Verified GitHub events become generic workflow intake                 | GitHub plugin/core tests                               | Automated  |
-| M7        | GitHub results publish without Octokit objects crossing into core     | core publication and GitHub adapter tests              | Automated  |
-| M7.5      | Runtime failures are diagnosable through telemetry                    | telemetry and Sentry plugin tests                      | Automated  |
-| M7.5      | Product provenance remains PatchPlane-owned                           | backend provenance and architecture tests              | Automated  |
-| M7.5      | Alpha requires no collector/ClickHouse backend                        | architecture boundary suite                            | Automated  |
-| M8        | A workflow provisions, clones, executes, logs, and tears down Daytona | Daytona tests and RPC live smoke                       | Live       |
-| M8        | Sandboxes receive no long-lived control-plane credentials             | architecture boundary suite                            | Automated  |
-| M8        | Sandbox lifecycle/network policy is stored                            | Daytona and backend Convex tests                       | Automated  |
-| M8        | Raw evidence is durably R2-backed                                     | R2 plugin tests and RPC live artifact write            | Live       |
-| M8.25     | Dev deployment creates R2 and AI Gateway                              | opt-in Alchemy live test and 2026-07-10 dev deployment | Live       |
-| M8.25     | Runtime code does not import Alchemy provisioning APIs                | architecture boundary suite                            | Automated  |
-| M8.25     | Core imports no Alchemy/Cloudflare SDK types                          | architecture boundary suite                            | Automated  |
-| M8.5      | A GitHub/Daytona workflow is understandable in the UI                 | workflow console component tests                       | Automated  |
-| M8.5      | UI explains untrusted, pending, approved, and rejected states         | workflow trust-state/component tests                   | Automated  |
-| M8.6      | Hosted onboarding requires no CLI                                     | install-flow helper tests and historical live smoke    | Historical |
-| M8.6      | Hosted user need not create a GitHub App manually                     | deployed product configuration                         | Historical |
-| M8.6      | Hosted user need not copy a webhook URL                               | deployed product configuration                         | Historical |
-| M8.6      | User can connect GitHub and select repositories                       | `smoke:browser` GitHub connection journey              | Missing    |
-| M8.6      | PatchPlane lists connected repositories                               | backend and component tests                            | Automated  |
-| M8.6      | PatchPlane reacts to PR open/synchronize events                       | GitHub normalization/webhook tests                     | Automated  |
-| M8.6      | PatchPlane posts a clear PR trust report                              | publication tests and hosted trust-loop smoke          | Live       |
-| M8.6      | Dashboard shows connected repository and latest verification          | backend/component tests plus `smoke:browser` readback  | Missing    |
+| Milestone | Acceptance criterion                                                                                                           | Evidence                                                                  | Status     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------- |
+| M7        | GitHub installation-token flow stays in plugins                                                                                | GitHub plugin and architecture tests                                      | Automated  |
+| M7        | Verified GitHub events become generic workflow intake                                                                          | GitHub plugin/core tests                                                  | Automated  |
+| M7        | GitHub results publish without Octokit objects crossing into core                                                              | core publication and GitHub adapter tests                                 | Automated  |
+| M7.5      | Foundational browser, client Worker, server-function, and initial webhook failures have a Sentry capture path                  | telemetry, Sentry plugin, router, and Worker tests                        | Automated  |
+| M7.5      | Every unexpected alpha critical-path failure is captured once or linked to an upstream issue                                   | route/Worker failure-capture tests plus deployed deliberate-failure smoke | Missing    |
+| M7.5      | Captured critical-path issues include bounded stage breadcrumbs and safe correlation IDs                                       | telemetry contract/plugin tests plus deployed Sentry readback             | Missing    |
+| M7.5      | Sentry events, logs, spans, breadcrumbs, and URLs exclude classified sensitive content                                         | sentinel-secret sanitization and transport-boundary tests                 | Missing    |
+| M7.5      | Expected validation, authorization, idempotency, policy, and incomplete-evidence outcomes do not create noisy duplicate issues | telemetry classification and route tests                                  | Missing    |
+| M7.5      | Browser, Effect, client Worker, and source-control Worker telemetry identifies the deployed environment/release                | configuration tests plus deployed Sentry readback                         | Missing    |
+| M7.5      | Product provenance remains PatchPlane-owned                                                                                    | backend provenance and architecture tests                                 | Automated  |
+| M7.5      | Alpha requires no collector/ClickHouse backend                                                                                 | architecture boundary suite                                               | Automated  |
+| M8        | A workflow provisions, clones, executes, logs, and tears down Daytona                                                          | Daytona tests and RPC live smoke                                          | Live       |
+| M8        | Sandboxes receive no long-lived control-plane credentials                                                                      | architecture boundary suite                                               | Automated  |
+| M8        | Sandbox lifecycle/network policy is stored                                                                                     | Daytona and backend Convex tests                                          | Automated  |
+| M8        | Raw evidence is durably R2-backed                                                                                              | R2 plugin tests and RPC live artifact write                               | Live       |
+| M8.25     | Dev deployment creates R2 and AI Gateway                                                                                       | opt-in Alchemy live test and 2026-07-10 dev deployment                    | Live       |
+| M8.25     | Runtime code does not import Alchemy provisioning APIs                                                                         | architecture boundary suite                                               | Automated  |
+| M8.25     | Core imports no Alchemy/Cloudflare SDK types                                                                                   | architecture boundary suite                                               | Automated  |
+| M8.5      | A GitHub/Daytona workflow is understandable in the UI                                                                          | workflow console component tests                                          | Automated  |
+| M8.5      | UI explains untrusted, pending, approved, and rejected states                                                                  | workflow trust-state/component tests                                      | Automated  |
+| M8.6      | Hosted onboarding requires no CLI                                                                                              | install-flow helper tests and historical live smoke                       | Historical |
+| M8.6      | Hosted user need not create a GitHub App manually                                                                              | deployed product configuration                                            | Historical |
+| M8.6      | Hosted user need not copy a webhook URL                                                                                        | deployed product configuration                                            | Historical |
+| M8.6      | User can connect GitHub and select repositories                                                                                | `smoke:browser` GitHub connection journey                                 | Missing    |
+| M8.6      | PatchPlane lists connected repositories                                                                                        | backend and component tests                                               | Automated  |
+| M8.6      | PatchPlane reacts to PR open/synchronize events                                                                                | GitHub normalization/webhook tests                                        | Automated  |
+| M8.6      | PatchPlane posts a clear PR trust report                                                                                       | publication tests and hosted trust-loop smoke                             | Live       |
+| M8.6      | Dashboard shows connected repository and latest verification                                                                   | backend/component tests plus `smoke:browser` readback                     | Missing    |
 
 ## M9-M9.75: remote runtime, investigation UI, and evidence
 
-| Milestone | Acceptance criterion                                                               | Evidence                                             | Status    |
-| --------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | --------- |
-| M9        | Pi starts inside a remote sandbox-backed workflow                                  | Daytona/Pi RPC live smoke                            | Live      |
-| M9        | Hosted control plane excludes in-process Pi packages                               | architecture and bundle checks                       | Automated |
-| M9        | Provider/model access is configurable                                              | command/config tests and RPC live smoke              | Live      |
-| M9        | Pi events normalize through an Effect Stream boundary                              | Pi ingestion tests and RPC live smoke                | Live      |
-| M9        | Raw Pi objects/JSONL do not cross into core/UI                                     | architecture and protocol tests                      | Automated |
-| M9        | Daytona consumes the PatchPlane Pi runtime-session facade                          | architecture/source boundary test                    | Automated |
-| M9.5      | Existing PatchPlane shell remains the dashboard foundation                         | component tests                                      | Automated |
-| M9.5      | Real workflow details are understandable                                           | component tests; deployed browser run still required | Automated |
-| M9.5      | Review ergonomics support maintainer dogfooding                                    | `smoke:browser` typed workflow readback confirmation | Missing   |
+| Milestone | Acceptance criterion                                                                                                                       | Evidence                                                     | Status    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | --------- |
+| M9        | Pi starts inside a remote sandbox-backed workflow                                                                                          | Daytona/Pi RPC live smoke                                    | Live      |
+| M9        | Hosted control plane excludes in-process Pi packages                                                                                       | architecture and bundle checks                               | Automated |
+| M9        | Provider/model access is configurable                                                                                                      | command/config tests and RPC live smoke                      | Live      |
+| M9        | Pi events normalize through an Effect Stream boundary                                                                                      | Pi ingestion tests and RPC live smoke                        | Live      |
+| M9        | Raw Pi objects/JSONL do not cross into core/UI                                                                                             | architecture and protocol tests                              | Automated |
+| M9        | Daytona consumes the PatchPlane Pi runtime-session facade                                                                                  | architecture/source boundary test                            | Automated |
+| M9.5      | Existing PatchPlane shell remains the dashboard foundation                                                                                 | component tests                                              | Automated |
+| M9.5      | Real workflow details are understandable                                                                                                   | component tests; deployed browser run still required         | Automated |
+| M9.5      | Review ergonomics support maintainer dogfooding                                                                                            | `smoke:browser` typed workflow readback confirmation         | Missing   |
 | M9.75     | Patch Report V1 answers request/attempt/candidate/execution/verification gaps/review/policy/decision/publication without collapsing states | domain, assembler, backend, publication, and component tests | Automated |
-| M9.75     | Legacy evidence cannot be silently represented as a V1 report                     | Patch Report assembler regression test               | Automated |
-| M9.75     | Required verification is declared before execution and bound to the frozen candidate digest | core workflow, policy, Daytona, and backend tests | Automated |
-| M9.75     | Missing, blocked, errored, mutated, platform-unavailable, truncated, or mismatched required evidence is never reported as passed | verification coverage, policy, report, and UI tests | Automated |
-| M9.75     | A fresh real dogfood run displays truthful candidate-bound V1 evidence and explicit native-platform gaps | `smoke:trust-loop` plus authenticated browser readback | Missing   |
-| M9.75     | Workflow stores raw artifacts in R2                                                | R2 tests and live RPC artifact write                 | Live      |
-| M9.75     | Convex stores artifact metadata/hashes/references                                  | backend Convex tests                                 | Automated |
-| M9.75     | UI links reports/provenance to evidence                                            | workflow component tests                             | Automated |
-| M9.75     | Raw artifacts are not analytics/telemetry truth                                    | architecture boundary suite                          | Automated |
-| M9.75     | R2 reads back the exact non-empty uploaded evidence bytes and matching stored hash | Daytona/Pi RPC live smoke                            | Live      |
+| M9.75     | Legacy evidence cannot be silently represented as a V1 report                                                                              | Patch Report assembler regression test                       | Automated |
+| M9.75     | Required verification is declared before execution and bound to the frozen candidate digest                                                | core workflow, policy, Daytona, and backend tests            | Automated |
+| M9.75     | Missing, blocked, errored, mutated, platform-unavailable, truncated, or mismatched required evidence is never reported as passed           | verification coverage, policy, report, and UI tests          | Automated |
+| M9.75     | A fresh real dogfood run displays truthful candidate-bound V1 evidence and explicit native-platform gaps                                   | `smoke:trust-loop` plus authenticated browser readback       | Missing   |
+| M9.75     | Workflow stores raw artifacts in R2                                                                                                        | R2 tests and live RPC artifact write                         | Live      |
+| M9.75     | Convex stores artifact metadata/hashes/references                                                                                          | backend Convex tests                                         | Automated |
+| M9.75     | UI links reports/provenance to evidence                                                                                                    | workflow component tests                                     | Automated |
+| M9.75     | Raw artifacts are not analytics/telemetry truth                                                                                            | architecture boundary suite                                  | Automated |
+| M9.75     | R2 reads back the exact non-empty uploaded evidence bytes and matching stored hash                                                         | Daytona/Pi RPC live smoke                                    | Live      |
 
 ## M9.9: public alpha landing page
 
@@ -126,21 +133,21 @@ diagnosis, and cleanup procedure.
 
 ## M10: evidence-backed decision and publication
 
-| Milestone | Acceptance criterion                                                                               | Evidence                                                         | Status    |
-| --------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------- |
-| M10       | Patch stays untrusted until declared candidate-bound evidence, policy, and review complete          | policy, Patch Report, backend precondition tests                 | Automated |
-| M10       | Human can approve/reject/request changes; incomplete verification approval requires a durable explicit override reason | backend and client decision tests | Automated |
-| M10       | Rerun creates an immutable child attempt with reason, pinned revision, idempotency, and one atomic execution claim | backend/core/source-control/client tests | Automated |
-| M10       | A real authenticated rerun executes the child attempt and preserves the parent report | `smoke:trust-loop` plus browser readback | Missing   |
-| M10       | Decision rationale is backed by persisted evidence/provenance                                      | backend/core/component tests                                     | Automated |
-| M10       | Review-ready acceptance uses the latest coherent execution, candidate, review, and policy records  | backend and trust-loop smoke regression tests                    | Automated |
-| M10       | Decision publication remains pinned to the candidate projection reviewed by the human              | backend and client decision-publication tests                    | Automated |
-| M10       | Candidate check publication requires exact candidate `headSha`; no PR-head fallback                | core publication and GitHub adapter tests                        | Automated |
-| M10       | Concurrent publication dispatch has one leased owner and canonical replay identity                 | backend/core/GitHub adapter tests                                | Automated |
-| M10       | Real authenticated decision updates GitHub and reads back in UI                                    | `smoke:trust-loop` replay plus `smoke:browser` readback          | Missing   |
-| M10       | Publication retry creates no duplicate GitHub output                                               | core/GitHub adapter tests and `smoke:trust-loop` provider replay | Live      |
-| M10       | Durable normalized records deterministically assemble a Patch Report linked to complete provenance | domain, backend, and component tests                             | Automated |
-| M10       | GitHub publication emits an evidence-backed result                                                 | check-run/comment publication tests and live trust-loop replay   | Automated |
+| Milestone | Acceptance criterion                                                                                                   | Evidence                                                         | Status    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------- |
+| M10       | Patch stays untrusted until declared candidate-bound evidence, policy, and review complete                             | policy, Patch Report, backend precondition tests                 | Automated |
+| M10       | Human can approve/reject/request changes; incomplete verification approval requires a durable explicit override reason | backend and client decision tests                                | Automated |
+| M10       | Rerun creates an immutable child attempt with reason, pinned revision, idempotency, and one atomic execution claim     | backend/core/source-control/client tests                         | Automated |
+| M10       | A real authenticated rerun executes the child attempt and preserves the parent report                                  | `smoke:trust-loop` plus browser readback                         | Missing   |
+| M10       | Decision rationale is backed by persisted evidence/provenance                                                          | backend/core/component tests                                     | Automated |
+| M10       | Review-ready acceptance uses the latest coherent execution, candidate, review, and policy records                      | backend and trust-loop smoke regression tests                    | Automated |
+| M10       | Decision publication remains pinned to the candidate projection reviewed by the human                                  | backend and client decision-publication tests                    | Automated |
+| M10       | Candidate check publication requires exact candidate `headSha`; no PR-head fallback                                    | core publication and GitHub adapter tests                        | Automated |
+| M10       | Concurrent publication dispatch has one leased owner and canonical replay identity                                     | backend/core/GitHub adapter tests                                | Automated |
+| M10       | Real authenticated decision updates GitHub and reads back in UI                                                        | `smoke:trust-loop` replay plus `smoke:browser` readback          | Missing   |
+| M10       | Publication retry creates no duplicate GitHub output                                                                   | core/GitHub adapter tests and `smoke:trust-loop` provider replay | Live      |
+| M10       | Durable normalized records deterministically assemble a Patch Report linked to complete provenance                     | domain, backend, and component tests                             | Automated |
+| M10       | GitHub publication emits an evidence-backed result                                                                     | check-run/comment publication tests and live trust-loop replay   | Automated |
 
 ## Completion rule
 
