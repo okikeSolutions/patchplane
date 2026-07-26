@@ -9,6 +9,7 @@ import { publicErrorMessage } from '@patchplane/domain/errors'
 import { getSourceControlWorker } from '@/env'
 import { effectServerFn } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
+import { loadConfiguredConvexUrl } from './convex-url'
 
 const authorizeRuntimeControl = makeFunctionReference<
   'query',
@@ -25,67 +26,89 @@ const SourceControlRuntimeControlResponse = Schema.Struct({
 
 type SourceControlRuntimeControlResponse = Schema.Schema.Type<typeof SourceControlRuntimeControlResponse>
 
-function configuredConvexUrl() {
-  const value = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
-  if (value === undefined || value.trim().length === 0) {
-    throw new Error('CONVEX_URL or VITE_CONVEX_URL is required')
-  }
-  return value.replace(/\/$/, '')
-}
+class RuntimeControlRequestError extends Schema.ErrorClass<RuntimeControlRequestError>('RuntimeControlRequestError')({
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
-async function authorizeWorkflowRun(workflowRunId: string, authToken?: string) {
-  const convex = new ConvexHttpClient(configuredConvexUrl())
+const authorizeWorkflowRun = Effect.fnUntraced(function*(workflowRunId: string, authToken?: string) {
+  const convexUrl = yield* loadConfiguredConvexUrl().pipe(
+    Effect.mapError((cause) => new RuntimeControlRequestError({
+      message: 'Runtime control configuration is invalid',
+      cause,
+    })),
+  )
+  const convex = new ConvexHttpClient(convexUrl.toString().replace(/\/$/, ''))
   if (authToken !== undefined) convex.setAuth(authToken)
-  await convex.query(authorizeRuntimeControl, { workflowRunId })
-}
+  yield* Effect.tryPromise({
+    try: () => convex.query(authorizeRuntimeControl, { workflowRunId }),
+    catch: (cause) => new RuntimeControlRequestError({
+      message: 'Runtime control authorization failed',
+      cause,
+    }),
+  })
+})
 
-function validateControlInput(input: typeof RuntimeControlInput.Type) {
+function validateControlInput(input: RuntimeControlInput) {
   if ((input.operation === 'steer' || input.operation === 'followUp') && input.message?.trim()) return undefined
   if (input.operation === 'abort' || input.operation === 'terminate') return undefined
   return 'Message is required for steer and follow-up runtime controls'
 }
 
-async function sendRuntimeControl(input: typeof RuntimeControlInput.Type): Promise<SourceControlRuntimeControlResponse> {
-  const client = Cloudflare.toHttpClient(
-    Cloudflare.fromCloudflareFetcher(await getSourceControlWorker()),
+const sendRuntimeControl = Effect.fnUntraced(function*(input: RuntimeControlInput) {
+  const fetcher = yield* Effect.tryPromise({
+    try: () => getSourceControlWorker(),
+    catch: (cause) => new RuntimeControlRequestError({
+      message: 'Source-control Worker binding is unavailable',
+      cause,
+    }),
+  })
+  const client = Cloudflare.toHttpClient(Cloudflare.fromCloudflareFetcher(fetcher))
+  return yield* client.execute(
+    HttpClientRequest.post('https://source-control-worker/internal/runtime/control', {
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: HttpBody.text(JSON.stringify(input), 'application/json'),
+    }),
+  ).pipe(
+    Effect.flatMap((workerResponse) => workerResponse.json),
+    Effect.flatMap(Schema.decodeUnknownEffect(SourceControlRuntimeControlResponse)),
+    Effect.mapError((cause) => new RuntimeControlRequestError({
+      message: 'Runtime control request failed',
+      cause,
+    })),
   )
-  const { patchPlaneRuntime } = await import('@/effect/runtime')
-  return await patchPlaneRuntime.runPromise(
-    client.execute(
-      HttpClientRequest.post('https://source-control-worker/internal/runtime/control', {
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: HttpBody.text(JSON.stringify(input), 'application/json'),
-      }),
-    ).pipe(
-      Effect.flatMap((workerResponse) => workerResponse.json),
-      Effect.flatMap(Schema.decodeUnknownEffect(SourceControlRuntimeControlResponse)),
-    ),
-  )
-}
+})
 
 export const controlRuntimeSessionServerFn = effectServerFn({
   method: 'POST',
   input: RuntimeControlInput,
   operation: 'controlRuntimeSessionServerFn',
-  effect: (input) =>
-    Effect.promise(async () => {
-      const validationError = validateControlInput(input)
-      if (validationError !== undefined) {
-        return { status: 'missing_message' as const }
-      }
+  effect: (input) => Effect.gen(function* () {
+    const validationError = validateControlInput(input)
+    if (validationError !== undefined) {
+      return { status: 'missing_message' as const }
+    }
 
-      const authRequest = await getWorkOSAuthRequest()
-      await authorizeWorkflowRun(input.workflowRunId, authRequest.accessToken)
-      const response = await sendRuntimeControl(input)
+    const authRequest = yield* Effect.tryPromise({
+      try: () => getWorkOSAuthRequest(),
+      catch: (cause) => new RuntimeControlRequestError({
+        message: 'Unable to load the authenticated session',
+        cause,
+      }),
+    })
+    yield* authorizeWorkflowRun(input.workflowRunId, authRequest.accessToken)
+    const response = yield* sendRuntimeControl(input)
 
-      if (!response.ok) {
-        throw new Error(response.error ?? 'Runtime control failed')
-      }
+    if (!response.ok) {
+      return yield* new RuntimeControlRequestError({
+        message: response.error ?? 'Runtime control failed',
+      })
+    }
 
-      return { status: response.status ?? 'no_active_session' as const }
-    }),
+    return { status: response.status ?? 'no_active_session' as const }
+  }),
   success: (result: RuntimeControlResult) => result,
   failure: (cause: unknown) => ({
     error: publicErrorMessage(cause, 'Runtime control failed'),

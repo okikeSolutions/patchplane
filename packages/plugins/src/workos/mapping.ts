@@ -1,8 +1,4 @@
-import type {
-  Organization,
-  OrganizationMembership,
-  User,
-} from '@workos-inc/node'
+import { Schema } from 'effect'
 import type { Actor } from '@patchplane/domain/actor'
 import {
   isPatchPlanePermission,
@@ -18,6 +14,43 @@ import type { Membership } from '@patchplane/domain/membership'
 import type { Permission } from '@patchplane/domain/permission'
 import type { Workspace } from '@patchplane/domain/workspace'
 
+export const WorkOSUserResponse = Schema.Struct({
+  id: Schema.NonEmptyString,
+  email: Schema.NonEmptyString,
+  name: Schema.NullOr(Schema.NonEmptyString),
+})
+export type WorkOSUserResponse = Schema.Schema.Type<typeof WorkOSUserResponse>
+export const decodeWorkOSUserResponse = Schema.decodeUnknownEffect(
+  WorkOSUserResponse,
+)
+
+export const WorkOSOrganizationResponse = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+})
+export type WorkOSOrganizationResponse = Schema.Schema.Type<
+  typeof WorkOSOrganizationResponse
+>
+export const decodeWorkOSOrganizationResponse = Schema.decodeUnknownEffect(
+  WorkOSOrganizationResponse,
+)
+
+const WorkOSRoleResponse = Schema.Struct({ slug: Schema.NonEmptyString })
+export const WorkOSMembershipResponse = Schema.Struct({
+  id: Schema.NonEmptyString,
+  organizationId: Schema.NonEmptyString,
+  status: Schema.Literals(['active', 'inactive', 'pending']),
+  userId: Schema.NonEmptyString,
+  role: WorkOSRoleResponse,
+  roles: Schema.optional(Schema.Array(WorkOSRoleResponse)),
+})
+export type WorkOSMembershipResponse = Schema.Schema.Type<
+  typeof WorkOSMembershipResponse
+>
+export const decodeWorkOSMembershipResponse = Schema.decodeUnknownEffect(
+  WorkOSMembershipResponse,
+)
+
 export { isPatchPlanePermission, normalizeWorkspaceRole }
 
 export function mapWorkOSPermissions(
@@ -26,7 +59,7 @@ export function mapWorkOSPermissions(
   return mapExternalPermissions(permissions)
 }
 
-export function mapWorkOSUserToActor(user: User): Actor {
+export function mapWorkOSUserToActor(user: WorkOSUserResponse): Actor {
   return {
     id: makeWorkOSActorId(user.id),
     displayName: user.name ?? user.email,
@@ -34,7 +67,7 @@ export function mapWorkOSUserToActor(user: User): Actor {
 }
 
 export function mapWorkOSOrganizationToWorkspace(
-  organization: Organization,
+  organization: WorkOSOrganizationResponse,
 ): Workspace {
   return {
     id: makeWorkOSWorkspaceId(organization.id),
@@ -50,7 +83,7 @@ export function mapWorkOSRolesToPermissions(
 }
 
 export function mapWorkOSMembershipToMembership(
-  membership: OrganizationMembership,
+  membership: WorkOSMembershipResponse,
 ): Membership {
   const role = normalizeWorkspaceRole(membership.role.slug)
   const roles = [

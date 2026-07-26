@@ -1,7 +1,7 @@
 import { Console, Effect, Option } from 'effect'
 import { CliError, Command, Flag } from 'effect/unstable/cli'
-import { getPatchPlanePlugin } from '@patchplane/plugins/registry'
-import { CliEnvFile, envTemplateText } from '../services/env-file'
+import type { PatchPlanePluginId } from '@patchplane/plugins/registry'
+import { CliEnvFile, envTemplateText, isPluginId } from '../services/env-file'
 import { failCommand, failSilently } from '../services/errors'
 import { formatEnvCheckResults } from '../output/format'
 
@@ -9,9 +9,10 @@ const pluginsFlag = Flag.string('plugins').pipe(
   Flag.withDescription('Comma-separated plugin ids to inspect, e.g. github,convex'),
   Flag.withMetavar('IDS'),
   Flag.mapEffect((value) => {
-    const unknown = value.split(',').map((item) => item.trim()).filter(Boolean).filter((id) => getPatchPlanePlugin(id) === undefined)
+    const values = value.split(',').map((item) => item.trim()).filter(Boolean)
+    const unknown = values.filter((id) => !isPluginId(id))
     return unknown.length === 0
-      ? Effect.succeed(value)
+      ? Effect.succeed(values.filter(isPluginId))
       : Effect.fail(new CliError.InvalidValue({
         option: 'plugins',
         value,
@@ -38,7 +39,7 @@ const envFlags = {
 
 function selection(input: {
   readonly surface: Option.Option<'app' | 'githubWebhook'>
-  readonly plugins: Option.Option<string>
+  readonly plugins: Option.Option<ReadonlyArray<PatchPlanePluginId>>
   readonly includeOptional: boolean
   readonly json: boolean
 }) {

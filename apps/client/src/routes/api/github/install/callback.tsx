@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import * as Cloudflare from 'alchemy/Cloudflare/Bridge'
-import { Effect, Schema } from 'effect'
+import { Config, Effect, Schema } from 'effect'
 import * as HttpBody from 'effect/unstable/http/HttpBody'
 import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
 import { getSourceControlWorker } from '@/env'
@@ -65,13 +65,10 @@ const syncInstallationResponseSchema = Schema.Struct({
   })),
 })
 
-function configuredConvexUrl() {
-  const value = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
-  if (value === undefined || value.trim().length === 0) {
-    throw new Error('CONVEX_URL or VITE_CONVEX_URL is required')
-  }
-  return value.replace(/\/$/, '')
-}
+const configuredConvexUrl = Config.nonEmptyString('CONVEX_URL').pipe(
+  Config.orElse(() => Config.nonEmptyString('VITE_CONVEX_URL')),
+  Config.map((value) => value.replace(/\/$/, '')),
+)
 
 async function syncGitHubInstallation(input: {
   readonly installationId: string
@@ -113,9 +110,10 @@ export const Route = createFileRoute('/api/github/install/callback')({
 
         const { getAuth } = await import('@workos/authkit-tanstack-react-start')
         const auth = await getAuth()
+        const convexUrl = await Effect.runPromise(configuredConvexUrl)
         const organizationId = 'organizationId' in auth ? auth.organizationId : undefined
         const accessToken = 'accessToken' in auth ? auth.accessToken : undefined
-        const convex = new ConvexHttpClient(configuredConvexUrl())
+        const convex = new ConvexHttpClient(convexUrl)
         if (accessToken) {
           convex.setAuth(accessToken)
         }

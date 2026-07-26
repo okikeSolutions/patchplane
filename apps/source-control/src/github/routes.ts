@@ -8,7 +8,7 @@ import { GitHubProviderPlugin } from '@patchplane/plugins/github/provider-plugin
 import { SentryTelemetryPlugin } from '@patchplane/plugins/sentry/telemetry-plugin'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { Cause, Crypto, Effect, Exit, Layer, ManagedRuntime, Redacted, Schema } from 'effect'
+import { Cause, Crypto, Effect, Exit, Layer, ManagedRuntime, Option, Redacted, Schema } from 'effect'
 import {
   PATCHPLANE_DEFAULT_AGENT_PROVIDER,
   loadSourceControlRouteConfig,
@@ -40,6 +40,7 @@ import {
 import { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import {
   HumanDecisionId,
+  WorkspaceId,
   WorkflowRunId,
   makeGitHubAppActorId,
   makeWorkspaceId,
@@ -56,7 +57,7 @@ const lookupGitHubWebhookRoute = makeFunctionReference<
     installationId: string
     repositoryExternalId: string
   },
-  { workspaceId: string; repositoryFullName: string; status: string } | null
+  unknown
 >('connectedRepositories:lookupGitHubWebhookRoute')
 
 const MissingR2ArtifactsLayer = Layer.succeed(ArtifactsService, ArtifactsService.of({
@@ -121,12 +122,19 @@ export function makeSourceControlRuntime(env: WorkerEnv): SourceControlRuntime {
 
 class SourceControlWorkerRequestError extends Schema.ErrorClass<SourceControlWorkerRequestError>('SourceControlWorkerRequestError')({
   message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
 const syncInstallationRequestSchema = Schema.Struct({
-  installationId: Schema.String,
-  workspaceId: Schema.String,
+  installationId: Schema.NonEmptyString,
+  workspaceId: WorkspaceId,
 })
+
+const connectedRepositoryRouteSchema = Schema.NullOr(Schema.Struct({
+  workspaceId: WorkspaceId,
+  repositoryFullName: Schema.NonEmptyString,
+  status: Schema.NonEmptyString,
+}))
 
 const rerunExecutionRequestSchema = Schema.Struct({
   traceId: Schema.String,
@@ -164,8 +172,8 @@ const decisionPublicationFixtureSchema = Schema.Struct({
   evidenceTruncated: Schema.Boolean,
   verification: Schema.Struct({
     status: Schema.Literals(['not-configured', 'incomplete', 'passed', 'failed']),
-    requiredCount: Schema.Number,
-    passedCount: Schema.Number,
+    requiredCount: Schema.Finite,
+    passedCount: Schema.Finite,
   }),
   candidateHeadSha: Schema.optional(Schema.String),
   publicationResults: Schema.Array(PublicationResult),
@@ -253,7 +261,7 @@ function parseGitHubWorkspaceId(config: SourceControlRouteConfigType) {
 
 function resolvePiExecutionConfig(config: SourceControlRouteConfigType) {
   const provider = config.piProvider.trim() || (
-    config.cloudflareApiKey.trim().length > 0 &&
+    Option.isSome(config.cloudflareApiKey) &&
       config.cloudflareAccountId.trim().length > 0 &&
       config.cloudflareGatewayId.trim().length > 0
       ? 'cloudflare-ai-gateway'
@@ -282,34 +290,46 @@ function resolveEvidenceCaptureConfig(config: SourceControlRouteConfigType) {
   }
 }
 
-function loadGitHubWebhookRouteConfig(config: SourceControlRouteConfigType) {
-  const mode = config.webhookExecution === 'daytona-command'
-    ? 'daytona-command'
-    : 'daytona-pi'
+const loadGitHubWebhookRouteConfig = Effect.fnUntraced(
+  function*(config: SourceControlRouteConfigType) {
+    return yield* Effect.try({
+      try: () => {
+        const workspaceId = parseGitHubWorkspaceId(config)
+        const repositoryAllowlist = parseRepositoryAllowlist(
+          config.repositoryAllowlist,
+        )
 
-  if (mode === 'daytona-pi') {
-    return {
-      workspaceId: parseGitHubWorkspaceId(config),
-      repositoryAllowlist: parseRepositoryAllowlist(config.repositoryAllowlist),
-      execution: {
-        mode,
-        ...resolvePiExecutionConfig(config),
-        ...resolveEvidenceCaptureConfig(config),
+        if (config.webhookExecution === 'daytona-pi') {
+          return {
+            workspaceId,
+            repositoryAllowlist,
+            execution: {
+              mode: config.webhookExecution,
+              ...resolvePiExecutionConfig(config),
+              ...resolveEvidenceCaptureConfig(config),
+            },
+          } as const
+        }
+
+        return {
+          workspaceId,
+          repositoryAllowlist,
+          execution: {
+            mode: config.webhookExecution,
+            command: DAYTONA_DEFAULT_COMMAND,
+            timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+            ...resolveEvidenceCaptureConfig(config),
+          },
+        } as const
       },
-    } as const
-  }
-
-  return {
-    workspaceId: parseGitHubWorkspaceId(config),
-    repositoryAllowlist: parseRepositoryAllowlist(config.repositoryAllowlist),
-    execution: {
-      mode,
-      command: DAYTONA_DEFAULT_COMMAND,
-      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
-      ...resolveEvidenceCaptureConfig(config),
-    },
-  } as const
-}
+      catch: (cause) =>
+        new SourceControlWorkerRequestError({
+          message: 'GitHub webhook route configuration is invalid',
+          cause,
+        }),
+    })
+  },
+)
 
 async function randomTraceId(runtime: SourceControlRuntime) {
   return await runtime.runPromise(
@@ -320,21 +340,20 @@ async function randomTraceId(runtime: SourceControlRuntime) {
   )
 }
 
-async function resolveGitHubWebhookWorkspace(input: {
+function resolveGitHubWebhookWorkspace(input: {
   readonly repositoryFullName: string
-  readonly fallbackWorkspaceId: string
+  readonly fallbackWorkspaceId: WorkspaceId
   readonly repositoryAllowlist: ReadonlySet<string>
-  readonly lookupConnectedRepository: () => Promise<{ readonly workspaceId: string } | null>
+  readonly hostedRoute: { readonly workspaceId: WorkspaceId } | null
 }) {
-  const hostedRoute = await input.lookupConnectedRepository()
   const allowlisted = input.repositoryAllowlist.has(input.repositoryFullName.toLowerCase())
 
-  if (hostedRoute === null && !allowlisted) {
+  if (input.hostedRoute === null && !allowlisted) {
     return { workspaceId: undefined, ignoredReason: 'unconnected_repository' as const }
   }
 
   return {
-    workspaceId: hostedRoute?.workspaceId ?? input.fallbackWorkspaceId,
+    workspaceId: input.hostedRoute?.workspaceId ?? input.fallbackWorkspaceId,
     ignoredReason: undefined,
   }
 }
@@ -366,12 +385,16 @@ function isPatchPlaneResultComment(input: {
 }
 
 export async function syncGitHubInstallation(request: Request, runtime: SourceControlRuntime) {
-  const input = await runtime.runPromise(
+  const inputExit = await runtime.runPromiseExit(
     Effect.tryPromise({
       try: () => request.json(),
       catch: (cause) => new SourceControlWorkerRequestError({ message: `Invalid JSON body: ${String(cause)}` }),
     }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(syncInstallationRequestSchema))),
   )
+  if (Exit.isFailure(inputExit)) {
+    return jsonResponse({ ok: false, error: 'Invalid installation sync request' }, { status: 400 })
+  }
+  const input = inputExit.value
 
   const result = await runtime.runPromise(
     Effect.gen(function* () {
@@ -467,8 +490,18 @@ export async function executeWorkflowRerun(request: Request, env: WorkerEnv, run
     return jsonResponse({ ok: false, traceId, error: 'Invalid rerun execution request' }, { status: 400 })
   }
 
-  const sourceConfig = loadSourceControlRouteConfig(env)
-  const routeConfig = loadGitHubWebhookRouteConfig(sourceConfig)
+  const sourceConfigExit = await runtime.runPromiseExit(loadSourceControlRouteConfig(env))
+  if (Exit.isFailure(sourceConfigExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Workflow execution is not configured' }, { status: 503 })
+  }
+  const sourceConfig = sourceConfigExit.value
+  const routeConfigExit = await runtime.runPromiseExit(
+    loadGitHubWebhookRouteConfig(sourceConfig),
+  )
+  if (Exit.isFailure(routeConfigExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Workflow execution is not configured' }, { status: 503 })
+  }
+  const routeConfig = routeConfigExit.value
   const secret = systemIngestionSecret(sourceConfig)
   if (secret === undefined) {
     return jsonResponse({ ok: false, traceId, error: 'Workflow execution is not configured' }, { status: 503 })
@@ -573,7 +606,11 @@ export async function publishDecision(request: Request, env: WorkerEnv, runtime:
     return jsonResponse({ ok: false, traceId, error: 'Workflow and human decision IDs required' }, { status: 400 })
   }
 
-  const routeConfig = loadSourceControlRouteConfig(env)
+  const routeConfigExit = await runtime.runPromiseExit(loadSourceControlRouteConfig(env))
+  if (Exit.isFailure(routeConfigExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Decision publication is not configured' }, { status: 503 })
+  }
+  const routeConfig = routeConfigExit.value
   const secret = systemIngestionSecret(routeConfig)
   if (secret === undefined) {
     return jsonResponse({ ok: false, traceId, error: 'Decision publication is not configured' }, { status: 503 })
@@ -661,17 +698,11 @@ export async function publishDecision(request: Request, env: WorkerEnv, runtime:
 }
 
 export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runtime: SourceControlRuntime) {
-  const config = (() => {
-    try {
-      return loadSourceControlRouteConfig(env)
-    } catch (error) {
-      return error instanceof Error ? error : new Error(String(error))
-    }
-  })()
-
-  if (config instanceof Error) {
-    return jsonResponse({ ok: false, error: config.message }, { status: 500 })
+  const configExit = await runtime.runPromiseExit(loadSourceControlRouteConfig(env))
+  if (Exit.isFailure(configExit)) {
+    return jsonResponse({ ok: false, error: 'GitHub webhook configuration is incomplete' }, { status: 500 })
   }
+  const config = configExit.value
 
   const deliveryId = requiredHeader(request, 'x-github-delivery')
   const eventName = requiredHeader(request, 'x-github-event')
@@ -689,17 +720,16 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
 
   const traceId = await randomTraceId(runtime)
   const payload = await request.text()
-  const routeConfig = (() => {
-    try {
-      return loadGitHubWebhookRouteConfig(config)
-    } catch (error) {
-      return error instanceof Error ? error : new Error(String(error))
-    }
-  })()
-
-  if (routeConfig instanceof Error) {
-    return jsonResponse({ ok: false, error: routeConfig.message }, { status: 500 })
+  const routeConfigExit = await runtime.runPromiseExit(
+    loadGitHubWebhookRouteConfig(config),
+  )
+  if (Exit.isFailure(routeConfigExit)) {
+    return jsonResponse(
+      { ok: false, error: 'GitHub webhook configuration is invalid' },
+      { status: 500 },
+    )
   }
+  const routeConfig = routeConfigExit.value
 
   const program = Effect.gen(function* () {
     const event = yield* IngestGitHubWebhook({ deliveryId, eventName, signature, payload })
@@ -720,27 +750,38 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
       }
     }
     const secret = systemIngestionSecret(config)
-    const resolvedRoute = yield* Effect.tryPromise({
-      try: () => resolveGitHubWebhookWorkspace({
-        repositoryFullName,
-        fallbackWorkspaceId: routeConfig.workspaceId,
-        repositoryAllowlist: routeConfig.repositoryAllowlist,
-        lookupConnectedRepository: async () => {
-          if (secret === undefined) return null
-          const convex = new ConvexHttpClient(configuredConvexUrl(config))
-          return await convex.query(lookupGitHubWebhookRoute, {
-            systemSecret: secret,
-            installationId: String(event.installationId),
-            repositoryExternalId: String(event.repositoryId),
-          })
-        },
-      }),
-      catch: (cause) =>
-        new SourceControlError({
-          operation: 'githubWorker.lookupConnectedRepository',
-          message: 'Convex failed to look up connected GitHub repository',
-          cause,
-        }),
+    const hostedRoute = secret === undefined
+      ? null
+      : yield* Effect.tryPromise({
+          try: () => {
+            const convex = new ConvexHttpClient(configuredConvexUrl(config))
+            return convex.query(lookupGitHubWebhookRoute, {
+              systemSecret: secret,
+              installationId: String(event.installationId),
+              repositoryExternalId: String(event.repositoryId),
+            })
+          },
+          catch: (cause) =>
+            new SourceControlError({
+              operation: 'githubWorker.lookupConnectedRepository',
+              message: 'Convex failed to look up connected GitHub repository',
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(connectedRepositoryRouteSchema)),
+          Effect.mapError((cause) => cause instanceof SourceControlError
+            ? cause
+            : new SourceControlError({
+                operation: 'githubWorker.lookupConnectedRepository.decode',
+                message: 'Convex returned an invalid connected repository route',
+                cause,
+              })),
+        )
+    const resolvedRoute = resolveGitHubWebhookWorkspace({
+      repositoryFullName,
+      fallbackWorkspaceId: routeConfig.workspaceId,
+      repositoryAllowlist: routeConfig.repositoryAllowlist,
+      hostedRoute,
     })
 
     if (resolvedRoute.ignoredReason === 'unconnected_repository') {
@@ -758,10 +799,9 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
       }
     }
 
-    const workspaceId = makeWorkspaceId(resolvedRoute.workspaceId)
     const intake = yield* GitHubEventToWorkflowIntake(event, {
       actor: makeGitHubActor(event.installationId),
-      workspaceId,
+      workspaceId: resolvedRoute.workspaceId,
       traceId,
     })
 

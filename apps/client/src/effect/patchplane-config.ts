@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path } from 'effect'
+import { Config, Data, Effect, FileSystem, Option, Path, Schema } from 'effect'
 import {
   patchPlaneDefaultSurfaces,
   patchPlanePlugins,
@@ -16,6 +16,33 @@ export type GitHubWebhookExecutionMode = 'daytona-command' | 'daytona-pi'
 const PATCHPLANE_DEFAULT_AGENT_PROVIDER = 'openai'
 const PATCHPLANE_DEFAULT_AGENT_MODEL = 'gpt-5.5'
 const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
+
+class PatchPlaneConfigError extends Data.TaggedError('PatchPlaneConfigError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+const GitHubWebhookEnvironment = Config.all({
+  repositoryAllowlist: Config.string('PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES').pipe(Config.withDefault('')),
+  githubWorkspaceId: Config.string('PATCHPLANE_GITHUB_WORKSPACE_ID').pipe(Config.withDefault('')),
+  workosOrganizationId: Config.string('PATCHPLANE_WORKOS_ORGANIZATION_ID').pipe(Config.withDefault('')),
+  piProvider: Config.string('PATCHPLANE_PI_PROVIDER').pipe(Config.withDefault('')),
+  piModel: Config.schema(Schema.NonEmptyString, 'PATCHPLANE_PI_MODEL').pipe(
+    Config.withDefault(PATCHPLANE_DEFAULT_AGENT_MODEL),
+  ),
+  piThinking: Config.schema(Schema.NonEmptyString, 'PATCHPLANE_PI_THINKING').pipe(
+    Config.withDefault(PATCHPLANE_DEFAULT_AGENT_THINKING),
+  ),
+  piMode: Config.literals(['json', 'rpc'], 'PATCHPLANE_PI_MODE').pipe(Config.withDefault('json')),
+  cloudflareApiKey: Config.option(Config.redacted('CLOUDFLARE_API_KEY')),
+  cloudflareAccountId: Config.string('CLOUDFLARE_ACCOUNT_ID').pipe(Config.withDefault('')),
+  cloudflareGatewayId: Config.string('CLOUDFLARE_GATEWAY_ID').pipe(
+    Config.orElse(() => Config.string('PATCHPLANE_AI_GATEWAY_ID')),
+    Config.withDefault(''),
+  ),
+})
+
+type GitHubWebhookEnvironment = typeof GitHubWebhookEnvironment extends Config.Config<infer A> ? A : never
 
 export interface PatchPlaneConfig {
   readonly plugins: Partial<Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>>
@@ -108,8 +135,7 @@ function parseConfigJson(value: unknown): PatchPlaneConfig {
   }
 }
 
-function findConfigPath(file: string) {
-  return Effect.gen(function* () {
+const findConfigPath = Effect.fnUntraced(function*(file: string) {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
 
@@ -117,8 +143,9 @@ function findConfigPath(file: string) {
       return (yield* fs.exists(file)) ? file : undefined
     }
 
-    const candidates = [process.cwd(), process.env.INIT_CWD]
-      .filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0)
+    const initialCwd = yield* Config.string('INIT_CWD').pipe(Config.withDefault(''))
+    const candidates = [process.cwd(), initialCwd]
+      .filter((candidate) => candidate.length > 0)
       .map((candidate) => path.resolve(candidate))
 
     for (const start of candidates) {
@@ -139,25 +166,32 @@ function findConfigPath(file: string) {
 
     return undefined
   })
+
+function decodeConfigJson(text: string, file: string) {
+  return Effect.try({
+    try: () => parseConfigJson(JSON.parse(text)),
+    catch: (cause) => new PatchPlaneConfigError({
+      message: `Unable to decode PatchPlane configuration at ${file}`,
+      cause,
+    }),
+  })
 }
 
-export function loadPatchPlaneConfig(file = 'patchplane.config.json') {
-  return Effect.gen(function* () {
+export const loadPatchPlaneConfig = Effect.fnUntraced(function*(file = 'patchplane.config.json') {
     const fs = yield* FileSystem.FileSystem
     const configPath = yield* findConfigPath(file)
     if (configPath !== undefined) {
-      return parseConfigJson(JSON.parse(yield* fs.readFileString(configPath)))
+      return yield* decodeConfigJson(yield* fs.readFileString(configPath), configPath)
     }
 
     const legacyPath = yield* findConfigPath('.patchplane/config.json')
     if (file === 'patchplane.config.json' && legacyPath !== undefined) {
-      console.warn('Using legacy .patchplane/config.json. Move this file to patchplane.config.json; .patchplane is reserved for generated local state.')
-      return parseConfigJson(JSON.parse(yield* fs.readFileString(legacyPath)))
+      yield* Effect.logWarning('Using legacy .patchplane/config.json. Move this file to patchplane.config.json; .patchplane is reserved for generated local state.')
+      return yield* decodeConfigJson(yield* fs.readFileString(legacyPath), legacyPath)
     }
 
     return defaultConfig
   })
-}
 
 export function getSurfacePluginIds(surface: PatchPlaneRuntimeSurface) {
   return Effect.map(loadPatchPlaneConfig(), (config) => config.plugins[surface] ?? patchPlaneDefaultSurfaces[surface])
@@ -180,13 +214,13 @@ function parseRepositoryAllowlist(value: string | undefined) {
   return new Set(repositories)
 }
 
-function parseGitHubWorkspaceId() {
-  const workspaceId = process.env.PATCHPLANE_GITHUB_WORKSPACE_ID?.trim()
+function parseGitHubWorkspaceId(workspaceIdValue: string, organizationIdValue: string) {
+  const workspaceId = workspaceIdValue.trim()
   if (workspaceId) {
     return makeWorkspaceId(workspaceId)
   }
 
-  const organizationId = process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID?.trim()
+  const organizationId = organizationIdValue.trim()
   if (organizationId) {
     return makeWorkOSWorkspaceId(organizationId)
   }
@@ -196,48 +230,61 @@ function parseGitHubWorkspaceId() {
   )
 }
 
-function resolvePiExecutionConfig() {
-  const provider = process.env.PATCHPLANE_PI_PROVIDER ?? (
-    process.env.CLOUDFLARE_API_KEY !== undefined &&
-      process.env.CLOUDFLARE_ACCOUNT_ID !== undefined &&
-      (process.env.CLOUDFLARE_GATEWAY_ID ?? process.env.PATCHPLANE_AI_GATEWAY_ID) !== undefined
+function resolvePiExecutionConfig(environment: GitHubWebhookEnvironment) {
+  const provider = environment.piProvider || (
+    Option.isSome(environment.cloudflareApiKey) && environment.cloudflareAccountId && environment.cloudflareGatewayId
       ? 'cloudflare-ai-gateway'
       : PATCHPLANE_DEFAULT_AGENT_PROVIDER
   )
 
   return {
     provider,
-    model: process.env.PATCHPLANE_PI_MODEL ?? PATCHPLANE_DEFAULT_AGENT_MODEL,
-    thinking: process.env.PATCHPLANE_PI_THINKING ?? PATCHPLANE_DEFAULT_AGENT_THINKING,
-    piMode: process.env.PATCHPLANE_PI_MODE === 'rpc' ? 'rpc' : 'json',
+    model: environment.piModel,
+    thinking: environment.piThinking,
+    piMode: environment.piMode === 'rpc' ? 'rpc' : 'json',
     timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
   } as const
 }
 
-export function loadGitHubWebhookRouteConfig() {
-  return Effect.gen(function* () {
-    const config = yield* loadPatchPlaneConfig()
-    const mode = config.runtime.githubWebhookExecution
+export const loadGitHubWebhookRouteConfig = Effect.gen(function* () {
+  const config = yield* loadPatchPlaneConfig()
+  const environment = yield* GitHubWebhookEnvironment
+  const mode = config.runtime.githubWebhookExecution
+  const { workspaceId, repositoryAllowlist } = yield* Effect.try({
+    try: () => ({
+      workspaceId: parseGitHubWorkspaceId(
+        environment.githubWorkspaceId,
+        environment.workosOrganizationId,
+      ),
+      repositoryAllowlist: parseRepositoryAllowlist(
+        environment.repositoryAllowlist,
+      ),
+    }),
+    catch: (cause) =>
+      new PatchPlaneConfigError({
+        message: 'GitHub webhook route configuration is invalid',
+        cause,
+      }),
+  })
 
-    if (mode === 'daytona-pi') {
-      return {
-        workspaceId: parseGitHubWorkspaceId(),
-        repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
-        execution: {
-          mode,
-          ...resolvePiExecutionConfig(),
-        },
-      } satisfies GitHubWebhookRouteConfig
-    }
-
+  if (mode === 'daytona-pi') {
     return {
-      workspaceId: parseGitHubWorkspaceId(),
-      repositoryAllowlist: parseRepositoryAllowlist(process.env.PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES),
+      workspaceId,
+      repositoryAllowlist,
       execution: {
         mode,
-        command: DAYTONA_DEFAULT_COMMAND,
-        timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        ...resolvePiExecutionConfig(environment),
       },
     } satisfies GitHubWebhookRouteConfig
-  })
-}
+  }
+
+  return {
+    workspaceId,
+    repositoryAllowlist,
+    execution: {
+      mode,
+      command: DAYTONA_DEFAULT_COMMAND,
+      timeoutSeconds: DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    },
+  } satisfies GitHubWebhookRouteConfig
+})

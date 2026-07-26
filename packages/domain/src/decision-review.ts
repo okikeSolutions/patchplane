@@ -14,6 +14,14 @@ import {
   VerificationResultId,
   WorkflowRunId,
 } from './ids'
+import {
+  EpochMillis,
+  GitCommitSha,
+  HttpUrl,
+  NonNegativeInt,
+  PositiveInt,
+  Sha256Digest,
+} from './refinements'
 
 export const CandidatePatchSetStatus = Schema.Literals([
   'captured',
@@ -23,9 +31,9 @@ export const CandidatePatchSetStatus = Schema.Literals([
 export type CandidatePatchSetStatus = Schema.Schema.Type<typeof CandidatePatchSetStatus>
 
 export const CandidatePatchSetStats = Schema.Struct({
-  filesChanged: Schema.Number,
-  additions: Schema.Number,
-  deletions: Schema.Number,
+  filesChanged: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
 })
 export type CandidatePatchSetStats = Schema.Schema.Type<typeof CandidatePatchSetStats>
 
@@ -34,16 +42,16 @@ export const CandidatePatchSet = Schema.Struct({
   workflowRunId: WorkflowRunId,
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
   status: CandidatePatchSetStatus,
-  candidateDigest: Schema.optional(Schema.String),
-  baseRef: Schema.optional(Schema.String),
-  baseSha: Schema.optional(Schema.String),
-  headRef: Schema.optional(Schema.String),
-  headSha: Schema.optional(Schema.String),
+  candidateDigest: Schema.optional(Sha256Digest),
+  baseRef: Schema.optional(Schema.NonEmptyString),
+  baseSha: Schema.optional(GitCommitSha),
+  headRef: Schema.optional(Schema.NonEmptyString),
+  headSha: Schema.optional(GitCommitSha),
   diffArtifactId: Schema.optional(EvidenceArtifactId),
   summary: Schema.optional(Schema.String),
   stats: Schema.optional(CandidatePatchSetStats),
-  idempotencyKey: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
 })
 export type CandidatePatchSet = Schema.Schema.Type<typeof CandidatePatchSet>
 
@@ -69,16 +77,16 @@ export const ReviewRun = Schema.Struct({
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
   candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   kind: ReviewRunKind,
-  reviewer: Schema.String,
+  reviewer: Schema.NonEmptyString,
   status: ReviewRunStatus,
   summary: Schema.optional(Schema.String),
   externalId: Schema.optional(Schema.String),
-  externalUrl: Schema.optional(Schema.String),
+  externalUrl: Schema.optional(HttpUrl),
   reviewedRevision: Schema.optional(Schema.String),
-  startedAt: Schema.Number,
-  completedAt: Schema.optional(Schema.Number),
-  idempotencyKey: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  startedAt: EpochMillis,
+  completedAt: Schema.optional(EpochMillis),
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
 })
 export type ReviewRun = Schema.Schema.Type<typeof ReviewRun>
 
@@ -108,11 +116,11 @@ export const ReviewFinding = Schema.Struct({
   category: ReviewFindingCategory,
   message: Schema.String,
   path: Schema.optional(Schema.String),
-  startLine: Schema.optional(Schema.Number),
-  endLine: Schema.optional(Schema.Number),
+  startLine: Schema.optional(PositiveInt),
+  endLine: Schema.optional(PositiveInt),
   evidenceArtifactId: Schema.optional(EvidenceArtifactId),
-  idempotencyKey: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
 })
 export type ReviewFinding = Schema.Schema.Type<typeof ReviewFinding>
 
@@ -140,12 +148,12 @@ export const PolicyDecision = Schema.Struct({
   summary: Schema.String,
   reason: Schema.optional(Schema.String),
   policyVersion: Schema.optional(Schema.String),
-  inputDigest: Schema.optional(Schema.String),
+  inputDigest: Schema.optional(Sha256Digest),
   verificationResultIds: Schema.optional(Schema.Array(VerificationResultId)),
   reviewFindingIds: Schema.optional(Schema.Array(ReviewFindingId)),
   missingRequirementIds: Schema.optional(Schema.Array(VerificationRequirementId)),
-  idempotencyKey: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
 })
 export type PolicyDecision = Schema.Schema.Type<typeof PolicyDecision>
 
@@ -161,8 +169,8 @@ export const HumanDecision = Schema.Struct({
   comment: Schema.String,
   verificationOverride: Schema.optional(Schema.Boolean),
   verificationOverrideReason: Schema.optional(Schema.String),
-  decidedAt: Schema.Number,
-  idempotencyKey: Schema.optional(Schema.String),
+  decidedAt: EpochMillis,
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
 })
 export type HumanDecision = Schema.Schema.Type<typeof HumanDecision>
 
@@ -186,17 +194,17 @@ export const PublicationResult = Schema.Struct({
   workflowRunId: WorkflowRunId,
   humanDecisionId: Schema.optional(HumanDecisionId),
   candidatePatchSetId: Schema.optional(CandidatePatchSetId),
-  targetSha: Schema.optional(Schema.String),
-  provider: Schema.String,
+  targetSha: Schema.optional(GitCommitSha),
+  provider: Schema.NonEmptyString,
   kind: PublicationResultKind,
   status: PublicationResultStatus,
   externalId: Schema.optional(Schema.String),
-  url: Schema.optional(Schema.String),
+  url: Schema.optional(HttpUrl),
   summary: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
-  dispatchToken: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  idempotencyKey: Schema.optional(Schema.String),
+  dispatchToken: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
 })
 export type PublicationResult = Schema.Schema.Type<typeof PublicationResult>
 
@@ -211,19 +219,19 @@ export type ProvenanceEventStatus = Schema.Schema.Type<typeof ProvenanceEventSta
 export const ProvenanceEvent = Schema.Struct({
   id: ProvenanceEventId,
   workflowRunId: WorkflowRunId,
-  traceId: Schema.String,
-  parentEventId: Schema.optional(Schema.String),
-  sequence: Schema.Number,
-  type: Schema.String,
-  operation: Schema.String,
-  pluginName: Schema.optional(Schema.String),
+  traceId: Schema.NonEmptyString,
+  parentEventId: Schema.optional(Schema.NonEmptyString),
+  sequence: NonNegativeInt,
+  type: Schema.NonEmptyString,
+  operation: Schema.NonEmptyString,
+  pluginName: Schema.optional(Schema.NonEmptyString),
   status: ProvenanceEventStatus,
-  startedAt: Schema.Number,
-  completedAt: Schema.optional(Schema.Number),
+  startedAt: EpochMillis,
+  completedAt: Schema.optional(EpochMillis),
   summary: Schema.optional(Schema.String),
   artifactRefs: Schema.Array(Schema.String),
-  errorCategory: Schema.optional(Schema.String),
-  idempotencyKey: Schema.optional(Schema.String),
+  errorCategory: Schema.optional(Schema.NonEmptyString),
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
 })
 export type ProvenanceEvent = Schema.Schema.Type<typeof ProvenanceEvent>
 

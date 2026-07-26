@@ -11,7 +11,7 @@ import { initCommand } from './commands/init'
 import { pluginsCommand } from './commands/plugins'
 import { patchPlaneRootCommand } from './command'
 import { cliCommand } from './main'
-import { parsePluginIds } from './services/env-file'
+import { isRuntimeSurface, parsePluginIds } from './services/env-file'
 import { CliConfigFlag, CliCwdFlag, CliDotenvFlag } from './services/global-options'
 import { patchPlaneDefaultSurfaces } from '@patchplane/plugins/registry'
 
@@ -23,14 +23,14 @@ function runPatchPlane(args: readonly string[]) {
 }
 
 function runPatchPlaneIn(cwd: string, args: readonly string[]) {
-  const layer = makeCliLayer({ cwd, envFiles: [] })
+  const cliLayer = makeCliLayer({ cwd, envFiles: [] })
   return Command.runWith(
     patchPlaneRootCommand.pipe(
       Command.withSubcommands([
-        initCommand.pipe(Command.provide(layer)),
-        doctorCommand.pipe(Command.provide(layer)),
-        envCommand.pipe(Command.provide(layer)),
-        pluginsCommand.pipe(Command.provide(layer)),
+        initCommand.pipe(Command.provide(cliLayer)),
+        doctorCommand.pipe(Command.provide(cliLayer)),
+        envCommand.pipe(Command.provide(cliLayer)),
+        pluginsCommand.pipe(Command.provide(cliLayer)),
       ]),
       Command.withGlobalFlags([CliCwdFlag, CliConfigFlag, CliDotenvFlag]),
     ),
@@ -125,10 +125,8 @@ describe('patchplane cli parsing', () => {
     ])
   })
 
-  it('rejects unknown runtime surfaces', () => {
-    expect(() => parsePluginIds({ surface: 'desktop' })).toThrow(
-      'Unknown surface: desktop',
-    )
+  it('rejects unknown runtime surfaces before plugin selection', () => {
+    expect(isRuntimeSurface('desktop')).toBe(false)
   })
 })
 

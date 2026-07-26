@@ -6,6 +6,8 @@ import { AuthRequestContext } from '@patchplane/core/services/auth-request-conte
 import { AuthService } from '@patchplane/core/services/auth-service'
 import { WorkOSConfig } from './WorkOSConfig'
 import {
+  decodeWorkOSMembershipResponse,
+  decodeWorkOSOrganizationResponse,
   mapWorkOSMembershipToMembership,
   mapWorkOSOrganizationToWorkspace,
 } from './mapping'
@@ -71,7 +73,19 @@ export const WorkOSAuthPlugin = {
             }),
         })
 
-        return mapWorkOSOrganizationToWorkspace(organization)
+        const decodedOrganization = yield* decodeWorkOSOrganizationResponse(
+          organization,
+        ).pipe(
+          Effect.mapError((cause) =>
+            new AuthError({
+              operation: 'getCurrentWorkspace.decode',
+              message: 'WorkOS returned an invalid organization',
+              cause,
+            })
+          ),
+        )
+
+        return mapWorkOSOrganizationToWorkspace(decodedOrganization)
       })
 
       const listMemberships = Effect.gen(function* () {
@@ -116,11 +130,26 @@ export const WorkOSAuthPlugin = {
             }),
         })
 
-        return memberships.map(mapWorkOSMembershipToMembership)
+        const decodedMemberships = yield* Effect.forEach(
+          memberships,
+          (membership) =>
+            decodeWorkOSMembershipResponse(membership).pipe(
+              Effect.mapError((cause) =>
+                new AuthError({
+                  operation: 'listMemberships.decode',
+                  message: 'WorkOS returned an invalid organization membership',
+                  cause,
+                })
+              ),
+            ),
+        )
+
+        return decodedMemberships.map(mapWorkOSMembershipToMembership)
       })
 
-      const requirePermission = (permission: Permission) =>
-        Effect.gen(function* () {
+      const requirePermission = Effect.fnUntraced(function*(
+        permission: Permission,
+      ) {
           const request = yield* AuthRequestContext
 
           if (!request.actor) {

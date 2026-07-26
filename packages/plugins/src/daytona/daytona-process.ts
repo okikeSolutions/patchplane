@@ -104,13 +104,13 @@ export interface DaytonaAsyncSessionCommandHandle {
   readonly sessionId: string
   readonly commandId: string
   readonly sendInput: (data: string) => Effect.Effect<void, DaytonaProcessError>
-  readonly getCommand: () => Effect.Effect<{ readonly exitCode?: number | undefined }, DaytonaProcessError>
-  readonly getLogs: () => Effect.Effect<{ readonly stdout: string; readonly stderr?: string | undefined }, DaytonaProcessError>
+  readonly getCommand: Effect.Effect<{ readonly exitCode?: number | undefined }, DaytonaProcessError>
+  readonly getLogs: Effect.Effect<{ readonly stdout: string; readonly stderr?: string | undefined }, DaytonaProcessError>
   readonly streamLogs: (
     onStdout: (chunk: string) => void,
     onStderr: (chunk: string) => void,
   ) => Effect.Effect<void, DaytonaProcessError>
-  readonly deleteSession: () => Effect.Effect<void, DaytonaProcessError>
+  readonly deleteSession: Effect.Effect<void, DaytonaProcessError>
 }
 
 export const startSandboxSessionCommand = Effect.fn(
@@ -128,56 +128,60 @@ export const startSandboxSessionCommand = Effect.fn(
     catch: processError('daytona.createSession', 'Daytona failed to create an async command session'),
   })
 
-  const command = yield* Effect.try({
-    try: () => withWorkingDirectoryAndEnv(input.command, input.env),
-    catch: processError('daytona.formatCommand', 'Daytona command could not be formatted safely'),
-  })
+  const cleanup = Effect.tryPromise({
+    try: () => sandbox.process.deleteSession(sessionId),
+    catch: processError('daytona.deleteSession', 'Daytona failed to delete async command session'),
+  }).pipe(Effect.ignore)
 
-  const response = yield* Effect.tryPromise({
-    try: () => sandbox.process.executeSessionCommand(
-      sessionId,
-      { command, runAsync: true, suppressInputEcho: true },
-      input.timeoutSeconds,
-    ),
-    catch: processError('daytona.executeSessionCommand', 'Daytona failed to start an async command session'),
-  })
-
-  if (response.cmdId === undefined || response.cmdId.length === 0) {
-    return yield* new DaytonaProcessError({
-      operation: 'daytona.executeSessionCommand',
-      message: 'Daytona did not return a command id for async command session',
-      cause: undefined,
+  return yield* Effect.gen(function* () {
+    const command = yield* Effect.try({
+      try: () => withWorkingDirectoryAndEnv(input.command, input.env),
+      catch: processError('daytona.formatCommand', 'Daytona command could not be formatted safely'),
     })
-  }
 
-  const commandId = response.cmdId
-  return {
-    sessionId,
-    commandId,
-    sendInput: (data: string) => Effect.tryPromise({
-      try: () => sandbox.process.sendSessionCommandInput?.(sessionId, commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-      catch: processError('daytona.sendSessionCommandInput', 'Daytona failed to send input to async command session'),
-    }),
-    getCommand: () => Effect.tryPromise({
-      try: async () => await sandbox.process.getSessionCommand?.(sessionId, commandId) ?? {},
-      catch: processError('daytona.getSessionCommand', 'Daytona failed to get async command status'),
-    }),
-    getLogs: () => Effect.tryPromise({
-      try: async () => {
-        const logs = await sandbox.process.getSessionCommandLogs?.(sessionId, commandId)
-        return { stdout: logs?.stdout ?? logs?.output ?? '', stderr: logs?.stderr ?? undefined }
-      },
-      catch: processError('daytona.getSessionCommandLogs', 'Daytona failed to get async command logs'),
-    }),
-    streamLogs: (onStdout: (chunk: string) => void, onStderr: (chunk: string) => void) => Effect.tryPromise({
-      try: () => sandbox.process.getSessionCommandLogs?.(sessionId, commandId, onStdout, onStderr) ?? Promise.reject(new Error('Daytona getSessionCommandLogs streaming is unavailable')),
-      catch: processError('daytona.getSessionCommandLogs.stream', 'Daytona failed to stream async command logs'),
-    }),
-    deleteSession: () => Effect.tryPromise({
-      try: () => sandbox.process.deleteSession(sessionId),
-      catch: processError('daytona.deleteSession', 'Daytona failed to delete async command session'),
-    }),
-  }
+    const response = yield* Effect.tryPromise({
+      try: () => sandbox.process.executeSessionCommand(
+        sessionId,
+        { command, runAsync: true, suppressInputEcho: true },
+        input.timeoutSeconds,
+      ),
+      catch: processError('daytona.executeSessionCommand', 'Daytona failed to start an async command session'),
+    })
+
+    if (response.cmdId === undefined || response.cmdId.length === 0) {
+      return yield* new DaytonaProcessError({
+        operation: 'daytona.executeSessionCommand',
+        message: 'Daytona did not return a command id for async command session',
+        cause: undefined,
+      })
+    }
+
+    const commandId = response.cmdId
+    return {
+      sessionId,
+      commandId,
+      sendInput: (data: string) => Effect.tryPromise({
+        try: () => sandbox.process.sendSessionCommandInput?.(sessionId, commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
+        catch: processError('daytona.sendSessionCommandInput', 'Daytona failed to send input to async command session'),
+      }),
+      getCommand: Effect.tryPromise({
+        try: async () => await sandbox.process.getSessionCommand?.(sessionId, commandId) ?? {},
+        catch: processError('daytona.getSessionCommand', 'Daytona failed to get async command status'),
+      }),
+      getLogs: Effect.tryPromise({
+        try: async () => {
+          const logs = await sandbox.process.getSessionCommandLogs?.(sessionId, commandId)
+          return { stdout: logs?.stdout ?? logs?.output ?? '', stderr: logs?.stderr ?? undefined }
+        },
+        catch: processError('daytona.getSessionCommandLogs', 'Daytona failed to get async command logs'),
+      }),
+      streamLogs: (onStdout: (chunk: string) => void, onStderr: (chunk: string) => void) => Effect.tryPromise({
+        try: () => sandbox.process.getSessionCommandLogs?.(sessionId, commandId, onStdout, onStderr) ?? Promise.reject(new Error('Daytona getSessionCommandLogs streaming is unavailable')),
+        catch: processError('daytona.getSessionCommandLogs.stream', 'Daytona failed to stream async command logs'),
+      }),
+      deleteSession: cleanup,
+    }
+  }).pipe(Effect.onError(() => cleanup))
 })
 
 export const executeSandboxCommand = Effect.fn(

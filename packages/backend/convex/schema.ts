@@ -386,7 +386,7 @@ export default defineSchema({
     skippedCount: v.optional(v.number()),
     artifactIds: v.array(v.id('evidenceArtifacts')),
     producedArtifactKinds: v.array(evidenceArtifactKind),
-    candidateDigestBefore: v.string(),
+    candidateDigestBefore: v.optional(v.string()),
     candidateDigestAfter: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),

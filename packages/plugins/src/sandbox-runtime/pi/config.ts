@@ -1,4 +1,4 @@
-import { Config, Effect, Redacted } from 'effect'
+import { Config, Effect, Redacted, Schema } from 'effect'
 
 export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'anthropic': 'ANTHROPIC_API_KEY',
@@ -36,24 +36,45 @@ export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'github-copilot': 'COPILOT_GITHUB_TOKEN',
 }
 
+class PiProviderConfigError extends Schema.ErrorClass<PiProviderConfigError>(
+  'PiProviderConfigError',
+)({
+  provider: Schema.String,
+  message: Schema.String,
+}) {}
+
 export function piProviderApiKeyEnvName(provider: string) {
-  return piProviderApiKeyEnvNames[provider] ?? 'OPENAI_API_KEY'
+  return piProviderApiKeyEnvNames[provider]
 }
 
-const cloudflareGatewayId = Config.string('CLOUDFLARE_GATEWAY_ID').pipe(
-  Config.orElse(() => Config.string('PATCHPLANE_AI_GATEWAY_ID')),
+const cloudflareGatewayId = Config.schema(
+  Schema.NonEmptyString,
+  'CLOUDFLARE_GATEWAY_ID',
+).pipe(
+  Config.orElse(() => Config.schema(
+    Schema.NonEmptyString,
+    'PATCHPLANE_AI_GATEWAY_ID',
+  )),
 )
 
-export function piRuntimeEnvironment(input: {
+export const piRuntimeEnvironment = Effect.fnUntraced(function*(input: {
   readonly provider: string
-}): Effect.Effect<Readonly<Record<string, string>>, Config.ConfigError> {
-  return Effect.gen(function* () {
+}) {
     const apiKeyEnvName = piProviderApiKeyEnvName(input.provider)
+    if (apiKeyEnvName === undefined) {
+      return yield* new PiProviderConfigError({
+        provider: input.provider,
+        message: `Unsupported Pi provider: ${input.provider}`,
+      })
+    }
     const apiKey = yield* Config.redacted(apiKeyEnvName)
 
     if (input.provider === 'cloudflare-ai-gateway') {
       const cloudflareConfig = yield* Config.all({
-        accountId: Config.string('CLOUDFLARE_ACCOUNT_ID'),
+        accountId: Config.schema(
+          Schema.NonEmptyString,
+          'CLOUDFLARE_ACCOUNT_ID',
+        ),
         gatewayId: cloudflareGatewayId,
       })
       return {
@@ -65,4 +86,3 @@ export function piRuntimeEnvironment(input: {
 
     return { [apiKeyEnvName]: Redacted.value(apiKey) }
   })
-}

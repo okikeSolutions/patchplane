@@ -19,7 +19,7 @@ function validateRedirectUri(candidate: URL) {
 
 export function resolveWorkOSRedirectUri(
   request: Request,
-  configuredRedirectUri = process.env.WORKOS_REDIRECT_URI,
+  configuredRedirectUri?: string,
 ) {
   const configured = configuredRedirectUri?.trim()
   const candidate = configured

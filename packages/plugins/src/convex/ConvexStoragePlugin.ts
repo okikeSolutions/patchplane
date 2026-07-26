@@ -1,4 +1,4 @@
-import { Config, Effect, Layer, Option, Redacted } from 'effect'
+import { Config, Effect, Layer, Option, Redacted, Schema } from 'effect'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
 import {
@@ -18,7 +18,6 @@ import { decodeVerificationRequirement, decodeVerificationResult } from '@patchp
 import {
   decodeWorkflowStart,
   decodeWorkflowStarts,
-  type WorkflowStart,
 } from '@patchplane/domain/workflow-start'
 import {
   StorageService,
@@ -279,7 +278,7 @@ const recordVerificationResultMutation = makeFunctionReference<
     failedCount?: number
     skippedCount?: number
     artifactIds: RecordVerificationResultInput['artifactIds']
-    candidateDigestBefore: string
+    candidateDigestBefore?: string
     candidateDigestAfter?: string
     startedAt: number
     completedAt?: number
@@ -404,7 +403,15 @@ export const ConvexStoragePlugin = {
     StorageService,
     Effect.gen(function* () {
       const config = yield* ConvexConfig
-      const convexUrl = config.url.toString().replace(/\/$/, '')
+      const configuredUrl = config.url.canonical.pipe(
+        Option.orElse(() => config.url.legacy),
+      )
+      if (Option.isNone(configuredUrl)) {
+        return yield* Schema.decodeUnknownEffect(Schema.Never)(undefined).pipe(
+          Effect.mapError((cause) => new Config.ConfigError(cause)),
+        )
+      }
+      const convexUrl = configuredUrl.value.toString().replace(/\/$/, '')
       const systemIngestionSecret = Option.getOrUndefined(
         config.systemIngestionSecret,
       )
@@ -412,10 +419,7 @@ export const ConvexStoragePlugin = {
       const createWorkflowFromPrompt = Effect.fn(
         '@patchplane/plugins/convex/createWorkflowFromPrompt',
       )(
-        (
-          input: CreateWorkflowFromPromptInput,
-        ): Effect.Effect<WorkflowStart, StorageError> =>
-          Effect.gen(function* () {
+        function*(input: CreateWorkflowFromPromptInput) {
             yield* Effect.annotateCurrentSpan({
               traceId: input.traceId,
               workspaceId: input.workspaceId,
@@ -494,16 +498,13 @@ export const ConvexStoragePlugin = {
             })
 
             return workflowStart
-          }),
+        },
       )
 
       const listRecentWorkflowStarts = Effect.fn(
         '@patchplane/plugins/convex/listRecentWorkflowStarts',
       )(
-        (
-          input: StorageListRecentWorkflowStartsInput,
-        ): Effect.Effect<ReadonlyArray<WorkflowStart>, StorageError> =>
-          Effect.gen(function* () {
+        function*(input: StorageListRecentWorkflowStartsInput) {
             yield* Effect.annotateCurrentSpan({
               workspaceId: input.workspaceId,
               limit: input.limit,
@@ -550,13 +551,12 @@ export const ConvexStoragePlugin = {
             })
 
             return workflowStarts
-          }),
+        },
       )
 
       const claimWorkflowExecution = Effect.fn(
         '@patchplane/plugins/convex/claimWorkflowExecution',
-      )((input: ClaimWorkflowExecutionInput) =>
-        Effect.gen(function* () {
+      )(function*(input: ClaimWorkflowExecutionInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'claimWorkflowExecution.config',
@@ -564,7 +564,7 @@ export const ConvexStoragePlugin = {
               cause: undefined,
             })
           }
-          return yield* Effect.tryPromise({
+          const result = yield* Effect.tryPromise({
             try: () => new ConvexHttpClient(convexUrl).mutation(claimWorkflowExecutionMutation, {
               systemSecret: Redacted.value(systemIngestionSecret),
               workflowRunId: input.workflowRunId,
@@ -575,12 +575,18 @@ export const ConvexStoragePlugin = {
               cause,
             }),
           })
-        }))
+          return yield* Schema.decodeUnknownEffect(Schema.Boolean)(result).pipe(
+            Effect.mapError((cause) => new StorageError({
+              operation: 'claimWorkflowExecution.decode',
+              message: 'Convex returned an invalid workflow execution claim result',
+              cause,
+            })),
+          )
+      })
 
       const markWorkflowExecutionFailed = Effect.fn(
         '@patchplane/plugins/convex/markWorkflowExecutionFailed',
-      )((input: MarkWorkflowExecutionFailedInput) =>
-        Effect.gen(function* () {
+      )(function*(input: MarkWorkflowExecutionFailedInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'markWorkflowExecutionFailed.config',
@@ -588,7 +594,7 @@ export const ConvexStoragePlugin = {
               cause: undefined,
             })
           }
-          return yield* Effect.tryPromise({
+          const result = yield* Effect.tryPromise({
             try: () => new ConvexHttpClient(convexUrl).mutation(markWorkflowExecutionFailedMutation, {
               systemSecret: Redacted.value(systemIngestionSecret),
               workflowRunId: input.workflowRunId,
@@ -600,13 +606,19 @@ export const ConvexStoragePlugin = {
               cause,
             }),
           })
-        }))
+          return yield* Schema.decodeUnknownEffect(Schema.Boolean)(result).pipe(
+            Effect.mapError((cause) => new StorageError({
+              operation: 'markWorkflowExecutionFailed.decode',
+              message: 'Convex returned an invalid workflow execution failure result',
+              cause,
+            })),
+          )
+      })
 
       const recordSandboxExecution = Effect.fn(
         '@patchplane/plugins/convex/recordSandboxExecution',
       )(
-        (input: RecordSandboxExecutionInput) =>
-          Effect.gen(function* () {
+        function*(input: RecordSandboxExecutionInput) {
             if (systemIngestionSecret === undefined) {
               return yield* new StorageError({
                 operation: 'recordSandboxExecution.config',
@@ -652,14 +664,13 @@ export const ConvexStoragePlugin = {
                   }),
               ),
             )
-          }),
+        },
       )
 
       const recordRuntimeEvents = Effect.fn(
         '@patchplane/plugins/convex/recordRuntimeEvents',
       )(
-        (input: ReadonlyArray<RecordRuntimeEventInput>) =>
-          Effect.gen(function* () {
+        function*(input: ReadonlyArray<RecordRuntimeEventInput>) {
             if (input.length === 0) {
               return []
             }
@@ -713,13 +724,12 @@ export const ConvexStoragePlugin = {
                   }),
               ),
             )
-          }),
+        },
       )
 
       const recordRuntimeSessionStarted = Effect.fn(
         '@patchplane/plugins/convex/recordRuntimeSessionStarted',
-      )((input: RecordRuntimeSessionStartedInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordRuntimeSessionStartedInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordRuntimeSessionStarted.config',
@@ -756,12 +766,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const markRuntimeSessionStatus = Effect.fn(
         '@patchplane/plugins/convex/markRuntimeSessionStatus',
-      )((input: MarkRuntimeSessionStatusInput) =>
-        Effect.gen(function* () {
+      )(function*(input: MarkRuntimeSessionStatusInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'markRuntimeSessionStatus.config',
@@ -795,12 +804,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const getActiveRuntimeSession = Effect.fn(
         '@patchplane/plugins/convex/getActiveRuntimeSession',
-      )((input: GetActiveRuntimeSessionInput) =>
-        Effect.gen(function* () {
+      )(function*(input: GetActiveRuntimeSessionInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'getActiveRuntimeSession.config',
@@ -823,8 +831,8 @@ export const ConvexStoragePlugin = {
                 cause,
               }),
           })
-          if (value === null) return undefined
-          return yield* decodeRuntimeSession(value).pipe(
+          if (value === null) return Option.none()
+          const session = yield* decodeRuntimeSession(value).pipe(
             Effect.mapError((cause) =>
               new StorageError({
                 operation: 'getActiveRuntimeSession.decode',
@@ -833,12 +841,12 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+          return Option.some(session)
+      })
 
       const recordEvidenceArtifact = Effect.fn(
         '@patchplane/plugins/convex/recordEvidenceArtifact',
-      )((input: RecordEvidenceArtifactInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordEvidenceArtifactInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordEvidenceArtifact.config',
@@ -882,12 +890,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const getEvidenceArtifact = Effect.fn(
         '@patchplane/plugins/convex/getEvidenceArtifact',
-      )((input: GetEvidenceArtifactInput) =>
-        Effect.gen(function* () {
+      )(function*(input: GetEvidenceArtifactInput) {
           if (input.authToken === undefined && systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'getEvidenceArtifact.config',
@@ -916,8 +923,8 @@ export const ConvexStoragePlugin = {
                 cause,
               }),
           })
-          if (value === null) return undefined
-          return yield* decodeEvidenceArtifact(value).pipe(
+          if (value === null) return Option.none()
+          const artifact = yield* decodeEvidenceArtifact(value).pipe(
             Effect.mapError((cause) =>
               new StorageError({
                 operation: 'getEvidenceArtifact.decode',
@@ -926,12 +933,12 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+          return Option.some(artifact)
+      })
 
       const recordCandidatePatchSet = Effect.fn(
         '@patchplane/plugins/convex/recordCandidatePatchSet',
-      )((input: RecordCandidatePatchSetInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordCandidatePatchSetInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordCandidatePatchSet.config',
@@ -975,12 +982,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const recordVerificationRequirement = Effect.fn(
         '@patchplane/plugins/convex/recordVerificationRequirement',
-      )((input: RecordVerificationRequirementInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordVerificationRequirementInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordVerificationRequirement.config',
@@ -1016,12 +1022,11 @@ export const ConvexStoragePlugin = {
               cause,
             })),
           )
-        }))
+      })
 
       const recordVerificationResult = Effect.fn(
         '@patchplane/plugins/convex/recordVerificationResult',
-      )((input: RecordVerificationResultInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordVerificationResultInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordVerificationResult.config',
@@ -1048,7 +1053,7 @@ export const ConvexStoragePlugin = {
               ...(input.failedCount === undefined ? {} : { failedCount: input.failedCount }),
               ...(input.skippedCount === undefined ? {} : { skippedCount: input.skippedCount }),
               artifactIds: input.artifactIds,
-              candidateDigestBefore: input.candidateDigestBefore,
+              ...(input.candidateDigestBefore === undefined ? {} : { candidateDigestBefore: input.candidateDigestBefore }),
               ...(input.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: input.candidateDigestAfter }),
               startedAt: input.startedAt,
               ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
@@ -1067,12 +1072,11 @@ export const ConvexStoragePlugin = {
               cause,
             })),
           )
-        }))
+      })
 
       const recordReviewRun = Effect.fn(
         '@patchplane/plugins/convex/recordReviewRun',
-      )((input: RecordReviewRunInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordReviewRunInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordReviewRun.config',
@@ -1114,12 +1118,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const recordReviewFinding = Effect.fn(
         '@patchplane/plugins/convex/recordReviewFinding',
-      )((input: RecordReviewFindingInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordReviewFindingInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordReviewFinding.config',
@@ -1161,12 +1164,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const recordPolicyDecision = Effect.fn(
         '@patchplane/plugins/convex/recordPolicyDecision',
-      )((input: RecordPolicyDecisionInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordPolicyDecisionInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordPolicyDecision.config',
@@ -1210,12 +1212,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const recordPublicationResult = Effect.fn(
         '@patchplane/plugins/convex/recordPublicationResult',
-      )((input: RecordPublicationResultInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordPublicationResultInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordPublicationResult.config',
@@ -1260,12 +1261,11 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       const recordProvenanceEvent = Effect.fn(
         '@patchplane/plugins/convex/recordProvenanceEvent',
-      )((input: RecordProvenanceEventInput) =>
-        Effect.gen(function* () {
+      )(function*(input: RecordProvenanceEventInput) {
           if (systemIngestionSecret === undefined) {
             return yield* new StorageError({
               operation: 'recordProvenanceEvent.config',
@@ -1309,7 +1309,7 @@ export const ConvexStoragePlugin = {
               })
             ),
           )
-        }))
+      })
 
       return StorageService.of({
         createWorkflowFromIntake: createWorkflowFromPrompt,

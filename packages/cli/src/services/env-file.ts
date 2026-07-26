@@ -6,6 +6,7 @@ import {
   patchPlaneDefaultSurfaces,
   patchPlanePlugins,
   type PatchPlanePluginEnvVar,
+  type PatchPlanePluginId,
   type PatchPlaneRuntimeSurface,
 } from '@patchplane/plugins/registry'
 import { pluginIdsForInitProfile, type ResolvedInitOptions } from './config-file'
@@ -17,29 +18,17 @@ export function isRuntimeSurface(value: string): value is PatchPlaneRuntimeSurfa
   return surfaces.some((surface) => surface === value)
 }
 
-export function parsePluginIds(input: {
-  readonly plugins?: string | undefined
-  readonly surface?: string | undefined
-}) {
-  if (input.plugins !== undefined) {
-    return input.plugins.split(',').map((item) => item.trim()).filter(Boolean)
-  }
-
-  if (input.surface !== undefined) {
-    if (!isRuntimeSurface(input.surface)) {
-      throw new Error(`Unknown surface: ${input.surface}`)
-    }
-    return [...patchPlaneDefaultSurfaces[input.surface]]
-  }
-
-  return Object.keys(patchPlanePlugins)
+export function isPluginId(value: string): value is PatchPlanePluginId {
+  return getPatchPlanePlugin(value) !== undefined
 }
 
-export function validatePluginIds(pluginIds: readonly string[]) {
-  const unknown = pluginIds.filter((id) => getPatchPlanePlugin(id) === undefined)
-  if (unknown.length > 0) {
-    throw new Error(`Unknown plugin(s): ${unknown.join(', ')}`)
-  }
+export function parsePluginIds(input: {
+  readonly plugins?: ReadonlyArray<PatchPlanePluginId> | undefined
+  readonly surface?: PatchPlaneRuntimeSurface | undefined
+}) {
+  if (input.plugins !== undefined) return [...input.plugins]
+  if (input.surface !== undefined) return [...patchPlaneDefaultSurfaces[input.surface]]
+  return Object.keys(patchPlanePlugins).filter(isPluginId)
 }
 
 export function loadEnvFileContent(content: string, target: Map<string, string>) {
@@ -60,8 +49,8 @@ export function loadEnvFileContent(content: string, target: Map<string, string>)
 }
 
 export interface EnvSelection {
-  readonly plugins?: string | undefined
-  readonly surface?: string | undefined
+  readonly plugins?: ReadonlyArray<PatchPlanePluginId> | undefined
+  readonly surface?: PatchPlaneRuntimeSurface | undefined
   readonly includeOptional?: boolean | undefined
 }
 
@@ -73,10 +62,9 @@ export function selectedPluginIdsForInit(options: {
 }
 
 export function missingEnvVarsForPlugins(
-  pluginIds: readonly string[],
+  pluginIds: ReadonlyArray<PatchPlanePluginId>,
   envFileContent: string,
 ) {
-  validatePluginIds(pluginIds)
   const existing = new Map<string, string>()
   loadEnvFileContent(envFileContent, existing)
   return getPatchPlaneEnvVars(pluginIds).filter((variable) =>
@@ -98,7 +86,6 @@ export function formatEnvVarsForAppend(vars: readonly PatchPlanePluginEnvVar[]) 
 
 export function selectedEnvVars(selection: EnvSelection) {
   const pluginIds = parsePluginIds(selection)
-  validatePluginIds(pluginIds)
   return {
     pluginIds,
     vars: getPatchPlaneEnvVars(pluginIds)

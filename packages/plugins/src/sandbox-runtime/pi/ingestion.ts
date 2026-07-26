@@ -90,10 +90,10 @@ export function decodePiRpcRuntimeEvents(input: {
   readonly sessionId: string
   readonly commandId: string
   readonly stream?: 'stdout' | 'stderr' | undefined
-  readonly now?: (() => number) | undefined
+  readonly now: () => number
 }) {
   const streamName = input.stream ?? 'stdout'
-  const now = input.now ?? Date.now
+  const now = input.now
   return <E, R>(chunks: Stream.Stream<string, E, R>): Stream.Stream<PiRpcRuntimeEvent, E, R> =>
     chunks.pipe(
       decodePiJsonlLines,

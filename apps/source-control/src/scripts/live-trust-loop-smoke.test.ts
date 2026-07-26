@@ -80,7 +80,7 @@ function fixture(status: 'published' | 'pending' = 'published') {
           repositoryName: 'example',
           repositoryFullName: 'patchplane/example',
           issueNumber: 12,
-          pullRequestHeadSha: 'abc123',
+          pullRequestHeadSha: 'a'.repeat(40),
         },
         status: 'created',
         createdAt: 1,

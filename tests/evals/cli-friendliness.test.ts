@@ -1,7 +1,7 @@
 import * as NodeChildProcessSpawner from '@effect/platform-node/NodeChildProcessSpawner'
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem'
 import * as NodePath from '@effect/platform-node/NodePath'
-import { assert, describe, it, layer } from '@effect/vitest'
+import { assert, describe, layer } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -150,7 +150,7 @@ describe('PatchPlane CLI friendliness eval', () => {
         }),
       ))
 
-    it.effect('preserves stdout\/stderr discipline for failing doctor runs', () =>
+    it.effect('preserves stdout/stderr discipline for failing doctor runs', () =>
       withTempProject((dir) =>
         Effect.gen(function* () {
           const result = yield* runPatchPlane(['doctor', '--surface', 'app'], { cwd: dir })
@@ -169,8 +169,8 @@ describe('PatchPlane CLI friendliness eval', () => {
         const schema = JSON.parse(yield* readText(schemaPath)) as {
           $defs?: { pluginId?: { enum?: string[] } }
         }
-        const schemaPluginIds = [...(schema.$defs?.pluginId?.enum ?? [])].sort()
-        const registryPluginIds = Object.values(patchPlanePlugins).map((plugin) => plugin.id).sort()
+        const schemaPluginIds = (schema.$defs?.pluginId?.enum ?? []).toSorted()
+        const registryPluginIds = Object.values(patchPlanePlugins).map((plugin) => plugin.id).toSorted()
 
         assert.deepStrictEqual(schemaPluginIds, registryPluginIds)
       }))

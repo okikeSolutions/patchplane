@@ -1,10 +1,13 @@
 import { describe, expect, it } from '@effect/vitest'
+import { Effect } from 'effect'
 import type {
   Organization,
   OrganizationMembership,
   User,
 } from '@workos-inc/node'
 import {
+  decodeWorkOSMembershipResponse,
+  decodeWorkOSOrganizationResponse,
   mapWorkOSMembershipToMembership,
   mapWorkOSOrganizationToWorkspace,
   mapWorkOSPermissions,
@@ -108,4 +111,23 @@ describe('WorkOS mapping', () => {
       'workspace:view',
     ])
   })
+
+  it.effect('rejects malformed WorkOS provider responses before mapping', () =>
+    Effect.gen(function* () {
+      const organizationError = yield* decodeWorkOSOrganizationResponse({
+        id: '',
+        name: 'Ada Labs',
+      }).pipe(Effect.flip)
+      const membershipError = yield* decodeWorkOSMembershipResponse({
+        id: 'om_123',
+        organizationId: 'org_123',
+        status: 'unknown',
+        userId: 'user_123',
+        role: { slug: 'admin' },
+      }).pipe(Effect.flip)
+
+      expect(String(organizationError)).toContain('length of at least 1')
+      expect(String(membershipError)).toContain('active')
+    }),
+  )
 })

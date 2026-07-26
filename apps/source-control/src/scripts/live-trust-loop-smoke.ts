@@ -108,7 +108,7 @@ const TrustLoopWebhookResponse = Schema.Struct({
   error: Schema.optional(Schema.String),
   workflowRunId: Schema.optional(Schema.String),
   sandboxStatus: Schema.optional(Schema.String),
-  publishedIssueNumber: Schema.optional(Schema.Number),
+  publishedIssueNumber: Schema.optional(Schema.Finite),
 })
 
 const decodeCloudflareScriptsResponse = Schema.decodeUnknownSync(

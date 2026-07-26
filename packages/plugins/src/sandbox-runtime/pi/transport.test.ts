@@ -3,6 +3,16 @@ import { Effect } from 'effect'
 import { makePiRpcCommandSender } from './transport'
 
 describe('Pi Effect RPC command transport', () => {
+  it.effect('preserves command-delivery failures in the typed channel', () =>
+    Effect.gen(function* () {
+      const pi = makePiRpcCommandSender({
+        sendInput: () => Effect.fail('transport unavailable' as const),
+      })
+
+      const error = yield* pi.abort().pipe(Effect.flip)
+      expect(error).toBe('transport unavailable')
+    }))
+
   it.effect('translates typed Effect RPC commands to Pi JSONL', () =>
     Effect.gen(function* () {
       const sent: string[] = []

@@ -99,6 +99,8 @@ function isValidPass(
   if (requirement.platform !== undefined && result.platform !== requirement.platform) return false
   if (requirement.architecture !== undefined && result.architecture !== requirement.architecture) return false
   if (
+    result.candidateDigestBefore === undefined ||
+    !/^sha256:[0-9a-f]{64}$/i.test(result.candidateDigestBefore) ||
     result.candidateDigestAfter === undefined ||
     result.candidateDigestBefore !== result.candidateDigestAfter
   ) {

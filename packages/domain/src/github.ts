@@ -1,17 +1,42 @@
 import { Schema } from 'effect'
+import { GitCommitSha, HttpUrl } from './refinements'
 
-export const GitHubInstallationId = Schema.Number
+const PositiveSafeInteger = Schema.Int.check(Schema.isGreaterThan(0))
+
+export const GitHubInstallationId = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubInstallationId'),
+)
 export type GitHubInstallationId = Schema.Schema.Type<
   typeof GitHubInstallationId
 >
 
+export const GitHubRepositoryId = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubRepositoryId'),
+)
+export const GitHubIssueId = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubIssueId'),
+)
+export const GitHubIssueNumber = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubIssueNumber'),
+)
+export const GitHubCommentId = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubCommentId'),
+)
+export const GitHubPullRequestId = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubPullRequestId'),
+)
+export const GitHubPullRequestNumber = PositiveSafeInteger.pipe(
+  Schema.brand('GitHubPullRequestNumber'),
+)
+const BrandedGitCommitSha = GitCommitSha.pipe(Schema.brand('GitCommitSha'))
+
 export const GitHubRepositoryRef = Schema.Struct({
   provider: Schema.Literal('github'),
   installationId: GitHubInstallationId,
-  owner: Schema.String,
-  name: Schema.String,
-  fullName: Schema.String,
-  repositoryExternalId: Schema.optional(Schema.String),
+  owner: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+  fullName: Schema.NonEmptyString,
+  repositoryExternalId: Schema.optional(Schema.NonEmptyString),
   private: Schema.optional(Schema.Boolean),
 })
 export type GitHubRepositoryRef = Schema.Schema.Type<
@@ -21,8 +46,8 @@ export const decodeGitHubRepositoryRef =
   Schema.decodeUnknownEffect(GitHubRepositoryRef)
 
 export const GitHubWebhookVerification = Schema.Struct({
-  deliveryId: Schema.String,
-  eventName: Schema.String,
+  deliveryId: Schema.NonEmptyString,
+  eventName: Schema.NonEmptyString,
   payload: Schema.Unknown,
 })
 export type GitHubWebhookVerification = Schema.Schema.Type<
@@ -35,16 +60,16 @@ export const decodeGitHubWebhookVerification = Schema.decodeUnknownEffect(
 export const GitHubNormalizedWorkflowEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal('github.issue.opened'),
-    deliveryId: Schema.String,
+    deliveryId: Schema.NonEmptyString,
     installationId: GitHubInstallationId,
-    owner: Schema.String,
-    repo: Schema.String,
-    repositoryId: Schema.Number,
-    issueId: Schema.Number,
-    issueNumber: Schema.Number,
+    owner: Schema.NonEmptyString,
+    repo: Schema.NonEmptyString,
+    repositoryId: GitHubRepositoryId,
+    issueId: GitHubIssueId,
+    issueNumber: GitHubIssueNumber,
     title: Schema.String,
     prompt: Schema.String,
-    url: Schema.optional(Schema.String),
+    url: Schema.optional(HttpUrl),
     sender: Schema.optional(Schema.String),
   }),
   Schema.Struct({
@@ -52,16 +77,16 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
       'github.issue_comment.created',
       'github.pull_request_comment.created',
     ]),
-    deliveryId: Schema.String,
+    deliveryId: Schema.NonEmptyString,
     installationId: GitHubInstallationId,
-    owner: Schema.String,
-    repo: Schema.String,
-    repositoryId: Schema.Number,
-    issueId: Schema.Number,
-    issueNumber: Schema.Number,
-    commentId: Schema.Number,
+    owner: Schema.NonEmptyString,
+    repo: Schema.NonEmptyString,
+    repositoryId: GitHubRepositoryId,
+    issueId: GitHubIssueId,
+    issueNumber: GitHubIssueNumber,
+    commentId: GitHubCommentId,
     prompt: Schema.String,
-    url: Schema.optional(Schema.String),
+    url: Schema.optional(HttpUrl),
     sender: Schema.optional(Schema.String),
   }),
   Schema.Struct({
@@ -69,19 +94,19 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
       'github.pull_request.opened',
       'github.pull_request.synchronize',
     ]),
-    deliveryId: Schema.String,
+    deliveryId: Schema.NonEmptyString,
     installationId: GitHubInstallationId,
-    owner: Schema.String,
-    repo: Schema.String,
-    repositoryId: Schema.Number,
-    pullRequestId: Schema.Number,
-    pullRequestNumber: Schema.Number,
+    owner: Schema.NonEmptyString,
+    repo: Schema.NonEmptyString,
+    repositoryId: GitHubRepositoryId,
+    pullRequestId: GitHubPullRequestId,
+    pullRequestNumber: GitHubPullRequestNumber,
     title: Schema.String,
     prompt: Schema.String,
-    headSha: Schema.String,
-    headRef: Schema.String,
-    baseRef: Schema.String,
-    url: Schema.optional(Schema.String),
+    headSha: BrandedGitCommitSha,
+    headRef: Schema.NonEmptyString,
+    baseRef: Schema.NonEmptyString,
+    url: Schema.optional(HttpUrl),
     sender: Schema.optional(Schema.String),
   }),
 ])

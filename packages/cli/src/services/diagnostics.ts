@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from 'effect'
 import type { PlatformError } from 'effect/PlatformError'
 import { patchPlanePlugins } from '@patchplane/plugins/registry'
 import { CliConfigFile } from './config-file'
-import { CliEnvFile } from './env-file'
+import { CliEnvFile, type EnvSelection } from './env-file'
 
 export type DiagnosticStatus = 'ok' | 'warning' | 'error'
 
@@ -17,11 +17,7 @@ export interface Diagnostic {
   readonly docsUrl?: string | undefined
 }
 
-export interface DoctorInput {
-  readonly surface?: string | undefined
-  readonly plugins?: string | undefined
-  readonly includeOptional?: boolean | undefined
-}
+export interface DoctorInput extends EnvSelection {}
 
 function pluginSourcesForEnvVar(envVar: string) {
   return Object.values(patchPlanePlugins)

@@ -34,8 +34,8 @@ describe('verification evidence schemas', () => {
         exitCode: 0,
         artifactIds: ['test-report-1'],
         producedArtifactKinds: ['test-report'],
-        candidateDigestBefore: 'sha256:abc',
-        candidateDigestAfter: 'sha256:abc',
+        candidateDigestBefore: `sha256:${'a'.repeat(64)}`,
+        candidateDigestAfter: `sha256:${'a'.repeat(64)}`,
         startedAt: 2,
         completedAt: 3,
       })
@@ -61,7 +61,7 @@ describe('verification evidence schemas', () => {
       status: 'succeeded',
       artifactIds: [],
       producedArtifactKinds: [],
-      candidateDigestBefore: 'sha256:abc',
+      candidateDigestBefore: `sha256:${'a'.repeat(64)}`,
       startedAt: 1,
     }).pipe(Effect.flip, Effect.asVoid),
   )

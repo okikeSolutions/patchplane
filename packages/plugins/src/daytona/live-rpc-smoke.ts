@@ -1,4 +1,4 @@
-import { Clock, ConfigProvider, Effect, Layer, Result, Schema } from 'effect'
+import { Clock, ConfigProvider, Effect, Layer, Option, Result, Schema } from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { NodeCrypto } from '@effect/platform-node'
 import {
@@ -55,9 +55,7 @@ const envProvider = ConfigProvider.layer(
 )
 
 function sleep(ms: number) {
-  return Effect.promise(
-    () => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-  )
+  return Effect.sleep(ms)
 }
 
 function makeS3R2Harness() {
@@ -161,7 +159,7 @@ const smokeArtifactStorageLayer = Layer.succeed(
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     markRuntimeSessionStatus: () => Effect.die('unused'),
-    getActiveRuntimeSession: () => Effect.void.pipe(Effect.as(undefined)),
+    getActiveRuntimeSession: () => Effect.succeed(Option.none()),
     recordEvidenceArtifact: (input) => Effect.gen(function*() {
       return {
         id: makeEvidenceArtifactId(`smoke-artifact:${input.storageKey}`),
@@ -169,7 +167,7 @@ const smokeArtifactStorageLayer = Layer.succeed(
         createdAt: input.createdAt ?? (yield* Clock.currentTimeMillis),
       }
     }),
-    getEvidenceArtifact: () => Effect.void.pipe(Effect.as(undefined)),
+    getEvidenceArtifact: () => Effect.succeed(Option.none()),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),
@@ -551,8 +549,9 @@ const program = Effect.gen(function* () {
 
 await Effect.runPromise(
   program.pipe(
-    Effect.provide(DaytonaSandboxPlugin.layer),
-    Effect.provide(envProvider),
+    Effect.provide(
+      DaytonaSandboxPlugin.layer.pipe(Layer.provideMerge(envProvider)),
+    ),
   ),
 ).catch((error) => {
   console.error(error)

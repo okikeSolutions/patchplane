@@ -1,8 +1,9 @@
 import { Config } from 'effect'
 
-const convexUrl = Config.url('CONVEX_URL').pipe(
-  Config.orElse(() => Config.url('VITE_CONVEX_URL')),
-)
+const convexUrl = Config.all({
+  canonical: Config.option(Config.url('CONVEX_URL')),
+  legacy: Config.option(Config.url('VITE_CONVEX_URL')),
+})
 
 /** Convex storage plugin configuration read from deployment environment. */
 export const ConvexConfig = Config.all({

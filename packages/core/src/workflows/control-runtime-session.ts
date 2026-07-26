@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect'
+import { Clock, Effect, Option } from 'effect'
 import type { WorkflowRunId } from '@patchplane/domain/ids'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
@@ -15,14 +15,15 @@ export const ControlRuntimeSession = Effect.fn(
 }) {
   const storage = yield* StorageService
   const sandbox = yield* SandboxService
-  const session = yield* storage.getActiveRuntimeSession({
+  const sessionOption = yield* storage.getActiveRuntimeSession({
     workflowRunId: input.workflowRunId,
     traceId: input.traceId,
   })
 
-  if (session === undefined) {
+  if (Option.isNone(sessionOption)) {
     return { status: 'no_active_session' as const }
   }
+  const session = sessionOption.value
 
   if (input.operation === 'abort') {
     const result = yield* sandbox.abortRuntimeSession({ ...session, traceId: input.traceId })

@@ -15,6 +15,13 @@ import {
   WorkflowRunId,
 } from './ids'
 import { VerificationCoverageStatus, VerificationPlatform, VerificationResultStatus } from './verification'
+import {
+  EpochMillis,
+  GitCommitSha,
+  NonNegativeInt,
+  PositiveInt,
+  Sha256Digest,
+} from './refinements'
 
 export const PatchReportTrustStatus = Schema.Literals([
   'untrusted',
@@ -35,8 +42,8 @@ export type PatchReportExecutionStatus = Schema.Schema.Type<typeof PatchReportEx
 
 export const PatchReportV1Check = Schema.Struct({
   requirementId: VerificationRequirementId,
-  key: Schema.String,
-  label: Schema.String,
+  key: Schema.NonEmptyString,
+  label: Schema.NonEmptyString,
   required: Schema.Boolean,
   resultId: Schema.optional(VerificationResultId),
   status: Schema.optional(VerificationResultStatus),
@@ -54,31 +61,31 @@ export const PatchReportV1 = Schema.Struct({
   workflowRunId: WorkflowRunId,
   rootWorkflowRunId: WorkflowRunId,
   parentWorkflowRunId: Schema.optional(WorkflowRunId),
-  attemptNumber: Schema.Number,
-  repository: Schema.optional(Schema.String),
-  sourceCommitSha: Schema.optional(Schema.String),
-  requestedChange: Schema.String,
+  attemptNumber: PositiveInt,
+  repository: Schema.optional(Schema.NonEmptyString),
+  sourceCommitSha: Schema.optional(GitCommitSha),
+  requestedChange: Schema.NonEmptyString,
   trustStatus: PatchReportTrustStatus,
   execution: Schema.Struct({
     status: PatchReportExecutionStatus,
     sandboxExecutionId: Schema.optional(SandboxExecutionId),
-    provider: Schema.optional(Schema.String),
-    command: Schema.optional(Schema.String),
-    exitCode: Schema.optional(Schema.Number),
+    provider: Schema.optional(Schema.NonEmptyString),
+    command: Schema.optional(Schema.NonEmptyString),
+    exitCode: Schema.optional(Schema.Int),
   }),
   candidate: Schema.Struct({
     status: Schema.Literals(['missing', 'empty', 'captured', 'failed']),
     candidatePatchSetId: Schema.optional(CandidatePatchSetId),
-    digest: Schema.optional(Schema.String),
-    baseSha: Schema.optional(Schema.String),
-    headSha: Schema.optional(Schema.String),
+    digest: Schema.optional(Sha256Digest),
+    baseSha: Schema.optional(GitCommitSha),
+    headSha: Schema.optional(GitCommitSha),
     diffArtifactId: Schema.optional(EvidenceArtifactId),
     summary: Schema.optional(Schema.String),
   }),
   verification: Schema.Struct({
     status: VerificationCoverageStatus,
-    requiredCount: Schema.Number,
-    passedCount: Schema.Number,
+    requiredCount: NonNegativeInt,
+    passedCount: NonNegativeInt,
     failedRequirementIds: Schema.Array(VerificationRequirementId),
     missingRequirementIds: Schema.Array(VerificationRequirementId),
     checks: Schema.Array(PatchReportV1Check),
@@ -87,13 +94,13 @@ export const PatchReportV1 = Schema.Struct({
     status: Schema.Literals(['not-run', 'running', 'completed', 'failed']),
     reviewRunId: Schema.optional(ReviewRunId),
     reviewer: Schema.optional(Schema.String),
-    findingCount: Schema.Number,
+    findingCount: NonNegativeInt,
   }),
   policy: Schema.Struct({
     status: Schema.Literals(['not-evaluated', 'approved', 'rejected', 'changes-requested', 'manual-review']),
     policyDecisionId: Schema.optional(PolicyDecisionId),
     policyVersion: Schema.optional(Schema.String),
-    inputDigest: Schema.optional(Schema.String),
+    inputDigest: Schema.optional(Sha256Digest),
     verificationResultIds: Schema.Array(VerificationResultId),
     reviewFindingIds: Schema.Array(ReviewFindingId),
     missingRequirementIds: Schema.Array(VerificationRequirementId),
@@ -106,10 +113,10 @@ export const PatchReportV1 = Schema.Struct({
     comment: Schema.optional(Schema.String),
     verificationOverride: Schema.optional(Schema.Boolean),
     verificationOverrideReason: Schema.optional(Schema.String),
-    decidedAt: Schema.optional(Schema.Number),
+    decidedAt: Schema.optional(EpochMillis),
   }),
   evidence: Schema.Struct({
-    artifactCount: Schema.Number,
+    artifactCount: NonNegativeInt,
     artifactIds: Schema.Array(EvidenceArtifactId),
     truncated: Schema.Boolean,
   }),
@@ -118,8 +125,8 @@ export const PatchReportV1 = Schema.Struct({
     resultIds: Schema.Array(PublicationResultId),
   }),
   reasons: Schema.Array(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: EpochMillis,
+  updatedAt: EpochMillis,
 })
 export type PatchReportV1 = Schema.Schema.Type<typeof PatchReportV1>
 

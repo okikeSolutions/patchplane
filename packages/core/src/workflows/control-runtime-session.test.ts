@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { makeRuntimeSessionId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
@@ -17,17 +17,23 @@ const activeSession = {
   updatedAt: 1,
 }
 
-function storageLayer(events: Array<unknown>, session = activeSession) {
+function storageLayer(
+  events: Array<unknown>,
+  session: typeof activeSession | null = activeSession,
+) {
   return Layer.succeed(StorageService, StorageService.of({
     createWorkflowFromIntake: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     listRecentWorkflowStarts: () => Effect.die('unused'),
     claimWorkflowExecution: () => Effect.succeed(true),
-          markWorkflowExecutionFailed: () => Effect.succeed(true),
+    markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
-    getActiveRuntimeSession: () => Effect.succeed(session),
+    getActiveRuntimeSession: () =>
+      Effect.succeed(
+        session === null ? Option.none() : Option.some(session),
+      ),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
     recordCandidatePatchSet: () => Effect.die('unused'),
@@ -40,7 +46,7 @@ function storageLayer(events: Array<unknown>, session = activeSession) {
     recordProvenanceEvent: () => Effect.die('unused'),
     markRuntimeSessionStatus: (input) => Effect.sync(() => {
       events.push(input)
-      return { ...session, status: input.status, updatedAt: 2, ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }) }
+      return { ...activeSession, status: input.status, updatedAt: 2, ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }) }
     }),
   }))
 }
@@ -71,6 +77,19 @@ function sandboxLayer(events: Array<unknown>) {
 const input = { workflowRunId: activeSession.workflowRunId, traceId: 'trace-1' }
 
 describe('ControlRuntimeSession workflows', () => {
+  it.effect('models a missing active session as Option.none', () =>
+    Effect.gen(function* () {
+      const events: Array<unknown> = []
+      const result = yield* AbortRuntimeSession(input).pipe(
+        Effect.provide(
+          Layer.mergeAll(storageLayer(events, null), sandboxLayer(events)),
+        ),
+      )
+
+      expect(result.status).toBe('no_active_session')
+      expect(events).toEqual([])
+    }))
+
   it.effect('sends soft abort and marks the runtime session cancelled', () =>
     Effect.gen(function* () {
       const events: Array<unknown> = []

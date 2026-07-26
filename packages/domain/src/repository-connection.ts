@@ -1,4 +1,6 @@
 import { Schema } from 'effect'
+import { ActorId, WorkspaceId } from './ids'
+import { EpochMillis } from './refinements'
 
 export const RepositoryConnectionStatus = Schema.Literals([
   'active',
@@ -12,15 +14,15 @@ export type RepositoryConnectionStatus = Schema.Schema.Type<
 
 export const ConnectedRepositoryAccount = Schema.Struct({
   provider: Schema.Literal('github'),
-  workspaceId: Schema.String,
-  installationId: Schema.String,
-  accountExternalId: Schema.String,
-  accountLogin: Schema.String,
-  accountType: Schema.optional(Schema.String),
+  workspaceId: WorkspaceId,
+  installationId: Schema.NonEmptyString,
+  accountExternalId: Schema.NonEmptyString,
+  accountLogin: Schema.NonEmptyString,
+  accountType: Schema.optional(Schema.NonEmptyString),
   status: RepositoryConnectionStatus,
-  connectedByActorId: Schema.String,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  connectedByActorId: ActorId,
+  createdAt: EpochMillis,
+  updatedAt: EpochMillis,
 })
 export type ConnectedRepositoryAccount = Schema.Schema.Type<
   typeof ConnectedRepositoryAccount
@@ -31,19 +33,19 @@ export const decodeConnectedRepositoryAccount = Schema.decodeUnknownEffect(
 
 export const ConnectedRepository = Schema.Struct({
   provider: Schema.Literal('github'),
-  workspaceId: Schema.String,
-  installationId: Schema.String,
-  repositoryExternalId: Schema.String,
-  repositoryOwner: Schema.String,
-  repositoryName: Schema.String,
-  repositoryFullName: Schema.String,
+  workspaceId: WorkspaceId,
+  installationId: Schema.NonEmptyString,
+  repositoryExternalId: Schema.NonEmptyString,
+  repositoryOwner: Schema.NonEmptyString,
+  repositoryName: Schema.NonEmptyString,
+  repositoryFullName: Schema.NonEmptyString,
   private: Schema.Boolean,
   selected: Schema.Boolean,
   permissionsJson: Schema.optional(Schema.String),
   status: RepositoryConnectionStatus,
-  connectedByActorId: Schema.String,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  connectedByActorId: ActorId,
+  createdAt: EpochMillis,
+  updatedAt: EpochMillis,
 })
 export type ConnectedRepository = Schema.Schema.Type<
   typeof ConnectedRepository

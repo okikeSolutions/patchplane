@@ -3,6 +3,7 @@ import { Argument, CliError, Command, Flag } from 'effect/unstable/cli'
 import {
   getPatchPlanePlugin,
   patchPlanePlugins,
+  type PatchPlanePluginId,
   type PatchPlanePluginMetadata,
 } from '@patchplane/plugins/registry'
 
@@ -19,12 +20,12 @@ export function pluginsListText() {
   return lines.join('\n')
 }
 
-export function pluginsExplainText(id: string) {
-  const plugin = getPatchPlanePlugin(id)
-  if (plugin === undefined) {
-    throw new Error(`Unknown plugin: ${id}`)
-  }
+function isPluginId(id: string): id is PatchPlanePluginId {
+  return getPatchPlanePlugin(id) !== undefined
+}
 
+export function pluginsExplainText(id: PatchPlanePluginId) {
+  const plugin: PatchPlanePluginMetadata = patchPlanePlugins[id]
   const lines = [
     `${plugin.id} - ${plugin.name}`,
     plugin.description,
@@ -45,7 +46,7 @@ export function pluginsExplainText(id: string) {
 const pluginIdArgument = Argument.string('id').pipe(
   Argument.withDescription('Plugin id to explain'),
   Argument.mapEffect((id) =>
-    getPatchPlanePlugin(id) === undefined
+    !isPluginId(id)
       ? Effect.fail(new CliError.InvalidValue({
         option: 'id',
         value: id,
@@ -74,15 +75,17 @@ export const pluginsExplainCommand = Command.make('explain', {
   json: Flag.boolean('json').pipe(
     Flag.withDescription('Emit machine-readable JSON to stdout'),
   ),
-}, ({ id, json }) =>
-  Effect.sync(() => {
-    const plugin = getPatchPlanePlugin(id)
-    if (plugin === undefined) throw new Error(`Unknown plugin: ${id}`)
-    return json ? JSON.stringify({ plugin }, null, 2) : pluginsExplainText(id)
-  }).pipe(
-    Effect.flatMap((text) => Console.log(text)),
-  )
-).pipe(
+}, ({ id, json }) => {
+  const plugin = getPatchPlanePlugin(id)
+  return plugin === undefined
+    ? Effect.fail(new CliError.InvalidValue({
+      option: 'id',
+      value: id,
+      expected: 'known plugin id',
+      kind: 'argument',
+    }))
+    : Console.log(json ? JSON.stringify({ plugin }, null, 2) : pluginsExplainText(id))
+}).pipe(
   Command.withDescription('Explain one PatchPlane plugin and its required environment variables.'),
   Command.withShortDescription('Explain plugin'),
 )

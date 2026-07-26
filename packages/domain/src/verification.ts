@@ -8,6 +8,7 @@ import {
   VerificationResultId,
   WorkflowRunId,
 } from './ids'
+import { EpochMillis, NonNegativeInt, Sha256Digest } from './refinements'
 
 /** A repository or policy expectation that must be evaluated for one candidate. */
 export const VerificationRequirementKind = Schema.Literals([
@@ -34,16 +35,16 @@ export type VerificationPlatform = Schema.Schema.Type<typeof VerificationPlatfor
 export const VerificationRequirement = Schema.Struct({
   id: VerificationRequirementId,
   workflowRunId: WorkflowRunId,
-  key: Schema.String,
-  label: Schema.String,
+  key: Schema.NonEmptyString,
+  label: Schema.NonEmptyString,
   kind: VerificationRequirementKind,
   required: Schema.Boolean,
   command: Schema.optional(Schema.String),
   platform: Schema.optional(VerificationPlatform),
-  architecture: Schema.optional(Schema.String),
+  architecture: Schema.optional(Schema.NonEmptyString),
   requiredArtifactKinds: Schema.Array(EvidenceArtifactKind),
   source: VerificationRequirementSource,
-  createdAt: Schema.Number,
+  createdAt: EpochMillis,
 })
 export type VerificationRequirement = Schema.Schema.Type<typeof VerificationRequirement>
 
@@ -72,24 +73,24 @@ export const VerificationResult = Schema.Struct({
   requirementId: VerificationRequirementId,
   candidatePatchSetId: CandidatePatchSetId,
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
-  provider: Schema.String,
+  provider: Schema.NonEmptyString,
   command: Schema.optional(Schema.String),
   platform: VerificationPlatform,
-  architecture: Schema.String,
-  environmentImage: Schema.optional(Schema.String),
+  architecture: Schema.NonEmptyString,
+  environmentImage: Schema.optional(Schema.NonEmptyString),
   status: VerificationResultStatus,
-  exitCode: Schema.optional(Schema.Number),
+  exitCode: Schema.optional(Schema.Int),
   summary: Schema.optional(Schema.String),
-  passedCount: Schema.optional(Schema.Number),
-  failedCount: Schema.optional(Schema.Number),
-  skippedCount: Schema.optional(Schema.Number),
+  passedCount: Schema.optional(NonNegativeInt),
+  failedCount: Schema.optional(NonNegativeInt),
+  skippedCount: Schema.optional(NonNegativeInt),
   artifactIds: Schema.Array(EvidenceArtifactId),
   producedArtifactKinds: Schema.Array(EvidenceArtifactKind),
-  candidateDigestBefore: Schema.String,
-  candidateDigestAfter: Schema.optional(Schema.String),
-  startedAt: Schema.Number,
-  completedAt: Schema.optional(Schema.Number),
-  idempotencyKey: Schema.optional(Schema.String),
+  candidateDigestBefore: Schema.optional(Sha256Digest),
+  candidateDigestAfter: Schema.optional(Sha256Digest),
+  startedAt: EpochMillis,
+  completedAt: Schema.optional(EpochMillis),
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
 })
 export type VerificationResult = Schema.Schema.Type<typeof VerificationResult>
 

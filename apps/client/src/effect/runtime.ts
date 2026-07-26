@@ -1,9 +1,9 @@
 import { Crypto, Effect, Layer, ManagedRuntime } from 'effect'
-import { makeAppLayer } from './app-layer'
+import { appLayer } from './app-layer'
 
 const patchPlaneMemoMap = Layer.makeMemoMapUnsafe()
 
-export const patchPlaneRuntime = ManagedRuntime.make(makeAppLayer(), {
+export const patchPlaneRuntime = ManagedRuntime.make(appLayer, {
   memoMap: patchPlaneMemoMap,
 })
 

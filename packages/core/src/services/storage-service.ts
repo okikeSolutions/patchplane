@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Effect, type Option } from 'effect'
 import type { Actor } from '@patchplane/domain/actor'
 import type {
   CandidatePatchSet,
@@ -188,7 +188,7 @@ export interface RecordVerificationResultInput extends TelemetryContextFields {
   readonly skippedCount?: number | undefined
   readonly artifactIds: ReadonlyArray<EvidenceArtifact['id']>
   readonly producedArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
-  readonly candidateDigestBefore: string
+  readonly candidateDigestBefore?: string | undefined
   readonly candidateDigestAfter?: string | undefined
   readonly startedAt: number
   readonly completedAt?: number | undefined
@@ -302,13 +302,13 @@ export class StorageService extends Context.Service<StorageService, {
   ) => Effect.Effect<RuntimeSession, StorageError>
   readonly getActiveRuntimeSession: (
     input: GetActiveRuntimeSessionInput,
-  ) => Effect.Effect<RuntimeSession | undefined, StorageError>
+  ) => Effect.Effect<Option.Option<RuntimeSession>, StorageError>
   readonly recordEvidenceArtifact: (
     input: RecordEvidenceArtifactInput,
   ) => Effect.Effect<EvidenceArtifact, StorageError>
   readonly getEvidenceArtifact: (
     input: GetEvidenceArtifactInput,
-  ) => Effect.Effect<EvidenceArtifact | undefined, StorageError>
+  ) => Effect.Effect<Option.Option<EvidenceArtifact>, StorageError>
   readonly recordCandidatePatchSet: (
     input: RecordCandidatePatchSetInput,
   ) => Effect.Effect<CandidatePatchSet, StorageError>

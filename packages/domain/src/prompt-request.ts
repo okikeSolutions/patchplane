@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { ExternalWorkflowRef } from './external-workflow-ref'
 import { ActorId, PromptRequestId, WorkspaceId } from './ids'
+import { EpochMillis } from './refinements'
 
 export const PromptRequestSource = Schema.Literals([
   'dev',
@@ -20,12 +21,12 @@ export const PromptRequest = Schema.Struct({
   id: PromptRequestId,
   workspaceId: WorkspaceId,
   actorId: ActorId,
-  traceId: Schema.String,
+  traceId: Schema.NonEmptyString,
   source: PromptRequestSource,
-  prompt: Schema.String,
+  prompt: Schema.NonEmptyString,
   externalRef: Schema.optional(ExternalWorkflowRef),
   status: PromptRequestStatus,
-  createdAt: Schema.Number,
+  createdAt: EpochMillis,
 })
 export type PromptRequest = Schema.Schema.Type<typeof PromptRequest>
 

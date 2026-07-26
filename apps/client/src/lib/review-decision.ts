@@ -1,7 +1,7 @@
 import * as Cloudflare from 'alchemy/Cloudflare/Bridge'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { Config, Effect, Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import * as HttpBody from 'effect/unstable/http/HttpBody'
 import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
 import { publicErrorMessage } from '@patchplane/domain/errors'
@@ -16,6 +16,7 @@ import {
 import { getSourceControlWorker } from '@/env'
 import { effectServerFn } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
+import { loadConfiguredConvexUrl } from './convex-url'
 
 const ReviewDecisionInput = Schema.Struct({
   workflowRunId: WorkflowRunId,
@@ -61,12 +62,8 @@ type SourceControlPublishDecisionResponse = Schema.Schema.Type<typeof SourceCont
 
 class ReviewDecisionError extends Schema.ErrorClass<ReviewDecisionError>('ReviewDecisionError')({
   message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {}
-
-const configuredConvexUrl = Config.nonEmptyString('CONVEX_URL').pipe(
-  Config.orElse(() => Config.nonEmptyString('VITE_CONVEX_URL')),
-  Config.map((value) => value.replace(/\/$/, '')),
-)
 
 export function decisionPublicationRequest(input: {
   readonly traceId: string
@@ -121,7 +118,13 @@ export const submitReviewDecisionServerFn = effectServerFn({
       try: () => getWorkOSAuthRequest(),
       catch: () => new ReviewDecisionError({ message: 'Unable to load the authenticated session' }),
     })
-    const convex = new ConvexHttpClient(yield* configuredConvexUrl)
+    const convexUrl = yield* loadConfiguredConvexUrl().pipe(
+      Effect.mapError((cause) => new ReviewDecisionError({
+        message: 'Review decision configuration is invalid',
+        cause,
+      })),
+    )
+    const convex = new ConvexHttpClient(convexUrl.toString().replace(/\/$/, ''))
     if (authRequest.accessToken !== undefined) convex.setAuth(authRequest.accessToken)
 
     const decision = yield* Effect.tryPromise({

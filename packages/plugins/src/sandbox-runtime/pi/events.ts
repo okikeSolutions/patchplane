@@ -87,74 +87,67 @@ export function summarizePiEvent(event: unknown) {
   }
 }
 
-function parsePiJsonRuntimeEventLine(input: {
+const parsePiJsonRuntimeEventLine = Effect.fnUntraced(function*(input: {
   readonly line: string
   readonly lineNumber: number
   readonly now: () => number
-}): Effect.Effect<SandboxRuntimeEvent | undefined, PiRuntimeParseError> {
-  return Effect.gen(function* () {
-    const event = yield* Effect.try({
-      try: () => JSON.parse(input.line) as unknown,
-      catch: (error): PiRuntimeParseError => ({
-        line: input.lineNumber,
-        message: error instanceof Error ? error.message : String(error),
-        raw: input.line.slice(0, 500),
-      }),
-    })
-    const header = yield* Schema.decodeUnknownEffect(PiEventHeader)(event).pipe(
-      Effect.mapError((error): PiRuntimeParseError => ({
-        line: input.lineNumber,
-        message: String(error),
-        raw: input.line.slice(0, 500),
-      })),
-    )
-
-    if (isTransientPiEventType(header.type)) {
-      return undefined
-    }
-
-    return {
-      provider: 'pi',
-      type: `pi.${header.type}`,
-      occurredAt: piEventTimestamp(event, input.now()),
-      summary: summarizePiEvent(event),
-      payloadJson: JSON.stringify(event),
-    } satisfies SandboxRuntimeEvent
+}) {
+  const event = yield* Effect.try({
+    try: () => JSON.parse(input.line) as unknown,
+    catch: (error): PiRuntimeParseError => ({
+      line: input.lineNumber,
+      message: error instanceof Error ? error.message : String(error),
+      raw: input.line.slice(0, 500),
+    }),
   })
-}
+  const header = yield* Schema.decodeUnknownEffect(PiEventHeader)(event).pipe(
+    Effect.mapError((error): PiRuntimeParseError => ({
+      line: input.lineNumber,
+      message: String(error),
+      raw: input.line.slice(0, 500),
+    })),
+  )
 
-export function parsePiJsonRuntimeEventsEffect(stdout: string, options: {
-  readonly now?: () => number
-} = {}): Effect.Effect<{
-  readonly events: ReadonlyArray<SandboxRuntimeEvent>
-  readonly parseErrors: ReadonlyArray<PiRuntimeParseError>
-}> {
-  const now = options.now ?? Date.now
-  return Effect.gen(function* () {
-    const events: SandboxRuntimeEvent[] = []
-    const parseErrors: PiRuntimeParseError[] = []
+  if (isTransientPiEventType(header.type)) {
+    return undefined
+  }
 
-    for (const [index, rawLine] of stdout.split(/\r?\n/).entries()) {
-      const line = rawLine.trim()
-      if (line.length === 0) continue
+  return {
+    provider: 'pi',
+    type: `pi.${header.type}`,
+    occurredAt: piEventTimestamp(event, input.now()),
+    summary: summarizePiEvent(event),
+    payloadJson: JSON.stringify(event),
+  } satisfies SandboxRuntimeEvent
+})
 
-      const result = yield* parsePiJsonRuntimeEventLine({
-        line,
-        lineNumber: index + 1,
-        now,
-      }).pipe(Effect.exit)
+export const parsePiJsonRuntimeEventsEffect = Effect.fnUntraced(function*(stdout: string, options: {
+  readonly now: () => number
+}) {
+  const now = options.now
+  const events: SandboxRuntimeEvent[] = []
+  const parseErrors: PiRuntimeParseError[] = []
 
-      if (Exit.isSuccess(result)) {
-        if (result.value !== undefined) events.push(result.value)
-      } else {
-        parseErrors.push({
-          line: index + 1,
-          message: 'Failed to parse Pi JSON event line',
-          raw: line.slice(0, 500),
-        })
-      }
+  for (const [index, rawLine] of stdout.split(/\r?\n/).entries()) {
+    const line = rawLine.trim()
+    if (line.length === 0) continue
+
+    const result = yield* parsePiJsonRuntimeEventLine({
+      line,
+      lineNumber: index + 1,
+      now,
+    }).pipe(Effect.exit)
+
+    if (Exit.isSuccess(result)) {
+      if (result.value !== undefined) events.push(result.value)
+    } else {
+      parseErrors.push({
+        line: index + 1,
+        message: 'Failed to parse Pi JSON event line',
+        raw: line.slice(0, 500),
+      })
     }
+  }
 
-    return { events, parseErrors } as const
-  })
-}
+  return { events, parseErrors } as const
+})

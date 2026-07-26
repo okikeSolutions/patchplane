@@ -1,7 +1,7 @@
 import * as Cloudflare from 'alchemy/Cloudflare/Bridge'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { Config, Effect, Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import * as HttpBody from 'effect/unstable/http/HttpBody'
 import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
 import { publicErrorMessage } from '@patchplane/domain/errors'
@@ -9,9 +9,11 @@ import { SandboxExecutionId, WorkflowRunId } from '@patchplane/domain/ids'
 import { getSourceControlWorker } from '@/env'
 import { effectServerFn } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
+import { loadConfiguredConvexUrl } from './convex-url'
 
 class RerunWorkflowError extends Schema.ErrorClass<RerunWorkflowError>('RerunWorkflowError')({
   message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
 const RerunWorkflowInput = Schema.Struct({
@@ -38,11 +40,6 @@ const RerunExecutionResponse = Schema.Struct({
   error: Schema.optional(Schema.String),
 })
 
-const configuredConvexUrl = Config.nonEmptyString('CONVEX_URL').pipe(
-  Config.orElse(() => Config.nonEmptyString('VITE_CONVEX_URL')),
-  Config.map((value) => value.replace(/\/$/, '')),
-)
-
 export const rerunWorkflowServerFn = effectServerFn({
   method: 'POST',
   input: RerunWorkflowInput,
@@ -57,7 +54,13 @@ export const rerunWorkflowServerFn = effectServerFn({
       try: () => getWorkOSAuthRequest(),
       catch: () => new RerunWorkflowError({ message: 'Unable to load the authenticated session' }),
     })
-    const convex = new ConvexHttpClient(yield* configuredConvexUrl)
+    const convexUrl = yield* loadConfiguredConvexUrl().pipe(
+      Effect.mapError((cause) => new RerunWorkflowError({
+        message: 'Rerun workflow configuration is invalid',
+        cause,
+      })),
+    )
+    const convex = new ConvexHttpClient(convexUrl.toString().replace(/\/$/, ''))
     if (authRequest.accessToken !== undefined) convex.setAuth(authRequest.accessToken)
     const workflowStart = yield* Effect.tryPromise({
       try: () => convex.mutation(createRerunMutation, {

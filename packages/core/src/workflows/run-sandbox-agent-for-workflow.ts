@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect'
+import { Clock, Effect, Match } from 'effect'
 import { SandboxError } from '@patchplane/domain/errors'
 import type { RuntimeSession } from '@patchplane/domain/runtime-session'
 import type { VerificationPlatform } from '@patchplane/domain/verification'
@@ -145,7 +145,11 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   if (runtimeSession !== undefined) {
     yield* storage.markRuntimeSessionStatus({
       runtimeSessionId: runtimeSession.id,
-      status: result.exitCode === undefined ? 'running' : result.exitCode === 0 ? 'completed' : 'failed',
+      status: Match.value(result.exitCode).pipe(
+        Match.when(undefined, () => 'running' as const),
+        Match.when(0, () => 'completed' as const),
+        Match.orElse(() => 'failed' as const),
+      ),
       ...(result.exitCode === undefined ? {} : { completedAt: result.completedAt }),
       traceId: input.workflowStart.workflowRun.traceId,
     })

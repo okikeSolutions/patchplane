@@ -531,7 +531,7 @@ describe('Daytona sandbox boundary adapters', () => {
   })
 
   it.effect('deletes sandbox when repository command is interrupted', () =>
-    Effect.promise(async () => {
+    Effect.gen(function* () {
       const sandbox = fakeSandbox({
         process: {
           createSession: vi.fn(async () => undefined),
@@ -548,9 +548,10 @@ describe('Daytona sandbox boundary adapters', () => {
         const service = yield* SandboxService
         return yield* service.runRepositoryCommand(commandInput)
       }).pipe(Effect.provide(testLayer(client)))
-      const fiber = Effect.runFork(program)
+      const fiber = yield* Effect.forkChild(program)
+      yield* Effect.yieldNow
 
-      await Effect.runPromise(Fiber.interrupt(fiber))
+      yield* Fiber.interrupt(fiber)
 
       expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
     }),
@@ -586,7 +587,7 @@ describe('Daytona sandbox boundary adapters', () => {
   })
 
   it.effect('uses Daytona session execution so stdout and stderr are captured', () =>
-    Effect.promise(async () => {
+    Effect.gen(function* () {
       const createSession = vi.fn(async () => undefined)
       const executeSessionCommand = vi.fn(async () => ({
         exitCode: 1,
@@ -596,12 +597,12 @@ describe('Daytona sandbox boundary adapters', () => {
       const deleteSession = vi.fn(async () => undefined)
       const sandbox = { process: { createSession, executeSessionCommand, deleteSession } }
 
-      const result = await Effect.runPromise(executeSandboxCommand(sandbox, {
+      const result = yield* executeSandboxCommand(sandbox, {
         command: 'bun test',
         env: { NODE_ENV: 'test' },
         timeoutSeconds: 7,
         traceId: 'trace-1',
-      }))
+      })
 
       expect(createSession).toHaveBeenCalledWith('patchplane-trace-1')
       expect(executeSessionCommand).toHaveBeenCalledWith(
@@ -619,18 +620,19 @@ describe('Daytona sandbox boundary adapters', () => {
   )
 
   it.effect('rejects unsafe Daytona command environment variable names', () =>
-    Effect.promise(async () => {
+    Effect.gen(function* () {
       const createSession = vi.fn(async () => undefined)
       const executeSessionCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }))
       const deleteSession = vi.fn(async () => undefined)
       const sandbox = { process: { createSession, executeSessionCommand, deleteSession } }
 
-      await expect(Effect.runPromise(executeSandboxCommand(sandbox, {
+      const error = yield* executeSandboxCommand(sandbox, {
         command: 'bun test',
         env: { 'BAD; echo pwned': 'value' },
         timeoutSeconds: 7,
         traceId: 'trace-1',
-      }))).rejects.toThrow('Daytona command could not be formatted safely')
+      }).pipe(Effect.flip)
+      expect(error.message).toBe('Daytona command could not be formatted safely')
 
       expect(executeSessionCommand).not.toHaveBeenCalled()
       expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
@@ -776,9 +778,9 @@ describe('Daytona sandbox boundary adapters', () => {
         traceId: 'trace-1',
       })
       yield* handle.sendInput('{"type":"get_state"}\n')
-      const command = yield* handle.getCommand()
-      const logs = yield* handle.getLogs()
-      yield* handle.deleteSession()
+      const command = yield* handle.getCommand
+      const logs = yield* handle.getLogs
+      yield* handle.deleteSession
 
       expect(handle.sessionId).toBe('patchplane-trace-1')
       expect(handle.commandId).toBe('cmd-1')
@@ -815,6 +817,9 @@ describe('Daytona sandbox boundary adapters', () => {
       }).pipe(Effect.exit)
 
       expect(Exit.isFailure(exit)).toBe(true)
+      expect(sandbox.process.deleteSession).toHaveBeenCalledWith(
+        'patchplane-trace-1',
+      )
     }),
   )
 

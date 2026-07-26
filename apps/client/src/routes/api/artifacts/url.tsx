@@ -1,8 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { createR2SignedReadUrl } from '@patchplane/plugins/cloudflare/r2-artifacts-plugin'
+import { R2ArtifactsConfig } from '@patchplane/plugins/cloudflare/r2-artifacts-config'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { Effect, Exit, Schema } from 'effect'
+import { loadConfiguredConvexUrl } from '@/lib/convex-url'
 
 const getEvidenceArtifact = makeFunctionReference<
   'query',
@@ -10,71 +12,70 @@ const getEvidenceArtifact = makeFunctionReference<
     artifactId: string
     workflowRunId?: string
   },
-  {
-    id: string
-    workflowRunId: string
-    storageProvider: 'cloudflare-r2'
-    storageKey: string
-    contentType: string
-    sizeBytes: number
-    sha256: string
-  } | null
+  unknown
 >('workflowStarts:getEvidenceArtifact')
 
-function configuredConvexUrl() {
-  const value = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL
-  if (value === undefined || value.trim().length === 0) {
-    throw new Error('CONVEX_URL or VITE_CONVEX_URL is required')
-  }
-  return value.replace(/\/$/, '')
-}
+class ArtifactRouteError extends Schema.ErrorClass<ArtifactRouteError>(
+  'ArtifactRouteError',
+)({
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
-function requiredEnv(name: string, fallbackName?: string) {
-  const value = process.env[name]?.trim() || (fallbackName === undefined ? undefined : process.env[fallbackName]?.trim())
-  if (!value) throw new Error(fallbackName === undefined ? `${name} is required` : `${name} or ${fallbackName} is required`)
-  return value
-}
-
-function validateExpiresInSeconds(value: number) {
-  if (!Number.isInteger(value) || value < 1 || value > 604_800) {
-    throw new Error('expiresInSeconds must be an integer from 1 to 604800')
-  }
-  return value
-}
-
-async function createArtifactReadUrl(input: {
-  readonly storageKey: string
-  readonly expiresInSeconds: number
-}) {
-  const accountId = requiredEnv('CLOUDFLARE_ACCOUNT_ID')
-  const rawEndpoint = process.env.CLOUDFLARE_S3_API_ENDPOINT?.trim() || `https://${accountId}.r2.cloudflarestorage.com`
-  const endpointUrl = new URL(rawEndpoint)
-  const endpointBucket = endpointUrl.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)[0]
-  endpointUrl.pathname = '/'
-  endpointUrl.search = ''
-  endpointUrl.hash = ''
-  const bucketName = process.env.PATCHPLANE_EVIDENCE_R2_BUCKET?.trim() || endpointBucket || requiredEnv('PATCHPLANE_EVIDENCE_R2_BUCKET')
-  const accessKeyId = requiredEnv('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID', 'CLOUDFLARE_ACCESS_KEY_ID')
-  const secretAccessKey = requiredEnv('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY', 'CLOUDFLARE_SECRET_ACCESS_KEY')
-  const expiresIn = validateExpiresInSeconds(input.expiresInSeconds)
-  const s3 = new S3Client({
-    region: 'auto',
-    endpoint: endpointUrl.toString().replace(/\/$/, ''),
-    credentials: { accessKeyId, secretAccessKey },
-  })
-  const url = await getSignedUrl(
-    s3,
-    new GetObjectCommand({ Bucket: bucketName, Key: input.storageKey }),
-    { expiresIn },
-  )
-  return { url, expiresAt: Date.now() + expiresIn * 1000 }
-}
-
+const EvidenceArtifactRouteRecord = Schema.Struct({
+  id: Schema.NonEmptyString,
+  workflowRunId: Schema.NonEmptyString,
+  storageProvider: Schema.Literal('cloudflare-r2'),
+  storageKey: Schema.NonEmptyString,
+  contentType: Schema.NonEmptyString,
+  sizeBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  sha256: Schema.NonEmptyString,
+})
+const EvidenceArtifactRouteResult = Schema.NullOr(EvidenceArtifactRouteRecord)
+const ExpiresInSeconds = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 604_800 }),
+)
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
   headers.set('content-type', 'application/json')
   return new Response(JSON.stringify(body), { ...init, headers })
 }
+
+const loadArtifactReadUrl = Effect.fnUntraced(function*(input: {
+  readonly accessToken: string
+  readonly artifactId: string
+  readonly workflowRunId?: string | undefined
+  readonly expiresInSeconds: unknown
+}) {
+  const convexUrl = yield* loadConfiguredConvexUrl()
+  const expiresInSeconds = yield* Schema.decodeUnknownEffect(ExpiresInSeconds)(
+    input.expiresInSeconds,
+  )
+  const artifact = yield* Effect.tryPromise({
+    try: () => {
+      const convex = new ConvexHttpClient(convexUrl.toString().replace(/\/$/, ''))
+      convex.setAuth(input.accessToken)
+      return convex.query(getEvidenceArtifact, {
+        artifactId: input.artifactId,
+        ...(input.workflowRunId === undefined
+          ? {}
+          : { workflowRunId: input.workflowRunId }),
+      })
+    },
+    catch: (cause) => new ArtifactRouteError({
+      message: 'Artifact metadata query failed',
+      cause,
+    }),
+  }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(EvidenceArtifactRouteResult)))
+  if (artifact === null) return null
+
+  const r2Config = yield* R2ArtifactsConfig
+  const signed = yield* createR2SignedReadUrl(r2Config, {
+    storageKey: artifact.storageKey,
+    expiresInSeconds,
+  })
+  return { artifact, signed }
+})
 
 export const Route = createFileRoute('/api/artifacts/url')({
   server: {
@@ -94,26 +95,29 @@ export const Route = createFileRoute('/api/artifacts/url')({
         const url = new URL(request.url)
         const artifactId = url.searchParams.get('artifactId')?.trim()
         const workflowRunId = url.searchParams.get('workflowRunId')?.trim() || undefined
-        const expires = Number(url.searchParams.get('expiresInSeconds') ?? '900')
+        const expiresInSeconds = Number(url.searchParams.get('expiresInSeconds') ?? '900')
         const preview = url.searchParams.get('preview') === '1'
         if (!artifactId) {
           return jsonResponse({ ok: false, error: 'artifactId is required' }, { status: 400 })
         }
 
-        const convex = new ConvexHttpClient(configuredConvexUrl())
-        convex.setAuth(accessToken)
-        const artifact = await convex.query(getEvidenceArtifact, {
+        const resultExit = await Effect.runPromiseExit(loadArtifactReadUrl({
+          accessToken,
           artifactId,
-          ...(workflowRunId === undefined ? {} : { workflowRunId }),
-        })
-        if (artifact === null) {
+          workflowRunId,
+          expiresInSeconds,
+        }))
+        if (Exit.isFailure(resultExit)) {
+          return jsonResponse(
+            { ok: false, error: 'Artifact URL could not be created' },
+            { status: 502 },
+          )
+        }
+        if (resultExit.value === null) {
           return jsonResponse({ ok: false, error: 'Artifact not found' }, { status: 404 })
         }
+        const { artifact, signed } = resultExit.value
 
-        const signed = await createArtifactReadUrl({
-          storageKey: artifact.storageKey,
-          expiresInSeconds: expires,
-        })
         if (preview) {
           const previewLimitBytes = 200_000
           const artifactResponse = await fetch(signed.url, {
@@ -128,12 +132,17 @@ export const Route = createFileRoute('/api/artifacts/url')({
           }
           const truncated = artifact.sizeBytes > previewLimitBytes
           const body = new TextDecoder().decode(bytes.slice(0, previewLimitBytes))
-          return new Response(truncated ? `${body}\n\n…preview truncated; open the full evidence artifact to inspect the remainder…` : body, {
-            headers: {
-              'content-type': 'text/plain; charset=utf-8',
-              'x-patchplane-preview-truncated': String(truncated),
+          return new Response(
+            truncated
+              ? `${body}\n\n…preview truncated; open the full evidence artifact to inspect the remainder…`
+              : body,
+            {
+              headers: {
+                'content-type': 'text/plain; charset=utf-8',
+                'x-patchplane-preview-truncated': String(truncated),
+              },
             },
-          })
+          )
         }
         return jsonResponse({
           ok: true,

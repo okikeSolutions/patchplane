@@ -2,7 +2,11 @@ import { describe, expect, it } from '@effect/vitest'
 import { Option, Schema } from 'effect'
 import {
   ActorId,
+  PromptRequestId,
+  WorkflowRunId,
   WorkspaceId,
+  makePromptRequestId,
+  makeWorkflowRunId,
   makeWorkOSActorId,
   makeWorkOSWorkspaceId,
 } from './ids'
@@ -20,5 +24,16 @@ describe('domain ids', () => {
       Option.isNone(Schema.decodeUnknownOption(WorkspaceId)('workos:')),
     ).toBe(true)
     expect(() => makeWorkOSWorkspaceId('')).toThrow()
+  })
+
+  it('rejects empty durable ids before applying their brands', () => {
+    expect(Option.isNone(Schema.decodeUnknownOption(PromptRequestId)(''))).toBe(
+      true,
+    )
+    expect(Option.isNone(Schema.decodeUnknownOption(WorkflowRunId)(''))).toBe(
+      true,
+    )
+    expect(() => makePromptRequestId('')).toThrow()
+    expect(() => makeWorkflowRunId('')).toThrow()
   })
 })

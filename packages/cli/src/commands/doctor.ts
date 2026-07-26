@@ -1,16 +1,18 @@
 import { Console, Effect, Option } from 'effect'
 import { CliError, Command, Flag } from 'effect/unstable/cli'
-import { getPatchPlanePlugin } from '@patchplane/plugins/registry'
+import type { PatchPlanePluginId } from '@patchplane/plugins/registry'
 import { CliDiagnostics } from '../services/diagnostics'
+import { isPluginId } from '../services/env-file'
 import { failCommand, failSilently } from '../services/errors'
 
 const pluginsFlag = Flag.string('plugins').pipe(
   Flag.withDescription('Comma-separated plugin ids to check, e.g. github,convex'),
   Flag.withMetavar('IDS'),
   Flag.mapEffect((value) => {
-    const unknown = value.split(',').map((item) => item.trim()).filter(Boolean).filter((id) => getPatchPlanePlugin(id) === undefined)
+    const values = value.split(',').map((item) => item.trim()).filter(Boolean)
+    const unknown = values.filter((id) => !isPluginId(id))
     return unknown.length === 0
-      ? Effect.succeed(value)
+      ? Effect.succeed(values.filter(isPluginId) satisfies ReadonlyArray<PatchPlanePluginId>)
       : Effect.fail(new CliError.InvalidValue({
         option: 'plugins',
         value,

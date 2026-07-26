@@ -25,6 +25,8 @@ const requirement: VerificationRequirement = {
   source: 'repository-config',
   createdAt: 1,
 }
+const candidateDigest = `sha256:${'a'.repeat(64)}`
+
 const passingResult: VerificationResult = {
   id: makeVerificationResultId('result-1'),
   workflowRunId,
@@ -39,8 +41,8 @@ const passingResult: VerificationResult = {
   exitCode: 0,
   artifactIds: [makeEvidenceArtifactId('artifact-1')],
   producedArtifactKinds: ['test-report'],
-  candidateDigestBefore: 'sha256:a',
-  candidateDigestAfter: 'sha256:a',
+  candidateDigestBefore: candidateDigest,
+  candidateDigestAfter: candidateDigest,
   startedAt: 2,
   completedAt: 3,
 }
@@ -68,7 +70,7 @@ describe('evaluateVerificationCoverage', () => {
 
     for (const result of [
       { ...passingResult, exitCode: 1 },
-      { ...passingResult, candidateDigestAfter: 'sha256:b' },
+      { ...passingResult, candidateDigestAfter: `sha256:${'b'.repeat(64)}` },
       { ...passingResult, producedArtifactKinds: [] },
       { ...passingResult, command: 'bun test --changed' },
       { ...passingResult, platform: 'macos' as const },

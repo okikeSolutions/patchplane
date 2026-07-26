@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { GitCommitSha, HttpUrl, PositiveInt } from './refinements'
 
 /**
  * Provider-specific provenance stored beside a generic PatchPlane workflow.
@@ -8,28 +9,28 @@ import { Schema } from 'effect'
  * identity for idempotency, audit trails, and publication back to the source.
  */
 export const ExternalWorkflowRef = Schema.Struct({
-  provider: Schema.String,
-  deliveryId: Schema.String,
-  eventKind: Schema.String,
-  repositoryProvider: Schema.optional(Schema.String),
-  repositoryInstallationId: Schema.optional(Schema.String),
-  repositoryExternalId: Schema.optional(Schema.String),
-  repositoryOwner: Schema.optional(Schema.String),
-  repositoryName: Schema.optional(Schema.String),
-  repositoryFullName: Schema.optional(Schema.String),
-  issueExternalId: Schema.optional(Schema.String),
-  issueNumber: Schema.optional(Schema.Number),
+  provider: Schema.NonEmptyString,
+  deliveryId: Schema.NonEmptyString,
+  eventKind: Schema.NonEmptyString,
+  repositoryProvider: Schema.optional(Schema.NonEmptyString),
+  repositoryInstallationId: Schema.optional(Schema.NonEmptyString),
+  repositoryExternalId: Schema.optional(Schema.NonEmptyString),
+  repositoryOwner: Schema.optional(Schema.NonEmptyString),
+  repositoryName: Schema.optional(Schema.NonEmptyString),
+  repositoryFullName: Schema.optional(Schema.NonEmptyString),
+  issueExternalId: Schema.optional(Schema.NonEmptyString),
+  issueNumber: Schema.optional(PositiveInt),
   issueTitle: Schema.optional(Schema.String),
-  pullRequestExternalId: Schema.optional(Schema.String),
-  pullRequestNumber: Schema.optional(Schema.Number),
-  pullRequestHeadSha: Schema.optional(Schema.String),
-  pullRequestHeadRef: Schema.optional(Schema.String),
-  pullRequestBaseRef: Schema.optional(Schema.String),
-  commentExternalId: Schema.optional(Schema.String),
-  url: Schema.optional(Schema.String),
-  senderProvider: Schema.optional(Schema.String),
-  senderExternalId: Schema.optional(Schema.String),
-  senderLogin: Schema.optional(Schema.String),
+  pullRequestExternalId: Schema.optional(Schema.NonEmptyString),
+  pullRequestNumber: Schema.optional(PositiveInt),
+  pullRequestHeadSha: Schema.optional(GitCommitSha),
+  pullRequestHeadRef: Schema.optional(Schema.NonEmptyString),
+  pullRequestBaseRef: Schema.optional(Schema.NonEmptyString),
+  commentExternalId: Schema.optional(Schema.NonEmptyString),
+  url: Schema.optional(HttpUrl),
+  senderProvider: Schema.optional(Schema.NonEmptyString),
+  senderExternalId: Schema.optional(Schema.NonEmptyString),
+  senderLogin: Schema.optional(Schema.NonEmptyString),
 })
 export type ExternalWorkflowRef = Schema.Schema.Type<typeof ExternalWorkflowRef>
 

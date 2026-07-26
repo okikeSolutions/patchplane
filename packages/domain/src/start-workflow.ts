@@ -14,7 +14,7 @@ export const StartWorkflowInput = Schema.Struct({
   actor: Actor,
   workspace: Workspace,
   source: PromptRequestSource,
-  traceId: Schema.String,
-  prompt: Schema.String,
+  traceId: Schema.NonEmptyString,
+  prompt: Schema.NonEmptyString,
 })
 export type StartWorkflowInput = Schema.Schema.Type<typeof StartWorkflowInput>

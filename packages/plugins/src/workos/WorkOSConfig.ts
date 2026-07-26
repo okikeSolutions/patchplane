@@ -1,11 +1,13 @@
-import { Config } from 'effect'
+import { Config, Schema } from 'effect'
 
 /** WorkOS/AuthKit server configuration for authentication and membership checks. */
 export const WorkOSConfig = Config.all({
   apiKey: Config.redacted('WORKOS_API_KEY'),
-  clientId: Config.string('WORKOS_CLIENT_ID'),
+  clientId: Config.schema(Schema.NonEmptyString, 'WORKOS_CLIENT_ID'),
   cookiePassword: Config.redacted('WORKOS_COOKIE_PASSWORD'),
-  apiHostname: Config.option(Config.string('WORKOS_API_HOSTNAME')),
+  apiHostname: Config.option(
+    Config.schema(Schema.NonEmptyString, 'WORKOS_API_HOSTNAME'),
+  ),
 })
 
 export type WorkOSConfig = typeof WorkOSConfig extends Config.Config<infer A>

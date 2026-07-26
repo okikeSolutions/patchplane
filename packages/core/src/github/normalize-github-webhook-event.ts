@@ -7,16 +7,16 @@ import {
 
 const GitHubIssueOpenedPayload = Schema.Struct({
   action: Schema.Literal('opened'),
-  installation: Schema.Struct({ id: Schema.Number }),
+  installation: Schema.Struct({ id: Schema.Finite }),
   repository: Schema.Struct({
-    id: Schema.Number,
+    id: Schema.Finite,
     name: Schema.String,
     owner: Schema.Struct({ login: Schema.String }),
   }),
   sender: Schema.optional(Schema.Struct({ login: Schema.String })),
   issue: Schema.Struct({
-    id: Schema.Number,
-    number: Schema.Number,
+    id: Schema.Finite,
+    number: Schema.Finite,
     title: Schema.String,
     body: Schema.optional(Schema.NullOr(Schema.String)),
     html_url: Schema.optional(Schema.String),
@@ -25,16 +25,16 @@ const GitHubIssueOpenedPayload = Schema.Struct({
 
 const GitHubPullRequestPayload = Schema.Struct({
   action: Schema.Literals(['opened', 'synchronize']),
-  installation: Schema.Struct({ id: Schema.Number }),
+  installation: Schema.Struct({ id: Schema.Finite }),
   repository: Schema.Struct({
-    id: Schema.Number,
+    id: Schema.Finite,
     name: Schema.String,
     owner: Schema.Struct({ login: Schema.String }),
   }),
   sender: Schema.optional(Schema.Struct({ login: Schema.String })),
   pull_request: Schema.Struct({
-    id: Schema.Number,
-    number: Schema.Number,
+    id: Schema.Finite,
+    number: Schema.Finite,
     title: Schema.String,
     body: Schema.optional(Schema.NullOr(Schema.String)),
     html_url: Schema.optional(Schema.String),
@@ -50,20 +50,20 @@ const GitHubPullRequestPayload = Schema.Struct({
 
 const GitHubIssueCommentCreatedPayload = Schema.Struct({
   action: Schema.Literal('created'),
-  installation: Schema.Struct({ id: Schema.Number }),
+  installation: Schema.Struct({ id: Schema.Finite }),
   repository: Schema.Struct({
-    id: Schema.Number,
+    id: Schema.Finite,
     name: Schema.String,
     owner: Schema.Struct({ login: Schema.String }),
   }),
   sender: Schema.optional(Schema.Struct({ login: Schema.String })),
   issue: Schema.Struct({
-    id: Schema.Number,
-    number: Schema.Number,
+    id: Schema.Finite,
+    number: Schema.Finite,
     pull_request: Schema.optional(Schema.Unknown),
   }),
   comment: Schema.Struct({
-    id: Schema.Number,
+    id: Schema.Finite,
     body: Schema.String,
     html_url: Schema.optional(Schema.String),
   }),

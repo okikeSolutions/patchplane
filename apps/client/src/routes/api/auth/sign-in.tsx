@@ -1,9 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { Config, Effect } from 'effect'
 
-function configuredOrganizationId() {
-  const value = process.env.PATCHPLANE_WORKOS_ORGANIZATION_ID?.trim()
-  return value ? value : undefined
-}
+const configuredOrganizationId = Config.string('PATCHPLANE_WORKOS_ORGANIZATION_ID').pipe(
+  Config.withDefault(''),
+  Config.map((value) => value.trim() || undefined),
+)
 
 function sanitizeReturnPathname(value: string | null) {
   if (!value) {
@@ -28,7 +29,7 @@ export const Route = createFileRoute('/api/auth/sign-in')({
         )
         const { getSignInUrl } =
           await import('@workos/authkit-tanstack-react-start')
-        const organizationId = configuredOrganizationId()
+        const organizationId = await Effect.runPromise(configuredOrganizationId)
         const url = await getSignInUrl({
           data: {
             ...(returnPathname === undefined ? {} : { returnPathname }),

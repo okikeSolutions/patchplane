@@ -8,7 +8,7 @@ export interface InitPromptAnswers {
   readonly confirmed: boolean
 }
 
-export function promptForInitOptions(defaults: {
+export const promptForInitOptions = Effect.fnUntraced(function*(defaults: {
   readonly profile?: InitProfile | undefined
   readonly withPi?: boolean | undefined
 }) {
@@ -21,24 +21,22 @@ export function promptForInitOptions(defaults: {
     description: pluginIdsForInitProfile(choice.value).join(', '),
   }))
 
-  return Effect.gen(function* () {
-    const profile = defaults.profile ?? (yield* Prompt.run(Prompt.select({
-      message: 'What do you want to set up?',
-      choices: profileChoices,
+  const profile = defaults.profile ?? (yield* Prompt.run(Prompt.select({
+    message: 'What do you want to set up?',
+    choices: profileChoices,
+  })))
+
+  const withPi = profile === 'app'
+    ? false
+    : defaults.withPi ?? (yield* Prompt.run(Prompt.confirm({
+      message: 'Enable Daytona Pi execution?',
+      initial: false,
     })))
 
-    const withPi = profile === 'app'
-      ? false
-      : defaults.withPi ?? (yield* Prompt.run(Prompt.confirm({
-        message: 'Enable Daytona Pi execution?',
-        initial: false,
-      })))
+  const confirmed = yield* Prompt.run(Prompt.confirm({
+    message: 'Write patchplane.config.json, update .env.local, and create .patchplane state directories?',
+    initial: true,
+  }))
 
-    const confirmed = yield* Prompt.run(Prompt.confirm({
-      message: 'Write patchplane.config.json, update .env.local, and create .patchplane state directories?',
-      initial: true,
-    }))
-
-    return { profile, withPi, confirmed } satisfies InitPromptAnswers
-  })
-}
+  return { profile, withPi, confirmed } satisfies InitPromptAnswers
+})

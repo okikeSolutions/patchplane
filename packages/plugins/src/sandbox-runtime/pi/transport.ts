@@ -52,12 +52,12 @@ export interface PiRpcCommandTransport<E = never> {
   readonly sendInput: (data: string) => Effect.Effect<void, E>
 }
 
-export interface PiRpcCommandSender {
-  readonly getState: (input?: { readonly id?: string | undefined }) => Effect.Effect<void>
-  readonly prompt: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void>
-  readonly steer: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void>
-  readonly followUp: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void>
-  readonly abort: (input?: { readonly id?: string | undefined }) => Effect.Effect<void>
+export interface PiRpcCommandSender<E = never> {
+  readonly getState: (input?: { readonly id?: string | undefined }) => Effect.Effect<void, RpcClientError | E>
+  readonly prompt: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, RpcClientError | E>
+  readonly steer: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, RpcClientError | E>
+  readonly followUp: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, RpcClientError | E>
+  readonly abort: (input?: { readonly id?: string | undefined }) => Effect.Effect<void, RpcClientError | E>
 }
 
 /**
@@ -65,10 +65,10 @@ export interface PiRpcCommandSender {
  * with `discard: true`: Pi acknowledges commands asynchronously on stdout, and
  * those responses are consumed by the runtime-event ingestion stream.
  */
-export function makePiRpcCommandSender<E>(transport: PiRpcCommandTransport<E>): PiRpcCommandSender {
+export function makePiRpcCommandSender<E>(transport: PiRpcCommandTransport<E>): PiRpcCommandSender<E> {
   const runDiscard = (
     f: (client: any) => Effect.Effect<void, RpcClientError | E>,
-  ): Effect.Effect<void> =>
+  ): Effect.Effect<void, RpcClientError | E> =>
     Effect.scoped(Effect.gen(function* () {
       const made = yield* RpcClient.makeNoSerialization(PiRpcs, {
         supportsAck: false,
@@ -78,7 +78,7 @@ export function makePiRpcCommandSender<E>(transport: PiRpcCommandTransport<E>): 
           return command === undefined ? Effect.void : transport.sendInput(encodePiRpcCommand(command))
         },
       })
-      return yield* f(made.client).pipe(Effect.orDie)
+      return yield* f(made.client)
     }))
 
   return {

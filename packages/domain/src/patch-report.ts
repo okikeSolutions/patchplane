@@ -6,6 +6,7 @@ import type { RuntimeEvent } from './runtime-event'
 import type { RuntimeSession } from './runtime-session'
 import type { SandboxExecution } from './sandbox-execution'
 import type { WorkflowStart } from './workflow-start'
+import { EpochMillis, HttpUrl } from './refinements'
 
 /**
  * Developer-facing trust report for one AI-generated patch attempt.
@@ -46,7 +47,7 @@ export const PatchReportDecisionStatus = Schema.Literals([
 export type PatchReportDecisionStatus = Schema.Schema.Type<typeof PatchReportDecisionStatus>
 
 export const PatchReportCheck = Schema.Struct({
-  name: Schema.String,
+  name: Schema.NonEmptyString,
   status: Schema.Literals(['passed', 'failed', 'skipped', 'unknown']),
   summary: Schema.optional(Schema.String),
 })
@@ -54,10 +55,10 @@ export type PatchReportCheck = Schema.Schema.Type<typeof PatchReportCheck>
 
 export const PatchReportEvidence = Schema.Struct({
   kind: PatchReportEvidenceKind,
-  label: Schema.String,
+  label: Schema.NonEmptyString,
   summary: Schema.optional(Schema.String),
-  artifactId: Schema.optional(Schema.String),
-  artifactUrl: Schema.optional(Schema.String),
+  artifactId: Schema.optional(Schema.NonEmptyString),
+  artifactUrl: Schema.optional(HttpUrl),
 })
 export type PatchReportEvidence = Schema.Schema.Type<typeof PatchReportEvidence>
 
@@ -65,31 +66,31 @@ export const PatchReportDecision = Schema.Struct({
   status: PatchReportDecisionStatus,
   actorId: ActorId,
   comment: Schema.String,
-  decidedAt: Schema.Number,
+  decidedAt: EpochMillis,
 })
 export type PatchReportDecision = Schema.Schema.Type<typeof PatchReportDecision>
 
 export const PatchReport = Schema.Struct({
-  id: Schema.String,
+  id: Schema.NonEmptyString,
   workflowRunId: WorkflowRunId,
   status: PatchReportStatus,
   repository: Schema.optional(Schema.String),
   promptSummary: Schema.String,
   patchSummary: Schema.optional(Schema.String),
   execution: Schema.Struct({
-    sandboxProvider: Schema.optional(Schema.String),
-    sandboxId: Schema.optional(Schema.String),
-    command: Schema.optional(Schema.String),
+    sandboxProvider: Schema.optional(Schema.NonEmptyString),
+    sandboxId: Schema.optional(Schema.NonEmptyString),
+    command: Schema.optional(Schema.NonEmptyString),
     status: Schema.Literals(['not-run', 'completed', 'failed', 'running', 'unknown']),
-    exitCode: Schema.optional(Schema.Number),
-    startedAt: Schema.optional(Schema.Number),
-    completedAt: Schema.optional(Schema.Number),
+    exitCode: Schema.optional(Schema.Int),
+    startedAt: Schema.optional(EpochMillis),
+    completedAt: Schema.optional(EpochMillis),
   }),
   checks: Schema.Array(PatchReportCheck),
   evidence: Schema.Array(PatchReportEvidence),
   decision: Schema.optional(PatchReportDecision),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: EpochMillis,
+  updatedAt: EpochMillis,
 })
 export type PatchReport = Schema.Schema.Type<typeof PatchReport>
 
@@ -125,7 +126,12 @@ export function assemblePatchReportV0(input: AssemblePatchReportV0Input): PatchR
     id: `patch-report:${input.workflowStart.workflowRun.id}`,
     workflowRunId: input.workflowStart.workflowRun.id,
     status,
-    ...optional('repository', input.workflowStart.promptRequest.externalRef?.repositoryFullName),
+    ...(input.workflowStart.promptRequest.externalRef?.repositoryFullName === undefined
+      ? {}
+      : {
+        repository:
+          input.workflowStart.promptRequest.externalRef.repositoryFullName,
+      }),
     promptSummary: summarizeText(input.workflowStart.promptRequest.prompt),
     execution: executionSection(latestExecution),
     checks: checksSection(latestExecution),
@@ -194,7 +200,9 @@ function executionSection(latestExecution: SandboxExecution | undefined): PatchR
     sandboxId: latestExecution.sandboxId,
     command: latestExecution.command,
     status: latestExecution.status === 'succeeded' ? 'completed' : 'failed',
-    ...optional('exitCode', latestExecution.exitCode),
+    ...(latestExecution.exitCode === undefined
+      ? {}
+      : { exitCode: latestExecution.exitCode }),
     startedAt: latestExecution.startedAt,
     completedAt: latestExecution.completedAt,
   }
@@ -269,11 +277,4 @@ function latestBy<A>(
 function summarizeText(value: string) {
   const collapsed = value.trim().replace(/\s+/g, ' ')
   return collapsed.length <= 240 ? collapsed : `${collapsed.slice(0, 237)}...`
-}
-
-function optional<Key extends string, Value>(
-  key: Key,
-  value: Value | undefined,
-): Value extends undefined ? Record<Key, never> : Partial<Record<Key, Value>> {
-  return value === undefined ? {} as never : { [key]: value } as never
 }

@@ -16,8 +16,7 @@ function failInit(message: string) {
   return failCommand(message)
 }
 
-function resolveInitOptions(input: InitOptions) {
-  return Effect.gen(function* () {
+const resolveInitOptions = Effect.fnUntraced(function*(input: InitOptions) {
     if (input.profile === 'app' && input.withPi) {
       return yield* new CliError.ShowHelp({
         commandPath: ['patchplane', 'init'],
@@ -63,7 +62,6 @@ function resolveInitOptions(input: InitOptions) {
       nonInteractive: input.nonInteractive,
     } satisfies ResolvedInitOptions
   })
-}
 
 export const initCommand = Command.make('init', {
   profile: Flag.choice('profile', ['app', 'githubWebhook', 'full'] as const).pipe(

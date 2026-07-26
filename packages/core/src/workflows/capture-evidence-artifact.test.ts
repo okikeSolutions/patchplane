@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Exit, Layer } from 'effect'
+import { Effect, Exit, Layer, Option } from 'effect'
 import { ArtifactsError, StorageError } from '@patchplane/domain/errors'
 import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { ArtifactsService } from '../services/artifacts-service'
@@ -36,11 +36,11 @@ function storageLayer(options: { readonly failRecord?: boolean } = {}) {
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     markRuntimeSessionStatus: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
-    getActiveRuntimeSession: () => Effect.void.pipe(Effect.as(undefined)),
+    getActiveRuntimeSession: () => Effect.succeed(Option.none()),
     recordEvidenceArtifact: (input) => options.failRecord
       ? Effect.fail(new StorageError({ operation: 'recordEvidenceArtifact', message: 'boom', cause: undefined }))
       : Effect.succeed({ id: makeEvidenceArtifactId('artifact_1'), ...input, createdAt: input.createdAt ?? 123 }),
-    getEvidenceArtifact: () => Effect.void.pipe(Effect.as(undefined)),
+    getEvidenceArtifact: () => Effect.succeed(Option.none()),
     recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordVerificationRequirement: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordVerificationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),

@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { SandboxExecutionId, WorkflowRunId } from './ids'
+import { EpochMillis } from './refinements'
 import { SandboxPolicy } from './sandbox-policy'
 
 export const SandboxExecutionStatus = Schema.Literals([
@@ -20,16 +21,16 @@ export type SandboxExecutionStatus = Schema.Schema.Type<
 export const SandboxExecution = Schema.Struct({
   id: SandboxExecutionId,
   workflowRunId: WorkflowRunId,
-  provider: Schema.String,
-  sandboxId: Schema.String,
-  command: Schema.String,
+  provider: Schema.NonEmptyString,
+  sandboxId: Schema.NonEmptyString,
+  command: Schema.NonEmptyString,
   status: SandboxExecutionStatus,
-  exitCode: Schema.optional(Schema.Number),
+  exitCode: Schema.optional(Schema.Int),
   stdout: Schema.String,
   stderr: Schema.optional(Schema.String),
   policy: Schema.optional(SandboxPolicy),
-  startedAt: Schema.Number,
-  completedAt: Schema.Number,
+  startedAt: EpochMillis,
+  completedAt: EpochMillis,
 })
 export type SandboxExecution = Schema.Schema.Type<typeof SandboxExecution>
 

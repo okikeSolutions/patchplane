@@ -341,7 +341,7 @@ const verificationResultReturn = v.object({
   skippedCount: v.optional(v.number()),
   artifactIds: v.array(v.id('evidenceArtifacts')),
   producedArtifactKinds: v.array(evidenceArtifactKindArg),
-  candidateDigestBefore: v.string(),
+  candidateDigestBefore: v.optional(v.string()),
   candidateDigestAfter: v.optional(v.string()),
   startedAt: v.number(),
   completedAt: v.optional(v.number()),
@@ -1902,7 +1902,7 @@ export const recordVerificationResult = mutation({
     failedCount: v.optional(v.number()),
     skippedCount: v.optional(v.number()),
     artifactIds: v.array(v.id('evidenceArtifacts')),
-    candidateDigestBefore: v.string(),
+    candidateDigestBefore: v.optional(v.string()),
     candidateDigestAfter: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
@@ -2028,7 +2028,7 @@ export const recordVerificationResult = mutation({
         ...(existing.skippedCount === undefined ? {} : { skippedCount: existing.skippedCount }),
         artifactIds: existing.artifactIds,
         producedArtifactKinds: existing.producedArtifactKinds,
-        candidateDigestBefore: existing.candidateDigestBefore,
+        ...(existing.candidateDigestBefore === undefined ? {} : { candidateDigestBefore: existing.candidateDigestBefore }),
         ...(existing.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: existing.candidateDigestAfter }),
         startedAt: existing.startedAt,
         ...(existing.completedAt === undefined ? {} : { completedAt: existing.completedAt }),
@@ -2054,7 +2054,7 @@ export const recordVerificationResult = mutation({
       ...(args.skippedCount === undefined ? {} : { skippedCount: args.skippedCount }),
       artifactIds: args.artifactIds,
       producedArtifactKinds,
-      candidateDigestBefore: args.candidateDigestBefore,
+      ...(args.candidateDigestBefore === undefined ? {} : { candidateDigestBefore: args.candidateDigestBefore }),
       ...(args.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: args.candidateDigestAfter }),
       startedAt: args.startedAt,
       ...(args.completedAt === undefined ? {} : { completedAt: args.completedAt }),
@@ -2375,8 +2375,10 @@ export const recordPolicyDecision = mutation({
         return result === undefined || result === null || (result.status !== 'passed' && result.status !== 'failed')
       })
       .map((requirement) => String(requirement._id))
-      .sort()
-    const suppliedMissingRequirementIds = (args.missingRequirementIds ?? []).map(String).sort()
+      .toSorted()
+    const suppliedMissingRequirementIds = (args.missingRequirementIds ?? [])
+      .map(String)
+      .toSorted()
     if (JSON.stringify(expectedMissingRequirementIds) !== JSON.stringify(suppliedMissingRequirementIds)) {
       throw new ConvexError('Policy missing requirements do not match persisted verification evidence')
     }
@@ -3266,7 +3268,6 @@ export const getTrustLoopAcceptanceSnapshot = query({
         },
       }),
       humanDecisions: humanDecisions.map((decision) => ({
-        // oxlint-disable-next-line eslint/no-underscore-dangle -- Convex document IDs are exposed as `_id`.
         id: decision._id,
         status: decision.status,
         decidedAt: decision.decidedAt,
@@ -3547,7 +3548,7 @@ export const getDecisionPublicationReplayFixture = query({
         ...(result.skippedCount === undefined ? {} : { skippedCount: result.skippedCount }),
         artifactIds: result.artifactIds,
         producedArtifactKinds: result.producedArtifactKinds,
-        candidateDigestBefore: result.candidateDigestBefore,
+        ...(result.candidateDigestBefore === undefined ? {} : { candidateDigestBefore: result.candidateDigestBefore }),
         ...(result.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: result.candidateDigestAfter }),
         startedAt: result.startedAt,
         ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
@@ -3646,12 +3647,16 @@ export const getDecisionPublicationReplayFixture = query({
 
 export const getDetail = query({
   args: {
-    workflowRunId: v.id('workflowRuns'),
+    workflowRunId: v.string(),
   },
   returns: workflowDetailReturn,
   handler: async (ctx, args) => {
     const identity = await requireWorkOSIdentity(ctx)
-    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+    const workflowRunId = ctx.db.normalizeId('workflowRuns', args.workflowRunId)
+    if (workflowRunId === null) {
+      throw new ConvexError('Workflow run not found')
+    }
+    const workflowRun = await ctx.db.get('workflowRuns', workflowRunId)
 
     if (workflowRun === null) {
       throw new ConvexError('Workflow run not found')
@@ -3672,7 +3677,7 @@ export const getDetail = query({
 
     const runtimeEventPage = await ctx.db
       .query('runtimeEvents')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailRuntimeEventLimit + 1)
     const runtimeEventsTruncated = runtimeEventPage.length > workflowDetailRuntimeEventLimit
@@ -3680,7 +3685,7 @@ export const getDetail = query({
 
     const runtimeSessionPage = await ctx.db
       .query('runtimeSessions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailRuntimeSessionLimit + 1)
     const runtimeSessionsTruncated = runtimeSessionPage.length > workflowDetailRuntimeSessionLimit
@@ -3688,7 +3693,7 @@ export const getDetail = query({
 
     const sandboxExecutions = await ctx.db
       .query('sandboxExecutions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailSandboxExecutionLimit + 1)
     const sandboxExecutionsTruncated = sandboxExecutions.length > workflowDetailSandboxExecutionLimit
@@ -3696,7 +3701,7 @@ export const getDetail = query({
 
     const evidenceArtifactPage = await ctx.db
       .query('evidenceArtifacts')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailEvidenceArtifactLimit + 1)
     const evidenceArtifactsTruncated = evidenceArtifactPage.length > workflowDetailEvidenceArtifactLimit
@@ -3704,7 +3709,7 @@ export const getDetail = query({
 
     const candidatePatchSetPage = await ctx.db
       .query('candidatePatchSets')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailCandidatePatchSetLimit + 1)
     const candidatePatchSetsTruncated = candidatePatchSetPage.length > workflowDetailCandidatePatchSetLimit
@@ -3712,7 +3717,7 @@ export const getDetail = query({
 
     const verificationRequirementPage = await ctx.db
       .query('verificationRequirements')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailVerificationRequirementLimit + 1)
     const verificationRequirementsTruncated = verificationRequirementPage.length > workflowDetailVerificationRequirementLimit
@@ -3720,7 +3725,7 @@ export const getDetail = query({
 
     const verificationResultPage = await ctx.db
       .query('verificationResults')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailVerificationResultLimit + 1)
     const verificationResultsTruncated = verificationResultPage.length > workflowDetailVerificationResultLimit
@@ -3728,7 +3733,7 @@ export const getDetail = query({
 
     const reviewRunPage = await ctx.db
       .query('reviewRuns')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailReviewRunLimit + 1)
     const reviewRunsTruncated = reviewRunPage.length > workflowDetailReviewRunLimit
@@ -3736,7 +3741,7 @@ export const getDetail = query({
 
     const reviewFindingPage = await ctx.db
       .query('reviewFindings')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailReviewFindingLimit + 1)
     const reviewFindingsTruncated = reviewFindingPage.length > workflowDetailReviewFindingLimit
@@ -3744,7 +3749,7 @@ export const getDetail = query({
 
     const policyDecisionPage = await ctx.db
       .query('policyDecisions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailPolicyDecisionLimit + 1)
     const policyDecisionsTruncated = policyDecisionPage.length > workflowDetailPolicyDecisionLimit
@@ -3752,7 +3757,7 @@ export const getDetail = query({
 
     const humanDecisionPage = await ctx.db
       .query('humanDecisions')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailHumanDecisionLimit + 1)
     const humanDecisionsTruncated = humanDecisionPage.length > workflowDetailHumanDecisionLimit
@@ -3760,7 +3765,7 @@ export const getDetail = query({
 
     const publicationResultPage = await ctx.db
       .query('publicationResults')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailPublicationResultLimit + 1)
     const publicationResultsTruncated = publicationResultPage.length > workflowDetailPublicationResultLimit
@@ -3768,7 +3773,7 @@ export const getDetail = query({
 
     const provenanceEventPage = await ctx.db
       .query('provenanceEvents')
-      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+      .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
       .order('desc')
       .take(workflowDetailProvenanceEventLimit + 1)
     const provenanceEventsTruncated = provenanceEventPage.length > workflowDetailProvenanceEventLimit
@@ -3926,7 +3931,7 @@ export const getDetail = query({
           ...(result.skippedCount === undefined ? {} : { skippedCount: result.skippedCount }),
           artifactIds: result.artifactIds,
           producedArtifactKinds: result.producedArtifactKinds,
-          candidateDigestBefore: result.candidateDigestBefore,
+          ...(result.candidateDigestBefore === undefined ? {} : { candidateDigestBefore: result.candidateDigestBefore }),
           ...(result.candidateDigestAfter === undefined ? {} : { candidateDigestAfter: result.candidateDigestAfter }),
           startedAt: result.startedAt,
           ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),

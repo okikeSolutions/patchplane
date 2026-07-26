@@ -4,11 +4,9 @@ import { SentryTelemetryPlugin } from '@patchplane/plugins/sentry/telemetry-plug
 import { WorkOSAuthPlugin } from '@patchplane/plugins/workos/auth-plugin'
 import { Layer } from 'effect'
 
-export function makeAppLayer() {
-  return Layer.mergeAll(
-    ConvexStoragePlugin.layer,
-    WorkOSAuthPlugin.layer,
-    SentryTelemetryPlugin.layer,
-    BrowserCryptoLayer,
-  )
-}
+export const appLayer = Layer.mergeAll(
+  ConvexStoragePlugin.layer,
+  WorkOSAuthPlugin.layer,
+  SentryTelemetryPlugin.layer,
+  BrowserCryptoLayer,
+)

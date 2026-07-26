@@ -1,6 +1,6 @@
 import { AuthRequestContext } from '@patchplane/core/services/auth-request-context'
 import { StartAuthenticatedWorkflowFromPrompt } from '@patchplane/core/workflows/start-authenticated-workflow-from-prompt'
-import { publicErrorMessage } from '@patchplane/domain/errors'
+import { AuthError, publicErrorMessage } from '@patchplane/domain/errors'
 import { StartWorkflowPromptInput } from '@patchplane/domain/start-workflow'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { Effect } from 'effect'
@@ -12,7 +12,14 @@ export const startWorkflowServerFn = effectServerFn({
   input: StartWorkflowPromptInput,
   operation: 'startWorkflowServerFn',
   effect: (data, context) =>
-    Effect.promise(() => getWorkOSAuthRequest()).pipe(
+    Effect.tryPromise({
+      try: () => getWorkOSAuthRequest(),
+      catch: (cause) => new AuthError({
+        operation: 'startWorkflowServerFn.getWorkOSAuthRequest',
+        message: 'Unable to load the authenticated session',
+        cause,
+      }),
+    }).pipe(
       Effect.flatMap((authRequest) =>
         StartAuthenticatedWorkflowFromPrompt({
           source: 'app',

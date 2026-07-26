@@ -2,6 +2,7 @@ import {
   sentryGlobalFunctionMiddleware,
   sentryGlobalRequestMiddleware,
 } from '@sentry/tanstackstart-react'
+import { Config, Effect } from 'effect'
 import {
   createCsrfMiddleware,
   createMiddleware,
@@ -42,8 +43,11 @@ const csrfMiddleware = createCsrfMiddleware({
 const workosAuthkitMiddleware = createMiddleware().server(async (args) => {
   const { authkitMiddleware } =
     await import('@workos/authkit-tanstack-react-start')
+  const configuredRedirectUri = await Effect.runPromise(
+    Config.string('WORKOS_REDIRECT_URI').pipe(Config.withDefault('')),
+  )
   const middleware: unknown = authkitMiddleware({
-    redirectUri: resolveWorkOSRedirectUri(args.request),
+    redirectUri: resolveWorkOSRedirectUri(args.request, configuredRedirectUri),
   })
 
   if (hasMiddlewareServer(middleware) && middleware.options.server) {

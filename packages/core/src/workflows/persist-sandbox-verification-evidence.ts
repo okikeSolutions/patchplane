@@ -113,7 +113,9 @@ export const PersistSandboxVerificationEvidence = Effect.fn(
         ...(transient.message === undefined ? {} : { summary: transient.message }),
         artifactIds: artifacts.map((artifact) => artifact.id),
         producedArtifactKinds: artifacts.map((artifact) => artifact.kind),
-        candidateDigestBefore: transient.candidateDigestBefore ?? 'unavailable',
+        ...(transient.candidateDigestBefore === undefined
+          ? {}
+          : { candidateDigestBefore: transient.candidateDigestBefore }),
         ...(transient.candidateDigestAfter === undefined
           ? {}
           : { candidateDigestAfter: transient.candidateDigestAfter }),

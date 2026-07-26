@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { ArtifactsError, StorageError } from '@patchplane/domain/errors'
 import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { ArtifactsService, type PutArtifactInput } from '../services/artifacts-service'
@@ -32,7 +32,7 @@ describe('CaptureSandboxResultArtifacts', () => {
         }),
       getArtifactMetadata: () => Effect.fail(new ArtifactsError({ operation: 'unused', message: 'unused', cause: undefined })),
       createSignedReadUrl: () => Effect.fail(new ArtifactsError({ operation: 'unused', message: 'unused', cause: undefined })),
-      deleteArtifact: () => Effect.sync(() => undefined),
+      deleteArtifact: () => Effect.void,
       applyRetentionPolicy: () => Effect.fail(new ArtifactsError({ operation: 'unused', message: 'unused', cause: undefined })),
     }))
     const storageLayer = Layer.succeed(StorageService, StorageService.of({
@@ -42,10 +42,10 @@ describe('CaptureSandboxResultArtifacts', () => {
       claimWorkflowExecution: () => Effect.succeed(true),
           markWorkflowExecutionFailed: () => Effect.succeed(true),
       recordSandboxExecution: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
-      recordRuntimeEvents: () => Effect.sync(() => []),
+      recordRuntimeEvents: () => Effect.succeed([]),
       recordRuntimeSessionStarted: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       markRuntimeSessionStatus: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
-      getActiveRuntimeSession: () => Effect.sync(() => undefined),
+      getActiveRuntimeSession: () => Effect.succeed(Option.none()),
       recordEvidenceArtifact: (input) =>
         Effect.sync(() => {
           recorded.push({ kind: input.kind, storageKey: input.storageKey })
@@ -56,7 +56,7 @@ describe('CaptureSandboxResultArtifacts', () => {
             createdAt: input.createdAt ?? 123,
           }),
         ),
-      getEvidenceArtifact: () => Effect.sync(() => undefined),
+      getEvidenceArtifact: () => Effect.succeed(Option.none()),
       recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordVerificationRequirement: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordVerificationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),

@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { PromptRequestId, WorkflowRunId, WorkspaceId } from './ids'
+import { EpochMillis, GitCommitSha, PositiveInt } from './refinements'
 
 export const WorkflowStatus = Schema.Literals(['queued', 'running', 'reviewed', 'failed'])
 export type WorkflowStatus = Schema.Schema.Type<typeof WorkflowStatus>
@@ -20,15 +21,15 @@ export const WorkflowRun = Schema.Struct({
   id: WorkflowRunId,
   promptRequestId: PromptRequestId,
   workspaceId: WorkspaceId,
-  traceId: Schema.String,
+  traceId: Schema.NonEmptyString,
   status: WorkflowStatus,
   modelVersion: Schema.optional(WorkflowRunModelVersion),
   parentWorkflowRunId: Schema.optional(WorkflowRunId),
   rootWorkflowRunId: Schema.optional(WorkflowRunId),
-  attemptNumber: Schema.optional(Schema.Number),
+  attemptNumber: Schema.optional(PositiveInt),
   trigger: Schema.optional(WorkflowRunTrigger),
-  sourceCommitSha: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  sourceCommitSha: Schema.optional(GitCommitSha),
+  createdAt: EpochMillis,
 })
 export type WorkflowRun = Schema.Schema.Type<typeof WorkflowRun>
 

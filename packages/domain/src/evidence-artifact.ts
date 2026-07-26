@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { CandidatePatchSetId, EvidenceArtifactId, VerificationResultId, WorkflowRunId } from './ids'
+import { EpochMillis, NonNegativeInt, Sha256Digest, Sha256Hex } from './refinements'
 
 /**
  * Raw evidence bytes live in an artifact store such as Cloudflare R2.
@@ -33,18 +34,18 @@ export const EvidenceArtifact = Schema.Struct({
   workflowRunId: WorkflowRunId,
   candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   verificationResultId: Schema.optional(VerificationResultId),
-  producer: Schema.optional(Schema.String),
-  subjectDigest: Schema.optional(Schema.String),
-  traceId: Schema.optional(Schema.String),
+  producer: Schema.optional(Schema.NonEmptyString),
+  subjectDigest: Schema.optional(Sha256Digest),
+  traceId: Schema.optional(Schema.NonEmptyString),
   kind: EvidenceArtifactKind,
   label: Schema.optional(Schema.String),
   storageProvider: EvidenceArtifactStorageProvider,
-  storageKey: Schema.String,
-  contentType: Schema.String,
-  sizeBytes: Schema.Number,
-  sha256: Schema.String,
-  retentionPolicy: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  storageKey: Schema.NonEmptyString,
+  contentType: Schema.NonEmptyString,
+  sizeBytes: NonNegativeInt,
+  sha256: Sha256Hex,
+  retentionPolicy: Schema.optional(Schema.NonEmptyString),
+  createdAt: EpochMillis,
 })
 export type EvidenceArtifact = Schema.Schema.Type<typeof EvidenceArtifact>
 

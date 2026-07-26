@@ -16,8 +16,8 @@ export const WorkflowIntake = Schema.Struct({
   actor: Actor,
   workspaceId: WorkspaceId,
   source: PromptRequestSource,
-  traceId: Schema.String,
-  prompt: Schema.String,
+  traceId: Schema.NonEmptyString,
+  prompt: Schema.NonEmptyString,
   externalRef: Schema.optional(ExternalWorkflowRef),
 })
 export type WorkflowIntake = Schema.Schema.Type<typeof WorkflowIntake>

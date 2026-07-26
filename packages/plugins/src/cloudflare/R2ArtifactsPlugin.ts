@@ -147,11 +147,10 @@ function resolveR2EndpointAndBucket(config: R2ArtifactsConfigType) {
   return { endpoint: url.toString().replace(/\/$/, ''), bucketName }
 }
 
-function makeS3Client(config: R2ArtifactsConfigType, input: {
+function makeS3Client(endpoint: string, input: {
   readonly accessKeyId: string
   readonly secretAccessKey: string
 }) {
-  const { endpoint } = resolveR2EndpointAndBucket(config)
   return new S3Client({
     region: 'auto',
     endpoint,
@@ -176,6 +175,49 @@ function requireSigningCredentials(config: R2ArtifactsConfigType) {
     secretAccessKey: Redacted.value(config.secretAccessKey.value),
   })
 }
+
+export const createR2SignedReadUrl = Effect.fnUntraced(function*(
+  config: R2ArtifactsConfigType,
+  input: { readonly storageKey: string; readonly expiresInSeconds: number },
+) {
+  const credentials = yield* requireSigningCredentials(config)
+  const signingConfig = yield* Effect.try({
+    try: () => {
+      const { endpoint, bucketName } = resolveR2EndpointAndBucket(config)
+      return {
+        bucketName,
+        expiresIn: validateExpiresInSeconds(input.expiresInSeconds),
+        s3: makeS3Client(endpoint, credentials),
+      }
+    },
+    catch: (cause) =>
+      new ArtifactsError({
+        operation: 'r2.createSignedReadUrl.config',
+        message: 'Invalid signed R2 read URL configuration',
+        cause,
+      }),
+  })
+  const now = yield* Clock.currentTimeMillis
+  return yield* Effect.tryPromise({
+    try: async () => {
+      const url = await getSignedUrl(
+        signingConfig.s3,
+        new GetObjectCommand({ Bucket: signingConfig.bucketName, Key: input.storageKey }),
+        { expiresIn: signingConfig.expiresIn },
+      )
+      return {
+        url,
+        expiresAt: now + signingConfig.expiresIn * 1000,
+      }
+    },
+    catch: (cause) =>
+      new ArtifactsError({
+        operation: 'r2.createSignedReadUrl',
+        message: 'Failed to create signed R2 read URL',
+        cause,
+      }),
+  })
+})
 
 export function makeR2ArtifactsService(
   bucket: R2BucketLike,
@@ -280,30 +322,7 @@ export function makeR2ArtifactsService(
         return metadata
       }),
 
-    createSignedReadUrl: (input) =>
-      Effect.gen(function* () {
-        const credentials = yield* requireSigningCredentials(config)
-        const s3 = makeS3Client(config, credentials)
-        const { bucketName } = resolveR2EndpointAndBucket(config)
-        const now = yield* Clock.currentTimeMillis
-        return yield* Effect.tryPromise({
-          try: async () => {
-            const expiresIn = validateExpiresInSeconds(input.expiresInSeconds)
-            const url = await getSignedUrl(
-              s3,
-              new GetObjectCommand({ Bucket: bucketName, Key: input.storageKey }),
-              { expiresIn },
-            )
-            return { url, expiresAt: now + expiresIn * 1000 }
-          },
-        catch: (cause) =>
-          new ArtifactsError({
-            operation: 'r2.createSignedReadUrl',
-            message: 'Failed to create signed R2 read URL',
-            cause,
-          }),
-        })
-      }),
+    createSignedReadUrl: (input) => createR2SignedReadUrl(config, input),
 
     deleteArtifact: (input) =>
       Effect.tryPromise({

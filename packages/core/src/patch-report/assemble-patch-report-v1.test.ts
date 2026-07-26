@@ -41,7 +41,7 @@ const workflowStart = {
     rootWorkflowRunId: workflowRunId,
     attemptNumber: 1,
     trigger: 'intake' as const,
-    sourceCommitSha: 'source-sha',
+    sourceCommitSha: 'a'.repeat(40),
     createdAt: 1,
   },
 }
@@ -62,8 +62,8 @@ const candidate: CandidatePatchSet = {
   workflowRunId,
   sandboxExecutionId: execution.id,
   status: 'captured',
-  candidateDigest: 'sha256:candidate',
-  baseSha: 'source-sha',
+  candidateDigest: `sha256:${'b'.repeat(64)}`,
+  baseSha: 'a'.repeat(40),
   diffArtifactId: makeEvidenceArtifactId('diff-1'),
   createdAt: 4,
 }
@@ -195,7 +195,7 @@ describe('AssemblePatchReportV1', () => {
       expect(report).toMatchObject({
         trustStatus: 'approved',
         execution: { status: 'completed' },
-        candidate: { status: 'captured', digest: 'sha256:candidate' },
+        candidate: { status: 'captured', digest: `sha256:${'b'.repeat(64)}` },
         verification: { status: 'passed', requiredCount: 1, passedCount: 1 },
         policy: { status: 'manual-review', policyVersion: 'alpha-v1' },
         decision: { status: 'approved' },
@@ -205,7 +205,7 @@ describe('AssemblePatchReportV1', () => {
 
   it.effect('does not apply a decision or result from another candidate', () =>
     Effect.gen(function* () {
-      const newerCandidate = { ...candidate, id: makeCandidatePatchSetId('candidate-2'), candidateDigest: 'sha256:newer', createdAt: 8 }
+      const newerCandidate = { ...candidate, id: makeCandidatePatchSetId('candidate-2'), candidateDigest: `sha256:${'c'.repeat(64)}`, createdAt: 8 }
       const report = yield* assemble({
         candidatePatchSets: [candidate, newerCandidate],
       })
