@@ -153,3 +153,4 @@ apps/client/dist
 apps/infra/.alchemy
 apps/source-control/.alchemy
 .alchemy/state/
+/.playwright-mcp
