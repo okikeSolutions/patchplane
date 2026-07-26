@@ -38,11 +38,14 @@ export function repoRoot() {
     while (true) {
       const packageJsonPath = path.join(candidate, 'package.json')
       if (yield* fs.exists(packageJsonPath)) {
-        const packageJson: unknown = JSON.parse(yield* fs.readFileString(packageJsonPath))
+        const packageJsonText = yield* fs.readFileString(packageJsonPath)
+        const packageData: unknown = yield* Effect.try(() =>
+          JSON.parse(packageJsonText),
+        )
         if (
-          typeof packageJson === 'object' &&
-          packageJson !== null &&
-          Reflect.get(packageJson, 'name') === 'patchplane-monorepo'
+          typeof packageData === 'object' &&
+          packageData !== null &&
+          Reflect.get(packageData, 'name') === 'patchplane-monorepo'
         ) {
           return candidate
         }
@@ -182,7 +185,8 @@ export function packageJson(file: string) {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const root = yield* repoRoot()
-    const value: unknown = JSON.parse(yield* fs.readFileString(path.resolve(root, file)))
+    const packageJsonText = yield* fs.readFileString(path.resolve(root, file))
+    const value: unknown = yield* Effect.try(() => JSON.parse(packageJsonText))
     if (!isObjectRecord(value)) {
       return {}
     }

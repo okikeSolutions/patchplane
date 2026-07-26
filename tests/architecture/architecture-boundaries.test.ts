@@ -126,6 +126,125 @@ describe('architecture boundaries', () => {
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
+  it.effect('keeps Oxlint rules enabled across repository-owned source', () =>
+    Effect.gen(function* () {
+      const suppressionMarker = ['oxlint', 'disable'].join('-')
+      const sourceFiles = (yield* filesUnder('.')).filter((file) =>
+        /\.(?:[cm]?[jt]sx?)$/.test(file)
+      )
+      const violations = (yield* Effect.all(
+        sourceFiles.map((file) =>
+          Effect.gen(function* () {
+            const source = yield* fileText(file)
+            return source.includes(suppressionMarker)
+              ? yield* relativeToRepo(file)
+              : undefined
+          })
+        ),
+      )).filter((file) => file !== undefined)
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect('uses Effect TypeScript-Go, TypeScript 7, and the Node platform exclusively', () =>
+    Effect.gen(function* () {
+      const packageManifestPaths = [
+        'package.json',
+        'apps/client/package.json',
+        'apps/infra/package.json',
+        'apps/source-control/package.json',
+        'packages/backend/package.json',
+        'packages/cli/package.json',
+        'packages/core/package.json',
+        'packages/domain/package.json',
+        'packages/plugins/package.json',
+      ]
+      const packageManifests = yield* Effect.all(
+        packageManifestPaths.map((path) =>
+          Effect.map(packageJson(path), (manifest) => ({ path, manifest })),
+        ),
+      )
+
+      const root = packageManifests.find(
+        ({ path }) => path === 'package.json',
+      )?.manifest
+      expect(root?.scripts?.prepare).toBe('effect-tsgo patch')
+      expect(root?.devDependencies?.['@effect/tsgo']).toBe('0.24.3')
+      expect(root?.devDependencies?.['@typescript/native']).toBe(
+        'npm:typescript@7.0.2',
+      )
+      // TypeScript ESLint and Paraglide still require the JavaScript compiler API.
+      // Keep TS 6 only as that compatibility API; the `tsc` binary is TS 7.
+      expect(root?.devDependencies?.typescript).toBe('6.0.3')
+      expect(root?.devDependencies?.['@effect/language-service']).toBeUndefined()
+      expect(root?.devDependencies?.['oxlint-tsgolint']).toBeUndefined()
+
+      const workspaceTypescriptDependencies = packageManifests
+        .filter(({ path }) => path !== 'package.json')
+        .flatMap(({ path, manifest }) =>
+          Object.keys({
+            ...manifest.dependencies,
+            ...manifest.devDependencies,
+          })
+            .filter(
+              (dependency) =>
+                dependency === 'typescript' ||
+                dependency === '@typescript/native',
+            )
+            .map((dependency) => ({ path, dependency })),
+        )
+      expect(workspaceTypescriptDependencies).toEqual([])
+
+      const dependencyViolations = packageManifests.flatMap(
+        ({ path, manifest }) =>
+          Object.keys({
+            ...manifest.dependencies,
+            ...manifest.devDependencies,
+            ...manifest.optionalDependencies,
+            ...manifest.peerDependencies,
+          })
+            .filter((dependency) => dependency === '@effect/platform-bun')
+            .map((dependency) => ({ path, dependency })),
+      )
+      const importViolations = (
+        yield* importsForFiles([
+          ...yield* sourceFilesUnder('apps'),
+          ...yield* sourceFilesUnder('packages'),
+          ...yield* sourceFilesUnder('scripts'),
+        ])
+      ).filter(
+        ({ specifier }) =>
+          specifier === '@effect/platform-bun' ||
+          specifier.startsWith('@effect/platform-bun/'),
+      )
+
+      const lockfile = yield* fileText('bun.lock')
+      const bundleBudgetScript = yield* fileText(
+        'scripts/bundle-size-client.ts',
+      )
+
+      expect(dependencyViolations).toEqual([])
+      expect(importViolations).toEqual([])
+      expect(lockfile).not.toContain('"@effect/platform-bun": [')
+      expect(bundleBudgetScript).toContain('@effect/platform-node/NodeServices')
+      expect(bundleBudgetScript).not.toContain('@effect/platform-bun')
+      expect(
+        packageManifests.some(
+          ({ manifest }) =>
+            Object.hasOwn(
+              manifest.dependencies ?? {},
+              '@effect/platform-node',
+            ) ||
+            Object.hasOwn(
+              manifest.devDependencies ?? {},
+              '@effect/platform-node',
+            ),
+        ),
+      ).toBe(true)
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
   it.effect('keeps Alchemy provisioning isolated to apps/infra', () =>
     Effect.gen(function* () {
       const imports = yield* importsForFiles([
@@ -145,6 +264,24 @@ describe('architecture boundaries', () => {
 
         return !file.startsWith('apps/infra/')
       })
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect('keeps provider SDK implementations out of application source', () =>
+    Effect.gen(function* () {
+      const imports = yield* importsForFiles([
+        ...yield* sourceFilesUnder('apps'),
+        ...yield* sourceFilesUnder('packages'),
+      ])
+      const violations = imports.filter(({ file, specifier }) =>
+        (specifier.startsWith('@aws-sdk/') || specifier.startsWith('@daytona/')) &&
+        !file.startsWith('packages/plugins/') &&
+        !file.startsWith('apps/infra/') &&
+        !file.endsWith('.test.ts') &&
+        !file.endsWith('.test.tsx')
+      )
 
       expect(violations).toEqual([])
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
@@ -407,8 +544,10 @@ describe('architecture boundaries', () => {
       }
 
       const root = yield* packageJson('package.json')
-      expect(root.scripts?.typecheck).toContain('packages/core')
-      expect(root.scripts?.lint).toContain('oxlint apps packages')
+      expect(root.scripts?.typecheck).toBe(
+        'bun run --workspaces --if-present typecheck',
+      )
+      expect(root.scripts?.lint).toContain('oxlint --disable-nested-config')
 
       const core = yield* packageJson('packages/core/package.json')
       expect(Object.keys(core.exports ?? {})).toEqual(expect.arrayContaining([

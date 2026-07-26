@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prepare": "effect-language-service patch",
+    "prepare": "effect-tsgo patch",
     "dev:client": "cd apps/client && bun --env-file=../../.env.local run dev",
     "dev:backend": "bun run --cwd packages/backend dev",
     "patchplane": "bun run packages/cli/src/main.ts",
@@ -18,6 +18,7 @@
     "infra:plan": "bun --bun alchemy deploy --dry-run --env-file .env.local --stage dev",
     "infra:deploy": "bun --bun alchemy deploy --env-file .env.local --stage dev",
     "infra:destroy": "bun --bun alchemy destroy --env-file .env.local --stage dev",
+    "test": "vitest run tests/architecture tests/automation test/alchemy-runtime-patches.test.ts --project default",
     "test:backend": "bun run --cwd packages/backend test",
     "test:domain": "bun run --cwd packages/domain test",
     "test:core": "bun run --cwd packages/core test",
@@ -28,8 +29,8 @@
     "test:source-control": "bun run --cwd apps/source-control test",
     "test:infra": "bun run --cwd apps/infra test",
     "test:architecture": "vitest run tests/architecture/architecture-boundaries.test.ts",
-    "test:automation": "vitest run tests/automation/roadmap-acceptance-consistency.test.ts --project default",
-    "test:all": "bun run test:domain && bun run test:core && bun run test:plugins && bun run test:backend && bun run test:cli && bun run test:client && bun run test:source-control && bun run test:infra && bun run test:architecture && bun run test:automation && bun run test:infra-patches",
+    "test:automation": "vitest run tests/automation --project default",
+    "test:all": "bun run --workspaces --if-present test && bun run test",
     "check:roadmap-acceptance": "bun scripts/check-roadmap-acceptance.ts",
     "verify:fast": "bun run typecheck && bun run lint && bun run test:all && bun run eval:cli && bun run check:roadmap-acceptance",
     "verify": "bun run verify:fast && bun run build:client && bun run bundle:check:client",
@@ -41,39 +42,42 @@
     "smoke:browser": "bun --no-env-file apps/client/src/scripts/live-browser-acceptance.ts",
     "smoke:trust-loop": "bun --env-file=.env.local apps/source-control/src/scripts/live-trust-loop-smoke.ts",
     "smoke:convex-sandbox": "bun --env-file=.env.local apps/source-control/src/scripts/live-convex-sandbox-smoke.ts",
-    "typecheck": "bun run --cwd packages/domain typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/plugins typecheck && bun run --cwd packages/cli typecheck && bun run --cwd packages/backend typecheck && bun run --cwd apps/client typecheck && bun run --cwd apps/source-control typecheck && bun run --cwd apps/infra typecheck",
-    "lint": "oxlint apps packages scripts/check-roadmap-acceptance.ts tests/automation && bun run --cwd packages/backend lint:convex",
-    "lint:fix": "oxlint --fix apps packages scripts/check-roadmap-acceptance.ts tests/automation && bun run --cwd packages/backend lint:convex:fix",
+    "typecheck": "bun run --workspaces --if-present typecheck",
+    "lint": "oxlint --disable-nested-config && bun run --cwd packages/backend lint:convex",
+    "lint:fix": "oxlint --disable-nested-config --fix && bun run --cwd packages/backend lint:convex:fix",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.100",
     "@effect/platform-node": "4.0.0-beta.100",
     "@sentry/effect": "^10.62.0",
     "alchemy": "2.0.0-beta.63",
     "effect": "4.0.0-beta.100"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.86.2",
+    "@effect/tsgo": "0.24.3",
     "@effect/vitest": "4.0.0-beta.100",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.9.3",
     "@types/pngjs": "^6.0.5",
+    "@typescript/native": "npm:typescript@7.0.2",
     "oxfmt": "^0.54.0",
-    "oxlint": "^1.69.0",
-    "oxlint-tsgolint": "^0.23.0",
+    "oxlint": "1.69.0",
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
-    "typescript": "^6.0.3",
+    "typescript": "6.0.3",
     "vitest": "^4.1.8"
   },
   "engines": {
     "node": ">=22.19.0"
   },
   "packageManager": "bun@1.3.10",
+  "overrides": {
+    "@hono/node-server": "2.0.12",
+    "@opentelemetry/propagator-jaeger": "2.10.0"
+  },
   "patchedDependencies": {
     "@distilled.cloud/cloudflare-runtime@0.11.3": "patches/@distilled.cloud%2Fcloudflare-runtime@0.11.3.patch",
     "@distilled.cloud/cloudflare-vite-plugin@0.11.3": "patches/@distilled.cloud%2Fcloudflare-vite-plugin@0.11.3.patch",

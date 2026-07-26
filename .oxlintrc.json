@@ -1,17 +1,31 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "options": {
-    "typeAware": true,
-    "typeCheck": true
-  },
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
   },
   "plugins": ["typescript", "react", "unicorn", "import", "jsx-a11y", "oxc"],
+  "jsPlugins": ["./scripts/oxlint/patchplane-plugin.mjs"],
   "rules": {
-    "react/react-in-jsx-scope": "off"
+    "react/react-in-jsx-scope": "off",
+    "patchplane/no-detached-effect-fork": "error",
+    "patchplane/no-effect-promise": "error",
+    "patchplane/no-throw-in-effect-sync": "error",
+    "patchplane/guard-json-parse-in-effect": "error",
+    "patchplane/no-run-sync-outside-entrypoint": "error",
+    "patchplane/no-ambient-env-in-effect-code": "error",
+    "patchplane/no-synchronous-set-state-in-effect": "error",
+    "patchplane/require-effect-cleanup": "error",
+    "patchplane/no-fetch-in-effect": "error"
   },
+  "overrides": [
+    {
+      "files": ["packages/backend/convex/**/*.ts"],
+      "rules": {
+        "eslint/no-underscore-dangle": "off"
+      }
+    }
+  ],
   "ignorePatterns": [
     "apps/client/dist/**",
     "apps/client/.output/**",

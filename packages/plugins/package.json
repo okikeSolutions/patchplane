@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=22.19.0"
-  },
   "exports": {
     "./cloudflare/r2-artifacts-config": "./src/cloudflare/R2ArtifactsConfig.ts",
     "./cloudflare/r2-artifacts-plugin": "./src/cloudflare/R2ArtifactsPlugin.ts",
@@ -20,6 +17,7 @@
     "./registry": "./src/registry.ts",
     "./sentry/cloudflare-worker": "./src/sentry/cloudflare-worker.ts",
     "./sentry/config": "./src/sentry/SentryConfig.ts",
+    "./sentry/sanitize": "./src/sentry/sanitize.ts",
     "./sentry/telemetry-plugin": "./src/sentry/SentryTelemetryPlugin.ts",
     "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",
     "./workos/config": "./src/workos/WorkOSConfig.ts",
@@ -33,12 +31,13 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",
     "@aws-sdk/s3-request-presigner": "^3.1079.0",
-    "@daytona/sdk": "^0.186.0",
+    "@daytona/sdk": "^0.200.1",
     "@effect/platform-node": "4.0.0-beta.100",
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
     "@sentry/cloudflare": "10.62.0",
-    "@sentry/effect": "^10.62.0",
+    "@sentry/core": "10.62.0",
+    "@sentry/effect": "10.62.0",
     "@workos-inc/node": "10.3.0",
     "convex": "^1.42.3",
     "effect": "4.0.0-beta.100",
@@ -51,7 +50,9 @@
     "@types/node": "^25.9.3",
     "@types/pngjs": "^6.0.5",
     "mockdate": "^3.0.5",
-    "nock": "^14.0.15",
-    "typescript": "^6.0.3"
+    "nock": "^14.0.15"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

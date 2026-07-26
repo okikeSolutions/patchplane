@@ -16,7 +16,6 @@
     "effect": "4.0.0-beta.100"
   },
   "devDependencies": {
-    "@patchplane/typescript-config": "workspace:*",
-    "typescript": "^6.0.3"
+    "@patchplane/typescript-config": "workspace:*"
   }
 }

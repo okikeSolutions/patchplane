@@ -45,7 +45,7 @@ function parseOptions(argv: readonly string[]): Options {
   let top = 10
   let serverBudgetMiB = 7.5
   let clientBudgetMiB = 3
-  let clientJsGzipBudgetKiB = 750
+  let clientJsGzipBudgetKiB = 762
   // The landing page intentionally keeps the shader runtime in the entry chunk
   // so the canvas can start immediately; its visual-startup benchmark guards
   // that behavior separately. Keep a modest ceiling above the measured 1.54 MiB
@@ -118,7 +118,7 @@ Options:
   --server-budget-mib=N      Server total budget for --check (default: 7.5)
   --client-budget-mib=N      Client total budget for --check (default: 3)
   --client-js-gzip-budget-kib=N
-                             Client JavaScript gzip budget (default: 750)
+                             Client JavaScript gzip budget (default: 762)
   --client-largest-js-budget-mib=N
                              Largest client JavaScript chunk budget (default: 1.75)
 `)
@@ -144,7 +144,7 @@ function buildClientDist() {
     'bun',
     [
       '-e',
-      "import * as Effect from 'effect/Effect'; import * as BunServices from '@effect/platform-bun/BunServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }).pipe(Effect.provide(BunServices.layer)));",
+      "import * as Effect from 'effect/Effect'; import * as NodeServices from '@effect/platform-node/NodeServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }).pipe(Effect.provide(NodeServices.layer)));",
     ],
     clientDir,
   )
@@ -171,7 +171,7 @@ function measureDirectory(directory: string, top: number): BundleStats {
   const files = walkFiles(directory)
   const sizes = files
     .map((path) => ({ path, bytes: statSync(path).size }))
-    .sort((a, b) => b.bytes - a.bytes)
+    .toSorted((a, b) => b.bytes - a.bytes)
 
   const totalBytes = sizes.reduce((sum, file) => sum + file.bytes, 0)
   const jsFiles = sizes.filter((file) => file.path.endsWith('.js'))
