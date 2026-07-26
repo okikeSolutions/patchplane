@@ -1,10 +1,11 @@
-import { Effect, Exit } from 'effect'
+import { Clock, Effect, Exit } from 'effect'
 import type {
   CandidatePatchSet,
   HumanDecision,
   PublicationResult,
   PublicationResultKind,
 } from '@patchplane/domain/decision-review'
+import type { PatchReportV1 } from '@patchplane/domain/patch-report-v1'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { decisionCheckConclusion, formatDecisionPatchReportComment } from '../publication/decision-patch-report'
@@ -17,6 +18,12 @@ export interface PublishDecisionToSourceInput extends TelemetryContextFields {
   readonly humanDecision: HumanDecision
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly candidatePatchSet?: CandidatePatchSet | undefined
+  readonly patchReport?: PatchReportV1 | undefined
+  readonly verification?: {
+    readonly status: 'not-configured' | 'incomplete' | 'passed' | 'failed'
+    readonly requiredCount: number
+    readonly passedCount: number
+  } | undefined
   readonly publicationResults?: ReadonlyArray<PublicationResult> | undefined
 }
 
@@ -28,7 +35,7 @@ export const PublishDecisionToSource = Effect.fn(
   const owner = ref?.repositoryOwner
   const name = ref?.repositoryName
   const installationId = ref?.repositoryInstallationId
-  const startedAt = Date.now()
+  const startedAt = yield* Clock.currentTimeMillis
   const traceId = input.traceId ?? input.workflowStart.workflowRun.traceId
   const storage = yield* StorageService
 
@@ -41,7 +48,7 @@ export const PublishDecisionToSource = Effect.fn(
       ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
       status: 'blocked',
       startedAt,
-      completedAt: Date.now(),
+      completedAt: yield* Clock.currentTimeMillis,
       summary: 'Decision publication skipped because no source repository reference is attached.',
       artifactRefs: [input.humanDecision.id],
       idempotencyKey: `${input.humanDecision.id}:publication:missing-repository`,
@@ -70,7 +77,7 @@ export const PublishDecisionToSource = Effect.fn(
         name,
         issueNumber: ref.issueNumber,
         body,
-        idempotencyKey: `${input.humanDecision.id}:issue-comment`,
+        idempotencyKey: `${input.workflowStart.workflowRun.rootWorkflowRunId ?? input.workflowStart.workflowRun.id}:patch-report`,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
         operation: 'publishDecisionToSource.createIssueComment',
@@ -78,7 +85,9 @@ export const PublishDecisionToSource = Effect.fn(
     })
   }
 
-  const headSha = input.candidatePatchSet?.headSha ?? ref?.pullRequestHeadSha
+  // A GitHub check run is commit-bound. Never attach candidate evidence to
+  // the original PR head when the candidate has not been materialized there.
+  const headSha = input.candidatePatchSet?.headSha
   if (headSha !== undefined) {
     publicationInputs.push({
       kind: 'check-run',
@@ -96,7 +105,7 @@ export const PublishDecisionToSource = Effect.fn(
         title: `PatchPlane: ${input.humanDecision.status}`,
         summary: body,
         ...(ref?.url === undefined ? {} : { detailsUrl: ref.url }),
-        idempotencyKey: `${input.humanDecision.id}:check-run`,
+        idempotencyKey: `${input.candidatePatchSet?.id ?? input.workflowStart.workflowRun.id}:patch-report-check`,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
         operation: 'publishDecisionToSource.createCheckRun',
@@ -116,23 +125,32 @@ export const PublishDecisionToSource = Effect.fn(
 
   const publications = yield* Effect.forEach(pendingPublications, (publication) =>
     Effect.gen(function* () {
+      const evidenceRefs = {
+        humanDecisionId: input.humanDecision.id,
+        ...(input.candidatePatchSet === undefined ? {} : { candidatePatchSetId: input.candidatePatchSet.id }),
+        ...(publication.kind === 'check-run' && headSha !== undefined ? { targetSha: headSha } : {}),
+      }
+      const dispatchToken = `${traceId}:${publication.key}`
       const pending = yield* storage.recordPublicationResult({
+        ...evidenceRefs,
         workflowRunId: input.workflowStart.workflowRun.id,
         provider,
         kind: publication.kind,
         status: 'pending',
         summary: publication.summary,
-        createdAt: Date.now(),
+        dispatchToken,
+        createdAt: yield* Clock.currentTimeMillis,
         idempotencyKey: publication.key,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
         operation: 'publishDecisionToSource.claimPublicationResult',
       })
-      if (pending.status === 'published') return pending
+      if (pending.status === 'published' || pending.dispatchToken !== dispatchToken) return pending
 
       const published = yield* publication.publish.pipe(Effect.exit)
       if (Exit.isSuccess(published)) {
         return yield* storage.recordPublicationResult({
+          ...evidenceRefs,
           workflowRunId: input.workflowStart.workflowRun.id,
           provider,
           kind: publication.kind,
@@ -140,7 +158,8 @@ export const PublishDecisionToSource = Effect.fn(
           externalId: published.value.externalId,
           url: published.value.url,
           summary: publication.summary,
-          createdAt: Date.now(),
+          dispatchToken,
+          createdAt: yield* Clock.currentTimeMillis,
           idempotencyKey: publication.key,
           traceId,
           ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
@@ -149,13 +168,15 @@ export const PublishDecisionToSource = Effect.fn(
       }
 
       return yield* storage.recordPublicationResult({
+        ...evidenceRefs,
         workflowRunId: input.workflowStart.workflowRun.id,
         provider,
         kind: publication.kind,
         status: 'failed',
         error: errorMessage(published.cause),
         summary: publication.summary,
-        createdAt: Date.now(),
+        dispatchToken,
+        createdAt: yield* Clock.currentTimeMillis,
         idempotencyKey: publication.key,
         traceId,
         ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
@@ -179,7 +200,7 @@ export const PublishDecisionToSource = Effect.fn(
     ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
     status: failedCount === 0 && publishedCount === publicationInputs.length ? 'succeeded' : 'failed',
     startedAt,
-    completedAt: Date.now(),
+    completedAt: yield* Clock.currentTimeMillis,
     summary: `Published ${publishedCount}/${publicationInputs.length} decision publication targets.`,
     artifactRefs: [
       input.humanDecision.id,

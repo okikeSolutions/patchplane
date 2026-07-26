@@ -1,6 +1,17 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
-import { makeGitHubAppActorId, makePromptRequestId, makeSystemActorId, makeWorkOSWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makeCandidatePatchSetId,
+  makeGitHubAppActorId,
+  makeHumanDecisionId,
+  makePromptRequestId,
+  makeProvenanceEventId,
+  makePublicationResultId,
+  makeSandboxExecutionId,
+  makeSystemActorId,
+  makeWorkOSWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import { SourceControlError, StorageError } from '@patchplane/domain/errors'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
@@ -42,7 +53,7 @@ const workflowStart = {
 }
 
 const sandboxExecution = {
-  id: 'sandbox-1',
+  id: makeSandboxExecutionId('sandbox-1'),
   workflowRunId,
   provider: 'daytona',
   sandboxId: 'sandbox-1',
@@ -54,8 +65,19 @@ const sandboxExecution = {
   completedAt: 3,
 }
 
+const candidatePatchSet = {
+  id: makeCandidatePatchSetId('candidate-1'),
+  workflowRunId,
+  sandboxExecutionId: sandboxExecution.id,
+  status: 'captured' as const,
+  candidateDigest: 'sha256:candidate',
+  baseSha: 'base-sha',
+  headSha: 'abc123',
+  createdAt: 4,
+}
+
 const humanDecision = {
-  id: 'decision-1',
+  id: makeHumanDecisionId('decision-1'),
   workflowRunId,
   actorId: makeSystemActorId('reviewer-1'),
   status: 'approved' as const,
@@ -109,18 +131,20 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               storageRecords.push({ type: 'publication', input })
               publicationOrder.push(`storage:${input.kind}:${input.status}`)
-              return Effect.succeed({ id: `publication-${storageRecords.length}`, ...input, createdAt: input.createdAt ?? 1 } as never)
+              return Effect.succeed({ id: makePublicationResultId(`publication-${storageRecords.length}`), ...input, createdAt: input.createdAt ?? 1 })
             }),
           recordProvenanceEvent: (input) =>
             Effect.suspend(() => {
               storageRecords.push({ type: 'provenance', input })
-              return Effect.succeed({ id: 'provenance-1', ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] } as never)
+              return Effect.succeed({ id: makeProvenanceEventId('provenance-1'), ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] })
             }),
         }),
       )
@@ -130,6 +154,7 @@ describe('PublishDecisionToSource', () => {
         workflowStart,
         humanDecision,
         sandboxExecution,
+        candidatePatchSet,
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
       expect(sourceCalls.map((call) => call.type)).toEqual(['issue-comment', 'check-run'])
@@ -160,7 +185,7 @@ describe('PublishDecisionToSource', () => {
     Effect.gen(function* () {
       const sourceCalls: Array<string> = []
       const recordedPublications: Array<{
-        readonly id: string
+        readonly id: ReturnType<typeof makePublicationResultId>
         readonly idempotencyKey?: string
         readonly kind: 'issue-comment' | 'check-run' | 'draft-pull-request' | 'branch'
         readonly status: 'pending' | 'published' | 'failed'
@@ -216,22 +241,24 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
-              const id = `publication-${recordedPublications.length + 1}`
+              const id = makePublicationResultId(`publication-${recordedPublications.length + 1}`)
               recordedPublications.push({
                 id,
                 kind: input.kind,
                 status: input.status,
                 ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
               })
-              return Effect.succeed({ id, ...input, createdAt: input.createdAt ?? 1 } as never)
+              return Effect.succeed({ id: makePublicationResultId(id), ...input, createdAt: input.createdAt ?? 1 })
             }),
           recordProvenanceEvent: (input) => {
             provenanceRecords.push(input)
-            return Effect.succeed({ id: 'provenance-1', ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] } as never)
+            return Effect.succeed({ id: makeProvenanceEventId('provenance-1'), ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] })
           },
         }),
       )
@@ -241,6 +268,7 @@ describe('PublishDecisionToSource', () => {
         workflowStart,
         humanDecision,
         sandboxExecution,
+        candidatePatchSet,
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
       expect(provenanceRecords.at(-1)).toMatchObject({
@@ -254,6 +282,7 @@ describe('PublishDecisionToSource', () => {
         workflowStart,
         humanDecision: { ...humanDecision, decidedAt: 11 },
         sandboxExecution,
+        candidatePatchSet,
         publicationResults: recordedPublications.filter((publication) => publication.status !== 'pending').map((publication) => ({
           id: publication.id,
           workflowRunId,
@@ -262,7 +291,7 @@ describe('PublishDecisionToSource', () => {
           status: publication.status,
           createdAt: 10,
           idempotencyKey: publication.idempotencyKey,
-        } as never)),
+        })),
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
       expect(sourceCalls).toEqual(['check-run'])
@@ -317,23 +346,26 @@ describe('PublishDecisionToSource', () => {
           recordReviewRun: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordReviewFinding: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
           recordPolicyDecision: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
+          claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           recordPublicationResult: (input) =>
-            Effect.succeed({ id: `publication-${input.kind}`, ...input, createdAt: input.createdAt ?? 1 } as never),
+            Effect.succeed({ id: makePublicationResultId(`publication-${input.kind}`), ...input, createdAt: input.createdAt ?? 1 }),
           recordProvenanceEvent: (input) =>
-            Effect.succeed({ id: 'provenance-1', ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] } as never),
+            Effect.succeed({ id: makeProvenanceEventId('provenance-1'), ...input, sequence: 1, artifactRefs: input.artifactRefs ?? [] }),
         }),
       )
 
       const result = yield* PublishDecisionToSource({
         traceId: 'trace-2',
         workflowStart,
-        humanDecision: { ...humanDecision, id: 'decision-2', decidedAt: 11 },
+        humanDecision: { ...humanDecision, id: makeHumanDecisionId('decision-2'), decidedAt: 11 },
         sandboxExecution,
+        candidatePatchSet,
         publicationResults: [
           {
-            id: 'publication-1',
+            id: makePublicationResultId('publication-1'),
             workflowRunId,
             provider: 'github',
             kind: 'issue-comment',
@@ -342,7 +374,7 @@ describe('PublishDecisionToSource', () => {
             idempotencyKey: 'decision-1:issue-comment',
           },
           {
-            id: 'publication-2',
+            id: makePublicationResultId('publication-2'),
             workflowRunId,
             provider: 'github',
             kind: 'check-run',
@@ -350,7 +382,7 @@ describe('PublishDecisionToSource', () => {
             createdAt: 10,
             idempotencyKey: 'decision-1:check-run',
           },
-        ] as never,
+        ],
       }).pipe(Effect.provide(Layer.mergeAll(sourceControlLayer, storageLayer)))
 
       expect(sourceCalls).toEqual(['issue-comment', 'check-run'])

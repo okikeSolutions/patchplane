@@ -18,6 +18,14 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
   event: GitHubNormalizedWorkflowEvent,
   context: GitHubEventToWorkflowIntakeContext,
 ) {
+  if (!('headSha' in event) || event.headSha.trim().length === 0) {
+    return yield* new GitHubError({
+      operation: 'GitHubEventToWorkflowIntake.requirePinnedRevision',
+      message: 'Executable GitHub workflow intake requires an authoritative pull request head SHA',
+      cause: { eventKind: event.kind },
+    })
+  }
+
   const externalRef = yield* decodeExternalWorkflowRef({
     provider: 'github',
     deliveryId: event.deliveryId,
@@ -30,7 +38,6 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
     repositoryFullName: `${event.owner}/${event.repo}`,
     issueExternalId: 'issueId' in event ? String(event.issueId) : undefined,
     issueNumber: 'issueNumber' in event ? event.issueNumber : event.pullRequestNumber,
-    issueTitle: event.kind === 'github.issue.opened' ? event.title : undefined,
     pullRequestExternalId: 'pullRequestId' in event ? String(event.pullRequestId) : undefined,
     pullRequestNumber: 'pullRequestNumber' in event ? event.pullRequestNumber : undefined,
     pullRequestHeadSha: 'headSha' in event ? event.headSha : undefined,

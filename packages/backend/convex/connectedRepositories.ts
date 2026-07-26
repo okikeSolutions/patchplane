@@ -115,6 +115,7 @@ const latestRepositoryVerificationReturn = v.object({
     v.literal('queued'),
     v.literal('running'),
     v.literal('reviewed'),
+    v.literal('failed'),
   ),
   verificationStatus: v.union(
     v.literal('queued'),
@@ -124,6 +125,7 @@ const latestRepositoryVerificationReturn = v.object({
     v.literal('rejected'),
     v.literal('changes-requested'),
     v.literal('manual-review'),
+    v.literal('failed'),
   ),
   pullRequestNumber: v.optional(v.number()),
   url: v.optional(v.string()),
@@ -519,7 +521,8 @@ export const listForWorkspaceWithLatestVerification = query({
         | 'approved'
         | 'rejected'
         | 'changes-requested'
-        | 'manual-review' = workflowRun.status !== 'reviewed'
+        | 'manual-review'
+        | 'failed' = workflowRun.status !== 'reviewed'
         ? workflowRun.status
         : coherentHumanDecision?.status ?? coherentPolicyDecision?.status ?? 'reviewed'
       const updatedAt = workflowRun.status !== 'reviewed'

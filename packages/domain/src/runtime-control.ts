@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { WorkflowRunId } from './ids'
 
 export const RuntimeControlOperation = Schema.Literals([
   'abort',
@@ -9,7 +10,7 @@ export const RuntimeControlOperation = Schema.Literals([
 export type RuntimeControlOperation = Schema.Schema.Type<typeof RuntimeControlOperation>
 
 export const RuntimeControlInput = Schema.Struct({
-  workflowRunId: Schema.String,
+  workflowRunId: WorkflowRunId,
   operation: RuntimeControlOperation,
   message: Schema.optional(Schema.String),
 })

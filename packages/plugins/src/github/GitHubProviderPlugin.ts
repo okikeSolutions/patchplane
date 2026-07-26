@@ -230,9 +230,15 @@ const sourceControlLayer = Layer.effect(
             })
             const existing = comments.find((comment) => comment.body?.includes(marker))
             if (existing !== undefined) {
+              const updated = await octokit.rest.issues.updateComment({
+                owner: input.owner,
+                repo: input.name,
+                comment_id: existing.id,
+                body: `${input.body}\n\n${marker}`,
+              })
               return {
-                externalId: String(existing.id),
-                url: existing.html_url,
+                externalId: String(updated.data.id),
+                url: updated.data.html_url,
               }
             }
           }
@@ -293,9 +299,23 @@ const sourceControlLayer = Layer.effect(
               if (existing !== undefined) break
             }
             if (existing !== undefined) {
+              const updated = await octokit.rest.checks.update({
+                owner: input.owner,
+                repo: input.name,
+                check_run_id: existing.id,
+                name: input.checkName,
+                status: input.status,
+                conclusion: input.conclusion,
+                ...(input.detailsUrl === undefined ? {} : { details_url: input.detailsUrl }),
+                output: {
+                  title: input.title,
+                  summary: input.summary,
+                  ...(input.text === undefined ? {} : { text: input.text }),
+                },
+              })
               return {
-                externalId: String(existing.id),
-                url: existing.html_url ?? undefined,
+                externalId: String(updated.data.id),
+                url: updated.data.html_url ?? undefined,
               }
             }
           }

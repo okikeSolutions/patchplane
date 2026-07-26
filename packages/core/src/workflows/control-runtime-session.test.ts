@@ -1,12 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
-import { makeWorkflowRunId } from '@patchplane/domain/ids'
+import { makeRuntimeSessionId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 import { AbortRuntimeSession, FollowUpRuntimeSession, SteerRuntimeSession, TerminateRuntimeSession } from './control-runtime-session'
 
 const activeSession = {
-  id: 'runtime-1',
+  id: makeRuntimeSessionId('runtime-1'),
   workflowRunId: makeWorkflowRunId('workflow-1'),
   provider: 'daytona:pi-rpc',
   sandboxId: 'sandbox-1',
@@ -22,6 +22,8 @@ function storageLayer(events: Array<unknown>, session = activeSession) {
     createWorkflowFromIntake: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     listRecentWorkflowStarts: () => Effect.die('unused'),
+    claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),

@@ -39,6 +39,13 @@ function WorkflowDetailRoute() {
               workflowRunId={workflowRunId as Id<'workflowRuns'>}
               tab={tab}
               returnTo={returnTo}
+              onRerunCreated={(childWorkflowRunId) => {
+                void navigate({
+                  to: '/app/workflows/$workflowRunId',
+                  params: { workflowRunId: childWorkflowRunId },
+                  search: { tab: 'summary', returnTo },
+                })
+              }}
               onTabChange={(nextTab) => {
                 void navigate({ search: { tab: nextTab, returnTo }, replace: true })
               }}

@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { WorkflowRunId } from './ids'
+import { SandboxExecutionId, WorkflowRunId } from './ids'
 import { SandboxPolicy } from './sandbox-policy'
 
 export const SandboxExecutionStatus = Schema.Literals([
@@ -18,7 +18,7 @@ export type SandboxExecutionStatus = Schema.Schema.Type<
  * sandbox provider's native response shape to core workflow consumers.
  */
 export const SandboxExecution = Schema.Struct({
-  id: Schema.String,
+  id: SandboxExecutionId,
   workflowRunId: WorkflowRunId,
   provider: Schema.String,
   sandboxId: Schema.String,

@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { WorkflowRunId } from './ids'
+import { RuntimeEventId, WorkflowRunId } from './ids'
 
 /**
  * Event emitted by an agent/runtime while processing a workflow run.
@@ -9,7 +9,7 @@ import { WorkflowRunId } from './ids'
  * schema while providers evolve their detailed event shapes independently.
  */
 export const RuntimeEvent = Schema.Struct({
-  id: Schema.String,
+  id: RuntimeEventId,
   workflowRunId: WorkflowRunId,
   provider: Schema.String,
   type: Schema.String,

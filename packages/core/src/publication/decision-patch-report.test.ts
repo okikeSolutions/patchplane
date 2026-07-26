@@ -1,5 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
-import { makePromptRequestId, makeSystemActorId, makeSystemWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makeHumanDecisionId,
+  makePromptRequestId,
+  makeSandboxExecutionId,
+  makeSystemActorId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import { decisionCheckConclusion, formatDecisionPatchReportComment } from './decision-patch-report'
 
 const workflowRunId = makeWorkflowRunId('run-1')
@@ -24,7 +31,7 @@ const workflowStart = {
   },
 }
 const humanDecision = {
-  id: 'decision-1',
+  id: makeHumanDecisionId('decision-1'),
   workflowRunId,
   actorId: makeSystemActorId('reviewer-1'),
   status: 'approved' as const,
@@ -32,7 +39,7 @@ const humanDecision = {
   decidedAt: 3,
 }
 const sandboxExecution = {
-  id: 'execution-1',
+  id: makeSandboxExecutionId('execution-1'),
   workflowRunId,
   provider: 'daytona',
   sandboxId: 'sandbox-1',
@@ -46,7 +53,7 @@ const sandboxExecution = {
 
 describe('decision Patch Report publication', () => {
   it('does not turn approval and agent completion into a successful verification check', () => {
-    expect(decisionCheckConclusion({ humanDecision, sandboxExecution })).toBe('action_required')
+    expect(decisionCheckConclusion({ humanDecision, sandboxExecution })).toBe('neutral')
 
     const body = formatDecisionPatchReportComment({
       workflowStart,
@@ -55,6 +62,19 @@ describe('decision Patch Report publication', () => {
     })
     expect(body).toContain('**Execution:** sandbox execution completed')
     expect(body).toContain('**Verification:** incomplete')
+  })
+
+  it('uses success only for durable passing verification without an override', () => {
+    expect(decisionCheckConclusion({
+      humanDecision,
+      sandboxExecution,
+      verification: { status: 'passed' },
+    })).toBe('success')
+    expect(decisionCheckConclusion({
+      humanDecision: { ...humanDecision, verificationOverride: true },
+      sandboxExecution,
+      verification: { status: 'passed' },
+    })).toBe('neutral')
   })
 
   it('keeps failed execution and rejected decisions blocking', () => {

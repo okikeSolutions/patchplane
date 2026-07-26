@@ -13,6 +13,7 @@ export const sourceControlRuntimeEnv = {
   DAYTONA_API_KEY: Config.redacted('DAYTONA_API_KEY'),
   OPENAI_API_KEY: Config.redacted('OPENAI_API_KEY'),
   PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND: Config.string('PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND').pipe(Config.withDefault('')),
+  PATCHPLANE_EVIDENCE_TEST_PLATFORM: Config.string('PATCHPLANE_EVIDENCE_TEST_PLATFORM').pipe(Config.withDefault('linux')),
   PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND: Config.string('PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND').pipe(Config.withDefault('')),
   SENTRY_DSN: Config.string('SENTRY_DSN'),
   SENTRY_ENABLED: true,

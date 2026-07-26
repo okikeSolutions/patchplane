@@ -343,7 +343,7 @@ describe('Daytona sandbox boundary adapters', () => {
         return { exitCode: 0, stdout: '', stderr: '' }
       }
       if (request.command.includes('PATCHPLANE_ARTIFACT_BODY_BASE64')) {
-        return { exitCode: 0, stdout: '.patchplane/browser-screenshot.png\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\nAQID', stderr: '' }
+        return { exitCode: 0, stdout: '.patchplane/browser-screenshot.png\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\niVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', stderr: '' }
       }
       return { exitCode: 0, stdout: '', stderr: '' }
     })
@@ -375,7 +375,7 @@ describe('Daytona sandbox boundary adapters', () => {
           kind: 'screenshot',
           label: 'Browser verification screenshot',
           contentType: 'image/png',
-          body: Uint8Array.from([1, 2, 3]),
+          body: expect.any(Uint8Array),
         }),
         expect.objectContaining({
           kind: 'diff',
@@ -397,6 +397,53 @@ describe('Daytona sandbox boundary adapters', () => {
       )
       expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
     }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('fails closed when stale test-report cleanup fails', () => {
+    const executeSessionCommand = vi.fn(async (_sessionId: string, request: { readonly command: string }) => {
+      if (request.command.includes('git rev-parse HEAD')) {
+        return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+      }
+      if (request.command.includes('rm -f .patchplane/test-report')) {
+        return { exitCode: 1, stdout: '', stderr: 'permission denied' }
+      }
+      if (request.command.includes('PATCHPLANE_ARTIFACT_BODY')) {
+        return { exitCode: 0, stdout: '.patchplane/test-report.json\n---PATCHPLANE_ARTIFACT_BODY---\n{"stale":true}', stderr: '' }
+      }
+      if (request.command.includes('sha256sum')) {
+        return { exitCode: 0, stdout: `${'a'.repeat(64)}  -\n`, stderr: '' }
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand,
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const result = yield* service.runRepositoryCommand({
+        ...commandInput,
+        evidenceTestReportCommand: 'make-report',
+      })
+
+      expect(result.verificationResults).toEqual([
+        expect.objectContaining({
+          kind: 'test',
+          status: 'failed',
+          message: 'Test verification setup failed while removing stale report artifacts.',
+        }),
+      ])
+      expect(result.evidenceArtifacts?.some((artifact) => artifact.kind === 'test-report')).toBe(false)
+      expect(executeSessionCommand).not.toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ command: 'make-report' }),
+        expect.any(Number),
+      )
+    }).pipe(Effect.provide(testLayer(fakeClient(sandbox))))
   })
 
   it.effect('reports failed configured verification commands', () => {

@@ -1,5 +1,5 @@
 import type { WorkerEnv } from './github/config'
-import { controlRuntimeSession, handleGitHubWebhook, makeSourceControlRuntime, publishDecision, syncGitHubInstallation } from './github/routes'
+import { controlRuntimeSession, executeWorkflowRerun, handleGitHubWebhook, makeSourceControlRuntime, publishDecision, syncGitHubInstallation } from './github/routes'
 
 interface RequestContext {
   waitUntil(promise: Promise<unknown>): void
@@ -25,8 +25,12 @@ export default {
         return await controlRuntimeSession(request, runtime)
       }
 
+      if (request.method === 'POST' && url.pathname === '/internal/workflow/rerun') {
+        return await executeWorkflowRerun(request, env, runtime)
+      }
+
       if (request.method === 'POST' && url.pathname === '/internal/decision/publish') {
-        return await publishDecision(request, runtime)
+        return await publishDecision(request, env, runtime)
       }
 
       if (request.method === 'POST' && url.pathname === '/api/github/webhook') {

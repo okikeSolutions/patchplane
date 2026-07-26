@@ -59,7 +59,7 @@ export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDe
       <Card className="ring-border">
         <CardHeader><CardTitle>Decision and publication</CardTitle><CardDescription>Who decided, why, and what PatchPlane published afterward.</CardDescription></CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
-          <Record label="Human decision" value={decisionIsCurrent ? decision?.status ?? 'Pending' : 'Pending'} detail={decision === undefined ? 'No human decision recorded.' : decisionIsCurrent ? `${decision.actorId} · ${new Date(decision.decidedAt).toLocaleString()}\n${decision.comment}` : `A previous ${decision.status} decision was superseded by newer evidence.`} />
+          <Record label="Human decision" value={decisionIsCurrent ? decision?.status ?? 'Pending' : 'Pending'} detail={decision === undefined ? 'No human decision recorded.' : decisionIsCurrent ? `${decision.actorId} · ${new Date(decision.decidedAt).toLocaleString()}\n${decision.comment}${decision.verificationOverride ? `\n\nVerification override: ${decision.verificationOverrideReason ?? 'Reason unavailable'}` : ''}` : `A previous ${decision.status} decision was superseded by newer evidence.`} />
           <Record label="GitHub publication" value={failedPublications.length > 0 ? 'Partial failure' : publishedResults.length > 0 ? 'Published' : 'Pending'} detail={`${publishedResults.length} published · ${failedPublications.length} failed · ${decisionPublications.length} attempts for the current decision`} href={publishedResults.find((result) => result.url !== undefined)?.url} />
         </CardContent>
       </Card>

@@ -693,7 +693,7 @@ Acceptance criteria:
 
 ### M9.75 — Patch Report and evidence capture slice
 
-**Status:** Complete for the alpha evidence pipeline; remaining work moves into the M10 decision/publication loop
+**Status:** Implementation complete for candidate-bound Patch Report V1; release claim reopened until a fresh real run proves the semantics
 
 Purpose:
 
@@ -702,7 +702,7 @@ Make the Patch Report the center of the alpha. Capture enough evidence to help a
 Scope:
 
 - Add `PatchReport` domain/read-model schema.
-- Assemble Patch Report v0 from workflow, sandbox, runtime, and source-control data.
+- Assemble Patch Report V1 for one immutable attempt and candidate from durable workflow, execution, verification, review, policy, decision, artifact, and publication records.
 - Publish Patch Report summary to GitHub.
 - Add `EvidenceArtifact` domain model and Convex metadata persistence.
 - Add `ArtifactsService` with Cloudflare R2 implementation.
@@ -712,8 +712,11 @@ Scope:
 Tasks:
 
 - [x] Define initial `PatchReport` schema.
-- [x] Assemble Patch Report v0 read model from existing Convex workflow detail data.
-- [x] Reframe GitHub sandbox publication as a Patch Report summary.
+- [x] Assemble Patch Report V1 from candidate-correlated durable records and reject legacy projection.
+- [x] Publish the canonical Patch Report V1 through the decision publication path; sandbox completion remains an execution update, not a verification verdict.
+- [x] Persist trusted verification requirements before execution and candidate-bound verification results afterward.
+- [x] Freeze candidates with producing execution, pinned base SHA, and exact diff digest before verification.
+- [x] Detect candidate mutation across verification and fail closed.
 - [x] Define `EvidenceArtifact` schema.
 - [x] Define `ArtifactsService` interface.
 - [x] Implement R2-backed `ArtifactsService` plugin.
@@ -728,13 +731,15 @@ Implementation evidence:
 - Daytona records the clone base SHA and captures `git diff --binary` against that base, including staged, committed, unstaged, and untracked worktree changes.
 - Daytona probes conventional test report files such as `.patchplane/test-report.json` and `.patchplane/test-report.xml` after the main run and optional producer command.
 - Daytona probes conventional browser screenshot files such as `.patchplane/browser-screenshot.png` after the main run and optional producer command.
-- Configured test and browser producer commands retain explicit success/failure outcomes; failed test verification becomes a durable review finding.
+- Configured test and browser requirements are stored before execution. Their results retain explicit passed/failed/blocked/error outcomes, candidate digests, environment metadata, and artifact references; missing or mismatched required evidence remains incomplete.
 - Core uploads sandbox-provided evidence through `CaptureEvidenceArtifact`, which stores raw bytes in R2 and metadata in Convex.
 - The client Evidence tab opens persisted evidence artifacts through authenticated signed URLs.
 
 Acceptance criteria:
 
-- A developer can open one Patch Report and answer: what changed, what ran, where it ran, what passed or failed, what evidence exists, and what decision is pending or recorded.
+- A developer can open one candidate-bound Patch Report and answer: what was requested, which attempt/candidate is shown, what ran, where it ran, what independently passed or failed, what is missing, what evidence exists, and what decision is pending or recorded.
+- Pi exit `0`, candidate capture, external review, independent verification, policy, human decision, and publication remain separate states.
+- A fresh credentialed dogfood run demonstrates candidate-bound evidence; until then M9.75 is not a release-complete claim.
 - A workflow stores raw evidence artifacts in R2.
 - Convex stores artifact metadata, hashes, and references.
 - The UI can link from a Patch Report/provenance event to its evidence artifacts.
@@ -778,7 +783,7 @@ Acceptance criteria:
 
 ### M10 — Evidence-backed decision and publication loop
 
-**Status:** In progress; the deployed evidence/review loop is live-verified, with the authenticated human decision and resulting GitHub publication replay still open
+**Status:** In progress; V1 semantics are implemented locally, but a fresh authenticated dogfood run, rerun, and canonical publication replay remain open
 
 Purpose:
 
@@ -791,15 +796,17 @@ Tasks:
 - [x] Implement one reviewer path, initially test/lint-oriented.
 - [x] Implement `PolicyService.evaluatePolicy`.
 - [x] Implement `ProposeMergeDecision`.
-- [x] Persist minimal human decision linked to the Patch Report.
+- [x] Persist human decisions against the exact execution/candidate/review/policy projection, requiring an explicit override reason when verification is incomplete.
 - [x] Require a comment for approve/reject/request-changes decisions.
-- [x] Update Patch Report status from the durable decision.
+- [x] Derive independent execution, candidate, verification, review, policy, human-decision, publication, and aggregate trust states.
 - [x] Add operator approval/rejection/request-changes path.
-- [x] Publish updated GitHub comment and check-run results after decision.
+- [x] Update one canonical GitHub issue comment and candidate-`headSha` check result after decision; never fall back to the original PR SHA.
 - [ ] Publish a draft PR result once candidate branches can be pushed and represented durably.
 - [x] Record workflow-scoped provenance for prompt/actor/workspace/repository, sandbox/runtime activity, commands/tests, candidate patch, review/policy result, human decision, and publication result.
 - [x] Keep Patch Report as a deterministic projection over durable workflow, evidence, review, decision, publication, and provenance records; avoid a second stale snapshot truth.
-- [ ] Revalidate the complete deployed trust loop against one real repository after the decision/publication changes.
+- [x] Implement immutable rerun lineage with reason/idempotency, atomic execution claims, and authoritative rerun dispatch.
+- [x] Add replay-safe identities for review runs, findings, policy decisions, human decisions, and publication records.
+- [ ] Revalidate the complete deployed V1 trust loop, immutable rerun, human override behavior, and canonical publication replay against one real repository.
 
 Implementation evidence:
 
@@ -808,10 +815,10 @@ Implementation evidence:
 - System-ingestion mutations record candidate patches, automated review/policy output, and publication results.
 - Authenticated human decisions require a non-empty comment and `decision:approve` or `decision:reject` permission.
 - Core now has `ReviewService`, `PolicyService`, alpha deterministic review/policy layers, and `ProposeMergeDecision`.
-- The first reviewer records failed sandbox execution, failed configured test verification, missing independent verification configuration, and missing diff evidence as review findings, then policy keeps the patch in `changes-requested` or `manual-review` until human approval.
-- The Patch Report read model derives its current status and decision section from the latest durable `HumanDecision`.
+- Policy evaluates a coherent candidate-bound evidence snapshot, stores its version and SHA-256 input digest, and fails closed on missing, blocked, errored, stale, mutated, platform-unavailable, or mismatched requirements.
+- Patch Report V1 selects decisions only when their execution, candidate, review, and policy IDs match the displayed projection; it does not use an independent latest-decision shortcut.
 - Maintainers and operators can approve, reject, or request changes through the authenticated UI/server path with a required comment and replay-safe decision idempotency key.
-- Decision publication creates durable pending/result records before and after GitHub calls, publishes issue comments and check runs, and reconciles retries through comment markers and check-run `external_id` values.
+- Decision publication uses a leased atomic dispatch claim, durable pending/result records, stable root-workflow comment markers, and candidate check-run `external_id` values so concurrent/replayed publication does not duplicate GitHub output.
 - Aggregate publication provenance can transition from failed to succeeded after retry while retaining links to all publication result records.
 - A system-secret acceptance snapshot exposes only workflow statuses, evidence hashes, publication IDs, and aggregate counts for live verification without bypassing WorkOS authorization on full workflow detail.
 
@@ -826,8 +833,8 @@ Current validation:
 
 Acceptance criteria:
 
-- A generated patch remains untrusted until sandbox execution, Patch Report evidence, and review complete.
-- A human can approve, reject, or request changes from the Patch Report before publication/merge handoff.
+- A generated patch remains untrusted until all declared required candidate-bound verification passes, policy accepts the coherent snapshot, and human review completes; approval with incomplete verification is visibly `approved-with-override` and requires a reason.
+- A human can approve, reject, request changes, or create an immutable reasoned rerun from the Patch Report before publication/merge handoff.
 - The alpha demo can show why the decision was made using persisted Patch Report provenance and evidence, not only transient logs.
 
 ---

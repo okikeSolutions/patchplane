@@ -1,4 +1,5 @@
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
+import type { WorkflowRunId } from '@patchplane/domain/ids'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 
@@ -7,7 +8,7 @@ type RuntimeControlOperation = 'abort' | 'steer' | 'followUp' | 'terminate'
 export const ControlRuntimeSession = Effect.fn(
   '@patchplane/core/workflows/ControlRuntimeSession',
 )(function*(input: {
-  readonly workflowRunId: string
+  readonly workflowRunId: WorkflowRunId
   readonly operation: RuntimeControlOperation
   readonly message?: string | undefined
   readonly traceId: string
@@ -28,7 +29,7 @@ export const ControlRuntimeSession = Effect.fn(
     yield* storage.markRuntimeSessionStatus({
       runtimeSessionId: session.id,
       status: 'cancelled',
-      completedAt: Date.now(),
+      completedAt: yield* Clock.currentTimeMillis,
       traceId: input.traceId,
     })
     return { status: 'sent' as const, result }
@@ -39,7 +40,7 @@ export const ControlRuntimeSession = Effect.fn(
     yield* storage.markRuntimeSessionStatus({
       runtimeSessionId: session.id,
       status: 'cancelled',
-      completedAt: Date.now(),
+      completedAt: yield* Clock.currentTimeMillis,
       traceId: input.traceId,
     })
     return { status: 'terminated' as const, result }
@@ -56,14 +57,32 @@ export const ControlRuntimeSession = Effect.fn(
   return { status: 'sent' as const, result }
 })
 
-export const AbortRuntimeSession = (input: { readonly workflowRunId: string; readonly traceId: string }) =>
-  ControlRuntimeSession({ ...input, operation: 'abort' })
+export const AbortRuntimeSession = Effect.fnUntraced(function*(input: {
+  readonly workflowRunId: WorkflowRunId
+  readonly traceId: string
+}) {
+  return yield* ControlRuntimeSession({ ...input, operation: 'abort' })
+})
 
-export const TerminateRuntimeSession = (input: { readonly workflowRunId: string; readonly traceId: string }) =>
-  ControlRuntimeSession({ ...input, operation: 'terminate' })
+export const TerminateRuntimeSession = Effect.fnUntraced(function*(input: {
+  readonly workflowRunId: WorkflowRunId
+  readonly traceId: string
+}) {
+  return yield* ControlRuntimeSession({ ...input, operation: 'terminate' })
+})
 
-export const SteerRuntimeSession = (input: { readonly workflowRunId: string; readonly message: string; readonly traceId: string }) =>
-  ControlRuntimeSession({ ...input, operation: 'steer' })
+export const SteerRuntimeSession = Effect.fnUntraced(function*(input: {
+  readonly workflowRunId: WorkflowRunId
+  readonly message: string
+  readonly traceId: string
+}) {
+  return yield* ControlRuntimeSession({ ...input, operation: 'steer' })
+})
 
-export const FollowUpRuntimeSession = (input: { readonly workflowRunId: string; readonly message: string; readonly traceId: string }) =>
-  ControlRuntimeSession({ ...input, operation: 'followUp' })
+export const FollowUpRuntimeSession = Effect.fnUntraced(function*(input: {
+  readonly workflowRunId: WorkflowRunId
+  readonly message: string
+  readonly traceId: string
+}) {
+  return yield* ControlRuntimeSession({ ...input, operation: 'followUp' })
+})

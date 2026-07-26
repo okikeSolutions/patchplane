@@ -22,6 +22,9 @@ export const SourceControlRouteConfig = Config.all({
   piMode: Config.string('PATCHPLANE_PI_MODE').pipe(Config.withDefault('json')),
   webhookExecution: Config.string('PATCHPLANE_GITHUB_WEBHOOK_EXECUTION').pipe(Config.withDefault('daytona-pi')),
   evidenceTestReportCommand: Config.string('PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND').pipe(Config.withDefault('')),
+  evidenceTestPlatform: Config.literals(['linux', 'macos', 'windows'], 'PATCHPLANE_EVIDENCE_TEST_PLATFORM').pipe(
+    Config.withDefault('linux'),
+  ),
   evidenceBrowserScreenshotCommand: Config.string('PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND').pipe(Config.withDefault('')),
   cloudflareApiKey: Config.string('CLOUDFLARE_API_KEY').pipe(Config.withDefault('')),
   cloudflareAccountId: Config.string('CLOUDFLARE_ACCOUNT_ID').pipe(Config.withDefault('')),

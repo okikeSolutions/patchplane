@@ -103,7 +103,11 @@ diagnosis, and cleanup procedure.
 | M9.5      | Existing PatchPlane shell remains the dashboard foundation                         | component tests                                      | Automated |
 | M9.5      | Real workflow details are understandable                                           | component tests; deployed browser run still required | Automated |
 | M9.5      | Review ergonomics support maintainer dogfooding                                    | `smoke:browser` typed workflow readback confirmation | Missing   |
-| M9.75     | Patch Report answers what changed/ran/passed and current decision                  | Patch Report domain and workflow component tests     | Automated |
+| M9.75     | Patch Report V1 answers request/attempt/candidate/execution/verification gaps/review/policy/decision/publication without collapsing states | domain, assembler, backend, publication, and component tests | Automated |
+| M9.75     | Legacy evidence cannot be silently represented as a V1 report                     | Patch Report assembler regression test               | Automated |
+| M9.75     | Required verification is declared before execution and bound to the frozen candidate digest | core workflow, policy, Daytona, and backend tests | Automated |
+| M9.75     | Missing, blocked, errored, mutated, platform-unavailable, truncated, or mismatched required evidence is never reported as passed | verification coverage, policy, report, and UI tests | Automated |
+| M9.75     | A fresh real dogfood run displays truthful candidate-bound V1 evidence and explicit native-platform gaps | `smoke:trust-loop` plus authenticated browser readback | Missing   |
 | M9.75     | Workflow stores raw artifacts in R2                                                | R2 tests and live RPC artifact write                 | Live      |
 | M9.75     | Convex stores artifact metadata/hashes/references                                  | backend Convex tests                                 | Automated |
 | M9.75     | UI links reports/provenance to evidence                                            | workflow component tests                             | Automated |
@@ -124,11 +128,15 @@ diagnosis, and cleanup procedure.
 
 | Milestone | Acceptance criterion                                                                               | Evidence                                                         | Status    |
 | --------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------- |
-| M10       | Patch stays untrusted until execution, evidence, and review complete                               | policy, Patch Report, backend precondition tests                 | Automated |
-| M10       | Human can approve/reject/request changes before publication                                        | backend and client decision tests                                | Automated |
+| M10       | Patch stays untrusted until declared candidate-bound evidence, policy, and review complete          | policy, Patch Report, backend precondition tests                 | Automated |
+| M10       | Human can approve/reject/request changes; incomplete verification approval requires a durable explicit override reason | backend and client decision tests | Automated |
+| M10       | Rerun creates an immutable child attempt with reason, pinned revision, idempotency, and one atomic execution claim | backend/core/source-control/client tests | Automated |
+| M10       | A real authenticated rerun executes the child attempt and preserves the parent report | `smoke:trust-loop` plus browser readback | Missing   |
 | M10       | Decision rationale is backed by persisted evidence/provenance                                      | backend/core/component tests                                     | Automated |
 | M10       | Review-ready acceptance uses the latest coherent execution, candidate, review, and policy records  | backend and trust-loop smoke regression tests                    | Automated |
 | M10       | Decision publication remains pinned to the candidate projection reviewed by the human              | backend and client decision-publication tests                    | Automated |
+| M10       | Candidate check publication requires exact candidate `headSha`; no PR-head fallback                | core publication and GitHub adapter tests                        | Automated |
+| M10       | Concurrent publication dispatch has one leased owner and canonical replay identity                 | backend/core/GitHub adapter tests                                | Automated |
 | M10       | Real authenticated decision updates GitHub and reads back in UI                                    | `smoke:trust-loop` replay plus `smoke:browser` readback          | Missing   |
 | M10       | Publication retry creates no duplicate GitHub output                                               | core/GitHub adapter tests and `smoke:trust-loop` provider replay | Live      |
 | M10       | Durable normalized records deterministically assemble a Patch Report linked to complete provenance | domain, backend, and component tests                             | Automated |
@@ -152,6 +160,6 @@ On 2026-07-10:
 - `bun run smoke:daytona-rpc` passed against Daytona/Pi and read back a non-empty R2 artifact byte-for-byte with matching SHA-256 metadata before deleting the object and sandbox.
 - The Cloudflare `dev` stack deployed R2, AI Gateway, client, source-control, and public webhook Workers. A fresh two-Worker create required one retry because the webhook service binding raced the target Worker precreate in the vendored Alchemy/Cloudflare provider.
 - Convex CLI authentication was verified for the `okikesolutions` team and the current backend functions were deployed to `veracious-rooster-773` with `npx convex dev --once`.
-- The hosted trust loop passed webhook HMAC verification, GitHub App repository access, Daytona/Pi JSON execution, normalized runtime-event persistence, R2 evidence capture with hashes, candidate-patch capture, automated review, policy evaluation, and provenance persistence for workflow `ms75nyt9d572v6p7ab98vrq7158a8kgx`.
-- GitHub readback confirmed the workflow's Patch Report comment on test PR 96. JSON-mode Pi runs do not create an RPC runtime session; durable RPC-session behavior remains independently covered by `smoke:daytona-rpc`.
+- The hosted trust loop passed the then-current webhook, repository access, Daytona/Pi, R2, candidate, review, policy, and provenance path for workflow `ms75nyt9d572v6p7ab98vrq7158a8kgx`. This is historical V0 evidence and does **not** satisfy the reopened V1 candidate-bound or rerun rows above.
+- GitHub readback confirmed the historical workflow's Patch Report comment on test PR 96. It does not prove canonical V1 publication, candidate-`headSha` checks, or immutable rerun behavior. JSON-mode Pi runs do not create an RPC runtime session; durable RPC-session behavior remains independently covered by `smoke:daytona-rpc`.
 - The authenticated WorkOS human decision and resulting durable GitHub publication replay remain required. Convex CLI authentication does not create a browser AuthKit session.

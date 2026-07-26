@@ -6,12 +6,13 @@ import type {
 } from '@patchplane/domain/decision-review'
 import type { StorageError } from '@patchplane/domain/errors'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
+import type { WorkflowRunId } from '@patchplane/domain/ids'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { VerificationResult } from '@patchplane/domain/verification'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export interface ReviewCandidateInput extends TelemetryContextFields {
-  readonly workflowRunId: string
+  readonly workflowRunId: WorkflowRunId
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly evidenceArtifacts: ReadonlyArray<EvidenceArtifact>
   readonly verificationResults?: ReadonlyArray<VerificationResult> | undefined
@@ -21,7 +22,7 @@ export interface ProposedReviewFinding {
   readonly severity: ReviewFindingSeverity
   readonly category: ReviewFindingCategory
   readonly message: string
-  readonly evidenceArtifactId?: string | undefined
+  readonly evidenceArtifactId?: EvidenceArtifact['id'] | undefined
 }
 
 export interface ReviewCandidateResult {

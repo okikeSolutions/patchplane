@@ -1,4 +1,5 @@
 import type { CandidatePatchSet, HumanDecision } from '@patchplane/domain/decision-review'
+import type { PatchReportV1 } from '@patchplane/domain/patch-report-v1'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 
@@ -7,6 +8,12 @@ export function formatDecisionPatchReportComment(input: {
   readonly humanDecision: HumanDecision
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly candidatePatchSet?: CandidatePatchSet | undefined
+  readonly patchReport?: PatchReportV1 | undefined
+  readonly verification?: {
+    readonly status: 'not-configured' | 'incomplete' | 'passed' | 'failed'
+    readonly requiredCount: number
+    readonly passedCount: number
+  } | undefined
 }) {
   const externalRef = input.workflowStart.promptRequest.externalRef
   const repository = externalRef?.repositoryFullName ?? 'unknown'
@@ -24,15 +31,21 @@ export function formatDecisionPatchReportComment(input: {
   const patch = input.candidatePatchSet
 
   return [
-    '## PatchPlane Decision Update',
+    input.patchReport === undefined ? '## PatchPlane Decision Update' : '## PatchPlane Patch Report V1',
     '',
     `**Decision:** ${decisionLabel(input.humanDecision.status)}`,
     `**Execution:** ${executionStatus}`,
-    '**Verification:** incomplete — no durable candidate-bound verification result is recorded',
+    `**Verification:** ${verificationLabel(input.verification)}`,
     '',
     `- Repository: ${repository}`,
     `- Source: ${sourceRef}`,
     `- Workflow run: ${input.workflowStart.workflowRun.id}`,
+    ...(input.patchReport === undefined ? [] : [
+      `- Requested: ${input.patchReport.requestedChange}`,
+      `- Candidate digest: ${input.patchReport.candidate.digest ?? 'not captured'}`,
+      `- Verification coverage: ${input.patchReport.verification.passedCount}/${input.patchReport.verification.requiredCount} required checks`,
+      `- Trust state: ${input.patchReport.trustStatus}`,
+    ]),
     `- Decided by: ${input.humanDecision.actorId}`,
     `- Comment: ${input.humanDecision.comment}`,
     ...(execution === undefined
@@ -52,6 +65,9 @@ export function formatDecisionPatchReportComment(input: {
 export function decisionCheckConclusion(input: {
   readonly humanDecision: HumanDecision
   readonly sandboxExecution?: SandboxExecution | undefined
+  readonly verification?: {
+    readonly status: 'not-configured' | 'incomplete' | 'passed' | 'failed'
+  } | undefined
 }) {
   if (input.humanDecision.status === 'rejected') {
     return 'failure' as const
@@ -61,10 +77,28 @@ export function decisionCheckConclusion(input: {
     return 'action_required' as const
   }
 
-  // Human approval and successful agent execution are not verification evidence.
-  // Until a durable candidate-bound verification projection is supplied here,
-  // an approval requires action rather than a successful GitHub check.
-  return input.sandboxExecution?.status === 'failed' ? 'failure' as const : 'action_required' as const
+  if (input.sandboxExecution?.status === 'failed' || input.verification?.status === 'failed') {
+    return 'failure' as const
+  }
+  if (
+    input.verification?.status === 'passed' &&
+    input.humanDecision.verificationOverride !== true
+  ) {
+    return 'success' as const
+  }
+  return input.humanDecision.status === 'approved' ? 'neutral' as const : 'action_required' as const
+}
+
+function verificationLabel(input: {
+  readonly status: 'not-configured' | 'incomplete' | 'passed' | 'failed'
+  readonly requiredCount: number
+  readonly passedCount: number
+} | undefined) {
+  if (input === undefined) return 'incomplete — no durable candidate-bound verification projection was supplied'
+  if (input.status === 'passed') return `passed — ${input.passedCount}/${input.requiredCount} required checks passed`
+  if (input.status === 'failed') return `failed — ${input.passedCount}/${input.requiredCount} required checks passed`
+  if (input.status === 'not-configured') return 'not configured — execution completion is not verification'
+  return `incomplete — ${input.passedCount}/${input.requiredCount} required checks passed`
 }
 
 function decisionLabel(status: HumanDecision['status']) {

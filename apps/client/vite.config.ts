@@ -18,6 +18,9 @@ const cloudflareWorkersTestStub = resolve(
 
 const config = defineConfig({
   build: {
+    // Browser assets are emitted by the client build; duplicating them in the
+    // Worker SSR output wastes bundle budget without serving those copies.
+    ssrEmitAssets: false,
     rolldownOptions: {
       output: {
         manualChunks(id) {

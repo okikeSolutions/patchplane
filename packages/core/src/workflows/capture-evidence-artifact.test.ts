@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Exit, Layer } from 'effect'
 import { ArtifactsError, StorageError } from '@patchplane/domain/errors'
+import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { ArtifactsService } from '../services/artifacts-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
@@ -29,15 +30,17 @@ function storageLayer(options: { readonly failRecord?: boolean } = {}) {
     createWorkflowFromIntake: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     createWorkflowFromPrompt: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     listRecentWorkflowStarts: () => Effect.succeed([]),
+    claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     markRuntimeSessionStatus: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
-    getActiveRuntimeSession: () => Effect.void as never,
+    getActiveRuntimeSession: () => Effect.void.pipe(Effect.as(undefined)),
     recordEvidenceArtifact: (input) => options.failRecord
       ? Effect.fail(new StorageError({ operation: 'recordEvidenceArtifact', message: 'boom', cause: undefined }))
-      : Effect.succeed({ id: 'artifact_1', ...input, createdAt: input.createdAt ?? 123 } as never),
-    getEvidenceArtifact: () => Effect.void as never,
+      : Effect.succeed({ id: makeEvidenceArtifactId('artifact_1'), ...input, createdAt: input.createdAt ?? 123 }),
+    getEvidenceArtifact: () => Effect.void.pipe(Effect.as(undefined)),
     recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordVerificationRequirement: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
     recordVerificationResult: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
@@ -53,7 +56,7 @@ describe('CaptureEvidenceArtifact', () => {
   it.effect('uploads raw bytes then records Convex-owned metadata', () =>
     Effect.gen(function* () {
       const artifact = yield* CaptureEvidenceArtifact({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'stdout',
         label: 'Sandbox stdout',
@@ -62,7 +65,7 @@ describe('CaptureEvidenceArtifact', () => {
       })
       expect(artifact).toMatchObject({
         id: 'artifact_1',
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'stdout',
         label: 'Sandbox stdout',
@@ -75,7 +78,7 @@ describe('CaptureEvidenceArtifact', () => {
     const deleted: Array<string> = []
     return Effect.gen(function* () {
       const exit = yield* Effect.exit(CaptureEvidenceArtifact({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         kind: 'stdout',
         contentType: 'text/plain',
         body: 'hello',

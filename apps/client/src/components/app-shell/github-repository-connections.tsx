@@ -41,6 +41,7 @@ type VerificationStatus =
   | 'rejected'
   | 'changes-requested'
   | 'manual-review'
+  | 'failed'
 
 interface ConnectedRepositoryRow {
   repository: {
@@ -51,7 +52,7 @@ interface ConnectedRepositoryRow {
   }
   latestVerification?: {
     workflowRunId: string
-    workflowStatus: 'queued' | 'running' | 'reviewed'
+    workflowStatus: 'queued' | 'running' | 'reviewed' | 'failed'
     verificationStatus: VerificationStatus
     pullRequestNumber?: number
     url?: string
@@ -68,6 +69,7 @@ const verificationLabels: Readonly<Record<VerificationStatus, string>> = {
   rejected: 'Rejected',
   'changes-requested': 'Changes requested',
   'manual-review': 'Manual review',
+  failed: 'Execution failed',
 }
 
 export function GitHubRepositoryConnections({

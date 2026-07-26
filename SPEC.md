@@ -648,6 +648,27 @@ It answers:
 
 The Patch Report may be materialized as a read model for the UI and GitHub publication, but it must be backed by PatchPlane-owned evidence and provenance records rather than transient logs.
 
+#### Attempt, candidate, and evidence identity
+
+- A `WorkflowRun` with `modelVersion: "v1"` is one immutable attempt. A rerun creates a new child run with `rootWorkflowRunId`, `parentWorkflowRunId`, `attemptNumber`, a required reason, and the same pinned source revision.
+- Execution must be atomically claimed. Duplicate webhook delivery or rerun dispatch cannot start a second sandbox for the same attempt.
+- The repository is prepared at the pinned source SHA. A captured candidate is valid only when its `baseSha` equals that pinned SHA and its `sandboxExecutionId` is the execution that produced it.
+- The candidate subject is its `candidateDigest`, currently `sha256:` over the exact captured diff. Verification records include that digest before and after the command; tracked-file mutation during verification invalidates the result.
+- Verification requirements come from trusted repository/intake configuration and are stored before agent execution. Results do not create or weaken requirements.
+- Review runs, findings, policy decisions, human decisions, publication results, and evidence artifacts are correlated to the same workflow/candidate subject. A record for candidate A cannot justify candidate B.
+- Policy evaluates a coherent evidence snapshot and stores a SHA-256 digest of its normalized inputs, policy version, considered verification results, and missing requirements.
+- Legacy runs are not silently projected as V1 Patch Reports.
+
+#### Trust dimensions and fail-closed language
+
+Agent execution, candidate capture, independent verification, external review, policy evaluation, human decision, and publication are separate dimensions. Agent exit `0` means only that agent execution completed. External-review confidence is review evidence, not test verification. `passed` is allowed only when every declared required check has a current candidate-bound passing result and required artifacts. Missing, blocked, errored, stale, truncated, unavailable-platform, or mismatched evidence is `incomplete` or `manual-review`, never `clean`.
+
+Human approval does not rewrite machine evidence. When required verification is incomplete, approval requires an explicit durable override reason and the Patch Report continues to display `approved-with-override` and the evidence gap. GitHub issue comments use one stable canonical Patch Report identity per root workflow. Check runs are published only against the candidate `headSha`; PatchPlane never attaches candidate claims to the original PR SHA as a fallback.
+
+Failure categories remain explicit: setup failure, agent failure, verification failure, missing evidence, unavailable capability/platform, policy rejection, human rejection, superseded attempt, and publication failure.
+
+See [`docs/adr/0001-attempt-candidate-evidence-identity.md`](docs/adr/0001-attempt-candidate-evidence-identity.md) for the normative identity and supersession rules.
+
 ### 11.4 Provenance timeline
 
 A `ProvenanceEvent` links workflow actions to evidence:

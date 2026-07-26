@@ -1,49 +1,20 @@
-import { describe, expect, test } from 'vitest'
-import { decisionRecord } from './review-decision'
+import { assert, describe, it } from '@effect/vitest'
+import { makeHumanDecisionId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import { decisionPublicationRequest } from './review-decision'
 
-const candidates = [
-  { id: 'candidate-reviewed', createdAt: 10, headSha: 'reviewed-sha' },
-  { id: 'candidate-after-decision', createdAt: 20, headSha: 'later-sha' },
-]
-
-describe('decision publication record correlation', () => {
-  test('uses the candidate pinned to the durable human decision', () => {
-    expect(
-      decisionRecord(
-        candidates,
-        {
-          id: 'decision-1',
-          decidedAt: 15,
-          candidatePatchSetId: 'candidate-reviewed',
-        },
-        'candidatePatchSetId',
-        (candidate) => candidate.createdAt,
-      ),
-    ).toMatchObject({ id: 'candidate-reviewed', headSha: 'reviewed-sha' })
-  })
-
-  test('never silently falls through when a pinned candidate is absent', () => {
-    expect(() =>
-      decisionRecord(
-        candidates,
-        {
-          id: 'decision-1',
-          candidatePatchSetId: 'candidate-missing',
-        },
-        'candidatePatchSetId',
-        (candidate) => candidate.createdAt,
-      ),
-    ).toThrow('candidatePatchSetId is missing from workflow detail')
-  })
-
-  test('keeps legacy decisions pinned to records created before the decision', () => {
-    expect(
-      decisionRecord(
-        candidates,
-        { id: 'legacy-decision', decidedAt: 15 },
-        'candidatePatchSetId',
-        (candidate) => candidate.createdAt,
-      ),
-    ).toMatchObject({ id: 'candidate-reviewed', headSha: 'reviewed-sha' })
+describe('decision publication request', () => {
+  it('sends only durable identifiers to the source-control trust boundary', () => {
+    assert.deepStrictEqual(
+      decisionPublicationRequest({
+        traceId: 'trace-1',
+        workflowRunId: makeWorkflowRunId('workflow-1'),
+        humanDecisionId: makeHumanDecisionId('decision-1'),
+      }),
+      {
+        traceId: 'trace-1',
+        workflowRunId: 'workflow-1',
+        humanDecisionId: 'decision-1',
+      },
+    )
   })
 })

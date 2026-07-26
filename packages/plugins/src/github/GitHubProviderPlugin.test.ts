@@ -278,7 +278,7 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('reuses an issue comment with the same publication marker', async () => {
+  test('updates the canonical issue comment with the same publication marker', async () => {
     mockInstallationToken()
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/issues/1/comments')
@@ -288,6 +288,14 @@ describe('GitHubProviderPlugin', () => {
         body: 'Existing result\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
         html_url: 'https://github.test/comment/42',
       }])
+    nock('https://api.github.com')
+      .patch('/repos/octokit/octokit.js/issues/comments/42', {
+        body: 'Hello from PatchPlane\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
+      })
+      .reply(200, {
+        id: 42,
+        html_url: 'https://github.test/comment/42',
+      })
 
     const result = await withGitHubProvider(
       Effect.gen(function* () {
@@ -320,6 +328,20 @@ describe('GitHubProviderPlugin', () => {
           external_id: 'decision-1:check-run',
           html_url: 'https://github.test/check/84',
         }],
+      })
+    nock('https://api.github.com')
+      .patch('/repos/octokit/octokit.js/check-runs/84', {
+        name: 'PatchPlane Review',
+        status: 'completed',
+        conclusion: 'success',
+        output: {
+          title: 'Approved',
+          summary: 'Approved by PatchPlane',
+        },
+      })
+      .reply(200, {
+        id: 84,
+        html_url: 'https://github.test/check/84',
       })
 
     const result = await withGitHubProvider(

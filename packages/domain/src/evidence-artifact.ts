@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { WorkflowRunId } from './ids'
+import { CandidatePatchSetId, EvidenceArtifactId, VerificationResultId, WorkflowRunId } from './ids'
 
 /**
  * Raw evidence bytes live in an artifact store such as Cloudflare R2.
@@ -29,10 +29,10 @@ export type EvidenceArtifactStorageProvider = Schema.Schema.Type<
 >
 
 export const EvidenceArtifact = Schema.Struct({
-  id: Schema.String,
+  id: EvidenceArtifactId,
   workflowRunId: WorkflowRunId,
-  candidatePatchSetId: Schema.optional(Schema.String),
-  verificationResultId: Schema.optional(Schema.String),
+  candidatePatchSetId: Schema.optional(CandidatePatchSetId),
+  verificationResultId: Schema.optional(VerificationResultId),
   producer: Schema.optional(Schema.String),
   subjectDigest: Schema.optional(Schema.String),
   traceId: Schema.optional(Schema.String),

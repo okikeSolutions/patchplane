@@ -43,6 +43,7 @@ const detail: WorkflowDetail = {
   runtimeEvents: [],
   runtimeEventsTruncated: false,
   runtimeSessions: [],
+  runtimeSessionsTruncated: false,
   sandboxExecutions: [
     {
       id: 'execution-1',
@@ -57,7 +58,9 @@ const detail: WorkflowDetail = {
       completedAt: 3,
     },
   ],
+  sandboxExecutionsTruncated: false,
   evidenceArtifacts: [],
+  evidenceArtifactsTruncated: false,
   candidatePatchSets: [
     {
       id: 'candidate-1',
@@ -66,6 +69,40 @@ const detail: WorkflowDetail = {
       createdAt: 3,
     },
   ],
+  candidatePatchSetsTruncated: false,
+  verificationRequirements: [
+    {
+      id: 'requirement-1',
+      workflowRunId,
+      key: 'tests',
+      label: 'Tests',
+      kind: 'test',
+      required: true,
+      requiredArtifactKinds: ['test-report'],
+      source: 'repository-config',
+      createdAt: 3,
+    },
+  ],
+  verificationRequirementsTruncated: false,
+  verificationResults: [
+    {
+      id: 'verification-1',
+      workflowRunId,
+      requirementId: 'requirement-1',
+      candidatePatchSetId: 'candidate-1',
+      provider: 'daytona',
+      platform: 'linux',
+      architecture: 'x86_64',
+      status: 'passed',
+      artifactIds: [],
+      producedArtifactKinds: ['test-report'],
+      candidateDigestBefore: 'sha256:candidate',
+      startedAt: 3,
+      completedAt: 4,
+      idempotencyKey: 'verification-1',
+    },
+  ],
+  verificationResultsTruncated: false,
   reviewRuns: [
     {
       id: 'review-1',
@@ -88,6 +125,8 @@ const detail: WorkflowDetail = {
       reviewRunId: 'review-1',
       status: 'approved',
       summary: 'Ready for human review.',
+      verificationResultIds: ['verification-1'],
+      missingRequirementIds: [],
       createdAt: 5,
     },
   ],
@@ -138,6 +177,81 @@ describe('WorkflowReviewPanel', () => {
       })
     },
   )
+
+  test('requires an explicit reason when approval overrides incomplete verification', async () => {
+    submitReviewDecision.mockResolvedValue({
+      ok: true,
+      decision: { id: 'decision-1', status: 'approved' },
+      publications: [],
+    })
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          verificationResults: [],
+          policyDecisions: detail.policyDecisions.map((decision) => ({
+            ...decision,
+            verificationResultIds: [],
+            missingRequirementIds: ['requirement-1'],
+          })),
+        }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Required comment'), {
+      target: { value: 'Reviewed evidence.' },
+    })
+    const approve = screen.getByRole('button', { name: 'Approve' })
+    expect(approve).toHaveProperty('disabled', true)
+
+    fireEvent.change(screen.getByLabelText('Verification override reason'), {
+      target: { value: 'Urgent mitigation; manual evidence was reviewed.' },
+    })
+    fireEvent.click(approve)
+
+    await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(1))
+    expect(submitReviewDecision.mock.calls[0]?.[0].data).toMatchObject({
+      status: 'approved',
+      verificationOverrideReason: 'Urgent mitigation; manual evidence was reviewed.',
+    })
+  })
+
+  test('blocks approval when policy rejects the current projection', () => {
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          policyDecisions: detail.policyDecisions.map((decision) => ({
+            ...decision,
+            status: 'rejected',
+          })),
+        }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Required comment'), {
+      target: { value: 'Reviewed evidence.' },
+    })
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+  })
+
+  test('fails closed when the verification projection is truncated', () => {
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          verificationResultsTruncated: true,
+        }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Required comment'), {
+      target: { value: 'Reviewed evidence.' },
+    })
+    expect(screen.queryByLabelText('Verification override reason')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+    expect(screen.getByText(/Approval is blocked until the complete projection/)).toBeTruthy()
+  })
 
   test('keeps decisions disabled when the displayed review is not linked to the latest candidate', () => {
     render(
@@ -196,6 +310,16 @@ describe('WorkflowReviewPanel', () => {
               createdAt: 20,
             },
           ],
+          verificationResults: [
+            ...detail.verificationResults,
+            {
+              ...detail.verificationResults[0],
+              id: 'verification-2',
+              candidatePatchSetId: 'candidate-2',
+              startedAt: 20,
+              completedAt: 21,
+            },
+          ],
           reviewRuns: [
             ...detail.reviewRuns,
             {
@@ -212,6 +336,7 @@ describe('WorkflowReviewPanel', () => {
               ...detail.policyDecisions[0],
               id: 'policy-2',
               reviewRunId: 'review-2',
+              verificationResultIds: ['verification-2'],
               createdAt: 22,
             },
           ],

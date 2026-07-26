@@ -14,6 +14,7 @@ import { WorkflowChanges } from './workflow-changes'
 import { WorkflowDetailOverview } from './workflow-detail-overview'
 import { WorkflowLogViewer } from './workflow-log-viewer'
 import { WorkflowReviewPanel } from './workflow-review-panel'
+import { WorkflowRerunPanel } from './workflow-rerun-panel'
 import { WorkflowRuntimeSessions } from './workflow-runtime-sessions'
 import { WorkflowSandboxEvidence } from './workflow-sandbox-evidence'
 import { WorkflowRunStatusBadge, WorkflowTrustStateBadge } from './workflow-status-badge'
@@ -23,11 +24,12 @@ import { deriveWorkflowTrustState } from './workflow-trust-state'
 type DetailTab = 'summary' | 'changes' | 'evidence' | 'activity'
 const detailTabs: ReadonlyArray<DetailTab> = ['summary', 'changes', 'evidence', 'activity']
 
-export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summary', returnTo = '/app', onTabChange }: {
+export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summary', returnTo = '/app', onRerunCreated, onTabChange }: {
   readonly detailOverride?: WorkflowDetail
   readonly workflowRunId: Id<'workflowRuns'>
   readonly tab?: DetailTab
   readonly returnTo?: string
+  readonly onRerunCreated?: (workflowRunId: string) => void
   readonly onTabChange?: (tab: DetailTab) => void
 }) {
   const queriedDetail = useQuery(api.workflowStarts.getDetail, detailOverride === undefined ? { workflowRunId } : 'skip') as WorkflowDetail | undefined
@@ -89,7 +91,20 @@ export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summa
             </TabsContent>
           </Tabs>
           <aside className="xl:sticky xl:top-32">
-            <Card className="ring-border"><CardContent><WorkflowReviewPanel detail={detail} /></CardContent></Card>
+            <Card className="ring-border">
+              <CardContent className="flex flex-col gap-4">
+                <WorkflowReviewPanel detail={detail} />
+                <WorkflowRerunPanel
+                  parentWorkflowRunId={detail.workflowRun.id}
+                  onCreated={onRerunCreated}
+                  unavailableReason={detail.workflowRun.modelVersion !== 'v1'
+                    ? 'Another run is available only for versioned workflow attempts.'
+                    : detail.workflowRun.status !== 'reviewed' && detail.workflowRun.status !== 'failed'
+                      ? 'Wait for this attempt to reach review or fail before requesting another run.'
+                      : undefined}
+                />
+              </CardContent>
+            </Card>
           </aside>
         </div>
       </main>

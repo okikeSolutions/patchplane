@@ -21,7 +21,8 @@ export const CaptureSandboxResultArtifacts = Effect.fn(
     const verification = verificationKind === undefined
       ? undefined
       : input.result.verificationResults?.find((result) => result.kind === verificationKind)
-    const producer = verificationKind === undefined ? 'sandbox:candidate' : `sandbox:${verificationKind}`
+    const producerKind = verificationKind === undefined ? 'candidate' : verificationKind
+    const producer = `sandbox:${producerKind}:${input.result.provider}:${input.result.sandboxId}:${input.result.startedAt}`
     const subjectDigest = verification?.candidateDigestAfter ?? input.result.candidateStateDigest
     const evidenceArtifact = yield* CaptureEvidenceArtifact({
       workflowRunId: input.workflowRunId,

@@ -48,7 +48,13 @@ export interface WorkflowRunRow {
   promptRequestId: string
   workspaceId: string
   traceId: string
-  status: 'queued' | 'running' | 'reviewed'
+  status: 'queued' | 'running' | 'reviewed' | 'failed'
+  modelVersion?: 'v1'
+  parentWorkflowRunId?: Id<'workflowRuns'>
+  rootWorkflowRunId?: Id<'workflowRuns'>
+  attemptNumber?: number
+  trigger?: 'intake' | 'rerun'
+  sourceCommitSha?: string
   trustState?:
     | 'queued'
     | 'running'
@@ -200,13 +206,59 @@ export interface ReviewFindingRow {
   createdAt: number
 }
 
+export interface VerificationRequirementRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  key: string
+  label: string
+  kind: 'test' | 'lint' | 'build' | 'browser' | 'security' | 'review'
+  required: boolean
+  command?: string
+  platform?: 'linux' | 'windows' | 'macos'
+  architecture?: string
+  requiredArtifactKinds: ReadonlyArray<EvidenceArtifactRow['kind']>
+  source: 'repository-config' | 'intake' | 'policy' | 'human'
+  createdAt: number
+}
+
+export interface VerificationResultRow {
+  id: string
+  workflowRunId: Id<'workflowRuns'>
+  requirementId: string
+  candidatePatchSetId: string
+  sandboxExecutionId?: string
+  provider: string
+  command?: string
+  platform: 'linux' | 'windows' | 'macos'
+  architecture: string
+  environmentImage?: string
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'blocked' | 'cancelled' | 'skipped' | 'invalidated'
+  exitCode?: number
+  summary?: string
+  passedCount?: number
+  failedCount?: number
+  skippedCount?: number
+  artifactIds: ReadonlyArray<string>
+  producedArtifactKinds: ReadonlyArray<EvidenceArtifactRow['kind']>
+  candidateDigestBefore: string
+  candidateDigestAfter?: string
+  startedAt: number
+  completedAt?: number
+  idempotencyKey: string
+}
+
 export interface PolicyDecisionRow {
   id: string
   workflowRunId: Id<'workflowRuns'>
   reviewRunId?: string
+  candidatePatchSetId?: string
   status: 'approved' | 'rejected' | 'changes-requested' | 'manual-review'
   summary: string
   reason?: string
+  policyVersion?: string
+  inputDigest?: string
+  verificationResultIds?: ReadonlyArray<string>
+  missingRequirementIds?: ReadonlyArray<string>
   createdAt: number
 }
 
@@ -220,6 +272,8 @@ export interface HumanDecisionRow {
   actorId: string
   status: 'approved' | 'rejected' | 'changes-requested'
   comment: string
+  verificationOverride?: boolean
+  verificationOverrideReason?: string
   decidedAt: number
   idempotencyKey?: string
 }
@@ -260,10 +314,17 @@ export interface WorkflowDetail extends WorkflowStartRow {
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
   runtimeEventsTruncated: boolean
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>
+  runtimeSessionsTruncated?: boolean
   sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
   sandboxExecutionsTruncated?: boolean
   evidenceArtifacts: ReadonlyArray<EvidenceArtifactRow>
+  evidenceArtifactsTruncated?: boolean
   candidatePatchSets: ReadonlyArray<CandidatePatchSetRow>
+  candidatePatchSetsTruncated?: boolean
+  verificationRequirements: ReadonlyArray<VerificationRequirementRow>
+  verificationRequirementsTruncated: boolean
+  verificationResults: ReadonlyArray<VerificationResultRow>
+  verificationResultsTruncated: boolean
   reviewRuns: ReadonlyArray<ReviewRunRow>
   reviewFindings: ReadonlyArray<ReviewFindingRow>
   policyDecisions: ReadonlyArray<PolicyDecisionRow>

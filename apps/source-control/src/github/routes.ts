@@ -19,6 +19,7 @@ import {
 import { GitHubEventToWorkflowIntake } from '@patchplane/core/workflows/github-event-to-intake'
 import { IngestGitHubWebhook } from '@patchplane/core/workflows/ingest-github-webhook'
 import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
+import { AssemblePatchReportV1 } from '@patchplane/core/patch-report/assemble-patch-report-v1'
 import { PublishDecisionToSource } from '@patchplane/core/workflows/publish-decision-to-source'
 import { PublishSandboxResultToSource } from '@patchplane/core/workflows/publish-sandbox-result-to-source'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
@@ -28,7 +29,25 @@ import { SourceControlService } from '@patchplane/core/services/source-control-s
 import { AlphaPolicyServiceLayer, AlphaReviewServiceLayer } from '@patchplane/core/services/alpha-review-policy'
 import { captureTelemetryCause, withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
 import { ArtifactsError, SourceControlError, publicErrorMessage } from '@patchplane/domain/errors'
-import { makeGitHubAppActorId, makeWorkspaceId, makeWorkOSWorkspaceId } from '@patchplane/domain/ids'
+import {
+  CandidatePatchSet,
+  HumanDecision,
+  PolicyDecision,
+  PublicationResult,
+  ReviewFinding,
+  ReviewRun,
+} from '@patchplane/domain/decision-review'
+import { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
+import {
+  HumanDecisionId,
+  WorkflowRunId,
+  makeGitHubAppActorId,
+  makeWorkspaceId,
+  makeWorkOSWorkspaceId,
+} from '@patchplane/domain/ids'
+import { SandboxExecution } from '@patchplane/domain/sandbox-execution'
+import { VerificationRequirement, VerificationResult } from '@patchplane/domain/verification'
+import { WorkflowStart } from '@patchplane/domain/workflow-start'
 
 const lookupGitHubWebhookRoute = makeFunctionReference<
   'query',
@@ -109,25 +128,80 @@ const syncInstallationRequestSchema = Schema.Struct({
   workspaceId: Schema.String,
 })
 
+const rerunExecutionRequestSchema = Schema.Struct({
+  traceId: Schema.String,
+  workflowRunId: WorkflowRunId,
+})
+
 const runtimeControlRequestSchema = Schema.Struct({
-  workflowRunId: Schema.String,
+  workflowRunId: WorkflowRunId,
   operation: Schema.Literals(['abort', 'steer', 'followUp', 'terminate']),
   message: Schema.optional(Schema.String),
 })
 
 const publishDecisionRequestSchema = Schema.Struct({
   traceId: Schema.String,
-  workflowStart: Schema.Unknown,
-  humanDecision: Schema.Unknown,
-  sandboxExecution: Schema.optional(Schema.Unknown),
-  candidatePatchSet: Schema.optional(Schema.Unknown),
-  publicationResults: Schema.Array(Schema.Unknown),
+  workflowRunId: Schema.optional(WorkflowRunId),
+  humanDecisionId: Schema.optional(HumanDecisionId),
+  // Accepted only during the client contract migration. These values are used
+  // to locate authoritative records and are never used as publication facts.
+  workflowStart: Schema.optional(Schema.Unknown),
+  humanDecision: Schema.optional(Schema.Unknown),
 })
+
+const decisionPublicationFixtureSchema = Schema.Struct({
+  workflowStart: WorkflowStart,
+  humanDecision: HumanDecision,
+  sandboxExecution: Schema.optional(SandboxExecution),
+  candidatePatchSet: Schema.optional(CandidatePatchSet),
+  verificationRequirements: Schema.Array(VerificationRequirement),
+  verificationResults: Schema.Array(VerificationResult),
+  reviewRun: Schema.optional(ReviewRun),
+  reviewFindings: Schema.Array(ReviewFinding),
+  policyDecision: Schema.optional(PolicyDecision),
+  evidenceArtifacts: Schema.Array(EvidenceArtifact),
+  trustDataTruncated: Schema.Boolean,
+  evidenceTruncated: Schema.Boolean,
+  verification: Schema.Struct({
+    status: Schema.Literals(['not-configured', 'incomplete', 'passed', 'failed']),
+    requiredCount: Schema.Number,
+    passedCount: Schema.Number,
+  }),
+  candidateHeadSha: Schema.optional(Schema.String),
+  publicationResults: Schema.Array(PublicationResult),
+})
+
+const markWorkflowExecutionFailedMutation = makeFunctionReference<
+  'mutation',
+  { systemSecret: string; workflowRunId: string; summary: string },
+  boolean
+>('workflowStarts:markWorkflowExecutionFailed')
+
+const getWorkflowExecutionFixtureQuery = makeFunctionReference<
+  'query',
+  { systemSecret: string; workflowRunId: string },
+  unknown
+>('workflowStarts:getWorkflowExecutionFixture')
+
+const getDecisionPublicationFixtureQuery = makeFunctionReference<
+  'query',
+  { systemSecret: string; workflowRunId: string; humanDecisionId: string },
+  unknown
+>('workflowStarts:getDecisionPublicationReplayFixture')
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
   headers.set('content-type', 'application/json')
   return new Response(JSON.stringify(body), { ...init, headers })
+}
+
+function nestedString(value: unknown, ...path: ReadonlyArray<string>) {
+  let current: unknown = value
+  for (const key of path) {
+    if (typeof current !== 'object' || current === null || !(key in current)) return undefined
+    current = Reflect.get(current, key)
+  }
+  return typeof current === 'string' && current.length > 0 ? current : undefined
 }
 
 function requiredHeader(request: Request, name: string) {
@@ -198,8 +272,12 @@ function resolvePiExecutionConfig(config: SourceControlRouteConfigType) {
 function resolveEvidenceCaptureConfig(config: SourceControlRouteConfigType) {
   const testReportCommand = config.evidenceTestReportCommand.trim()
   const browserScreenshotCommand = config.evidenceBrowserScreenshotCommand.trim()
+  const testPlatform = config.evidenceTestPlatform
   return {
-    ...(testReportCommand.length === 0 ? {} : { evidenceTestReportCommand: testReportCommand }),
+    ...(testReportCommand.length === 0 ? {} : {
+      evidenceTestReportCommand: testReportCommand,
+      evidenceTestPlatform: testPlatform,
+    }),
     ...(browserScreenshotCommand.length === 0 ? {} : { evidenceBrowserScreenshotCommand: browserScreenshotCommand }),
   }
 }
@@ -377,7 +455,105 @@ export async function controlRuntimeSession(request: Request, runtime: SourceCon
   return jsonResponse({ ok: true, traceId, status: controlExit.value.status })
 }
 
-export async function publishDecision(request: Request, runtime: SourceControlRuntime) {
+export async function executeWorkflowRerun(request: Request, env: WorkerEnv, runtime: SourceControlRuntime) {
+  const traceId = await randomTraceId(runtime)
+  const inputExit = await runtime.runPromiseExit(
+    Effect.tryPromise({
+      try: () => request.json(),
+      catch: (cause) => new SourceControlWorkerRequestError({ message: `Invalid JSON body: ${String(cause)}` }),
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(rerunExecutionRequestSchema))),
+  )
+  if (Exit.isFailure(inputExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Invalid rerun execution request' }, { status: 400 })
+  }
+
+  const sourceConfig = loadSourceControlRouteConfig(env)
+  const routeConfig = loadGitHubWebhookRouteConfig(sourceConfig)
+  const secret = systemIngestionSecret(sourceConfig)
+  if (secret === undefined) {
+    return jsonResponse({ ok: false, traceId, error: 'Workflow execution is not configured' }, { status: 503 })
+  }
+  const input = inputExit.value
+  const workflowExit = await runtime.runPromiseExit(
+    Effect.tryPromise({
+      try: () => new ConvexHttpClient(configuredConvexUrl(sourceConfig)).query(getWorkflowExecutionFixtureQuery, {
+        systemSecret: secret,
+        workflowRunId: input.workflowRunId,
+      }),
+      catch: (cause) => new SourceControlWorkerRequestError({ message: `Unable to load rerun workflow: ${String(cause)}` }),
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(WorkflowStart))),
+  )
+  if (Exit.isFailure(workflowExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Queued rerun workflow unavailable' }, { status: 409 })
+  }
+
+  const workflowStart = workflowExit.value
+  const executionExit = await runtime.runPromiseExit(
+    (routeConfig.execution.mode === 'daytona-pi'
+      ? RunSandboxAgentForWorkflow({
+          workflowStart,
+          provider: routeConfig.execution.provider,
+          model: routeConfig.execution.model,
+          thinking: routeConfig.execution.thinking,
+          mode: routeConfig.execution.piMode,
+          timeoutSeconds: routeConfig.execution.timeoutSeconds,
+          evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+          evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
+        })
+      : RunSandboxCommandForWorkflow({
+          workflowStart,
+          command: routeConfig.execution.command,
+          timeoutSeconds: routeConfig.execution.timeoutSeconds,
+          evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+          evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
+        })).pipe(
+      Effect.flatMap((sandboxExecution) =>
+        PublishSandboxResultToSource({ workflowStart, sandboxExecution }).pipe(
+          Effect.as({ sandboxExecution }),
+        )
+      ),
+      (effect) => withTelemetrySpan({
+        traceId: input.traceId,
+        operation: 'githubWorker.executeWorkflowRerun',
+        name: 'githubWorker.executeWorkflowRerun',
+      }, effect),
+    ),
+  )
+  if (Exit.isFailure(executionExit)) {
+    const terminalStateExit = await runtime.runPromiseExit(Effect.tryPromise({
+      try: () => new ConvexHttpClient(configuredConvexUrl(sourceConfig)).mutation(
+        markWorkflowExecutionFailedMutation,
+        {
+          systemSecret: secret,
+          workflowRunId: workflowStart.workflowRun.id,
+          summary: 'Rerun execution failed after dispatch.',
+        },
+      ),
+      catch: (cause) => new SourceControlWorkerRequestError({
+        message: `Unable to confirm terminal rerun state: ${String(cause)}`,
+      }),
+    }))
+    const terminalStateConfirmed = Exit.isSuccess(terminalStateExit) && terminalStateExit.value
+    return jsonResponse({
+      ok: false,
+      traceId: input.traceId,
+      workflowRunId: workflowStart.workflowRun.id,
+      error: terminalStateConfirmed
+        ? 'Rerun execution failed; the child attempt was retained with failed status'
+        : 'Rerun execution failed; the child attempt was retained but its terminal state is unconfirmed',
+    }, { status: 500 })
+  }
+  return jsonResponse({
+    ok: true,
+    traceId: input.traceId,
+    workflowRunId: workflowStart.workflowRun.id,
+    sandboxExecutionId: executionExit.value.sandboxExecution?.id,
+  }, { status: 202 })
+}
+
+export async function publishDecision(request: Request, env: WorkerEnv, runtime: SourceControlRuntime) {
   const traceId = await randomTraceId(runtime)
   const inputExit = await runtime.runPromiseExit(
     Effect.tryPromise({
@@ -391,14 +567,63 @@ export async function publishDecision(request: Request, runtime: SourceControlRu
   }
 
   const input = inputExit.value
+  const workflowRunId = input.workflowRunId ?? nestedString(input.workflowStart, 'workflowRun', 'id')
+  const humanDecisionId = input.humanDecisionId ?? nestedString(input.humanDecision, 'id')
+  if (workflowRunId === undefined || humanDecisionId === undefined) {
+    return jsonResponse({ ok: false, traceId, error: 'Workflow and human decision IDs required' }, { status: 400 })
+  }
+
+  const routeConfig = loadSourceControlRouteConfig(env)
+  const secret = systemIngestionSecret(routeConfig)
+  if (secret === undefined) {
+    return jsonResponse({ ok: false, traceId, error: 'Decision publication is not configured' }, { status: 503 })
+  }
+  const fixtureExit = await runtime.runPromiseExit(
+    Effect.tryPromise({
+      try: () => new ConvexHttpClient(configuredConvexUrl(routeConfig)).query(
+        getDecisionPublicationFixtureQuery,
+        { systemSecret: secret, workflowRunId, humanDecisionId },
+      ),
+      catch: (cause) => new SourceControlWorkerRequestError({ message: `Unable to load decision publication evidence: ${String(cause)}` }),
+    }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(decisionPublicationFixtureSchema))),
+  )
+  if (Exit.isFailure(fixtureExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Authoritative decision evidence unavailable' }, { status: 409 })
+  }
+  const fixture = fixtureExit.value
+  const patchReportExit = fixture.workflowStart.workflowRun.modelVersion === 'v1'
+    ? await runtime.runPromiseExit(AssemblePatchReportV1({
+      workflowStart: fixture.workflowStart,
+      sandboxExecutions: fixture.sandboxExecution === undefined ? [] : [fixture.sandboxExecution],
+      candidatePatchSets: fixture.candidatePatchSet === undefined ? [] : [fixture.candidatePatchSet],
+      verificationRequirements: fixture.verificationRequirements,
+      verificationResults: fixture.verificationResults,
+      reviewRuns: fixture.reviewRun === undefined ? [] : [fixture.reviewRun],
+      reviewFindings: fixture.reviewFindings,
+      policyDecisions: fixture.policyDecision === undefined ? [] : [fixture.policyDecision],
+      humanDecisions: [fixture.humanDecision],
+      evidenceArtifacts: fixture.evidenceArtifacts,
+      publicationResults: fixture.publicationResults,
+      trustDataTruncated: fixture.trustDataTruncated,
+      evidenceTruncated: fixture.evidenceTruncated,
+    }))
+    : undefined
+  if (patchReportExit !== undefined && Exit.isFailure(patchReportExit)) {
+    return jsonResponse({ ok: false, traceId, error: 'Canonical Patch Report assembly failed' }, { status: 409 })
+  }
+  const patchReport = patchReportExit !== undefined && Exit.isSuccess(patchReportExit)
+    ? patchReportExit.value
+    : undefined
   const publicationExit = await runtime.runPromiseExit(
     PublishDecisionToSource({
       traceId: input.traceId,
-      workflowStart: input.workflowStart as never,
-      humanDecision: input.humanDecision as never,
-      ...(input.sandboxExecution === undefined ? {} : { sandboxExecution: input.sandboxExecution as never }),
-      ...(input.candidatePatchSet === undefined ? {} : { candidatePatchSet: input.candidatePatchSet as never }),
-      publicationResults: input.publicationResults as never,
+      workflowStart: fixture.workflowStart,
+      humanDecision: fixture.humanDecision,
+      ...(fixture.sandboxExecution === undefined ? {} : { sandboxExecution: fixture.sandboxExecution }),
+      ...(fixture.candidatePatchSet === undefined ? {} : { candidatePatchSet: fixture.candidatePatchSet }),
+      ...(patchReport === undefined ? {} : { patchReport }),
+      verification: fixture.verification,
+      publicationResults: fixture.publicationResults,
     }).pipe(
       (effect) => withTelemetrySpan({
         traceId: input.traceId,
@@ -479,6 +704,21 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
   const program = Effect.gen(function* () {
     const event = yield* IngestGitHubWebhook({ deliveryId, eventName, signature, payload })
     const repositoryFullName = `${event.owner}/${event.repo}`
+    if (event.kind !== 'github.pull_request.opened' && event.kind !== 'github.pull_request.synchronize') {
+      yield* Effect.logInfo('Ignoring executable GitHub event without a pinned pull request head', {
+        deliveryId,
+        eventKind: event.kind,
+        repository: repositoryFullName,
+      })
+      return {
+        event,
+        intake: undefined,
+        workflowStart: undefined,
+        sandboxExecution: undefined,
+        publication: undefined,
+        ignoredReason: 'unpinned_event',
+      }
+    }
     const secret = systemIngestionSecret(config)
     const resolvedRoute = yield* Effect.tryPromise({
       try: () => resolveGitHubWebhookWorkspace({
@@ -553,6 +793,7 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
           mode: routeConfig.execution.piMode,
           timeoutSeconds: routeConfig.execution.timeoutSeconds,
           evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
           evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
         })
       : yield* RunSandboxCommandForWorkflow({
@@ -560,6 +801,7 @@ export async function handleGitHubWebhook(request: Request, env: WorkerEnv, runt
           command: routeConfig.execution.command,
           timeoutSeconds: routeConfig.execution.timeoutSeconds,
           evidenceTestReportCommand: routeConfig.execution.evidenceTestReportCommand,
+          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
           evidenceBrowserScreenshotCommand: routeConfig.execution.evidenceBrowserScreenshotCommand,
         })
 

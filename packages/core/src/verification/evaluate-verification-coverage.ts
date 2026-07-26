@@ -8,9 +8,9 @@ export interface VerificationCoverage {
   readonly status: VerificationCoverageStatus
   readonly requiredCount: number
   readonly passedCount: number
-  readonly failedRequirementIds: ReadonlyArray<string>
-  readonly missingRequirementIds: ReadonlyArray<string>
-  readonly consideredResultIds: ReadonlyArray<string>
+  readonly failedRequirementIds: ReadonlyArray<VerificationRequirement['id']>
+  readonly missingRequirementIds: ReadonlyArray<VerificationRequirement['id']>
+  readonly consideredResultIds: ReadonlyArray<VerificationResult['id']>
 }
 
 /**
@@ -18,7 +18,7 @@ export interface VerificationCoverage {
  * Results for older or different candidates are intentionally ignored.
  */
 export function evaluateVerificationCoverage(input: {
-  readonly candidatePatchSetId: string
+  readonly candidatePatchSetId: VerificationResult['candidatePatchSetId']
   readonly requirements: ReadonlyArray<VerificationRequirement>
   readonly results: ReadonlyArray<VerificationResult>
 }): VerificationCoverage {
@@ -37,9 +37,9 @@ export function evaluateVerificationCoverage(input: {
   const currentResults = input.results.filter(
     (result) => result.candidatePatchSetId === input.candidatePatchSetId,
   )
-  const consideredResultIds: Array<string> = []
-  const failedRequirementIds: Array<string> = []
-  const missingRequirementIds: Array<string> = []
+  const consideredResultIds: Array<VerificationResult['id']> = []
+  const failedRequirementIds: Array<VerificationRequirement['id']> = []
+  const missingRequirementIds: Array<VerificationRequirement['id']> = []
   let passedCount = 0
 
   for (const requirement of required) {
@@ -79,7 +79,7 @@ export function evaluateVerificationCoverage(input: {
 
 function latestResultForRequirement(
   results: ReadonlyArray<VerificationResult>,
-  requirementId: string,
+  requirementId: VerificationRequirement['id'],
 ): VerificationResult | undefined {
   return results.reduce<VerificationResult | undefined>((latest, result) => {
     if (result.requirementId !== requirementId) return latest
@@ -95,6 +95,9 @@ function isValidPass(
   result: VerificationResult,
 ) {
   if (result.status !== 'passed' || result.exitCode !== 0) return false
+  if (requirement.command !== undefined && result.command !== requirement.command) return false
+  if (requirement.platform !== undefined && result.platform !== requirement.platform) return false
+  if (requirement.architecture !== undefined && result.architecture !== requirement.architecture) return false
   if (
     result.candidateDigestAfter === undefined ||
     result.candidateDigestBefore !== result.candidateDigestAfter

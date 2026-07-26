@@ -22,6 +22,8 @@ import {
 } from '@patchplane/domain/workflow-start'
 import {
   StorageService,
+  type ClaimWorkflowExecutionInput,
+  type MarkWorkflowExecutionFailedInput,
   type CreateWorkflowFromPromptInput,
   type GetActiveRuntimeSessionInput,
   type MarkRuntimeSessionStatusInput,
@@ -151,6 +153,18 @@ const getActiveRuntimeSessionQuery = makeFunctionReference<
   unknown
 >('workflowStarts:getActiveRuntimeSession')
 
+const claimWorkflowExecutionMutation = makeFunctionReference<
+  'mutation',
+  { systemSecret: string; workflowRunId: string },
+  boolean
+>('workflowStarts:claimWorkflowExecution')
+
+const markWorkflowExecutionFailedMutation = makeFunctionReference<
+  'mutation',
+  { systemSecret: string; workflowRunId: string; summary: string },
+  boolean
+>('workflowStarts:markWorkflowExecutionFailed')
+
 const recordSandboxExecutionMutation = makeFunctionReference<
   'mutation',
   {
@@ -221,7 +235,7 @@ const recordCandidatePatchSetMutation = makeFunctionReference<
       deletions: number
     }
     idempotencyKey: string
-    createdAt?: number
+    createdAt: number
   },
   unknown
 >('workflowStarts:recordCandidatePatchSet')
@@ -240,7 +254,7 @@ const recordVerificationRequirementMutation = makeFunctionReference<
     architecture?: string
     requiredArtifactKinds: RecordVerificationRequirementInput['requiredArtifactKinds']
     source: RecordVerificationRequirementInput['source']
-    createdAt?: number
+    createdAt: number
   },
   unknown
 >('workflowStarts:recordVerificationRequirement')
@@ -287,6 +301,7 @@ const recordReviewRunMutation = makeFunctionReference<
     summary?: string
     startedAt: number
     completedAt?: number
+    idempotencyKey: string
     createdAt?: number
   },
   unknown
@@ -305,6 +320,7 @@ const recordReviewFindingMutation = makeFunctionReference<
     startLine?: number
     endLine?: number
     evidenceArtifactId?: string
+    idempotencyKey: string
     createdAt?: number
   },
   unknown
@@ -323,7 +339,9 @@ const recordPolicyDecisionMutation = makeFunctionReference<
     policyVersion?: string
     inputDigest?: string
     verificationResultIds?: ReadonlyArray<string>
+    reviewFindingIds?: ReadonlyArray<string>
     missingRequirementIds?: ReadonlyArray<string>
+    idempotencyKey: string
     createdAt?: number
   },
   unknown
@@ -334,6 +352,9 @@ const recordPublicationResultMutation = makeFunctionReference<
   {
     systemSecret: string
     workflowRunId: string
+    humanDecisionId?: string
+    candidatePatchSetId?: string
+    targetSha?: string
     provider: string
     kind: RecordPublicationResultInput['kind']
     status: RecordPublicationResultInput['status']
@@ -341,6 +362,7 @@ const recordPublicationResultMutation = makeFunctionReference<
     url?: string
     summary?: string
     error?: string
+    dispatchToken?: string
     createdAt?: number
     idempotencyKey?: string
   },
@@ -530,6 +552,55 @@ export const ConvexStoragePlugin = {
             return workflowStarts
           }),
       )
+
+      const claimWorkflowExecution = Effect.fn(
+        '@patchplane/plugins/convex/claimWorkflowExecution',
+      )((input: ClaimWorkflowExecutionInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'claimWorkflowExecution.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to claim workflow execution',
+              cause: undefined,
+            })
+          }
+          return yield* Effect.tryPromise({
+            try: () => new ConvexHttpClient(convexUrl).mutation(claimWorkflowExecutionMutation, {
+              systemSecret: Redacted.value(systemIngestionSecret),
+              workflowRunId: input.workflowRunId,
+            }),
+            catch: (cause) => new StorageError({
+              operation: 'claimWorkflowExecution',
+              message: 'Convex failed to claim workflow execution',
+              cause,
+            }),
+          })
+        }))
+
+      const markWorkflowExecutionFailed = Effect.fn(
+        '@patchplane/plugins/convex/markWorkflowExecutionFailed',
+      )((input: MarkWorkflowExecutionFailedInput) =>
+        Effect.gen(function* () {
+          if (systemIngestionSecret === undefined) {
+            return yield* new StorageError({
+              operation: 'markWorkflowExecutionFailed.config',
+              message: 'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to mark workflow execution failed',
+              cause: undefined,
+            })
+          }
+          return yield* Effect.tryPromise({
+            try: () => new ConvexHttpClient(convexUrl).mutation(markWorkflowExecutionFailedMutation, {
+              systemSecret: Redacted.value(systemIngestionSecret),
+              workflowRunId: input.workflowRunId,
+              summary: input.summary,
+            }),
+            catch: (cause) => new StorageError({
+              operation: 'markWorkflowExecutionFailed',
+              message: 'Convex failed to mark workflow execution failed',
+              cause,
+            }),
+          })
+        }))
 
       const recordSandboxExecution = Effect.fn(
         '@patchplane/plugins/convex/recordSandboxExecution',
@@ -885,7 +956,7 @@ export const ConvexStoragePlugin = {
                 ...(input.summary === undefined ? {} : { summary: input.summary }),
                 ...(input.stats === undefined ? {} : { stats: input.stats }),
                 idempotencyKey: input.idempotencyKey,
-                ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+                createdAt: input.createdAt,
               })
             },
             catch: (cause) =>
@@ -930,7 +1001,7 @@ export const ConvexStoragePlugin = {
               ...(input.architecture === undefined ? {} : { architecture: input.architecture }),
               requiredArtifactKinds: input.requiredArtifactKinds,
               source: input.source,
-              ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
+              createdAt: input.createdAt,
             }),
             catch: (cause) => new StorageError({
               operation: 'recordVerificationRequirement',
@@ -1023,6 +1094,7 @@ export const ConvexStoragePlugin = {
                 ...(input.summary === undefined ? {} : { summary: input.summary }),
                 startedAt: input.startedAt,
                 ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+                idempotencyKey: input.idempotencyKey,
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               })
             },
@@ -1069,6 +1141,7 @@ export const ConvexStoragePlugin = {
                 ...(input.startLine === undefined ? {} : { startLine: input.startLine }),
                 ...(input.endLine === undefined ? {} : { endLine: input.endLine }),
                 ...(input.evidenceArtifactId === undefined ? {} : { evidenceArtifactId: input.evidenceArtifactId }),
+                idempotencyKey: input.idempotencyKey,
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               })
             },
@@ -1115,7 +1188,9 @@ export const ConvexStoragePlugin = {
                 ...(input.policyVersion === undefined ? {} : { policyVersion: input.policyVersion }),
                 ...(input.inputDigest === undefined ? {} : { inputDigest: input.inputDigest }),
                 ...(input.verificationResultIds === undefined ? {} : { verificationResultIds: input.verificationResultIds }),
+                ...(input.reviewFindingIds === undefined ? {} : { reviewFindingIds: input.reviewFindingIds }),
                 ...(input.missingRequirementIds === undefined ? {} : { missingRequirementIds: input.missingRequirementIds }),
+                idempotencyKey: input.idempotencyKey,
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
               })
             },
@@ -1154,6 +1229,9 @@ export const ConvexStoragePlugin = {
               return client.mutation(recordPublicationResultMutation, {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.humanDecisionId === undefined ? {} : { humanDecisionId: input.humanDecisionId }),
+                ...(input.candidatePatchSetId === undefined ? {} : { candidatePatchSetId: input.candidatePatchSetId }),
+                ...(input.targetSha === undefined ? {} : { targetSha: input.targetSha }),
                 provider: input.provider,
                 kind: input.kind,
                 status: input.status,
@@ -1161,6 +1239,7 @@ export const ConvexStoragePlugin = {
                 ...(input.url === undefined ? {} : { url: input.url }),
                 ...(input.summary === undefined ? {} : { summary: input.summary }),
                 ...(input.error === undefined ? {} : { error: input.error }),
+                ...(input.dispatchToken === undefined ? {} : { dispatchToken: input.dispatchToken }),
                 ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
                 ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
               })
@@ -1240,6 +1319,8 @@ export const ConvexStoragePlugin = {
         recordRuntimeSessionStarted,
         markRuntimeSessionStatus,
         getActiveRuntimeSession,
+        claimWorkflowExecution,
+        markWorkflowExecutionFailed,
         recordSandboxExecution,
         recordEvidenceArtifact,
         getEvidenceArtifact,

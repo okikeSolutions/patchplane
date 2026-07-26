@@ -5,12 +5,13 @@ import type {
   ReviewFinding,
 } from '@patchplane/domain/decision-review'
 import type { StorageError } from '@patchplane/domain/errors'
+import type { WorkflowRunId } from '@patchplane/domain/ids'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { VerificationCoverage } from '../verification/evaluate-verification-coverage'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export interface EvaluatePolicyInput extends TelemetryContextFields {
-  readonly workflowRunId: string
+  readonly workflowRunId: WorkflowRunId
   readonly sandboxExecution?: SandboxExecution | undefined
   readonly candidatePatchSet?: CandidatePatchSet | undefined
   readonly verificationCoverage: VerificationCoverage

@@ -49,10 +49,67 @@ export type PromptRequestId = Schema.Schema.Type<typeof PromptRequestId>
 export const WorkflowRunId = Schema.String.pipe(Schema.brand('WorkflowRunId'))
 export type WorkflowRunId = Schema.Schema.Type<typeof WorkflowRunId>
 
+export const SandboxExecutionId = Schema.String.pipe(Schema.brand('SandboxExecutionId'))
+export type SandboxExecutionId = Schema.Schema.Type<typeof SandboxExecutionId>
+
+export const CandidatePatchSetId = Schema.String.pipe(Schema.brand('CandidatePatchSetId'))
+export type CandidatePatchSetId = Schema.Schema.Type<typeof CandidatePatchSetId>
+
+export const EvidenceArtifactId = Schema.String.pipe(Schema.brand('EvidenceArtifactId'))
+export type EvidenceArtifactId = Schema.Schema.Type<typeof EvidenceArtifactId>
+
+export const VerificationRequirementId = Schema.String.pipe(Schema.brand('VerificationRequirementId'))
+export type VerificationRequirementId = Schema.Schema.Type<typeof VerificationRequirementId>
+
+export const VerificationResultId = Schema.String.pipe(Schema.brand('VerificationResultId'))
+export type VerificationResultId = Schema.Schema.Type<typeof VerificationResultId>
+
+export const ReviewRunId = Schema.String.pipe(Schema.brand('ReviewRunId'))
+export type ReviewRunId = Schema.Schema.Type<typeof ReviewRunId>
+
+export const ReviewFindingId = Schema.String.pipe(Schema.brand('ReviewFindingId'))
+export type ReviewFindingId = Schema.Schema.Type<typeof ReviewFindingId>
+
+export const PolicyDecisionId = Schema.String.pipe(Schema.brand('PolicyDecisionId'))
+export type PolicyDecisionId = Schema.Schema.Type<typeof PolicyDecisionId>
+
+export const HumanDecisionId = Schema.String.pipe(Schema.brand('HumanDecisionId'))
+export type HumanDecisionId = Schema.Schema.Type<typeof HumanDecisionId>
+
+export const PublicationResultId = Schema.String.pipe(Schema.brand('PublicationResultId'))
+export type PublicationResultId = Schema.Schema.Type<typeof PublicationResultId>
+
+export const RuntimeSessionId = Schema.String.pipe(Schema.brand('RuntimeSessionId'))
+export type RuntimeSessionId = Schema.Schema.Type<typeof RuntimeSessionId>
+
+export const ProvenanceEventId = Schema.String.pipe(Schema.brand('ProvenanceEventId'))
+export type ProvenanceEventId = Schema.Schema.Type<typeof ProvenanceEventId>
+
+export const PatchReportId = Schema.String.pipe(Schema.brand('PatchReportId'))
+export type PatchReportId = Schema.Schema.Type<typeof PatchReportId>
+
+export const RuntimeEventId = Schema.String.pipe(Schema.brand('RuntimeEventId'))
+export type RuntimeEventId = Schema.Schema.Type<typeof RuntimeEventId>
+
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorId)
 const decodeWorkspaceIdSync = Schema.decodeUnknownSync(WorkspaceId)
 const decodePromptRequestIdSync = Schema.decodeUnknownSync(PromptRequestId)
 const decodeWorkflowRunIdSync = Schema.decodeUnknownSync(WorkflowRunId)
+
+export const makeSandboxExecutionId = Schema.decodeUnknownSync(SandboxExecutionId)
+export const makeCandidatePatchSetId = Schema.decodeUnknownSync(CandidatePatchSetId)
+export const makeEvidenceArtifactId = Schema.decodeUnknownSync(EvidenceArtifactId)
+export const makeVerificationRequirementId = Schema.decodeUnknownSync(VerificationRequirementId)
+export const makeVerificationResultId = Schema.decodeUnknownSync(VerificationResultId)
+export const makeReviewRunId = Schema.decodeUnknownSync(ReviewRunId)
+export const makeReviewFindingId = Schema.decodeUnknownSync(ReviewFindingId)
+export const makePolicyDecisionId = Schema.decodeUnknownSync(PolicyDecisionId)
+export const makeHumanDecisionId = Schema.decodeUnknownSync(HumanDecisionId)
+export const makePublicationResultId = Schema.decodeUnknownSync(PublicationResultId)
+export const makeRuntimeSessionId = Schema.decodeUnknownSync(RuntimeSessionId)
+export const makeProvenanceEventId = Schema.decodeUnknownSync(ProvenanceEventId)
+export const makePatchReportId = Schema.decodeUnknownSync(PatchReportId)
+export const makeRuntimeEventId = Schema.decodeUnknownSync(RuntimeEventId)
 
 export function makeWorkspaceId(workspaceId: string): WorkspaceId {
   return decodeWorkspaceIdSync(workspaceId)

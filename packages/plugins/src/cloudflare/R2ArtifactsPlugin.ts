@@ -2,7 +2,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { ArtifactsService, type ArtifactBody, type EvidenceArtifactKind } from '@patchplane/core/services/artifacts-service'
 import { ArtifactsError } from '@patchplane/domain/errors'
-import { Config, Crypto, Effect, Encoding, Layer, Option, Redacted } from 'effect'
+import { Clock, Config, Crypto, Effect, Encoding, Layer, Option, Redacted } from 'effect'
 import { R2ArtifactsConfig, type R2ArtifactsConfig as R2ArtifactsConfigType } from './R2ArtifactsConfig'
 
 export interface R2ObjectLike {
@@ -247,7 +247,7 @@ export function makeR2ArtifactsService(
           contentType: input.contentType,
           sizeBytes: object.size,
           sha256,
-          createdAt: Date.now(),
+          createdAt: yield* Clock.currentTimeMillis,
         }
       }),
 
@@ -285,6 +285,7 @@ export function makeR2ArtifactsService(
         const credentials = yield* requireSigningCredentials(config)
         const s3 = makeS3Client(config, credentials)
         const { bucketName } = resolveR2EndpointAndBucket(config)
+        const now = yield* Clock.currentTimeMillis
         return yield* Effect.tryPromise({
           try: async () => {
             const expiresIn = validateExpiresInSeconds(input.expiresInSeconds)
@@ -293,7 +294,7 @@ export function makeR2ArtifactsService(
               new GetObjectCommand({ Bucket: bucketName, Key: input.storageKey }),
               { expiresIn },
             )
-            return { url, expiresAt: Date.now() + expiresIn * 1000 }
+            return { url, expiresAt: now + expiresIn * 1000 }
           },
         catch: (cause) =>
           new ArtifactsError({

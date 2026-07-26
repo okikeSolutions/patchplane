@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { PromptRequestId, WorkflowRunId, WorkspaceId } from './ids'
 
-export const WorkflowStatus = Schema.Literals(['queued', 'running', 'reviewed'])
+export const WorkflowStatus = Schema.Literals(['queued', 'running', 'reviewed', 'failed'])
 export type WorkflowStatus = Schema.Schema.Type<typeof WorkflowStatus>
 
 /**

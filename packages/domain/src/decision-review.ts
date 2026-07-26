@@ -1,5 +1,19 @@
 import { Schema } from 'effect'
-import { ActorId, WorkflowRunId } from './ids'
+import {
+  ActorId,
+  CandidatePatchSetId,
+  EvidenceArtifactId,
+  HumanDecisionId,
+  PolicyDecisionId,
+  ProvenanceEventId,
+  PublicationResultId,
+  ReviewFindingId,
+  ReviewRunId,
+  SandboxExecutionId,
+  VerificationRequirementId,
+  VerificationResultId,
+  WorkflowRunId,
+} from './ids'
 
 export const CandidatePatchSetStatus = Schema.Literals([
   'captured',
@@ -16,16 +30,16 @@ export const CandidatePatchSetStats = Schema.Struct({
 export type CandidatePatchSetStats = Schema.Schema.Type<typeof CandidatePatchSetStats>
 
 export const CandidatePatchSet = Schema.Struct({
-  id: Schema.String,
+  id: CandidatePatchSetId,
   workflowRunId: WorkflowRunId,
-  sandboxExecutionId: Schema.optional(Schema.String),
+  sandboxExecutionId: Schema.optional(SandboxExecutionId),
   status: CandidatePatchSetStatus,
   candidateDigest: Schema.optional(Schema.String),
   baseRef: Schema.optional(Schema.String),
   baseSha: Schema.optional(Schema.String),
   headRef: Schema.optional(Schema.String),
   headSha: Schema.optional(Schema.String),
-  diffArtifactId: Schema.optional(Schema.String),
+  diffArtifactId: Schema.optional(EvidenceArtifactId),
   summary: Schema.optional(Schema.String),
   stats: Schema.optional(CandidatePatchSetStats),
   idempotencyKey: Schema.optional(Schema.String),
@@ -50,10 +64,10 @@ export const ReviewRunStatus = Schema.Literals([
 export type ReviewRunStatus = Schema.Schema.Type<typeof ReviewRunStatus>
 
 export const ReviewRun = Schema.Struct({
-  id: Schema.String,
+  id: ReviewRunId,
   workflowRunId: WorkflowRunId,
-  sandboxExecutionId: Schema.optional(Schema.String),
-  candidatePatchSetId: Schema.optional(Schema.String),
+  sandboxExecutionId: Schema.optional(SandboxExecutionId),
+  candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   kind: ReviewRunKind,
   reviewer: Schema.String,
   status: ReviewRunStatus,
@@ -63,6 +77,7 @@ export const ReviewRun = Schema.Struct({
   reviewedRevision: Schema.optional(Schema.String),
   startedAt: Schema.Number,
   completedAt: Schema.optional(Schema.Number),
+  idempotencyKey: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 })
 export type ReviewRun = Schema.Schema.Type<typeof ReviewRun>
@@ -86,16 +101,17 @@ export const ReviewFindingCategory = Schema.Literals([
 export type ReviewFindingCategory = Schema.Schema.Type<typeof ReviewFindingCategory>
 
 export const ReviewFinding = Schema.Struct({
-  id: Schema.String,
+  id: ReviewFindingId,
   workflowRunId: WorkflowRunId,
-  reviewRunId: Schema.optional(Schema.String),
+  reviewRunId: Schema.optional(ReviewRunId),
   severity: ReviewFindingSeverity,
   category: ReviewFindingCategory,
   message: Schema.String,
   path: Schema.optional(Schema.String),
   startLine: Schema.optional(Schema.Number),
   endLine: Schema.optional(Schema.Number),
-  evidenceArtifactId: Schema.optional(Schema.String),
+  evidenceArtifactId: Schema.optional(EvidenceArtifactId),
+  idempotencyKey: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 })
 export type ReviewFinding = Schema.Schema.Type<typeof ReviewFinding>
@@ -116,28 +132,30 @@ export const PolicyDecisionStatus = Schema.Literals([
 export type PolicyDecisionStatus = Schema.Schema.Type<typeof PolicyDecisionStatus>
 
 export const PolicyDecision = Schema.Struct({
-  id: Schema.String,
+  id: PolicyDecisionId,
   workflowRunId: WorkflowRunId,
-  reviewRunId: Schema.optional(Schema.String),
-  candidatePatchSetId: Schema.optional(Schema.String),
+  reviewRunId: Schema.optional(ReviewRunId),
+  candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   status: PolicyDecisionStatus,
   summary: Schema.String,
   reason: Schema.optional(Schema.String),
   policyVersion: Schema.optional(Schema.String),
   inputDigest: Schema.optional(Schema.String),
-  verificationResultIds: Schema.optional(Schema.Array(Schema.String)),
-  missingRequirementIds: Schema.optional(Schema.Array(Schema.String)),
+  verificationResultIds: Schema.optional(Schema.Array(VerificationResultId)),
+  reviewFindingIds: Schema.optional(Schema.Array(ReviewFindingId)),
+  missingRequirementIds: Schema.optional(Schema.Array(VerificationRequirementId)),
+  idempotencyKey: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 })
 export type PolicyDecision = Schema.Schema.Type<typeof PolicyDecision>
 
 export const HumanDecision = Schema.Struct({
-  id: Schema.String,
+  id: HumanDecisionId,
   workflowRunId: WorkflowRunId,
-  sandboxExecutionId: Schema.optional(Schema.String),
-  candidatePatchSetId: Schema.optional(Schema.String),
-  reviewRunId: Schema.optional(Schema.String),
-  policyDecisionId: Schema.optional(Schema.String),
+  sandboxExecutionId: Schema.optional(SandboxExecutionId),
+  candidatePatchSetId: Schema.optional(CandidatePatchSetId),
+  reviewRunId: Schema.optional(ReviewRunId),
+  policyDecisionId: Schema.optional(PolicyDecisionId),
   actorId: ActorId,
   status: DecisionStatus,
   comment: Schema.String,
@@ -164,10 +182,10 @@ export const PublicationResultStatus = Schema.Literals([
 export type PublicationResultStatus = Schema.Schema.Type<typeof PublicationResultStatus>
 
 export const PublicationResult = Schema.Struct({
-  id: Schema.String,
+  id: PublicationResultId,
   workflowRunId: WorkflowRunId,
-  humanDecisionId: Schema.optional(Schema.String),
-  candidatePatchSetId: Schema.optional(Schema.String),
+  humanDecisionId: Schema.optional(HumanDecisionId),
+  candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   targetSha: Schema.optional(Schema.String),
   provider: Schema.String,
   kind: PublicationResultKind,
@@ -176,6 +194,7 @@ export const PublicationResult = Schema.Struct({
   url: Schema.optional(Schema.String),
   summary: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
+  dispatchToken: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   idempotencyKey: Schema.optional(Schema.String),
 })
@@ -190,7 +209,7 @@ export const ProvenanceEventStatus = Schema.Literals([
 export type ProvenanceEventStatus = Schema.Schema.Type<typeof ProvenanceEventStatus>
 
 export const ProvenanceEvent = Schema.Struct({
-  id: Schema.String,
+  id: ProvenanceEventId,
   workflowRunId: WorkflowRunId,
   traceId: Schema.String,
   parentEventId: Schema.optional(Schema.String),

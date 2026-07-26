@@ -104,6 +104,10 @@ function workflowDetail(row: WorkflowStartRow): WorkflowDetail {
         createdAt: 1_778_000_310_000,
       },
     ],
+    verificationRequirements: [],
+    verificationRequirementsTruncated: false,
+    verificationResults: [],
+    verificationResultsTruncated: false,
     reviewRuns: [
       {
         id: 'review_run_1',

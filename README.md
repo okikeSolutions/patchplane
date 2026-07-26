@@ -96,7 +96,7 @@ Optional provider keys, such as `OPENAI_API_KEY`, are only needed for Pi modes.
 The current alpha is being narrowed around one developer-first loop:
 
 ```text
-AI patch → sandbox verification → Patch Report → human decision → GitHub result
+request → immutable attempt → agent execution → frozen candidate → independent verification → policy → human decision → canonical GitHub Patch Report
 ```
 
 The current foundation includes two workflow-start paths:
@@ -121,7 +121,11 @@ GitHub webhook
 → promptRequests + workflowRuns + externalWorkflowRefs
 ```
 
-The authenticated dashboard lists connected GitHub repositories and their latest workspace-scoped verification status, with a direct link to the durable workflow investigation view.
+The authenticated dashboard lists connected GitHub repositories and their latest workspace-scoped trust status, with a direct link to the durable workflow investigation view.
+
+Each V1 run is an immutable attempt. A rerun creates a child attempt pinned to the same source revision; it does not overwrite the parent. Evidence applies only to the candidate produced by that attempt, identified by its producing sandbox execution and `sha256:` candidate digest. Agent exit `0`, diff capture, external review, independent verification, policy, human decision, and publication are separate states. Missing, blocked, stale, truncated, or candidate-mismatched required evidence cannot produce a trusted result. A human may still approve incomplete verification only with an explicit recorded override reason; the Patch Report continues to show the gap.
+
+The canonical Patch Report V1 is assembled from durable Convex records and R2 artifact metadata for the exact attempt/candidate. GitHub issue comments and commit-bound check runs use stable canonical identities and update on replay; immutable attempts, publication rows, and provenance remain in PatchPlane.
 
 GitHub, WorkOS, Convex, and Daytona SDK usage is server/plugin-side only. For the alpha `daytona-pi` path, Pi runs inside the Daytona sandbox rather than being bundled into the web/control-plane runtime. Core workflows depend on PatchPlane-owned Effect services and domain schemas.
 
@@ -160,7 +164,7 @@ PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 DAYTONA_API_KEY
 ```
 
-The route verifies GitHub signatures against the raw request body, maps supported events into generic `WorkflowIntake`, verifies repository access through the GitHub App installation, and persists generic external refs in Convex. Pi exiting successfully means only that the sandbox agent completed. Independent test evidence requires an explicit `PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND`; without one, Patchplane records a review warning and does not describe the run as verification passed.
+The route verifies GitHub signatures against the raw request body, maps supported events into generic `WorkflowIntake`, verifies repository access through the GitHub App installation, pins the intake SHA, and persists generic external refs in Convex. Pi exiting successfully means only that sandbox agent execution completed. Verification requirements are persisted from trusted configuration before execution. Independent test evidence requires an explicit `PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND`; without one, PatchPlane reports verification as not configured/incomplete and never as clean or passed. Set `PATCHPLANE_EVIDENCE_TEST_PLATFORM` to `linux`, `macos`, or `windows` to declare the required platform. Non-Linux requirements remain explicit blocked evidence until a matching safe provider is configured.
 
 ## Live Daytona/Pi RPC smoke
 

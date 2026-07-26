@@ -6,7 +6,7 @@ import { workflowTrustStateLabel } from './workflow-trust-state'
 export function WorkflowRunStatusBadge({
   status,
 }: {
-  readonly status: 'queued' | 'running' | 'reviewed'
+  readonly status: 'queued' | 'running' | 'reviewed' | 'failed'
 }) {
   return <Badge variant="secondary">{workflowStatusLabel(status)}</Badge>
 }
@@ -35,7 +35,7 @@ export function WorkflowTrustStateBadge({
   )
 }
 
-export function workflowStatusLabel(status: 'queued' | 'running' | 'reviewed') {
+export function workflowStatusLabel(status: 'queued' | 'running' | 'reviewed' | 'failed') {
   switch (status) {
     case 'queued':
       return 'Queued'
@@ -43,6 +43,8 @@ export function workflowStatusLabel(status: 'queued' | 'running' | 'reviewed') {
       return 'Running'
     case 'reviewed':
       return 'Review ready'
+    case 'failed':
+      return 'Execution failed'
     default:
       return status
   }

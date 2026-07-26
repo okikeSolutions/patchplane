@@ -1,6 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
 import { formatSandboxResultComment } from './sandbox-result-comment'
-import { makePromptRequestId, makeSystemActorId, makeSystemWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makePromptRequestId,
+  makeSandboxExecutionId,
+  makeSystemActorId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 
 describe('formatSandboxResultComment', () => {
   it('keeps untrusted command and output inside GitHub Markdown boundaries', () => {
@@ -26,7 +32,7 @@ describe('formatSandboxResultComment', () => {
         },
       },
       sandboxExecution: {
-        id: 'sandbox-exec-1',
+        id: makeSandboxExecutionId('sandbox-exec-1'),
         workflowRunId: makeWorkflowRunId('run-1'),
         provider: 'daytona',
         sandboxId: 'sandbox-1',

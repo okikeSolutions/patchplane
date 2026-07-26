@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { WorkflowRunId } from './ids'
+import { RuntimeSessionId, WorkflowRunId } from './ids'
 
 export const RuntimeSessionStatus = Schema.Literals([
   'starting',
@@ -11,7 +11,7 @@ export const RuntimeSessionStatus = Schema.Literals([
 export type RuntimeSessionStatus = Schema.Schema.Type<typeof RuntimeSessionStatus>
 
 export const RuntimeSession = Schema.Struct({
-  id: Schema.String,
+  id: RuntimeSessionId,
   workflowRunId: WorkflowRunId,
   provider: Schema.String,
   sandboxId: Schema.String,

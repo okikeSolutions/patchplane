@@ -15,6 +15,7 @@
     "./list-recent-workflow-starts": "./src/list-recent-workflow-starts.ts",
     "./membership": "./src/membership.ts",
     "./patch-report": "./src/patch-report.ts",
+    "./patch-report-v1": "./src/patch-report-v1.ts",
     "./permission": "./src/permission.ts",
     "./prompt-request": "./src/prompt-request.ts",
     "./repository-connection": "./src/repository-connection.ts",

@@ -1,6 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
-import { makeGitHubAppActorId, makePromptRequestId, makeWorkOSWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makeGitHubAppActorId,
+  makePromptRequestId,
+  makeSandboxExecutionId,
+  makeWorkOSWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import { SourceControlService } from '../services/source-control-service'
 import { PublishSandboxResultToSource } from './publish-sandbox-result-to-source'
 
@@ -73,7 +79,7 @@ describe('PublishSandboxResultToSource', () => {
           },
         },
         sandboxExecution: {
-          id: 'sandbox-exec-pr-1',
+          id: makeSandboxExecutionId('sandbox-exec-pr-1'),
           workflowRunId: makeWorkflowRunId('run-pr-1'),
           provider: 'daytona',
           sandboxId: 'sandbox-pr-1',

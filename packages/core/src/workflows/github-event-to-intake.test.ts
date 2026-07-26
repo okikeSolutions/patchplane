@@ -7,9 +7,9 @@ import {
 import { GitHubEventToWorkflowIntake } from './github-event-to-intake'
 
 describe('GitHubEventToWorkflowIntake', () => {
-  it.effect('maps GitHub issue events to generic workflow intake', () =>
+  it.effect('rejects issue intake without an authoritative commit SHA', () =>
     Effect.gen(function* () {
-      const intake = yield* GitHubEventToWorkflowIntake(
+      const error = yield* GitHubEventToWorkflowIntake(
         {
           kind: 'github.issue.opened',
           deliveryId: 'delivery-1',
@@ -32,20 +32,9 @@ describe('GitHubEventToWorkflowIntake', () => {
           workspaceId: makeSystemWorkspaceId('workspace-1'),
           traceId: 'trace-1',
         },
-      )
+      ).pipe(Effect.flip)
 
-      expect(intake.actor.id).toBe('github-app:123')
-      expect(intake.workspaceId).toBe('system:workspace-1')
-      expect(intake.traceId).toBe('trace-1')
-      expect(intake.source).toBe('external')
-      expect(intake.externalRef).toMatchObject({
-        provider: 'github',
-        eventKind: 'github.issue.opened',
-        repositoryExternalId: '456',
-        issueExternalId: '789',
-        issueNumber: 7,
-        senderLogin: 'octocat',
-      })
+      expect(error.message).toContain('authoritative pull request head SHA')
     }),
   )
 

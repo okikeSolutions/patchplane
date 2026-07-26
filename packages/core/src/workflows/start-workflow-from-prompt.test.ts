@@ -13,6 +13,8 @@ const TestStorageLayer = Layer.succeed(
   StorageService,
   StorageService.of({
     listRecentWorkflowStarts: () => Effect.succeed([]),
+    claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),

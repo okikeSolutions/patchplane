@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./dev/context": "./src/dev/context.ts",
+    "./patch-report/assemble-patch-report-v1": "./src/patch-report/assemble-patch-report-v1.ts",
     "./services/auth-request-context": "./src/services/auth-request-context.ts",
     "./services/alpha-review-policy": "./src/services/alpha-review-policy.ts",
     "./services/artifacts-service": "./src/services/artifacts-service.ts",

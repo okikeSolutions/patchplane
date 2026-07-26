@@ -1,5 +1,6 @@
 import { Context, Effect } from 'effect'
 import type { ArtifactsError } from '@patchplane/domain/errors'
+import type { WorkflowRunId } from '@patchplane/domain/ids'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export type EvidenceArtifactKind =
@@ -26,7 +27,7 @@ export interface StoredArtifactObjectMetadata {
 }
 
 export interface PutArtifactInput extends TelemetryContextFields {
-  readonly workflowRunId: string
+  readonly workflowRunId: WorkflowRunId
   readonly traceId?: string | undefined
   readonly kind: EvidenceArtifactKind
   readonly contentType: string

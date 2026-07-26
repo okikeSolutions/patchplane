@@ -406,6 +406,7 @@ export default defineSchema({
     summary: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
+    idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index('by_workflow_run', ['workflowRunId'])
@@ -421,6 +422,7 @@ export default defineSchema({
     startLine: v.optional(v.number()),
     endLine: v.optional(v.number()),
     evidenceArtifactId: v.optional(v.id('evidenceArtifacts')),
+    idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index('by_workflow_run', ['workflowRunId'])
@@ -436,7 +438,9 @@ export default defineSchema({
     policyVersion: v.optional(v.string()),
     inputDigest: v.optional(v.string()),
     verificationResultIds: v.optional(v.array(v.id('verificationResults'))),
+    reviewFindingIds: v.optional(v.array(v.id('reviewFindings'))),
     missingRequirementIds: v.optional(v.array(v.id('verificationRequirements'))),
+    idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
 
@@ -458,8 +462,22 @@ export default defineSchema({
     .index('by_actor', ['actorId'])
     .index('by_workflow_decision_key', ['workflowRunId', 'idempotencyKey']),
 
+  canonicalPublicationClaims: defineTable({
+    rootWorkflowRunId: v.id('workflowRuns'),
+    kind: publicationResultKind,
+    workflowRunId: v.id('workflowRuns'),
+    humanDecisionId: v.id('humanDecisions'),
+    dispatchToken: v.string(),
+    leasedAt: v.number(),
+  })
+    .index('by_root_kind', ['rootWorkflowRunId', 'kind'])
+    .index('by_root', ['rootWorkflowRunId']),
+
   publicationResults: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    humanDecisionId: v.optional(v.id('humanDecisions')),
+    candidatePatchSetId: v.optional(v.id('candidatePatchSets')),
+    targetSha: v.optional(v.string()),
     provider: v.string(),
     kind: publicationResultKind,
     status: publicationResultStatus,
@@ -467,6 +485,7 @@ export default defineSchema({
     url: v.optional(v.string()),
     summary: v.optional(v.string()),
     error: v.optional(v.string()),
+    dispatchToken: v.optional(v.string()),
     createdAt: v.number(),
     idempotencyKey: v.optional(v.string()),
   })
@@ -564,7 +583,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index('by_parent_workflow_run', ['parentWorkflowRunId'])
-    .index('by_parent_workflow_run_and_idempotency_key', ['parentWorkflowRunId', 'idempotencyKey']),
+    .index('by_parent_workflow_run_and_idempotency_key', ['parentWorkflowRunId', 'idempotencyKey'])
+    .index('by_workflow_run', ['workflowRunId']),
 
   workflowRuns: defineTable({    promptRequestId: v.id('promptRequests'),
     workspaceId: v.string(),
@@ -579,10 +599,12 @@ export default defineSchema({
       v.literal('queued'),
       v.literal('running'),
       v.literal('reviewed'),
+      v.literal('failed'),
     ),
     createdAt: v.number(),
   })
     .index('by_prompt_request', ['promptRequestId'])
     .index('by_workspace', ['workspaceId'])
-    .index('by_trace', ['traceId']),
+    .index('by_trace', ['traceId'])
+    .index('by_root_attempt', ['rootWorkflowRunId', 'attemptNumber']),
 })

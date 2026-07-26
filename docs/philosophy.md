@@ -64,7 +64,10 @@ are product behavior.
 This means:
 
 - resource lifecycles are acquisition-safe and interruption-safe;
+- reruns create immutable child attempts rather than rewriting evidence;
 - retries are idempotent and do not duplicate GitHub output;
+- agent completion, candidate capture, independent verification, external review, policy, human decision, and publication remain separate states;
+- missing or unavailable required evidence remains explicitly incomplete, even after a human override;
 - partial failure remains visible in durable workflow state;
 - evidence and decisions survive transient provider failures;
 - release claims require the relevant live checks, not only mocks.
@@ -81,8 +84,10 @@ This means:
 - user-visible contracts change deliberately and include compatibility or
   migration consideration;
 - errors follow stable, actionable structures;
-- durable records deterministically produce the same Patch Report;
-- policy and publication behavior is explicit and replay-safe.
+- durable candidate-correlated records deterministically produce the same Patch Report;
+- evidence for one candidate or attempt cannot justify another;
+- legacy records are not silently upgraded into stronger report semantics;
+- policy and canonical publication behavior is explicit and replay-safe.
 
 ## 6. Speed keeps developers in the review flow
 

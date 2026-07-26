@@ -2,6 +2,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { ConfigProvider, Effect, Exit, Layer } from 'effect'
 import { NodeCrypto } from '@effect/platform-node'
 import { ArtifactsService } from '@patchplane/core/services/artifacts-service'
+import { makeWorkflowRunId } from '@patchplane/domain/ids'
 import { CloudflareR2ArtifactsPlugin, type R2BucketLike, type R2ObjectLike } from './R2ArtifactsPlugin'
 
 class FakeBucket implements R2BucketLike {
@@ -57,7 +58,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     return Effect.gen(function* () {
       const artifacts = yield* ArtifactsService
       const metadata = yield* artifacts.putArtifact({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'stdout',
         contentType: 'text/plain',
@@ -69,7 +70,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
       expect(metadata.sizeBytes).toBe(14)
       expect(metadata.sha256).toBe('d1cc3064379fca32757730461bd728cb7de430e46a0046aa59ab55c65be7ce3b')
       expect(bucket.objects.get(metadata.storageKey)?.object.customMetadata).toMatchObject({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'stdout',
         sha256: metadata.sha256,
@@ -82,7 +83,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     return Effect.gen(function* () {
       const artifacts = yield* ArtifactsService
       const input = {
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'test-report' as const,
         contentType: 'application/json',
@@ -101,7 +102,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
       expect(first.storageKey).not.toBe(second.storageKey)
       expect(first.storageKey).toMatch(/^workflows\/run_123\/test-report\/.+-report\.json$/)
       expect(bucket.objects.get(first.storageKey)?.object.customMetadata).toMatchObject({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         kind: 'test-report',
         sha256: first.sha256,
@@ -127,7 +128,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     return Effect.gen(function* () {
       const artifacts = yield* ArtifactsService
       const metadata = yield* artifacts.putArtifact({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         kind: 'stdout',
         contentType: 'text/plain',
         body: 'native binding only',
@@ -156,7 +157,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     return Effect.gen(function* () {
       const artifacts = yield* ArtifactsService
       const exit = yield* Effect.exit(artifacts.putArtifact({
-        workflowRunId: 'run_123',
+        workflowRunId: makeWorkflowRunId('run_123'),
         kind: 'stdout',
         contentType: 'text/plain',
         body: 'hello',

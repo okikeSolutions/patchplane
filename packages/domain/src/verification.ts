@@ -1,6 +1,13 @@
 import { Schema } from 'effect'
 import { EvidenceArtifactKind } from './evidence-artifact'
-import { WorkflowRunId } from './ids'
+import {
+  CandidatePatchSetId,
+  EvidenceArtifactId,
+  SandboxExecutionId,
+  VerificationRequirementId,
+  VerificationResultId,
+  WorkflowRunId,
+} from './ids'
 
 /** A repository or policy expectation that must be evaluated for one candidate. */
 export const VerificationRequirementKind = Schema.Literals([
@@ -25,7 +32,7 @@ export const VerificationPlatform = Schema.Literals(['linux', 'windows', 'macos'
 export type VerificationPlatform = Schema.Schema.Type<typeof VerificationPlatform>
 
 export const VerificationRequirement = Schema.Struct({
-  id: Schema.String,
+  id: VerificationRequirementId,
   workflowRunId: WorkflowRunId,
   key: Schema.String,
   label: Schema.String,
@@ -60,11 +67,11 @@ export const VerificationResultStatus = Schema.Literals([
 export type VerificationResultStatus = Schema.Schema.Type<typeof VerificationResultStatus>
 
 export const VerificationResult = Schema.Struct({
-  id: Schema.String,
+  id: VerificationResultId,
   workflowRunId: WorkflowRunId,
-  requirementId: Schema.String,
-  candidatePatchSetId: Schema.String,
-  sandboxExecutionId: Schema.optional(Schema.String),
+  requirementId: VerificationRequirementId,
+  candidatePatchSetId: CandidatePatchSetId,
+  sandboxExecutionId: Schema.optional(SandboxExecutionId),
   provider: Schema.String,
   command: Schema.optional(Schema.String),
   platform: VerificationPlatform,
@@ -76,7 +83,7 @@ export const VerificationResult = Schema.Struct({
   passedCount: Schema.optional(Schema.Number),
   failedCount: Schema.optional(Schema.Number),
   skippedCount: Schema.optional(Schema.Number),
-  artifactIds: Schema.Array(Schema.String),
+  artifactIds: Schema.Array(EvidenceArtifactId),
   producedArtifactKinds: Schema.Array(EvidenceArtifactKind),
   candidateDigestBefore: Schema.String,
   candidateDigestAfter: Schema.optional(Schema.String),

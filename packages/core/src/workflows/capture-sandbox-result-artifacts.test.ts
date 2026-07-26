@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { ArtifactsError, StorageError } from '@patchplane/domain/errors'
+import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { ArtifactsService, type PutArtifactInput } from '../services/artifacts-service'
 import { StorageService } from '../services/storage-service'
 import type { SandboxCommandResult } from '../services/sandbox-service'
@@ -38,6 +39,8 @@ describe('CaptureSandboxResultArtifacts', () => {
       createWorkflowFromIntake: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       createWorkflowFromPrompt: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       listRecentWorkflowStarts: () => Effect.succeed([]),
+      claimWorkflowExecution: () => Effect.succeed(true),
+          markWorkflowExecutionFailed: () => Effect.succeed(true),
       recordSandboxExecution: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
       recordRuntimeEvents: () => Effect.sync(() => []),
       recordRuntimeSessionStarted: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
@@ -47,7 +50,11 @@ describe('CaptureSandboxResultArtifacts', () => {
         Effect.sync(() => {
           recorded.push({ kind: input.kind, storageKey: input.storageKey })
         }).pipe(
-          Effect.as({ id: `artifact:${input.kind}`, ...input, createdAt: input.createdAt ?? 123 } as never),
+          Effect.as({
+            id: makeEvidenceArtifactId(`artifact:${input.kind}`),
+            ...input,
+            createdAt: input.createdAt ?? 123,
+          }),
         ),
       getEvidenceArtifact: () => Effect.sync(() => undefined),
       recordCandidatePatchSet: () => Effect.fail(new StorageError({ operation: 'unused', message: 'unused', cause: undefined })),
@@ -86,7 +93,7 @@ describe('CaptureSandboxResultArtifacts', () => {
 
     return Effect.gen(function* () {
       yield* CaptureSandboxResultArtifacts({
-        workflowRunId: 'run_123' as never,
+        workflowRunId: makeWorkflowRunId('run_123'),
         traceId: 'trace_123',
         result,
       })

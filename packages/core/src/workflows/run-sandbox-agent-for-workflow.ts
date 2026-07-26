@@ -1,12 +1,17 @@
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
+import { SandboxError } from '@patchplane/domain/errors'
 import type { RuntimeSession } from '@patchplane/domain/runtime-session'
+import type { VerificationPlatform } from '@patchplane/domain/verification'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { PrepareRepositoryClone } from '../repository/prepare-repository-clone'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
-import { PersistSandboxVerificationEvidence } from './persist-sandbox-verification-evidence'
+import {
+  PersistConfiguredVerificationRequirements,
+  PersistSandboxVerificationEvidence,
+} from './persist-sandbox-verification-evidence'
 import { ProposeMergeDecision } from './propose-merge-decision'
 
 const inlineLogPreviewBytes = 16 * 1024
@@ -30,16 +35,40 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   readonly mode?: 'json' | 'rpc' | undefined
   readonly timeoutSeconds?: number | undefined
   readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceTestPlatform?: VerificationPlatform | undefined
   readonly evidenceBrowserScreenshotCommand?: string | undefined
 }) {
-  const clone = yield* PrepareRepositoryClone(input.workflowStart)
+  const storage = yield* StorageService
+  const claimed = yield* storage.claimWorkflowExecution({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxAgentForWorkflow.claimExecution',
+  })
+  if (!claimed) return undefined
 
+  return yield* Effect.gen(function* () {
+  const clone = yield* PrepareRepositoryClone(input.workflowStart)
   if (clone === undefined) {
-    return undefined
+    return yield* new SandboxError({
+      operation: 'runSandboxAgentForWorkflow.prepareRepository',
+      message: 'Claimed workflow attempt has no repository clone target',
+      cause: undefined,
+    })
   }
 
+  const verificationRequirements = yield* PersistConfiguredVerificationRequirements({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    testCommand: input.evidenceTestReportCommand,
+    testPlatform: input.evidenceTestPlatform,
+    browserCommand: input.evidenceBrowserScreenshotCommand,
+    createdAt: yield* Clock.currentTimeMillis,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxAgentForWorkflow.persistVerificationRequirements',
+  })
   const sandbox = yield* SandboxService
-  const storage = yield* StorageService
+  const runnableTestCommand = input.evidenceTestPlatform === undefined || input.evidenceTestPlatform === 'linux'
+    ? input.evidenceTestReportCommand
+    : undefined
   let runtimeSession: RuntimeSession | undefined
   const result = yield* sandbox.runRepositoryAgent({
     ...clone,
@@ -49,7 +78,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     thinking: input.thinking,
     mode: input.mode,
     timeoutSeconds: input.timeoutSeconds,
-    evidenceTestReportCommand: input.evidenceTestReportCommand,
+    evidenceTestReportCommand: runnableTestCommand,
     evidenceBrowserScreenshotCommand: input.evidenceBrowserScreenshotCommand,
     traceId: input.workflowStart.workflowRun.traceId,
     onRuntimeSessionStarted: (session) =>
@@ -189,6 +218,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     candidatePatchSet,
     evidenceArtifacts,
     sandboxResult: result,
+    verificationRequirements,
     traceId: input.workflowStart.workflowRun.traceId,
     operation: 'runSandboxAgentForWorkflow.persistVerificationEvidence',
   })
@@ -205,4 +235,12 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   })
 
   return sandboxExecution
+  }).pipe(
+    Effect.tapCause(() => storage.markWorkflowExecutionFailed({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      summary: 'Workflow execution failed after the attempt was claimed.',
+      traceId: input.workflowStart.workflowRun.traceId,
+      operation: 'runSandboxAgentForWorkflow.markExecutionFailed',
+    })),
+  )
 })

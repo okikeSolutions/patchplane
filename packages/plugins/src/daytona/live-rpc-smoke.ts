@@ -1,4 +1,4 @@
-import { ConfigProvider, Effect, Layer, Result, Schema } from 'effect'
+import { Clock, ConfigProvider, Effect, Layer, Result, Schema } from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { NodeCrypto } from '@effect/platform-node'
 import {
@@ -14,6 +14,7 @@ import {
   type SandboxRuntimeEvent,
 } from '@patchplane/core/services/sandbox-service'
 import { StorageService } from '@patchplane/core/services/storage-service'
+import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import {
   CloudflareR2ArtifactsPlugin,
   type R2BucketLike,
@@ -154,18 +155,21 @@ const smokeArtifactStorageLayer = Layer.succeed(
     createWorkflowFromIntake: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     listRecentWorkflowStarts: () => Effect.succeed([]),
+    claimWorkflowExecution: () => Effect.succeed(true),
+        markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     markRuntimeSessionStatus: () => Effect.die('unused'),
-    getActiveRuntimeSession: () => Effect.void as never,
-    recordEvidenceArtifact: (input) =>
-      Effect.succeed({
-        id: `smoke-artifact:${input.storageKey}`,
+    getActiveRuntimeSession: () => Effect.void.pipe(Effect.as(undefined)),
+    recordEvidenceArtifact: (input) => Effect.gen(function*() {
+      return {
+        id: makeEvidenceArtifactId(`smoke-artifact:${input.storageKey}`),
         ...input,
-        createdAt: input.createdAt ?? Date.now(),
-      } as never),
-    getEvidenceArtifact: () => Effect.void as never,
+        createdAt: input.createdAt ?? (yield* Clock.currentTimeMillis),
+      }
+    }),
+    getEvidenceArtifact: () => Effect.void.pipe(Effect.as(undefined)),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),
@@ -184,7 +188,7 @@ const program = Effect.gen(function* () {
     process.env.PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME ?? 'patchplane/smoke'
   const provider = process.env.PATCHPLANE_PI_PROVIDER ?? 'openai'
   const model = process.env.PATCHPLANE_PI_MODEL ?? 'gpt-5.5'
-  const traceId = `smoke-rpc-${Date.now()}`
+  const traceId = `smoke-rpc-${yield* Clock.currentTimeMillis}`
   const observedEvents: SandboxRuntimeEvent[] = []
   const captureArtifacts =
     process.env.PATCHPLANE_SMOKE_CAPTURE_ARTIFACTS === 'true'
@@ -259,7 +263,7 @@ const program = Effect.gen(function* () {
           })
           const artifactResult = yield* Effect.result(
             CaptureEvidenceArtifact({
-              workflowRunId: `smoke:${result.sandboxId}` as never,
+              workflowRunId: makeWorkflowRunId(`smoke:${result.sandboxId}`),
               traceId,
               kind: 'raw-trace',
               label: 'RPC smoke trace',

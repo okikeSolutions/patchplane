@@ -1,5 +1,7 @@
-import { Config, Effect, Exit, Layer, Schedule, Stream } from 'effect'
+import { Clock, Config, Effect, Exit, Layer, Schedule, Stream } from 'effect'
 import { Daytona } from '@daytona/sdk'
+import { XMLValidator } from 'fast-xml-parser'
+import { PNG } from 'pngjs'
 import { SandboxError } from '@patchplane/domain/errors'
 import {
   SandboxService,
@@ -33,6 +35,8 @@ import { makePiRuntimeSession } from '../sandbox-runtime/pi/runtime-session'
 import { makePiRpcCommandSender } from '../sandbox-runtime/pi/transport'
 
 const evidenceCaptureTimeoutSeconds = 30
+const maxEvidenceArtifactBytes = 5_000_000
+const maxCandidateDiffBytes = 10_000_000
 const textArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY---\n'
 const binaryArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\n'
 
@@ -184,26 +188,59 @@ function testReportContentType(path: string) {
   return path.endsWith('.xml') ? 'application/xml' : 'application/json'
 }
 
+function isValidTestReport(path: string, body: string) {
+  if (path.endsWith('.xml')) {
+    if (XMLValidator.validate(body) !== true) return false
+    const root = body.match(/<testsuites?\b([^>]*)>/i)
+    const tests = root?.[1]?.match(/\btests=["'](\d+)["']/i)?.[1]
+    const failures = root?.[1]?.match(/\bfailures=["'](\d+)["']/i)?.[1] ?? '0'
+    const errors = root?.[1]?.match(/\berrors=["'](\d+)["']/i)?.[1] ?? '0'
+    return root !== null && Number(tests) > 0 && Number(failures) === 0 && Number(errors) === 0
+  }
+  try {
+    const value: unknown = JSON.parse(body)
+    if (typeof value !== 'object' || value === null) return false
+    if ('ok' in value && typeof value.ok === 'boolean') return value.ok
+    if ('numTotalTests' in value && 'numFailedTests' in value) {
+      return typeof value.numTotalTests === 'number' && value.numTotalTests > 0 && value.numFailedTests === 0
+    }
+    if ('failed' in value && 'passed' in value) {
+      return value.failed === 0 && typeof value.passed === 'number' && value.passed > 0
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+function isValidPng(body: Uint8Array) {
+  try {
+    const image = PNG.sync.read(Buffer.from(body), { checkCRC: true })
+    return image.width > 0 && image.height > 0
+  } catch {
+    return false
+  }
+}
+
 function testReportProbeCommand() {
-  return [
-    'for file in',
-    [
-      '.patchplane/test-report.json',
-      '.patchplane/test-report.xml',
-      'patchplane-test-report.json',
-      'patchplane-test-report.xml',
-      'test-results/junit.xml',
-      'junit.xml',
-      'coverage/coverage-final.json',
-    ].map((path) => `'${path}'`).join(' '),
-    '; do',
-    'if [ -s "$file" ]; then',
-    `printf '%s${textArtifactMarker.replaceAll('\n', '\\n')}' "$file";`,
-    'cat "$file";',
-    'exit 0;',
-    'fi;',
-    'done',
-  ].join(' ')
+  const paths = [
+    '.patchplane/test-report.json',
+    '.patchplane/test-report.xml',
+    'patchplane-test-report.json',
+    'patchplane-test-report.xml',
+    'test-results/junit.xml',
+    'junit.xml',
+  ]
+  const script = [
+    'const fs=require("fs");',
+    `const paths=${JSON.stringify(paths)};`,
+    `const limit=${maxEvidenceArtifactBytes};`,
+    'for(const path of paths){let fd;try{fd=fs.openSync(path,"r");const size=fs.fstatSync(fd).size;if(size<=0||size>limit)continue;',
+    'const body=Buffer.alloc(size);const read=fs.readSync(fd,body,0,size,0);if(read!==size)continue;',
+    `process.stdout.write(path+${JSON.stringify(textArtifactMarker)}+body);break;`,
+    '}catch{}finally{if(fd!==undefined)fs.closeSync(fd);}}',
+  ].join('')
+  return `node -e '${script}'`
 }
 
 function screenshotProbeCommand() {
@@ -216,10 +253,11 @@ function screenshotProbeCommand() {
   const script = [
     'const fs=require("fs");',
     `const paths=${JSON.stringify(paths)};`,
-    'const path=paths.find((candidate)=>fs.existsSync(candidate)&&fs.statSync(candidate).size>0);',
-    'if(path){',
-    `process.stdout.write(path+${JSON.stringify(binaryArtifactMarker)}+fs.readFileSync(path).toString("base64"));`,
-    '}',
+    `const limit=${maxEvidenceArtifactBytes};`,
+    'for(const path of paths){let fd;try{fd=fs.openSync(path,"r");const size=fs.fstatSync(fd).size;if(size<=0||size>limit)continue;',
+    'const body=Buffer.alloc(size);const read=fs.readSync(fd,body,0,size,0);if(read!==size)continue;',
+    `process.stdout.write(path+${JSON.stringify(binaryArtifactMarker)}+body.toString("base64"));break;`,
+    '}catch{}finally{if(fd!==undefined)fs.closeSync(fd);}}',
   ].join('')
   return `node -e '${script}'`
 }
@@ -243,6 +281,18 @@ function captureRepositoryBaseSha(sandbox: DaytonaSandboxLike, traceId: string) 
   })
 }
 
+const evidenceOutputPathspecExclusions = [
+  ':(exclude).patchplane/**',
+  ':(exclude)patchplane-test-report.json',
+  ':(exclude)patchplane-test-report.xml',
+  ':(exclude)test-results/junit.xml',
+  ':(exclude)junit.xml',
+  ':(exclude)coverage/coverage-final.json',
+  ':(exclude)patchplane-browser-screenshot.png',
+  ':(exclude)test-results/browser-screenshot.png',
+  ':(exclude)playwright-report/browser-screenshot.png',
+].map(shellQuote).join(' ')
+
 function collectSandboxEvidenceArtifacts(
   sandbox: DaytonaSandboxLike,
   input: {
@@ -255,24 +305,24 @@ function collectSandboxEvidenceArtifacts(
   return Effect.gen(function* () {
     const artifacts: Array<SandboxEvidenceArtifact> = []
     const verificationResults: Array<SandboxVerificationResult> = []
-    const runCaptureCommand = (operation: string, command: string) =>
-      Effect.suspend(() => {
-        const startedAt = Date.now()
-        return executeSandboxCommand(sandbox, {
-          command,
-          timeoutSeconds: evidenceCaptureTimeoutSeconds,
-          traceId: `${input.traceId}-${operation}`,
-        }).pipe(
-          Effect.map((result) => ({ ...result, startedAt, completedAt: Date.now() })),
-          Effect.catch((error) =>
-            Effect.logWarning('Evidence artifact probe failed', {
-              traceId: input.traceId,
-              operation,
-              error: error.message,
-            }).pipe(Effect.as(undefined))
-          ),
-        )
-      })
+    const runCaptureCommand = Effect.fnUntraced(function*(operation: string, command: string) {
+      const startedAt = yield* Clock.currentTimeMillis
+      const result = yield* executeSandboxCommand(sandbox, {
+        command,
+        timeoutSeconds: evidenceCaptureTimeoutSeconds,
+        traceId: `${input.traceId}-${operation}`,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning('Evidence artifact probe failed', {
+            traceId: input.traceId,
+            operation,
+            error: error.message,
+          }).pipe(Effect.as(undefined))
+        ),
+      )
+      if (result === undefined) return undefined
+      return { ...result, startedAt, completedAt: yield* Clock.currentTimeMillis }
+    })
 
     const architectureProbe = yield* runCaptureCommand('architecture', 'uname -m')
     const architecture = architectureProbe?.exitCode === 0 && architectureProbe.stdout.trim().length > 0
@@ -281,7 +331,7 @@ function collectSandboxEvidenceArtifacts(
     const captureCandidateState = (operation: string) =>
       runCaptureCommand(
         operation,
-        `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . | sha256sum`,
+        `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
       ).pipe(Effect.map((result) => {
         const digest = result?.stdout.trim().split(/\s+/, 1)[0]
         return result?.exitCode === 0 && digest !== undefined && /^[0-9a-f]{64}$/i.test(digest)
@@ -289,11 +339,24 @@ function collectSandboxEvidenceArtifacts(
           : undefined
       }))
 
+    let shouldProbeTestReport = false
     if (nonEmpty(input.evidenceTestReportCommand)) {
-      yield* runCaptureCommand(
+      const cleanup = yield* runCaptureCommand(
         'test-report-clean',
         "rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json",
       )
+      if (cleanup === undefined || cleanup.exitCode !== 0) {
+        verificationResults.push({
+          kind: 'test',
+          command: input.evidenceTestReportCommand,
+          status: 'failed',
+          message: 'Test verification setup failed while removing stale report artifacts.',
+          provider: 'daytona',
+          platform: 'linux',
+          architecture,
+        })
+      } else {
+        shouldProbeTestReport = true
       const candidateDigestBefore = yield* captureCandidateState('test-candidate-before')
       const result = yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand)
       const candidateDigestAfter = yield* captureCandidateState('test-candidate-after')
@@ -323,11 +386,14 @@ function collectSandboxEvidenceArtifacts(
             completedAt: result.completedAt,
             ...(result.exitCode === 0 ? {} : { message: `Test verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
           })
+      }
     }
-    const testReport = yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
+    const testReport = shouldProbeTestReport
+      ? yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
+      : undefined
     if (testReport !== undefined && testReport.exitCode === 0) {
       const probed = parseTextArtifactProbe(testReport.stdout)
-      if (probed !== undefined) {
+      if (probed !== undefined && isValidTestReport(probed.path, probed.body)) {
         artifacts.push({
           kind: 'test-report',
           label: 'Test report',
@@ -348,11 +414,24 @@ function collectSandboxEvidenceArtifacts(
       }
     }
 
+    let shouldProbeScreenshot = false
     if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
-      yield* runCaptureCommand(
+      const cleanup = yield* runCaptureCommand(
         'browser-screenshot-clean',
         "rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png",
       )
+      if (cleanup === undefined || cleanup.exitCode !== 0) {
+        verificationResults.push({
+          kind: 'browser',
+          command: input.evidenceBrowserScreenshotCommand,
+          status: 'failed',
+          message: 'Browser verification setup failed while removing stale screenshot artifacts.',
+          provider: 'daytona',
+          platform: 'linux',
+          architecture,
+        })
+      } else {
+        shouldProbeScreenshot = true
       const candidateDigestBefore = yield* captureCandidateState('browser-candidate-before')
       const result = yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand)
       const candidateDigestAfter = yield* captureCandidateState('browser-candidate-after')
@@ -382,11 +461,14 @@ function collectSandboxEvidenceArtifacts(
             completedAt: result.completedAt,
             ...(result.exitCode === 0 ? {} : { message: `Browser verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
           })
+      }
     }
-    const screenshot = yield* runCaptureCommand('browser-screenshot-probe', screenshotProbeCommand())
+    const screenshot = shouldProbeScreenshot
+      ? yield* runCaptureCommand('browser-screenshot-probe', screenshotProbeCommand())
+      : undefined
     if (screenshot !== undefined && screenshot.exitCode === 0) {
       const probed = parseBinaryArtifactProbe(screenshot.stdout)
-      if (probed !== undefined) {
+      if (probed !== undefined && isValidPng(probed.body)) {
         artifacts.push({
           kind: 'screenshot',
           label: 'Browser verification screenshot',
@@ -409,7 +491,7 @@ function collectSandboxEvidenceArtifacts(
 
     const diff = yield* runCaptureCommand(
       'diff',
-      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- .`,
+      `git add -N . >/dev/null 2>&1 || true; tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} > "$tmp" || exit $?; node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"r");try{const body=Buffer.alloc(${maxCandidateDiffBytes + 1});const read=fs.readSync(fd,body,0,body.length,0);if(read>${maxCandidateDiffBytes})process.exit(65);process.stdout.write(body.subarray(0,read));}finally{fs.closeSync(fd);}' "$tmp"`,
     )
     if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
       artifacts.push({
@@ -544,7 +626,7 @@ export function makeDaytonaSandboxLayer(
       return SandboxService.of({
         runRepositoryAgent: (input) =>
           Effect.gen(function* () {
-            const startedAt = Date.now()
+            const startedAt = yield* Clock.currentTimeMillis
             const envVars = yield* piRuntimeEnvironment({ provider: input.provider }).pipe(
               Effect.mapError(sandboxBoundaryError('pi.config', 'Pi runtime provider configuration is invalid')),
             )
@@ -657,7 +739,7 @@ export function makeDaytonaSandboxLayer(
                     candidateStateDigest,
                     baseSha,
                     startedAt,
-                    completedAt: Date.now(),
+                    completedAt: yield* Clock.currentTimeMillis,
                   }
                 }
 
@@ -706,7 +788,7 @@ export function makeDaytonaSandboxLayer(
                   candidateStateDigest,
                   baseSha,
                   startedAt,
-                  completedAt: Date.now(),
+                  completedAt: yield* Clock.currentTimeMillis,
                 }
               }))
           }).pipe(
@@ -792,7 +874,7 @@ export function makeDaytonaSandboxLayer(
           ),
         runRepositoryCommand: (input) =>
           Effect.gen(function* () {
-            const startedAt = Date.now()
+            const startedAt = yield* Clock.currentTimeMillis
             return yield* runWithSandbox(
               { ...input, envVars: input.env === undefined ? undefined : { ...input.env } },
               (sandbox) => Effect.gen(function* () {
@@ -825,7 +907,7 @@ export function makeDaytonaSandboxLayer(
                   candidateStateDigest,
                   baseSha,
                   startedAt,
-                  completedAt: Date.now(),
+                  completedAt: yield* Clock.currentTimeMillis,
                 }
               }))
           }).pipe(

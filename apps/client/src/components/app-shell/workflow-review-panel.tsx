@@ -16,8 +16,46 @@ function latestBy<A>(items: ReadonlyArray<A>, timestamp: (item: A) => number) {
   )
 }
 
+export function verificationCoverageForDecision(
+  detail: WorkflowDetail,
+  candidatePatchSetId: string | undefined,
+  policyDecision: WorkflowDetail['policyDecisions'][number] | undefined,
+) {
+  const required = detail.verificationRequirements.filter((requirement) => requirement.required)
+  const consideredResultIds = new Set(policyDecision?.verificationResultIds ?? [])
+  const passedRequirementIds = new Set(
+    detail.verificationResults
+      .filter((result) =>
+        result.candidatePatchSetId === candidatePatchSetId &&
+        consideredResultIds.has(result.id) &&
+        result.status === 'passed'
+      )
+      .map((result) => result.requirementId),
+  )
+  const passedCount = required.filter((requirement) => passedRequirementIds.has(requirement.id)).length
+  const truncated = detail.verificationRequirementsTruncated || detail.verificationResultsTruncated
+  const complete =
+    !truncated &&
+    required.length > 0 &&
+    (policyDecision?.missingRequirementIds?.length ?? 0) === 0 &&
+    passedCount === required.length
+
+  return {
+    canOverride: !truncated,
+    complete,
+    detail: truncated
+      ? 'Verification records are truncated. Approval is blocked until the complete projection is available.'
+      : required.length === 0
+        ? 'No required verification is configured; approval requires an explicit override.'
+        : `${passedCount} of ${required.length} required checks passed for this candidate${complete ? '.' : '; approval requires an explicit override.'}`,
+    passedCount,
+    requiredCount: required.length,
+  }
+}
+
 export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetail }) {
   const [comment, setComment] = useState('')
+  const [verificationOverrideReason, setVerificationOverrideReason] = useState('')
   const [submittingStatus, setSubmittingStatus] = useState<HumanDecisionStatus | undefined>()
   const [error, setError] = useState<string | undefined>()
   const submissionAttempt = useRef<
@@ -32,6 +70,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
     | undefined
   >(undefined)
   const hasComment = comment.trim().length > 0
+  const hasOverrideReason = verificationOverrideReason.trim().length > 0
   const trustState = deriveWorkflowTrustState(detail)
   const isSubmitting = submittingStatus !== undefined
   const sandboxExecution = latestBy(
@@ -52,6 +91,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
   )
   const reviewPassed = reviewRun?.status === 'completed' && blockingFindings.length === 0
   const policyAllowsReview = policyDecision?.status === 'approved' || policyDecision?.status === 'manual-review'
+  const verificationCoverage = verificationCoverageForDecision(detail, candidatePatchSet?.id, policyDecision)
   const hasCurrentProjection =
     detail.workflowRun.status === 'reviewed' &&
     sandboxExecution !== undefined &&
@@ -62,8 +102,12 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
 
   const submitDecision = async (status: HumanDecisionStatus) => {
     const trimmedComment = comment.trim()
+    const trimmedOverrideReason = verificationOverrideReason.trim()
+    const requiresVerificationOverride = status === 'approved' && !verificationCoverage.complete
     if (
       trimmedComment.length === 0 ||
+      (status === 'approved' && (!policyAllowsReview || (!verificationCoverage.complete && !verificationCoverage.canOverride))) ||
+      (requiresVerificationOverride && trimmedOverrideReason.length === 0) ||
       isSubmitting ||
       !hasCurrentProjection ||
       sandboxExecution === undefined ||
@@ -77,7 +121,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
     setSubmittingStatus(status)
     setError(undefined)
     try {
-      const fingerprint = `${detail.workflowRun.id}:${sandboxExecution.id}:${candidatePatchSet.id}:${reviewRun.id}:${policyDecision.id}:${status}:${trimmedComment}`
+      const fingerprint = `${detail.workflowRun.id}:${sandboxExecution.id}:${candidatePatchSet.id}:${reviewRun.id}:${policyDecision.id}:${status}:${trimmedComment}:${requiresVerificationOverride ? trimmedOverrideReason : ''}`
       if (submissionAttempt.current?.fingerprint !== fingerprint) {
         submissionAttempt.current = {
           fingerprint,
@@ -97,6 +141,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
           policyDecisionId: submissionAttempt.current.policyDecisionId,
           status,
           comment: trimmedComment,
+          ...(requiresVerificationOverride ? { verificationOverrideReason: trimmedOverrideReason } : {}),
           idempotencyKey: submissionAttempt.current.idempotencyKey,
         },
       })
@@ -106,6 +151,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
       }
       submissionAttempt.current = undefined
       setComment('')
+      setVerificationOverrideReason('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to record decision')
     } finally {
@@ -133,6 +179,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <EvidenceCheck label="Candidate patch" ready={candidatePatchSet?.status === 'captured'} detail={candidatePatchSet?.summary ?? candidatePatchSet?.id ?? 'Not captured'} />
         <EvidenceCheck label="Automated review" ready={reviewPassed} status={reviewRun === undefined ? 'missing' : reviewPassed ? 'passed' : reviewRun.status === 'completed' ? 'blocked' : reviewRun.status} detail={blockingFindings.length > 0 ? `${blockingFindings.length} blocking findings` : reviewRun?.summary ?? reviewRun?.reviewer ?? 'Not completed'} />
         <EvidenceCheck label="Policy verdict" ready={policyAllowsReview} status={policyDecision?.status ?? 'missing'} detail={policyDecision?.summary ?? 'Not evaluated'} />
+        <EvidenceCheck label="Candidate-bound verification" ready={verificationCoverage.complete} status={verificationCoverage.complete ? 'passed' : verificationCoverage.requiredCount === 0 ? 'not configured' : 'incomplete'} detail={verificationCoverage.detail} />
       </div>
       {hasCurrentProjection ? null : (
         <Alert variant="destructive">
@@ -164,11 +211,27 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
             Comments are required for approve, reject, and request-changes actions.
           </FieldDescription>
         </Field>
+        {verificationCoverage.complete || !verificationCoverage.canOverride ? null : (
+          <Field data-invalid={!hasOverrideReason && verificationOverrideReason.length > 0 ? true : undefined}>
+            <FieldLabel htmlFor="workflow-verification-override-reason">Verification override reason</FieldLabel>
+            <Textarea
+              id="workflow-verification-override-reason"
+              value={verificationOverrideReason}
+              aria-invalid={!hasOverrideReason && verificationOverrideReason.length > 0}
+              maxLength={1000}
+              placeholder="Explain why approval is justified despite incomplete or unconfigured verification."
+              onChange={(event) => setVerificationOverrideReason(event.currentTarget.value)}
+            />
+            <FieldDescription>
+              Required only for approval. This explicit override is stored in the Patch Report audit trail.
+            </FieldDescription>
+          </Field>
+        )}
       </FieldGroup>
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={!hasComment || isSubmitting || !hasCurrentProjection || sandboxExecution.status !== 'succeeded' || candidatePatchSet.status !== 'captured' || reviewRun.status !== 'completed'}
+          disabled={!hasComment || !policyAllowsReview || (!verificationCoverage.complete && (!verificationCoverage.canOverride || !hasOverrideReason)) || isSubmitting || !hasCurrentProjection || sandboxExecution.status !== 'succeeded' || candidatePatchSet.status !== 'captured' || reviewRun.status !== 'completed'}
           onClick={() => void submitDecision('approved')}
         >
           <CheckIcon data-icon="inline-start" />

@@ -2,7 +2,18 @@ import { describe, expect, it } from '@effect/vitest'
 import { assemblePatchReportV0 } from './patch-report'
 import type { HumanDecision, PolicyDecision } from './decision-review'
 import type { EvidenceArtifact } from './evidence-artifact'
-import { makePromptRequestId, makeSystemActorId, makeSystemWorkspaceId, makeWorkflowRunId } from './ids'
+import {
+  makeEvidenceArtifactId,
+  makeHumanDecisionId,
+  makePolicyDecisionId,
+  makePromptRequestId,
+  makeRuntimeEventId,
+  makeRuntimeSessionId,
+  makeSandboxExecutionId,
+  makeSystemActorId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from './ids'
 import type { RuntimeEvent } from './runtime-event'
 import type { RuntimeSession } from './runtime-session'
 import type { SandboxExecution } from './sandbox-execution'
@@ -40,7 +51,7 @@ const workflowStart: WorkflowStart = {
 }
 
 const runtimeEvent: RuntimeEvent = {
-  id: 'event-1',
+  id: makeRuntimeEventId('event-1'),
   workflowRunId,
   provider: 'pi',
   type: 'agent.started',
@@ -49,7 +60,7 @@ const runtimeEvent: RuntimeEvent = {
 }
 
 const runtimeSession: RuntimeSession = {
-  id: 'session-1',
+  id: makeRuntimeSessionId('session-1'),
   workflowRunId,
   provider: 'daytona:pi-rpc',
   sandboxId: 'sandbox-1',
@@ -62,7 +73,7 @@ const runtimeSession: RuntimeSession = {
 }
 
 const sandboxExecution: SandboxExecution = {
-  id: 'sandbox-execution-1',
+  id: makeSandboxExecutionId('sandbox-execution-1'),
   workflowRunId,
   provider: 'daytona',
   sandboxId: 'sandbox-1',
@@ -75,7 +86,7 @@ const sandboxExecution: SandboxExecution = {
 }
 
 const evidenceArtifact: EvidenceArtifact = {
-  id: 'artifact-1',
+  id: makeEvidenceArtifactId('artifact-1'),
   workflowRunId,
   traceId: 'trace-1',
   kind: 'diff',
@@ -139,7 +150,7 @@ describe('assemblePatchReportV0', () => {
   it('uses the latest sandbox execution for execution status', () => {
     const olderFailure: SandboxExecution = {
       ...sandboxExecution,
-      id: 'sandbox-execution-older',
+      id: makeSandboxExecutionId('sandbox-execution-older'),
       status: 'failed',
       exitCode: 1,
       startedAt: 1,
@@ -177,7 +188,7 @@ describe('assemblePatchReportV0', () => {
 
   it('uses the latest human decision as the report status and decision', () => {
     const approved: HumanDecision = {
-      id: 'decision-approved',
+      id: makeHumanDecisionId('decision-approved'),
       workflowRunId,
       actorId: makeSystemActorId('reviewer-1'),
       status: 'approved',
@@ -186,7 +197,7 @@ describe('assemblePatchReportV0', () => {
     }
     const changesRequested: HumanDecision = {
       ...approved,
-      id: 'decision-changes',
+      id: makeHumanDecisionId('decision-changes'),
       status: 'changes-requested',
       comment: 'Please tighten the test coverage.',
       decidedAt: 9,
@@ -212,7 +223,7 @@ describe('assemblePatchReportV0', () => {
 
   it('maps blocking policy decisions to changes-requested before human review', () => {
     const policyDecision: PolicyDecision = {
-      id: 'policy-1',
+      id: makePolicyDecisionId('policy-1'),
       workflowRunId,
       status: 'rejected',
       summary: 'Sandbox failed.',
