@@ -17,6 +17,7 @@
     "./registry": "./src/registry.ts",
     "./sentry/cloudflare-worker": "./src/sentry/cloudflare-worker.ts",
     "./sentry/config": "./src/sentry/SentryConfig.ts",
+    "./sentry/cloudflare-telemetry-plugin": "./src/sentry/CloudflareTelemetryPlugin.ts",
     "./sentry/sanitize": "./src/sentry/sanitize.ts",
     "./sentry/telemetry-plugin": "./src/sentry/SentryTelemetryPlugin.ts",
     "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",

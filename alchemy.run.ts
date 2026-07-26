@@ -6,7 +6,10 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import { Path } from 'effect/Path'
-import { clientRuntimeEnv, sourceControlRuntimeEnv } from './apps/infra/config.ts'
+import {
+  clientRuntimeEnv,
+  sourceControlRuntimeEnv,
+} from './apps/infra/config.ts'
 import { createPhysicalName } from './apps/infra/utils.ts'
 
 const artifactRetentionDays = 14
@@ -35,19 +38,32 @@ export default Alchemy.Stack(
   },
   Effect.gen(function* () {
     const rawStage = yield* Alchemy.Stage
-    const stage = createPhysicalName({ id: '', stage: rawStage, prefix: rawStage, fallback: 'dev' })
+    const stage = createPhysicalName({
+      id: '',
+      stage: rawStage,
+      prefix: rawStage,
+      fallback: 'dev',
+    })
     const isLandingStage =
       rawStage === 'prod' || rawStage.startsWith('landing-')
     const path = yield* Path
 
     if (isLandingStage) {
       const fileSystem = yield* FileSystem.FileSystem
-      const publicDirectory = path.resolve(import.meta.dirname, 'apps/client/public')
+      const publicDirectory = path.resolve(
+        import.meta.dirname,
+        'apps/client/public',
+      )
       const readStaticAsset = (fileName: string) =>
         fileSystem.readFileString(path.join(publicDirectory, fileName)).pipe(
-          Effect.mapError((error) => new Config.ConfigError(new ConfigProvider.SourceError({
-            message: error.message,
-          }))),
+          Effect.mapError(
+            (error) =>
+              new Config.ConfigError(
+                new ConfigProvider.SourceError({
+                  message: error.message,
+                }),
+              ),
+          ),
         )
       const [headers, redirects] = yield* Effect.all([
         readStaticAsset('_headers'),
@@ -62,7 +78,9 @@ export default Alchemy.Stack(
         cwd: path.resolve(import.meta.dirname, 'apps/client'),
         command: 'bun run build:landing',
         outdir: 'dist/client',
-        ...(rawStage === 'prod' && productionDomain !== undefined ? { domain: productionDomain } : {}),
+        ...(rawStage === 'prod' && productionDomain !== undefined
+          ? { domain: productionDomain }
+          : {}),
         assets: {
           headers,
           redirects,
@@ -80,7 +98,10 @@ export default Alchemy.Stack(
 
     const retentionDays = Math.max(1, Math.floor(artifactRetentionDays))
     const retentionSeconds = retentionDays * 24 * 60 * 60
-    const rateLimitPerMinute = Math.max(1, Math.floor(aiGatewayRateLimitPerMinute))
+    const rateLimitPerMinute = Math.max(
+      1,
+      Math.floor(aiGatewayRateLimitPerMinute),
+    )
     const collectAiGatewayLogs = aiGatewayCollectLogs
 
     const evidenceBucket = yield* Cloudflare.R2.Bucket('EvidenceArtifacts', {
@@ -119,28 +140,41 @@ export default Alchemy.Stack(
       rateLimitingTechnique: 'sliding',
     })
 
-    const sourceControlWorker = yield* Cloudflare.Worker('SourceControlWorker', {
-      main: path.resolve(import.meta.dirname, 'apps/source-control/src/worker.ts'),
-      url: false,
-      compatibility: { flags: ['nodejs_compat'] },
-      observability: devWorkerObservability,
-      env: {
-        ...sourceControlRuntimeEnv,
-        PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
-        PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
-        PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
-        CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
+    const sourceControlWorker = yield* Cloudflare.Worker(
+      'SourceControlWorker',
+      {
+        main: path.resolve(
+          import.meta.dirname,
+          'apps/source-control/src/worker.ts',
+        ),
+        url: false,
+        compatibility: { flags: ['nodejs_compat'] },
+        observability: devWorkerObservability,
+        env: {
+          ...sourceControlRuntimeEnv,
+          PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
+          PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
+          PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
+          CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
+        },
       },
-    })
+    )
 
-    const githubWebhookWorker = yield* Cloudflare.Worker('GitHubWebhookWorker', {
-      main: path.resolve(import.meta.dirname, 'apps/source-control/src/webhook-worker.ts'),
-      compatibility: { flags: ['nodejs_compat'] },
-      observability: devWorkerObservability,
-      env: {
-        SOURCE_CONTROL_WORKER: sourceControlWorker,
+    const githubWebhookWorker = yield* Cloudflare.Worker(
+      'GitHubWebhookWorker',
+      {
+        main: path.resolve(
+          import.meta.dirname,
+          'apps/source-control/src/webhook-worker.ts',
+        ),
+        compatibility: { flags: ['nodejs_compat'] },
+        observability: devWorkerObservability,
+        env: {
+          CLOUDFLARE_SENTRY_DSN: sourceControlRuntimeEnv.CLOUDFLARE_SENTRY_DSN,
+          SOURCE_CONTROL_WORKER: sourceControlWorker,
+        },
       },
-    })
+    )
 
     const client = yield* Cloudflare.Website.Vite('Client', {
       rootDir: path.resolve(import.meta.dirname, 'apps/client'),

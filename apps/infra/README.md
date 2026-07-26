@@ -99,24 +99,15 @@ PATCHPLANE_AI_GATEWAY_ID
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-Signed artifact URL generation also requires R2 S3 API credentials at deploy
-time. Set either:
+The client and source-control Workers access evidence through the native R2
+bucket binding. `/api/artifacts/url` authorizes the artifact metadata through
+Convex and proxies bounded previews or authenticated downloads from that
+binding. The client Worker does not receive R2 S3 API credentials.
 
-```text
-PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID
-PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY
-```
-
-or the generic fallback names:
-
-```text
-CLOUDFLARE_ACCESS_KEY_ID
-CLOUDFLARE_SECRET_ACCESS_KEY
-```
-
-These are deployed to the client Worker as secret bindings for
-`/api/artifacts/url`. Source-control artifact capture uses the native R2 bucket
-binding and does not require these signing credentials.
+Standalone live-smoke tooling that accesses R2 outside Cloudflare may still use
+`PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID` and
+`PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY`; those credentials are not deployed
+to the hosted client.
 
 Optional source-control evidence producer commands can create richer artifacts
 inside the Daytona sandbox before capture:

@@ -123,7 +123,8 @@ flowchart TD
 - **GitHub** is an external publication surface, not PatchPlane's provenance
   store.
 - **Sentry and analytics** are operational/product telemetry, never evidence or
-  provenance.
+  provenance. Sentry capture and breadcrumb research is documented in
+  [`docs/sentry-error-capture-research.md`](./sentry-error-capture-research.md).
 - **Daytona and Pi output** remain untrusted until decoded and correlated to
   PatchPlane-owned types.
 - **The browser** supplies user intent, not authoritative workflow identity or

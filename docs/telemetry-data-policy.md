@@ -6,7 +6,7 @@ PatchPlane uses Sentry for operational debugging. Sentry is an external data-egr
 
 Telemetry is deny-by-default. Only bounded metadata needed to locate and correlate an operational failure may leave PatchPlane. Full prompts, patches, runtime output, provider responses, and evidence remain in their designated PatchPlane stores under the applicable retention policy.
 
-`sendDefaultPii: false` is required on every Sentry SDK, but it is not sufficient by itself. Every browser, Effect, and Cloudflare Sentry client must also use PatchPlane's event, log, metric, span, and breadcrumb sanitizers.
+`sendDefaultPii: false` is required on every Sentry SDK, but it is not sufficient by itself. Every browser, Effect, and Cloudflare Sentry client must also use PatchPlane's complete deny-by-default `makeSentryDataCollection()` configuration, the shared 64-breadcrumb limit, and PatchPlane's event, log, metric, span, and breadcrumb sanitizers. Provider integrations that collect request bodies independently of Sentry's general data-collection options must be disabled explicitly.
 
 ## Allowed metadata
 
@@ -37,9 +37,9 @@ Exception types and sanitized stack locations may remain for grouping and diagno
 
 ## Logs and breadcrumbs
 
-Sentry logs are opt-in. A log must carry PatchPlane's telemetry-policy marker and use allowlisted attributes; unmarked Effect or console logs are dropped at the Sentry boundary. Metrics are dropped unless their name is in the fixed PatchPlane metric allowlist. Local logging remains separately configured and must still follow the repository's secret-handling rules.
+Sentry logs are opt-in. A log must carry PatchPlane's telemetry-policy marker and use allowlisted attributes. Routine Effect logs and metrics remain local and must not be registered directly with Sentry's Effect logger or metrics layers; unmarked logs are also dropped by the transport hook as defense in depth. Metrics are dropped unless their name is in the fixed PatchPlane metric allowlist. Local logging remains separately configured and must still follow the repository's secret-handling rules.
 
-Explicit critical-path breadcrumbs use stable `patchplane.*` categories and bounded stage names. Automatic browser breadcrumbs may retain safe navigation/request metadata, but arbitrary messages and non-allowlisted data are filtered.
+Explicit critical-path breadcrumbs use stable `patchplane.*` categories and bounded stage names. They must be buffered in a request/workflow-local telemetry scope and attached only to an error captured in that same scope; concurrent correlation scopes must never share breadcrumbs. Automatic browser breadcrumbs may retain safe navigation/request metadata, but arbitrary messages and non-allowlisted data are filtered.
 
 ## Errors and expected outcomes
 

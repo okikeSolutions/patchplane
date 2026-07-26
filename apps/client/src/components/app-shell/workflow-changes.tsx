@@ -61,7 +61,7 @@ export function WorkflowChanges({ detail }: { readonly detail: WorkflowDetail })
         <CardHeader>
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
             <div><CardTitle as="h2">Unified diff</CardTitle><CardDescription>Exact changed lines from the candidate’s referenced evidence artifact.</CardDescription></div>
-            {diff === undefined ? null : <Button size="sm" variant="outline" className="min-h-11 w-full sm:min-h-8 sm:w-auto" aria-busy={loadingDiff} disabled={loadingDiff} onClick={() => void loadDiffPreview(diff.id, setLoadingDiff, setDiffPreview, setDiffError)}>{loadingDiff ? 'Loading…' : diffPreview === undefined ? 'Load diff' : 'Reload'}</Button>}
+            {diff === undefined ? null : <Button size="sm" variant="outline" className="min-h-11 w-full sm:min-h-8 sm:w-auto" aria-busy={loadingDiff} disabled={loadingDiff} onClick={() => void loadDiffPreview(diff.id, detail.workflowRun.id, setLoadingDiff, setDiffPreview, setDiffError)}>{loadingDiff ? 'Loading…' : diffPreview === undefined ? 'Load diff' : 'Reload'}</Button>}
           </div>
         </CardHeader>
         <CardContent>
@@ -80,6 +80,7 @@ function artifactPreviewError(value: unknown) {
 
 async function loadDiffPreview(
   artifactId: string,
+  workflowRunId: string,
   setLoading: (value: boolean) => void,
   setPreview: (value: string | undefined) => void,
   setError: (value: string | undefined) => void,
@@ -87,7 +88,8 @@ async function loadDiffPreview(
   setLoading(true)
   setError(undefined)
   try {
-    const response = await fetch(`/api/artifacts/url?artifactId=${encodeURIComponent(artifactId)}&preview=1`)
+    const params = new URLSearchParams({ artifactId, workflowRunId, preview: '1' })
+    const response = await fetch(`/api/artifacts/url?${params.toString()}`)
     if (!response.ok) {
       const payload: unknown = await response.json().catch(() => undefined)
       throw new Error(

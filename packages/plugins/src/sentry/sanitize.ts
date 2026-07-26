@@ -1,6 +1,11 @@
+import {
+  CriticalPathBreadcrumbStatus,
+  CriticalPathStage,
+} from '@patchplane/core/services/telemetry-service'
 import type {
   Breadcrumb,
   Contexts,
+  ResolvedDataCollection,
   ErrorEvent,
   Event,
   EventHint,
@@ -25,6 +30,22 @@ import {
 const FILTERED = '[Filtered]'
 const MAX_STRING_LENGTH = 512
 const MAX_COLLECTION_ENTRIES = 64
+const MAX_STACK_INPUT_LENGTH = 32_768
+
+export function makeSentryDataCollection(): ResolvedDataCollection {
+  return {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: { request: false, response: false },
+    httpBodies: [],
+    queryParams: false,
+    genAI: { inputs: false, outputs: false },
+    stackFrameVariables: false,
+    frameContextLines: 0,
+  }
+}
+
+export const sentryMaxBreadcrumbs = MAX_COLLECTION_ENTRIES
 
 const credentialPattern = new EffectRegExp.RegExp(
   String.raw`(?:bearer\s+[a-z0-9._~+/-]+=*|gh[pousr]_[a-z0-9_]{20,}|github_pat_[a-z0-9_]{20,}|(?:eyJ[a-z0-9_-]+\.){2}[a-z0-9_-]+|(?:api[_-]?key|password|secret|token)\s*[:=]\s*[^\s,;]+|(?:api[_-]?key|password|secret|token)_[a-z0-9_-]{12,})`,
@@ -35,6 +56,7 @@ const httpDescriptionPattern = new EffectRegExp.RegExp(
   '^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\s+(.+)$',
   'i',
 )
+const stackLocationPattern = new EffectRegExp.RegExp(':(\\d+):(\\d+)\\)?$')
 const TelemetryName = Schema.String.check(
   Schema.isMaxLength(160),
   Schema.isPattern(
@@ -136,11 +158,36 @@ const SentryLogLevel = Schema.Literals([
   'error',
   'fatal',
 ])
+const SentryExceptionType = Schema.Literals([
+  'Error',
+  'ArtifactsError',
+  'AuthError',
+  'GitHubError',
+  'PatchReportAssemblyError',
+  'SandboxError',
+  'SourceControlError',
+  'StorageError',
+  'TelemetryError',
+  'ValidationError',
+  'WorkflowStateError',
+])
+const StackLineNumber = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(10_000_000),
+)
+const StackColumnNumber = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(100_000),
+)
 const SentryMetricName = Schema.Literals([
   'patchplane.operation.count',
   'patchplane.operation.duration',
 ])
 const decodeTelemetryName = Schema.decodeUnknownOption(TelemetryName)
+const decodeCriticalPathStage = Schema.decodeUnknownOption(CriticalPathStage)
+const decodeCriticalPathBreadcrumbStatus = Schema.decodeUnknownOption(
+  CriticalPathBreadcrumbStatus,
+)
 const decodeTelemetryTraceId = Schema.decodeUnknownOption(TelemetryTraceId)
 const decodeTelemetryRecordId = Schema.decodeUnknownOption(TelemetryRecordId)
 const decodeTelemetryRelease = Schema.decodeUnknownOption(TelemetryRelease)
@@ -161,6 +208,10 @@ const decodeSentryLevel = Schema.decodeUnknownOption(SentryLevel)
 const decodeSentryMetricType = Schema.decodeUnknownOption(SentryMetricType)
 const decodeSentryLogLevel = Schema.decodeUnknownOption(SentryLogLevel)
 const decodeSentryMetricName = Schema.decodeUnknownOption(SentryMetricName)
+const decodeSentryExceptionType =
+  Schema.decodeUnknownOption(SentryExceptionType)
+const decodeStackLineNumber = Schema.decodeUnknownOption(StackLineNumber)
+const decodeStackColumnNumber = Schema.decodeUnknownOption(StackColumnNumber)
 const decodeFiniteNumber = Schema.decodeUnknownOption(Schema.Finite)
 const decodeInstructionAddress = Schema.decodeUnknownOption(
   Schema.String.check(
@@ -351,6 +402,12 @@ function sanitizeAttribute(
     return Option.getOrUndefined(decodeTelemetryTraceId(value))
   }
   if (HashSet.has(idAttributeNames, key)) return safeRecordId(value)
+  if (key === 'criticalPathStage' || key === 'stage') {
+    return Option.getOrUndefined(decodeCriticalPathStage(value))
+  }
+  if (key === 'status') {
+    return Option.getOrUndefined(decodeCriticalPathBreadcrumbStatus(value))
+  }
   if (HashSet.has(nameAttributeNames, key)) {
     return safeTelemetryName(value) === undefined
       ? undefined
@@ -401,7 +458,9 @@ function sanitizeAttribute(
   return undefined
 }
 
-function sanitizeAttributes(value: unknown): Record<string, SafeAttribute> {
+export function sanitizeSentryAttributes(
+  value: unknown,
+): Record<string, SafeAttribute> {
   if (!Predicate.isObject(value)) return {}
   return pipe(
     allowedAttributeNames,
@@ -416,6 +475,48 @@ function sanitizeAttributes(value: unknown): Record<string, SafeAttribute> {
     EffectArray.getSomes,
     EffectRecord.fromEntries,
   )
+}
+
+export function sanitizeSentryException(error: unknown): Error {
+  const safe = new Error('Captured PatchPlane operation failure')
+  safe.name = 'Error'
+  safe.stack = 'Error: Captured PatchPlane operation failure'
+
+  const isError = Option.liftThrowable(
+    (value: unknown) => value instanceof Error,
+  )(error)
+  if (Option.isNone(isError) || !isError.value) return safe
+
+  const errorName = Option.liftThrowable(() => (error as Error).name)()
+  safe.name = Option.getOrElse(
+    Option.flatMap(errorName, decodeSentryExceptionType),
+    () => 'Error' as const,
+  )
+  safe.stack = `${safe.name}: Captured PatchPlane operation failure`
+
+  const stack = Option.liftThrowable(() => (error as Error).stack)()
+  if (Option.isNone(stack) || typeof stack.value !== 'string') return safe
+
+  const frames = EffectString.slice(
+    0,
+    MAX_STACK_INPUT_LENGTH,
+  )(stack.value)
+    .split('\n')
+    .slice(1, MAX_COLLECTION_ENTRIES + 1)
+    .flatMap((line) => {
+      const match = EffectString.match(stackLocationPattern)(line)
+      if (Option.isNone(match)) return []
+      const lineNumber = decodeStackLineNumber(Number(match.value[1]))
+      const columnNumber = decodeStackColumnNumber(Number(match.value[2]))
+      return Option.isNone(lineNumber) || Option.isNone(columnNumber)
+        ? []
+        : [
+            `    at patchplane.frame (/:path:${lineNumber.value}:${columnNumber.value})`,
+          ]
+    })
+
+  safe.stack = [safe.stack, ...frames].join('\n')
+  return safe
 }
 
 function sanitizeStacktrace(value: Stacktrace): Stacktrace {
@@ -489,30 +590,41 @@ function sanitizeSpanDescription(value: string): string {
 
 function sanitizeBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
   const requestedCategory = safeTelemetryName(breadcrumb.category)
+  const criticalPathBreadcrumb =
+    requestedCategory === 'patchplane.critical-path'
   const patchplaneBreadcrumb =
     requestedCategory !== undefined &&
     EffectString.startsWith('patchplane.')(requestedCategory)
-  const category = patchplaneBreadcrumb
-    ? 'patchplane.event'
-    : 'sentry.automatic'
+  const category = criticalPathBreadcrumb
+    ? 'patchplane.critical-path'
+    : patchplaneBreadcrumb
+      ? 'patchplane.event'
+      : 'sentry.automatic'
   const level = Option.getOrUndefined(decodeSentryLevel(breadcrumb.level))
   const timestamp = safeFiniteNumber(breadcrumb.timestamp)
+  const attributes = sanitizeSentryAttributes(breadcrumb.data)
+  const stage = attributes.criticalPathStage ?? attributes.stage
+  const status = attributes.status
   const message =
-    typeof breadcrumb.message === 'string'
-      ? patchplaneBreadcrumb
-        ? 'patchplane.event'
-        : EffectString.includes('://')(breadcrumb.message) ||
-            EffectString.startsWith('/')(breadcrumb.message)
-          ? sanitizeTelemetryUrl(breadcrumb.message)
-          : FILTERED
-      : undefined
+    criticalPathBreadcrumb &&
+    typeof stage === 'string' &&
+    typeof status === 'string'
+      ? `${stage}.${status}`
+      : typeof breadcrumb.message === 'string'
+        ? patchplaneBreadcrumb
+          ? 'patchplane.event'
+          : EffectString.includes('://')(breadcrumb.message) ||
+              EffectString.startsWith('/')(breadcrumb.message)
+            ? sanitizeTelemetryUrl(breadcrumb.message)
+            : FILTERED
+        : undefined
 
   return {
     ...(category === undefined ? {} : { category }),
     ...(level === undefined ? {} : { level }),
     ...(timestamp === undefined ? {} : { timestamp }),
     ...(message === undefined ? {} : { message }),
-    data: sanitizeAttributes(breadcrumb.data),
+    data: attributes,
   }
 }
 
@@ -546,7 +658,7 @@ function sanitizeContexts(event: Event): Contexts | undefined {
             : { status: 'unknown' }),
         }
   const patchplane = Predicate.isObject(event.contexts?.patchplane)
-    ? sanitizeAttributes(event.contexts.patchplane)
+    ? sanitizeSentryAttributes(event.contexts.patchplane)
     : undefined
   const hasErrorContext = Predicate.isObject(
     event.contexts?.['patchplane.error'],
@@ -589,7 +701,9 @@ function sanitizeEvent(event: Event): Event {
           event.exception.values,
           EffectArray.take(MAX_COLLECTION_ENTRIES),
           EffectArray.map((entry) => {
-            const exceptionType = safeTelemetryName(entry.type)
+            const exceptionType = Option.getOrUndefined(
+              decodeSentryExceptionType(entry.type),
+            )
             const mechanismType = safeTelemetryName(entry.mechanism?.type)
             const threadId =
               typeof entry.thread_id === 'number' ? entry.thread_id : undefined
@@ -606,7 +720,7 @@ function sanitizeEvent(event: Event): Event {
                       : {}),
                   }
             return {
-              ...(exceptionType === undefined ? {} : { type: 'Error' }),
+              type: exceptionType ?? 'Error',
               value: 'Captured PatchPlane operation failure',
               ...(threadId === undefined ? {} : { thread_id: threadId }),
               ...(mechanism === undefined ? {} : { mechanism }),
@@ -661,7 +775,7 @@ function sanitizeEvent(event: Event): Event {
     ...(exception === undefined ? {} : { exception }),
     ...(breadcrumbs === undefined ? {} : { breadcrumbs }),
     ...(contexts === undefined ? {} : { contexts }),
-    tags: sanitizeAttributes(event.tags),
+    tags: sanitizeSentryAttributes(event.tags),
     ...(spans === undefined ? {} : { spans }),
     ...(event.message === undefined
       ? {}
@@ -726,7 +840,7 @@ function sanitizeLog(log: Log): Log | null {
     level,
     message: 'patchplane.operational-event',
     ...(severityNumber === undefined ? {} : { severityNumber }),
-    attributes: sanitizeAttributes(log.attributes),
+    attributes: sanitizeSentryAttributes(log.attributes),
   }
 }
 
@@ -746,7 +860,7 @@ function sanitizeMetric(metric: Metric): Metric | null {
     name,
     value,
     type,
-    attributes: sanitizeAttributes(metric.attributes),
+    attributes: sanitizeSentryAttributes(metric.attributes),
   }
 }
 
@@ -775,7 +889,7 @@ function sanitizeSpan(span: SpanJSON): SpanJSON {
   )
   const segmentId = Option.getOrUndefined(decodeSentrySpanId(span.segment_id))
   const data = EffectRecord.filter(
-    sanitizeAttributes(span.data),
+    sanitizeSentryAttributes(span.data),
     (value): value is string | number | boolean => value !== null,
   )
   return {

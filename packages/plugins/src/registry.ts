@@ -33,15 +33,18 @@ export const patchPlanePlugins = {
   convex: {
     id: 'convex',
     name: 'Convex storage',
-    description: 'Persists workflow starts, sandbox executions, and runtime events in Convex.',
-    layerExport: '@patchplane/plugins/convex/storage-plugin#ConvexStoragePlugin.layer',
+    description:
+      'Persists workflow starts, sandbox executions, and runtime events in Convex.',
+    layerExport:
+      '@patchplane/plugins/convex/storage-plugin#ConvexStoragePlugin.layer',
     provides: ['StorageService'],
     surfaces: ['app', 'githubWebhook'],
     env: [
       {
         name: 'CONVEX_URL',
         required: true,
-        description: 'Convex deployment URL for server-side calls. VITE_CONVEX_URL is accepted as fallback by the plugin.',
+        description:
+          'Convex deployment URL for server-side calls. VITE_CONVEX_URL is accepted as fallback by the plugin.',
       },
       {
         name: 'VITE_CONVEX_URL',
@@ -52,15 +55,18 @@ export const patchPlanePlugins = {
         name: 'PATCHPLANE_SYSTEM_INGESTION_SECRET',
         required: true,
         secret: true,
-        description: 'Shared secret required for external workflow ingestion and server-to-Convex system writes.',
+        description:
+          'Shared secret required for external workflow ingestion and server-to-Convex system writes.',
       },
     ],
   },
   workos: {
     id: 'workos',
     name: 'WorkOS auth',
-    description: 'Authenticates users and maps WorkOS users/organizations into PatchPlane actors/workspaces.',
-    layerExport: '@patchplane/plugins/workos/auth-plugin#WorkOSAuthPlugin.layer',
+    description:
+      'Authenticates users and maps WorkOS users/organizations into PatchPlane actors/workspaces.',
+    layerExport:
+      '@patchplane/plugins/workos/auth-plugin#WorkOSAuthPlugin.layer',
     provides: ['AuthService'],
     surfaces: ['app'],
     env: [
@@ -73,18 +79,21 @@ export const patchPlanePlugins = {
       {
         name: 'WORKOS_CLIENT_ID',
         required: true,
-        description: 'WorkOS/AuthKit client id. Also used by Convex auth.config.ts.',
+        description:
+          'WorkOS/AuthKit client id. Also used by Convex auth.config.ts.',
       },
       {
         name: 'WORKOS_COOKIE_PASSWORD',
         required: true,
         secret: true,
-        description: 'AuthKit cookie encryption password. Must be at least 32 characters.',
+        description:
+          'AuthKit cookie encryption password. Must be at least 32 characters.',
       },
       {
         name: 'WORKOS_REDIRECT_URI',
         required: true,
-        description: 'AuthKit OAuth callback URL, for example http://localhost:3000/api/auth/callback.',
+        description:
+          'AuthKit OAuth callback URL, for example http://localhost:3000/api/auth/callback.',
       },
       {
         name: 'WORKOS_API_HOSTNAME',
@@ -94,15 +103,18 @@ export const patchPlanePlugins = {
       {
         name: 'PATCHPLANE_WORKOS_ORGANIZATION_ID',
         required: false,
-        description: 'Optional organization id used as a current alpha workspace routing fallback.',
+        description:
+          'Optional organization id used as a current alpha workspace routing fallback.',
       },
     ],
   },
   github: {
     id: 'github',
     name: 'GitHub provider',
-    description: 'Verifies GitHub webhooks and performs source-control operations through a GitHub App.',
-    layerExport: '@patchplane/plugins/github/provider-plugin#GitHubProviderPlugin.layer',
+    description:
+      'Verifies GitHub webhooks and performs source-control operations through a GitHub App.',
+    layerExport:
+      '@patchplane/plugins/github/provider-plugin#GitHubProviderPlugin.layer',
     provides: ['SourceControlService', 'GitHubWebhookService'],
     dependsOn: ['convex'],
     surfaces: ['githubWebhook'],
@@ -116,13 +128,15 @@ export const patchPlanePlugins = {
         name: 'GITHUB_PRIVATE_KEY',
         required: true,
         secret: true,
-        description: 'GitHub App private key. Literal \\n sequences are accepted and normalized by the plugin.',
+        description:
+          'GitHub App private key. Literal \\n sequences are accepted and normalized by the plugin.',
       },
       {
         name: 'GITHUB_WEBHOOK_SECRET',
         required: true,
         secret: true,
-        description: 'GitHub webhook secret used to verify x-hub-signature-256.',
+        description:
+          'GitHub webhook secret used to verify x-hub-signature-256.',
       },
       {
         name: 'GITHUB_BASE_URL',
@@ -132,20 +146,24 @@ export const patchPlanePlugins = {
       {
         name: 'PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES',
         required: true,
-        description: 'Comma-separated alpha allowlist, e.g. owner/repo,another/repo.',
+        description:
+          'Comma-separated alpha allowlist, e.g. owner/repo,another/repo.',
       },
       {
         name: 'PATCHPLANE_GITHUB_WORKSPACE_ID',
         required: false,
-        description: 'Optional PatchPlane workspace id for GitHub webhook intake. Alternative: PATCHPLANE_WORKOS_ORGANIZATION_ID.',
+        description:
+          'Optional PatchPlane workspace id for GitHub webhook intake. Alternative: PATCHPLANE_WORKOS_ORGANIZATION_ID.',
       },
     ],
   },
   daytona: {
     id: 'daytona',
     name: 'Daytona sandbox',
-    description: 'Runs repository commands or Pi coding-agent runs inside Daytona sandboxes.',
-    layerExport: '@patchplane/plugins/daytona/sandbox-plugin#DaytonaSandboxPlugin.layer',
+    description:
+      'Runs repository commands or Pi coding-agent runs inside Daytona sandboxes.',
+    layerExport:
+      '@patchplane/plugins/daytona/sandbox-plugin#DaytonaSandboxPlugin.layer',
     provides: ['SandboxService'],
     surfaces: ['githubWebhook'],
     env: [
@@ -168,39 +186,46 @@ export const patchPlanePlugins = {
       {
         name: 'DAYTONA_NETWORK_BLOCK_ALL',
         required: false,
-        description: 'Optional sandbox network posture. When true, blocks all outbound network access unless Daytona allow-list behavior permits exceptions.',
+        description:
+          'Optional sandbox network posture. When true, blocks all outbound network access unless Daytona allow-list behavior permits exceptions.',
       },
       {
         name: 'DAYTONA_NETWORK_ALLOW_LIST',
         required: false,
-        description: 'Optional comma-separated CIDR allow-list recorded in normalized sandbox policy metadata.',
+        description:
+          'Optional comma-separated CIDR allow-list recorded in normalized sandbox policy metadata.',
       },
       {
         name: 'DAYTONA_RESOURCE_CPU',
         required: false,
-        description: 'Optional requested sandbox CPU count recorded in normalized sandbox policy metadata.',
+        description:
+          'Optional requested sandbox CPU count recorded in normalized sandbox policy metadata.',
       },
       {
         name: 'DAYTONA_RESOURCE_MEMORY',
         required: false,
-        description: 'Optional requested sandbox memory in GiB recorded in normalized sandbox policy metadata.',
+        description:
+          'Optional requested sandbox memory in GiB recorded in normalized sandbox policy metadata.',
       },
       {
         name: 'DAYTONA_RESOURCE_DISK',
         required: false,
-        description: 'Optional requested sandbox disk in GiB recorded in normalized sandbox policy metadata.',
+        description:
+          'Optional requested sandbox disk in GiB recorded in normalized sandbox policy metadata.',
       },
       {
         name: 'DAYTONA_RETAIN_SANDBOXES',
         required: false,
         defaultValue: 'false',
-        description: 'Set to true only for manual debugging. Alpha workflow sandboxes are ephemeral by default.',
+        description:
+          'Set to true only for manual debugging. Alpha workflow sandboxes are ephemeral by default.',
       },
       {
         name: 'PATCHPLANE_PI_PROVIDER',
         required: false,
         defaultValue: 'openai',
-        description: 'Optional Pi provider for Daytona Pi mode. Cloudflare AI Gateway is selected automatically when its required env vars are configured.',
+        description:
+          'Optional Pi provider for Daytona Pi mode. Cloudflare AI Gateway is selected automatically when its required env vars are configured.',
       },
       {
         name: 'PATCHPLANE_PI_MODEL',
@@ -218,55 +243,65 @@ export const patchPlanePlugins = {
         name: 'PATCHPLANE_PI_MODE',
         required: false,
         defaultValue: 'json',
-        description: 'Optional Pi execution mode. json is the one-shot alpha default; rpc enables experimental remote steering/follow-up/control.',
+        description:
+          'Optional Pi execution mode. json is the one-shot alpha default; rpc enables experimental remote steering/follow-up/control.',
       },
       {
         name: 'PATCHPLANE_AI_GATEWAY_ID',
         required: false,
-        description: 'Optional Cloudflare AI Gateway id/slug. Mapped to CLOUDFLARE_GATEWAY_ID inside Pi sandboxes when Cloudflare AI Gateway is selected.',
+        description:
+          'Optional Cloudflare AI Gateway id/slug. Mapped to CLOUDFLARE_GATEWAY_ID inside Pi sandboxes when Cloudflare AI Gateway is selected.',
       },
       {
         name: 'CLOUDFLARE_API_KEY',
         required: false,
         secret: true,
-        description: 'Optional Cloudflare AI Gateway API key for Pi sandbox model access.',
+        description:
+          'Optional Cloudflare AI Gateway API key for Pi sandbox model access.',
       },
     ],
   },
   cloudflareR2: {
     id: 'cloudflare-r2',
     name: 'Cloudflare R2 artifacts',
-    description: 'Stores raw evidence artifacts such as logs, diffs, reports, screenshots, and trust-report JSON in Cloudflare R2.',
-    layerExport: '@patchplane/plugins/cloudflare/R2ArtifactsPlugin#CloudflareR2ArtifactsPlugin.layerFromBucket',
+    description:
+      'Stores raw evidence artifacts such as logs, diffs, reports, screenshots, and trust-report JSON in Cloudflare R2.',
+    layerExport:
+      '@patchplane/plugins/cloudflare/R2ArtifactsPlugin#CloudflareR2ArtifactsPlugin.layerFromBucket',
     provides: ['ArtifactsService'],
     surfaces: ['app', 'githubWebhook'],
     env: [
       {
         name: 'CLOUDFLARE_ACCOUNT_ID',
         required: true,
-        description: 'Cloudflare account id that owns the evidence artifact R2 bucket.',
+        description:
+          'Cloudflare account id that owns the evidence artifact R2 bucket.',
       },
       {
         name: 'PATCHPLANE_EVIDENCE_R2_BUCKET',
         required: true,
-        description: 'Cloudflare R2 bucket name for raw PatchPlane evidence artifacts.',
+        description:
+          'Cloudflare R2 bucket name for raw PatchPlane evidence artifacts.',
       },
       {
         name: 'PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID',
         required: true,
         secret: true,
-        description: 'R2/S3 access key id used for signed artifact reads and direct R2 API operations. CLOUDFLARE_ACCESS_KEY_ID is accepted as fallback.',
+        description:
+          'R2/S3 access key id used for signed artifact reads and direct R2 API operations. CLOUDFLARE_ACCESS_KEY_ID is accepted as fallback.',
       },
       {
         name: 'PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY',
         required: true,
         secret: true,
-        description: 'R2/S3 secret access key used for signed artifact reads and direct R2 API operations. CLOUDFLARE_SECRET_ACCESS_KEY is accepted as fallback.',
+        description:
+          'R2/S3 secret access key used for signed artifact reads and direct R2 API operations. CLOUDFLARE_SECRET_ACCESS_KEY is accepted as fallback.',
       },
       {
         name: 'CLOUDFLARE_S3_API_ENDPOINT',
         required: false,
-        description: 'Optional Cloudflare R2 S3 API endpoint override. Defaults to https://<accountId>.r2.cloudflarestorage.com.',
+        description:
+          'Optional Cloudflare R2 S3 API endpoint override. Defaults to https://<accountId>.r2.cloudflarestorage.com.',
       },
       {
         name: 'PATCHPLANE_EVIDENCE_R2_SIGNED_URL_EXPIRES_SECONDS',
@@ -278,15 +313,18 @@ export const patchPlanePlugins = {
         name: 'PATCHPLANE_EVIDENCE_MAX_ARTIFACT_BYTES',
         required: false,
         defaultValue: String(10 * 1024 * 1024),
-        description: 'Maximum raw artifact payload size accepted by the R2 artifacts plugin.',
+        description:
+          'Maximum raw artifact payload size accepted by the R2 artifacts plugin.',
       },
     ],
   },
   cloudflareAiGateway: {
     id: 'cloudflare-ai-gateway',
     name: 'Cloudflare AI Gateway',
-    description: 'Provides model gateway configuration for Pi sandbox model access through Cloudflare AI Gateway.',
-    layerExport: '@patchplane/plugins/sandbox-runtime/pi/config#piRuntimeEnvironment',
+    description:
+      'Provides model gateway configuration for Pi sandbox model access through Cloudflare AI Gateway.',
+    layerExport:
+      '@patchplane/plugins/sandbox-runtime/pi/config#piRuntimeEnvironment',
     provides: ['ModelGatewayService'],
     surfaces: ['githubWebhook'],
     env: [
@@ -298,27 +336,32 @@ export const patchPlanePlugins = {
       {
         name: 'PATCHPLANE_AI_GATEWAY_ID',
         required: true,
-        description: 'Cloudflare AI Gateway id/slug provisioned by PatchPlane infra. CLOUDFLARE_GATEWAY_ID is accepted as fallback by runtime code.',
+        description:
+          'Cloudflare AI Gateway id/slug provisioned by PatchPlane infra. CLOUDFLARE_GATEWAY_ID is accepted as fallback by runtime code.',
       },
       {
         name: 'CLOUDFLARE_API_KEY',
         required: true,
         secret: true,
-        description: 'Cloudflare API key/token used by Pi sandbox model access when PATCHPLANE_PI_PROVIDER=cloudflare-ai-gateway.',
+        description:
+          'Cloudflare API key/token used by Pi sandbox model access when PATCHPLANE_PI_PROVIDER=cloudflare-ai-gateway.',
       },
       {
         name: 'PATCHPLANE_PI_PROVIDER',
         required: false,
         defaultValue: 'cloudflare-ai-gateway',
-        description: 'Pi provider value for routing model access through Cloudflare AI Gateway.',
+        description:
+          'Pi provider value for routing model access through Cloudflare AI Gateway.',
       },
     ],
   },
   observability: {
     id: 'observability',
     name: 'Local Effect observability',
-    description: 'Writes local Effect logs to the console and .patchplane JSONL log file.',
-    layerExport: '@patchplane/plugins/observability/local-plugin#LocalObservabilityPlugin.layer',
+    description:
+      'Writes local Effect logs to the console and .patchplane JSONL log file.',
+    layerExport:
+      '@patchplane/plugins/observability/local-plugin#LocalObservabilityPlugin.layer',
     provides: ['LocalEffectLogs'],
     surfaces: ['app', 'githubWebhook'],
     env: [],
@@ -326,8 +369,10 @@ export const patchPlanePlugins = {
   sentry: {
     id: 'sentry',
     name: 'Sentry telemetry',
-    description: 'Captures operational errors, Effect logs, spans, and metrics in Sentry when configured.',
-    layerExport: '@patchplane/plugins/sentry/telemetry-plugin#SentryTelemetryPlugin.layer',
+    description:
+      'Captures sanitized operational errors, explicit telemetry events, and spans in Sentry when configured.',
+    layerExport:
+      '@patchplane/plugins/sentry/telemetry-plugin#SentryTelemetryPlugin.layer',
     provides: ['TelemetryService'],
     surfaces: ['app', 'githubWebhook'],
     env: [
@@ -335,55 +380,64 @@ export const patchPlanePlugins = {
         name: 'SENTRY_DSN',
         required: false,
         secret: true,
-        description: 'Optional Sentry DSN for the Effect-managed telemetry runtime. When omitted, the telemetry plugin runs as a no-op service.',
+        description:
+          'Optional Sentry DSN for the Effect-managed telemetry runtime. When omitted, the telemetry plugin runs as a no-op service.',
       },
       {
         name: 'CLOUDFLARE_SENTRY_DSN',
         required: false,
         secret: true,
-        description: 'Optional dedicated Sentry DSN for request-scoped Cloudflare Worker error capture.',
+        description:
+          'Optional dedicated Sentry DSN for request-scoped Cloudflare Worker error capture.',
       },
       {
         name: 'TANSTACK_SENTRY_DSN',
         required: false,
         secret: true,
-        description: 'Optional dedicated Sentry DSN for TanStack Start browser errors and route tracing.',
+        description:
+          'Optional dedicated Sentry DSN for TanStack Start browser errors and route tracing.',
       },
       {
         name: 'SENTRY_ENABLED',
         required: false,
         defaultValue: 'true',
-        description: 'Set to false to disable Sentry telemetry even when SENTRY_DSN is present.',
+        description:
+          'Set to false to disable Sentry telemetry even when SENTRY_DSN is present.',
       },
       {
         name: 'SENTRY_ENVIRONMENT',
         required: false,
         defaultValue: 'development',
-        description: 'Sentry environment name. PatchPlane currently supports development and production.',
+        description:
+          'Sentry environment name. PatchPlane currently supports development and production.',
       },
       {
         name: 'SENTRY_LOG_LEVEL',
         required: false,
         defaultValue: 'Debug in development, Warn in production',
-        description: 'Minimum Effect log level for runtime observability. Accepted values include Debug, Info, Warn, Error, Fatal.',
+        description:
+          'Minimum Effect log level for runtime observability. Accepted values include Debug, Info, Warn, Error, Fatal.',
       },
       {
         name: 'SENTRY_ENABLE_LOGS',
         required: false,
         defaultValue: 'false',
-        description: 'Whether Effect logs are forwarded to Sentry logs. Defaults off to keep routine operational events local unless explicitly enabled.',
+        description:
+          'Whether explicitly allowlisted TelemetryService events use Sentry logs. Routine Effect logs remain local.',
       },
       {
         name: 'SENTRY_ENABLE_TRACING',
         required: false,
         defaultValue: 'true',
-        description: 'Whether Effect spans are registered with the Sentry Effect tracer.',
+        description:
+          'Whether Effect spans are registered with the Sentry Effect tracer.',
       },
       {
         name: 'SENTRY_ENABLE_METRICS',
         required: false,
         defaultValue: 'false in development, true in production',
-        description: 'Whether Effect metrics are periodically flushed to Sentry. Defaults off in development to avoid noisy telemetry.',
+        description:
+          'Whether explicitly allowlisted Sentry metrics are enabled. Routine Effect metrics remain local.',
       },
       {
         name: 'SENTRY_TRACES_SAMPLE_RATE',
@@ -400,19 +454,29 @@ export type PatchPlanePluginId = keyof typeof patchPlanePlugins
 export const patchPlaneDefaultSurfaces = {
   app: ['convex', 'workos', 'observability', 'sentry'],
   githubWebhook: ['github', 'convex', 'daytona', 'observability', 'sentry'],
-} as const satisfies Record<PatchPlaneRuntimeSurface, readonly PatchPlanePluginId[]>
+} as const satisfies Record<
+  PatchPlaneRuntimeSurface,
+  readonly PatchPlanePluginId[]
+>
 
-export function getPatchPlanePluginsForSurface(surface: PatchPlaneRuntimeSurface) {
+export function getPatchPlanePluginsForSurface(
+  surface: PatchPlaneRuntimeSurface,
+) {
   return patchPlaneDefaultSurfaces[surface].map((id) => patchPlanePlugins[id])
 }
 
-export function getPatchPlanePlugin(id: string): PatchPlanePluginMetadata | undefined {
-  return (Object.values(patchPlanePlugins) as readonly PatchPlanePluginMetadata[])
-    .find((plugin) => plugin.id === id)
+export function getPatchPlanePlugin(
+  id: string,
+): PatchPlanePluginMetadata | undefined {
+  return (
+    Object.values(patchPlanePlugins) as readonly PatchPlanePluginMetadata[]
+  ).find((plugin) => plugin.id === id)
 }
 
 /** Returns the de-duplicated environment variable requirements for plugin ids. */
-export function getPatchPlaneEnvVars(pluginIds: readonly string[]): PatchPlanePluginEnvVar[] {
+export function getPatchPlaneEnvVars(
+  pluginIds: readonly string[],
+): PatchPlanePluginEnvVar[] {
   const env = new Map<string, PatchPlanePluginEnvVar>()
 
   for (const id of pluginIds) {
@@ -433,16 +497,19 @@ export function getPatchPlaneEnvVars(pluginIds: readonly string[]): PatchPlanePl
         required: existing.required || variable.required,
         secret: existing.secret || variable.secret,
         defaultValue: existing.defaultValue ?? variable.defaultValue,
-        description: existing.description === variable.description
-          ? existing.description
-          : `${existing.description} ${variable.description}`,
+        description:
+          existing.description === variable.description
+            ? existing.description
+            : `${existing.description} ${variable.description}`,
       })
     }
   }
 
   const sorted: PatchPlanePluginEnvVar[] = []
   for (const variable of env.values()) {
-    const index = sorted.findIndex((item) => variable.name.localeCompare(item.name) < 0)
+    const index = sorted.findIndex(
+      (item) => variable.name.localeCompare(item.name) < 0,
+    )
     if (index === -1) {
       sorted.push(variable)
     } else {

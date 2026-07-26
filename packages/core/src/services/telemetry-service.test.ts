@@ -1,7 +1,9 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, it } from '@effect/vitest'
 import { Cause, Effect, Layer } from 'effect'
 import {
   captureTelemetryCause,
+  makeCriticalPathBreadcrumbStatus,
+  makeCriticalPathStage,
   TelemetryService,
   telemetryAttributes,
   telemetryContextAttributes,
@@ -10,7 +12,7 @@ import {
 
 describe('telemetry-service helpers', () => {
   it('keeps canonical telemetry context fields and filters undefined attributes', () => {
-    expect(
+    assert.deepStrictEqual(
       telemetryContextAttributes({
         traceId: 'trace-1',
         workflowRunId: 'run-1',
@@ -18,27 +20,37 @@ describe('telemetry-service helpers', () => {
         pluginName: 'github',
         operation: 'github.verifyWebhook',
       }),
-    ).toEqual({
-      traceId: 'trace-1',
-      workflowRunId: 'run-1',
-      runtimeSessionId: 'session-1',
-      pluginName: 'github',
-      operation: 'github.verifyWebhook',
-    })
+      {
+        traceId: 'trace-1',
+        workflowRunId: 'run-1',
+        runtimeSessionId: 'session-1',
+        pluginName: 'github',
+        operation: 'github.verifyWebhook',
+      },
+    )
 
-    expect(
+    assert.deepStrictEqual(
       telemetryAttributes(
         { traceId: 'trace-1', operation: 'test.operation' },
-        { kept: 'yes', skipped: undefined, count: 1, ok: true, none: null },
+        {
+          traceId: 'spoofed-trace',
+          operation: 'spoofed.operation',
+          kept: 'yes',
+          skipped: undefined,
+          count: 1,
+          ok: true,
+          none: null,
+        },
       ),
-    ).toEqual({
-      traceId: 'trace-1',
-      operation: 'test.operation',
-      kept: 'yes',
-      count: 1,
-      ok: true,
-      none: null,
-    })
+      {
+        traceId: 'trace-1',
+        operation: 'test.operation',
+        kept: 'yes',
+        count: 1,
+        ok: true,
+        none: null,
+      },
+    )
   })
 
   it.effect('withTelemetrySpan preserves the wrapped effect result', () =>
@@ -54,40 +66,60 @@ describe('telemetry-service helpers', () => {
         Effect.succeed('ok'),
       )
 
-      expect(result).toBe('ok')
+      assert.strictEqual(result, 'ok')
     }),
   )
 
-  it.effect('captureTelemetryCause calls TelemetryService.captureError with canonical context', () => {
-    const captured: unknown[] = []
-    const TestTelemetryLayer = Layer.succeed(TelemetryService, TelemetryService.of({
-      recordEvent: () => Effect.void,
-      captureError: (input) => Effect.sync(() => captured.push(input)),
-      withSpan: (_input, effect) => effect,
-    }))
+  it.effect(
+    'captureTelemetryCause calls TelemetryService.captureError with canonical context',
+    () => {
+      const captured: unknown[] = []
+      const TestTelemetryLayer = Layer.succeed(
+        TelemetryService,
+        TelemetryService.of({
+          recordEvent: () => Effect.void,
+          addBreadcrumb: (input) => Effect.sync(() => captured.push(input)),
+          withBreadcrumbScope: (effect) => effect,
+          captureError: (input) => Effect.sync(() => captured.push(input)),
+          withSpan: (_input, effect) => effect,
+        }),
+      )
 
-    return Effect.gen(function* () {
-      yield* captureTelemetryCause({
-        traceId: 'trace-1',
-        workflowRunId: 'run-1',
-        runtimeSessionId: 'session-1',
-        pluginName: 'test',
-        operation: 'test.operation',
-        cause: Cause.fail(new Error('boom')),
-        message: 'test failed',
-        attributes: { extra: 'value' },
-      })
+      return Effect.gen(function* () {
+        const telemetry = yield* TelemetryService
+        yield* telemetry.addBreadcrumb({
+          stage: makeCriticalPathStage('candidate-frozen'),
+          status: makeCriticalPathBreadcrumbStatus('succeeded'),
+          traceId: 'trace-1',
+        })
+        yield* captureTelemetryCause({
+          traceId: 'trace-1',
+          workflowRunId: 'run-1',
+          runtimeSessionId: 'session-1',
+          pluginName: 'test',
+          operation: 'test.operation',
+          cause: Cause.fail(new Error('boom')),
+          message: 'test failed',
+          attributes: { extra: 'value' },
+        })
 
-      expect(captured).toHaveLength(1)
-      expect(captured[0]).toMatchObject({
-        traceId: 'trace-1',
-        workflowRunId: 'run-1',
-        runtimeSessionId: 'session-1',
-        pluginName: 'test',
-        operation: 'test.operation',
-        message: 'test failed',
-        attributes: { extra: 'value' },
-      })
-    }).pipe(Effect.provide(TestTelemetryLayer))
-  })
+        assert.strictEqual(captured.length, 2)
+        assert.deepStrictEqual(captured[0], {
+          stage: 'candidate-frozen',
+          status: 'succeeded',
+          traceId: 'trace-1',
+        })
+        assert.deepStrictEqual(captured[1], {
+          traceId: 'trace-1',
+          workflowRunId: 'run-1',
+          runtimeSessionId: 'session-1',
+          pluginName: 'test',
+          operation: 'test.operation',
+          error: new Error('boom'),
+          message: 'test failed',
+          attributes: { extra: 'value' },
+        })
+      }).pipe(Effect.provide(TestTelemetryLayer))
+    },
+  )
 })

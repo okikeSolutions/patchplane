@@ -8,13 +8,17 @@ import type {
 } from '@sentry/core'
 import { Array as EffectArray } from 'effect'
 import {
+  makeSentryDataCollection,
+  sanitizeSentryAttributes,
   sanitizeSentryBreadcrumb,
   sanitizeSentryEvent,
+  sanitizeSentryException,
   sanitizeSentryLog,
   sanitizeSentryMetric,
   sanitizeSentrySpan,
   sanitizeSentryTransaction,
   sanitizeTelemetryUrl,
+  sentryMaxBreadcrumbs,
   sentryTelemetryPolicyMarker,
 } from './sanitize'
 
@@ -34,6 +38,90 @@ function assertExcludesSentinel(value: unknown): void {
 }
 
 describe('Sentry telemetry sanitization', () => {
+  it('disables automatic sensitive data collection and bounds breadcrumbs', () => {
+    const first = makeSentryDataCollection()
+    const second = makeSentryDataCollection()
+
+    assert.notStrictEqual(first, second)
+    assert.notStrictEqual(first.httpHeaders, second.httpHeaders)
+    assert.notStrictEqual(first.httpBodies, second.httpBodies)
+    assert.notStrictEqual(first.genAI, second.genAI)
+    assert.deepStrictEqual(first, {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      queryParams: false,
+      genAI: { inputs: false, outputs: false },
+      stackFrameVariables: false,
+      frameContextLines: 0,
+    })
+    assert.equal(sentryMaxBreadcrumbs, 64)
+  })
+
+  it('sanitizes attributes and exceptions before they enter the Sentry SDK', () => {
+    const error = new Error(`provider failure ${sentinel}`)
+    error.name = `Sensitive${sentinel}`
+    error.stack = [
+      `${error.name}: ${error.message}`,
+      `    at privateFunction (/Users/private/${sentinel}/source.ts:42:7)`,
+      `    at token=${sentinel}`,
+    ].join('\n')
+
+    const safe = sanitizeSentryException(error)
+
+    assert.notStrictEqual(safe, error)
+    assert.strictEqual(safe.name, 'Error')
+    assert.strictEqual(safe.message, 'Captured PatchPlane operation failure')
+    assert.strictEqual(
+      safe.stack,
+      [
+        'Error: Captured PatchPlane operation failure',
+        '    at patchplane.frame (/:path:42:7)',
+      ].join('\n'),
+    )
+    assert.deepStrictEqual(
+      sanitizeSentryAttributes({
+        traceId: telemetryTraceId,
+        operation: 'runtime.execute',
+        prompt: sentinel,
+      }),
+      { traceId: telemetryTraceId, operation: 'patchplane.operation' },
+    )
+    assertExcludesSentinel([safe.name, safe.message, safe.stack])
+
+    const typed = new Error(sentinel)
+    typed.name = 'AuthError'
+    typed.stack = `AuthError: ${sentinel}\n    at auth (/private:12:4)`
+    assert.strictEqual(sanitizeSentryException(typed).name, 'AuthError')
+    assert.strictEqual(
+      sanitizeSentryEvent({
+        type: undefined,
+        exception: { values: [{ type: 'AuthError', value: sentinel }] },
+      }).exception?.values?.[0]?.type,
+      'AuthError',
+    )
+
+    const oversized = new Error(sentinel)
+    oversized.stack = `${'9'.repeat(40_000)}:${'8'.repeat(200)}:${'7'.repeat(200)}`
+    const bounded = sanitizeSentryException(oversized)
+    assert.strictEqual(
+      bounded.stack,
+      'Error: Captured PatchPlane operation failure',
+    )
+    assert.ok(String(bounded.stack).length <= 32_768)
+
+    const hostile = new Proxy(new Error(sentinel), {
+      getPrototypeOf: () => {
+        throw new Error(sentinel)
+      },
+    })
+    assert.strictEqual(
+      sanitizeSentryException(hostile).message,
+      'Captured PatchPlane operation failure',
+    )
+  })
+
   it('removes sensitive event content while retaining safe correlation metadata', () => {
     const event = sanitizeSentryEvent({
       type: undefined,
@@ -164,7 +252,6 @@ describe('Sentry telemetry sanitization', () => {
 
     assert.deepStrictEqual(event.tags, {
       operation: 'patchplane.operation',
-      status: 'patchplane.status',
     })
     assert.deepStrictEqual(event.contexts?.patchplane, {
       operation: 'patchplane.operation',
@@ -215,6 +302,15 @@ describe('Sentry telemetry sanitization', () => {
   })
 
   it('keeps bounded PatchPlane breadcrumbs and filters automatic breadcrumb messages', () => {
+    const criticalPath = sanitizeSentryBreadcrumb({
+      category: 'patchplane.critical-path',
+      message: sentinel,
+      data: {
+        criticalPathStage: 'verification',
+        status: 'failed',
+        prompt: sentinel,
+      },
+    })
     const patchplane = sanitizeSentryBreadcrumb({
       category: 'patchplane.workflow',
       message: 'candidate.frozen',
@@ -230,6 +326,11 @@ describe('Sentry telemetry sanitization', () => {
       data: { output: sentinel },
     })
 
+    assert.deepStrictEqual(criticalPath, {
+      category: 'patchplane.critical-path',
+      message: 'verification.failed',
+      data: { criticalPathStage: 'verification', status: 'failed' },
+    })
     assert.deepStrictEqual(patchplane, {
       category: 'patchplane.event',
       message: 'patchplane.event',
@@ -240,7 +341,7 @@ describe('Sentry telemetry sanitization', () => {
       message: '[Filtered]',
       data: {},
     })
-    assertExcludesSentinel([patchplane, automatic])
+    assertExcludesSentinel([criticalPath, patchplane, automatic])
   })
 
   it('drops unmarked logs and allowlists marked operational log attributes', () => {

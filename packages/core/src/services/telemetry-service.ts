@@ -1,6 +1,23 @@
+import type {
+  CriticalPathBreadcrumbStatus,
+  CriticalPathStage,
+} from '@patchplane/domain/telemetry'
 import { Cause, Context, Effect } from 'effect'
 
-export type TelemetrySeverity = 'trace' | 'debug' | 'info' | 'warning' | 'error' | 'fatal'
+export {
+  CriticalPathBreadcrumbStatus,
+  CriticalPathStage,
+  makeCriticalPathBreadcrumbStatus,
+  makeCriticalPathStage,
+} from '@patchplane/domain/telemetry'
+
+export type TelemetrySeverity =
+  | 'trace'
+  | 'debug'
+  | 'info'
+  | 'warning'
+  | 'error'
+  | 'fatal'
 
 export interface TelemetryContextFields {
   /** End-to-end correlation id for an incoming request or workflow trigger. */
@@ -23,9 +40,12 @@ export const telemetryContextFieldNames = [
   'operation',
 ] as const satisfies readonly (keyof TelemetryContextFields)[]
 
-export type TelemetryContextFieldName = typeof telemetryContextFieldNames[number]
+export type TelemetryContextFieldName =
+  (typeof telemetryContextFieldNames)[number]
 
-export type TelemetryAttributes = Readonly<Record<string, string | number | boolean | null | undefined>>
+export type TelemetryAttributes = Readonly<
+  Record<string, string | number | boolean | null | undefined>
+>
 
 export function telemetryContextAttributes(
   input: TelemetryContextFields,
@@ -44,23 +64,26 @@ export function telemetryAttributes(
   context: TelemetryContextFields,
   attributes?: TelemetryAttributes,
 ): Record<string, string | number | boolean | null> {
-  const output: Record<string, string | number | boolean | null> = {
-    ...telemetryContextAttributes(context),
-  }
+  const output: Record<string, string | number | boolean | null> = {}
 
   if (attributes !== undefined) {
     for (const [key, value] of Object.entries(attributes)) {
-      if (value !== undefined) {
+      if (
+        value !== undefined &&
+        !(telemetryContextFieldNames as readonly string[]).includes(key)
+      ) {
         output[key] = value
       }
     }
   }
 
-  return output
+  return Object.assign(output, telemetryContextAttributes(context))
 }
 
 export function withTelemetryContext<A, E, R>(
-  context: TelemetryContextFields & { readonly attributes?: TelemetryAttributes | undefined },
+  context: TelemetryContextFields & {
+    readonly attributes?: TelemetryAttributes | undefined
+  },
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> {
   const attributes = telemetryAttributes(context, context.attributes)
@@ -75,6 +98,11 @@ export interface RecordTelemetryEventInput extends TelemetryContextFields {
   readonly severity?: TelemetrySeverity | undefined
   readonly message?: string | undefined
   readonly attributes?: TelemetryAttributes | undefined
+}
+
+export interface RecordCriticalPathBreadcrumbInput extends TelemetryContextFields {
+  readonly stage: CriticalPathStage
+  readonly status: CriticalPathBreadcrumbStatus
 }
 
 export interface CaptureTelemetryErrorInput extends TelemetryContextFields {
@@ -118,21 +146,30 @@ export function captureTelemetryCause(
         error: Cause.squash(input.cause),
         message: input.message,
         attributes: input.attributes,
-      })
+      }),
     ),
   )
 }
 
 /** Operational telemetry boundary. Implementations must not become product truth/provenance storage. */
-export class TelemetryService extends Context.Service<TelemetryService, {
-  readonly recordEvent: (
-    input: RecordTelemetryEventInput,
-  ) => Effect.Effect<void>
-  readonly captureError: (
-    input: CaptureTelemetryErrorInput,
-  ) => Effect.Effect<void>
-  readonly withSpan: <A, E, R>(
-    input: TelemetrySpanInput,
-    effect: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E, R>
-}>()('@patchplane/core/services/TelemetryService') {}
+export class TelemetryService extends Context.Service<
+  TelemetryService,
+  {
+    readonly recordEvent: (
+      input: RecordTelemetryEventInput,
+    ) => Effect.Effect<void>
+    readonly addBreadcrumb: (
+      input: RecordCriticalPathBreadcrumbInput,
+    ) => Effect.Effect<void>
+    readonly withBreadcrumbScope: <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>
+    readonly captureError: (
+      input: CaptureTelemetryErrorInput,
+    ) => Effect.Effect<void>
+    readonly withSpan: <A, E, R>(
+      input: TelemetrySpanInput,
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>
+  }
+>()('@patchplane/core/services/TelemetryService') {}

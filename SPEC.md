@@ -894,7 +894,7 @@ Trusted control-plane components:
 - GitHub App private-key handling,
 - verified webhook state,
 - configuration profiles,
-- artifact metadata and signed-access paths.
+- artifact metadata and authenticated access paths.
 
 ### 15.2 Semi-trusted clients
 
@@ -932,7 +932,7 @@ Untrusted execution plane:
 - Treat dependency changes as high-risk.
 - Validate workspaces, paths, permissions, and execution targets before runtime start.
 - Make approval policy explicit per runtime session.
-- Use short-lived signed URLs for private artifact access.
+- Use an authenticated same-origin proxy or short-lived signed URLs for private artifact access; never expose native bucket bindings or long-lived R2 credentials to clients.
 - Avoid sending raw code, secrets, full diffs, or sensitive evidence to analytics tools by default.
 
 The alpha is intended for controlled, single-team or design-partner usage first. It is not an open multi-tenant SaaS without additional tenancy, sandbox, audit, and isolation hardening.

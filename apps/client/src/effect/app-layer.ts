@@ -1,12 +1,12 @@
 import { layer as BrowserCryptoLayer } from '@effect/platform-browser/BrowserCrypto'
 import { ConvexStoragePlugin } from '@patchplane/plugins/convex/storage-plugin'
-import { SentryTelemetryPlugin } from '@patchplane/plugins/sentry/telemetry-plugin'
+import { CloudflareTelemetryPlugin } from '@patchplane/plugins/sentry/cloudflare-telemetry-plugin'
 import { WorkOSAuthPlugin } from '@patchplane/plugins/workos/auth-plugin'
 import { Layer } from 'effect'
 
 export const appLayer = Layer.mergeAll(
   ConvexStoragePlugin.layer,
   WorkOSAuthPlugin.layer,
-  SentryTelemetryPlugin.layer,
+  CloudflareTelemetryPlugin.layer,
   BrowserCryptoLayer,
 )
