@@ -7,27 +7,41 @@ import {
   type TelemetryContextFields,
   type TelemetrySeverity,
 } from '@patchplane/core/services/telemetry-service'
-import { Effect, Layer, Logger, Option, Redacted, References, Tracer } from 'effect'
 import {
-  SENTRY_DEFAULT_ENABLE_LOGS,
-  SENTRY_DEFAULT_ENABLE_METRICS,
-  SENTRY_DEFAULT_ENABLE_TRACING,
-  SENTRY_DEFAULT_LOG_LEVEL,
-  SENTRY_DEFAULT_TRACES_SAMPLE_RATE,
-  SentryConfig,
-} from './SentryConfig'
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Redacted,
+  References,
+  Tracer,
+} from 'effect'
+import {
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+  sanitizeSentryLog,
+  sanitizeSentryMetric,
+  sanitizeSentrySpan,
+  sanitizeSentryTransaction,
+  sentryTelemetryPolicyMarker,
+} from './sanitize'
+import { SentryConfig } from './SentryConfig'
 
 type SentryLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
 const pluginName = 'sentry'
 
-function mergeAttributes(input: TelemetryContextFields & {
-  readonly attributes?: TelemetryAttributes | undefined
-}) {
+function mergeAttributes(
+  input: TelemetryContextFields & {
+    readonly attributes?: TelemetryAttributes | undefined
+  },
+) {
   return telemetryAttributes(input, input.attributes)
 }
 
-function toSentryLevel(severity: TelemetrySeverity | undefined): SentryLogLevel {
+function toSentryLevel(
+  severity: TelemetrySeverity | undefined,
+): SentryLogLevel {
   switch (severity) {
     case 'trace':
     case 'debug':
@@ -45,32 +59,44 @@ function toSentryLevel(severity: TelemetrySeverity | undefined): SentryLogLevel 
   }
 }
 
-function annotateScope(input: TelemetryContextFields & {
-  readonly attributes?: TelemetryAttributes | undefined
-}) {
+function annotateScope(
+  input: TelemetryContextFields & {
+    readonly attributes?: TelemetryAttributes | undefined
+  },
+) {
   return (scope: Sentry.Scope) => {
     if (input.traceId !== undefined) scope.setTag('traceId', input.traceId)
-    if (input.workflowRunId !== undefined) scope.setTag('workflowRunId', input.workflowRunId)
-    if (input.runtimeSessionId !== undefined) scope.setTag('runtimeSessionId', input.runtimeSessionId)
-    if (input.pluginName !== undefined) scope.setTag('pluginName', input.pluginName)
-    if (input.operation !== undefined) scope.setTag('operation', input.operation)
+    if (input.workflowRunId !== undefined)
+      scope.setTag('workflowRunId', input.workflowRunId)
+    if (input.runtimeSessionId !== undefined)
+      scope.setTag('runtimeSessionId', input.runtimeSessionId)
+    if (input.pluginName !== undefined)
+      scope.setTag('pluginName', input.pluginName)
+    if (input.operation !== undefined)
+      scope.setTag('operation', input.operation)
     scope.setContext('patchplane', mergeAttributes(input))
   }
 }
 
-const NoopTelemetryLayer = Layer.succeed(TelemetryService, TelemetryService.of({
-  recordEvent: () => Effect.void,
-  captureError: () => Effect.void,
-  withSpan: (_input, effect) => effect,
-}))
+const NoopTelemetryLayer = Layer.succeed(
+  TelemetryService,
+  TelemetryService.of({
+    recordEvent: () => Effect.void,
+    captureError: () => Effect.void,
+    withSpan: (_input, effect) => effect,
+  }),
+)
 
 function makeTelemetryService() {
   return TelemetryService.of({
     recordEvent: (input) =>
       Effect.sync(() => {
         const level = toSentryLevel(input.severity)
-        const message = input.message ?? input.name
-        const attributes = mergeAttributes(input)
+        const message = input.name
+        const attributes = {
+          ...mergeAttributes(input),
+          telemetryPolicy: sentryTelemetryPolicyMarker,
+        }
         Sentry.withScope((scope) => {
           annotateScope(input)(scope)
           Sentry.logger[level](message, attributes, { scope })
@@ -131,6 +157,13 @@ export const SentryTelemetryPlugin = {
           tracesSampleRate: config.enableTracing ? config.tracesSampleRate : 0,
           enableLogs: config.enableLogs,
           enableMetrics: config.enableMetrics,
+          sendDefaultPii: false,
+          beforeSend: sanitizeSentryEvent,
+          beforeSendTransaction: sanitizeSentryTransaction,
+          beforeBreadcrumb: sanitizeSentryBreadcrumb,
+          beforeSendLog: sanitizeSentryLog,
+          beforeSendMetric: sanitizeSentryMetric,
+          beforeSendSpan: sanitizeSentrySpan,
         }),
         observabilityControlsLayer,
         config.enableTracing
@@ -142,23 +175,12 @@ export const SentryTelemetryPlugin = {
 
       return config.enableLogs
         ? Layer.merge(
-          sentryBaseLayer,
-          Logger.layer([Sentry.SentryEffectLogger], { mergeWithExisting: true }),
-        )
+            sentryBaseLayer,
+            Logger.layer([Sentry.SentryEffectLogger], {
+              mergeWithExisting: true,
+            }),
+          )
         : sentryBaseLayer
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning('Sentry telemetry configuration failed; continuing with no-op telemetry', {
-          pluginName,
-          operation: 'sentry.configure',
-          cause,
-          defaultEnableLogs: SENTRY_DEFAULT_ENABLE_LOGS,
-          defaultEnableTracing: SENTRY_DEFAULT_ENABLE_TRACING,
-          defaultEnableMetrics: SENTRY_DEFAULT_ENABLE_METRICS,
-          defaultLogLevel: SENTRY_DEFAULT_LOG_LEVEL,
-          defaultTracesSampleRate: SENTRY_DEFAULT_TRACES_SAMPLE_RATE,
-        }).pipe(Effect.as(NoopTelemetryLayer)),
-      ),
-    ),
+    }),
   ),
 } as const

@@ -1,4 +1,12 @@
 import * as Sentry from '@sentry/cloudflare'
+import {
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+  sanitizeSentryLog,
+  sanitizeSentryMetric,
+  sanitizeSentrySpan,
+  sanitizeSentryTransaction,
+} from './sanitize'
 
 export type CloudflareSentryEnv = {
   readonly CLOUDFLARE_SENTRY_DSN: string
@@ -11,11 +19,17 @@ export function withCloudflareSentry<
 >(handler: Handler): Handler {
   return Sentry.withSentry<Env, unknown, unknown, never>(
     (env: Env | undefined) => ({
-      dsn: env?.CLOUDFLARE_SENTRY_DSN ?? process.env.CLOUDFLARE_SENTRY_DSN,
+      dsn: env?.CLOUDFLARE_SENTRY_DSN,
       environment: 'development',
-      enableLogs: true,
+      enableLogs: false,
       tracesSampleRate: 1,
       sendDefaultPii: false,
+      beforeSend: sanitizeSentryEvent,
+      beforeSendTransaction: sanitizeSentryTransaction,
+      beforeBreadcrumb: sanitizeSentryBreadcrumb,
+      beforeSendLog: sanitizeSentryLog,
+      beforeSendMetric: sanitizeSentryMetric,
+      beforeSendSpan: sanitizeSentrySpan,
     }),
     // Sentry's Worker globals differ from DOM Request types used by TanStack Start.
     handler as never,
