@@ -47,15 +47,6 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
-  const clone = yield* PrepareRepositoryClone(input.workflowStart)
-  if (clone === undefined) {
-    return yield* new SandboxError({
-      operation: 'runSandboxAgentForWorkflow.prepareRepository',
-      message: 'Claimed workflow attempt has no repository clone target',
-      cause: undefined,
-    })
-  }
-
   const verificationRequirements = yield* PersistConfiguredVerificationRequirements({
     workflowRunId: input.workflowStart.workflowRun.id,
     testCommand: input.evidenceTestReportCommand,
@@ -65,6 +56,16 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     traceId: input.workflowStart.workflowRun.traceId,
     operation: 'runSandboxAgentForWorkflow.persistVerificationRequirements',
   })
+
+  const clone = yield* PrepareRepositoryClone(input.workflowStart)
+  if (clone === undefined) {
+    return yield* new SandboxError({
+      operation: 'runSandboxAgentForWorkflow.prepareRepository',
+      message: 'Claimed workflow attempt has no repository clone target',
+      cause: undefined,
+    })
+  }
+
   const sandbox = yield* SandboxService
   const runnableTestCommand = input.evidenceTestPlatform === undefined || input.evidenceTestPlatform === 'linux'
     ? input.evidenceTestReportCommand

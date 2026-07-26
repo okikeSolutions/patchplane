@@ -20,7 +20,12 @@ export const PrepareRepositoryClone = Effect.fn(
     return undefined
   }
 
-  const sourceCommitSha = workflowStart.workflowRun.sourceCommitSha ?? ref.pullRequestHeadSha
+  const sourceCommitSha = workflowStart.workflowRun.modelVersion === 'v1'
+    ? workflowStart.workflowRun.sourceCommitSha
+    : workflowStart.workflowRun.sourceCommitSha ?? ref.pullRequestHeadSha
+  if (workflowStart.workflowRun.modelVersion === 'v1' && sourceCommitSha === undefined) {
+    return undefined
+  }
   const clone = {
     repositoryUrl: `https://github.com/${ref.repositoryFullName}.git`,
     repositoryFullName: ref.repositoryFullName,

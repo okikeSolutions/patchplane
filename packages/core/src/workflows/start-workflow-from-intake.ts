@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { WorkflowStateError } from '@patchplane/domain/errors'
 import type { WorkflowIntake } from '@patchplane/domain/workflow-intake'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
@@ -16,6 +17,18 @@ export const StartWorkflowFromIntake = Effect.fn(
     externalProvider: input.externalRef?.provider,
     externalEventKind: input.externalRef?.eventKind,
   })
+
+  if (
+    input.source === 'external' &&
+    (
+      input.externalRef?.pullRequestHeadSha === undefined ||
+      input.externalRef.pullRequestHeadSha.trim().length === 0
+    )
+  ) {
+    return yield* new WorkflowStateError({
+      message: 'External workflow intake requires a pinned source commit SHA',
+    })
+  }
 
   if (
     input.externalRef?.repositoryProvider !== undefined &&

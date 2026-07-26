@@ -650,11 +650,11 @@ The Patch Report may be materialized as a read model for the UI and GitHub publi
 
 #### Attempt, candidate, and evidence identity
 
-- A `WorkflowRun` with `modelVersion: "v1"` is one immutable attempt. A rerun creates a new child run with `rootWorkflowRunId`, `parentWorkflowRunId`, `attemptNumber`, a required reason, and the same pinned source revision.
-- Execution must be atomically claimed. Duplicate webhook delivery or rerun dispatch cannot start a second sandbox for the same attempt.
+- A `WorkflowRun` with `modelVersion: "v1"` is one immutable attempt and must have an authoritative pinned source revision. Intake without one remains outside V1 and cannot enter the V1 execution path. A rerun creates a new child run with `rootWorkflowRunId`, `parentWorkflowRunId`, `attemptNumber`, a required reason, and the same pinned source revision.
+- Execution must be atomically claimed, and V1 sandbox-execution persistence independently rejects a second execution. Duplicate webhook delivery or rerun dispatch cannot start or persist a second sandbox for the same attempt.
 - The repository is prepared at the pinned source SHA. A captured candidate is valid only when its `baseSha` equals that pinned SHA and its `sandboxExecutionId` is the execution that produced it.
 - The candidate subject is its `candidateDigest`, currently `sha256:` over the exact captured diff. Verification records include that digest before and after the command; tracked-file mutation during verification invalidates the result.
-- Verification requirements come from trusted repository/intake configuration and are stored before agent execution. Results do not create or weaken requirements.
+- Verification requirements come from trusted repository/intake configuration and are stored before repository preparation or agent execution. Results do not create or weaken requirements; a configured verifier that emits no result remains an explicit incomplete requirement.
 - Review runs, findings, policy decisions, human decisions, publication results, and evidence artifacts are correlated to the same workflow/candidate subject. A record for candidate A cannot justify candidate B.
 - Policy evaluates a coherent evidence snapshot and stores a SHA-256 digest of its normalized inputs, policy version, considered verification results, and missing requirements.
 - Legacy runs are not silently projected as V1 Patch Reports.

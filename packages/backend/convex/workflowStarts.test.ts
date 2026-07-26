@@ -26,6 +26,8 @@ interface WorkflowStartResult {
   }
   workflowRun: {
     id: Id<'workflowRuns'>
+    modelVersion?: 'v1' | undefined
+    sourceCommitSha?: string | undefined
   }
 }
 
@@ -288,7 +290,24 @@ async function createWorkflowStartForTest(
     throw new Error('Expected workflow start result')
   }
 
+  await t.run((ctx) => ctx.db.patch('workflowRuns', result.workflowRun.id, {
+    modelVersion: 'v1',
+    rootWorkflowRunId: result.workflowRun.id,
+    attemptNumber: 1,
+    trigger: 'intake',
+    sourceCommitSha: '0123456789012345678901234567890123456789',
+  }))
   return result
+}
+
+async function claimWorkflowForTest(
+  t: ReturnType<typeof authenticatedTest>,
+  workflowRunId: Id<'workflowRuns'>,
+) {
+  expect(await t.mutation(claimWorkflowExecution, {
+    systemSecret: 'system_test',
+    workflowRunId,
+  })).toBe(true)
 }
 
 async function seedDecisionPublicationReplayFixture(
@@ -408,6 +427,131 @@ describe('workflowStarts V1 execution claim', () => {
     const failedRun = await t.run((ctx) => ctx.db.get('workflowRuns', workflowStart.workflowRun.id))
     expect(failedRun?.status).toBe('failed')
   })
+
+  test('fails a V1 attempt closed when no source revision is pinned', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const result = await t.mutation(createWorkflowStart, createArgs())
+    if (!isWorkflowStartResult(result)) throw new Error('Expected workflow start result')
+    await t.run((ctx) => ctx.db.patch('workflowRuns', result.workflowRun.id, {
+      modelVersion: 'v1',
+      rootWorkflowRunId: result.workflowRun.id,
+      attemptNumber: 1,
+      trigger: 'intake',
+    }))
+
+    expect(await t.mutation(claimWorkflowExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: result.workflowRun.id,
+    })).toBe(false)
+
+    const workflowRun = await t.run((ctx) => ctx.db.get('workflowRuns', result.workflowRun.id))
+    expect(workflowRun?.status).toBe('failed')
+    const provenance = await t.run((ctx) =>
+      ctx.db
+        .query('provenanceEvents')
+        .withIndex('by_workflow_event_key', (q) =>
+          q.eq('workflowRunId', result.workflowRun.id).eq('idempotencyKey', `${String(result.workflowRun.id)}:missing-source-revision`),
+        )
+        .unique()
+    )
+    expect(provenance).toMatchObject({ status: 'failed', errorCategory: 'setup' })
+  })
+
+  test('rejects external intake without a pinned source revision', async () => {
+    const t = authenticatedTest()
+    await expect(t.mutation(createWorkflowStartFromExternalIntake, {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external',
+      traceId: 'trace-unpinned-external',
+      prompt: 'Fix issue 7',
+      externalRef: {
+        provider: 'github',
+        deliveryId: 'delivery-unpinned',
+        eventKind: 'github.issue.opened',
+      },
+    })).rejects.toThrow('External workflow intake requires a pinned source commit SHA')
+  })
+
+  test('deduplicates webhook delivery and permits exactly one sandbox execution', async () => {
+    const t = authenticatedTest()
+    const intake = {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external' as const,
+      traceId: 'trace-delivery-1',
+      prompt: 'Fix pull request 7',
+      externalRef: {
+        provider: 'github',
+        deliveryId: 'delivery-1',
+        eventKind: 'github.pull_request.opened',
+        repositoryProvider: 'github',
+        repositoryInstallationId: '123',
+        repositoryExternalId: '456',
+        repositoryOwner: 'patchplane',
+        repositoryName: 'demo',
+        repositoryFullName: 'patchplane/demo',
+        issueExternalId: '789',
+        issueNumber: 7,
+        pullRequestExternalId: '789',
+        pullRequestNumber: 7,
+        pullRequestHeadSha: '0123456789012345678901234567890123456789',
+      },
+    }
+    const first = await t.mutation(createWorkflowStartFromExternalIntake, intake)
+    const replay = await t.mutation(createWorkflowStartFromExternalIntake, intake)
+    if (!isWorkflowStartResult(first) || !isWorkflowStartResult(replay)) {
+      throw new Error('Expected workflow start result')
+    }
+    expect(replay.workflowRun.id).toBe(first.workflowRun.id)
+
+    expect(await t.mutation(claimWorkflowExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: first.workflowRun.id,
+    })).toBe(true)
+    expect(await t.mutation(claimWorkflowExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: replay.workflowRun.id,
+    })).toBe(false)
+
+    await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: first.workflowRun.id,
+      provider: 'daytona',
+      sandboxId: 'sandbox-delivery-1',
+      command: 'pi --mode json',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'done',
+      startedAt: 1,
+      completedAt: 2,
+    })
+    await expect(t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: first.workflowRun.id,
+      provider: 'daytona',
+      sandboxId: 'sandbox-delivery-duplicate',
+      command: 'pi --mode json',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'duplicate',
+      startedAt: 1,
+      completedAt: 2,
+    })).rejects.toThrow('V1 workflow attempt already has a sandbox execution')
+
+    const executions = await t.run((ctx) =>
+      ctx.db
+        .query('sandboxExecutions')
+        .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', first.workflowRun.id))
+        .take(2)
+    )
+    expect(executions).toHaveLength(1)
+  })
 })
 
 describe('workflowStarts V1 rerun lineage', () => {
@@ -457,6 +601,7 @@ describe('workflowStarts candidate-bound verification evidence', () => {
     await seedMembership(t)
     const workflowStart = await createWorkflowStartForTest(t)
     const workflowRunId = workflowStart.workflowRun.id
+    await claimWorkflowForTest(t, workflowRunId)
     const sandbox = await t.mutation(recordSandboxExecution, {
       systemSecret: 'system_test',
       workflowRunId,
@@ -493,6 +638,18 @@ describe('workflowStarts candidate-bound verification evidence', () => {
       sizeBytes: 10,
       sha256: 'def456',
     }) as { id: Id<'evidenceArtifacts'> }
+    await expect(t.mutation(recordCandidatePatchSet, {
+      systemSecret: 'system_test',
+      workflowRunId,
+      sandboxExecutionId: sandbox.id,
+      status: 'captured',
+      candidateDigest: 'sha256:abc123',
+      baseSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      diffArtifactId: diff.id,
+      idempotencyKey: 'sandbox-1:mismatched-candidate',
+      createdAt: 2,
+    })).rejects.toThrow('Candidate base commit does not match the pinned workflow source revision')
+
     const candidate = await t.mutation(recordCandidatePatchSet, {
       systemSecret: 'system_test',
       workflowRunId,
@@ -735,7 +892,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       externalRef: {
         provider: 'github',
         deliveryId: 'delivery-1',
-        eventKind: 'github.issue.opened',
+        eventKind: 'github.pull_request.opened',
         repositoryProvider: 'github',
         repositoryInstallationId: '123',
         repositoryExternalId: '456',
@@ -745,7 +902,10 @@ describe('workflowStarts trusted boundary and authz', () => {
         issueExternalId: '789',
         issueNumber: 7,
         issueTitle: 'Fix auth callback',
-        url: 'https://github.com/patchplane/demo/issues/7',
+        pullRequestExternalId: '789',
+        pullRequestNumber: 7,
+        pullRequestHeadSha: '0123456789012345678901234567890123456789',
+        url: 'https://github.com/patchplane/demo/pull/7',
         senderProvider: 'github',
         senderLogin: 'octocat',
       },
@@ -768,6 +928,10 @@ describe('workflowStarts trusted boundary and authz', () => {
     }
 
     expect(second.promptRequest.id).toBe(first.promptRequest.id)
+    expect(first.workflowRun).toMatchObject({
+      modelVersion: 'v1',
+      sourceCommitSha: '0123456789012345678901234567890123456789',
+    })
     expect(first.promptRequest).toMatchObject({
       workspaceId: 'workos:org_123',
       actorId: 'github-app:123',
@@ -840,6 +1004,8 @@ describe('workflowStarts trusted boundary and authz', () => {
       source: 'app',
       prompt: 'Ship it',
     })
+    expect(result.workflowRun.modelVersion).toBeUndefined()
+    expect(result.workflowRun.sourceCommitSha).toBeUndefined()
   })
 
   test('public workflow start tolerates duplicate mirrored memberships', async () => {
@@ -875,6 +1041,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       timeoutSeconds: 120,
     }
 
+    await claimWorkflowForTest(t, workflowStart.workflowRun.id)
     const result = await t.mutation(recordSandboxExecution, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
@@ -904,6 +1071,7 @@ describe('workflowStarts trusted boundary and authz', () => {
     await seedMembership(t)
     const workflowStart = await createWorkflowStartForTest(t)
 
+    await claimWorkflowForTest(t, workflowStart.workflowRun.id)
     await t.mutation(recordSandboxExecution, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
@@ -1014,6 +1182,7 @@ describe('workflowStarts trusted boundary and authz', () => {
     })
     const workflowStart = await createWorkflowStartForTest(t)
 
+    await claimWorkflowForTest(t, workflowStart.workflowRun.id)
     const sandboxExecution = await t.mutation(recordSandboxExecution, {
       systemSecret: 'system_test',
       workflowRunId: workflowStart.workflowRun.id,
@@ -1049,7 +1218,7 @@ describe('workflowStarts trusted boundary and authz', () => {
       status: 'captured',
       candidateDigest: 'sha256:e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
       baseRef: 'main',
-      baseSha: 'abc123',
+      baseSha: '0123456789012345678901234567890123456789',
       diffArtifactId: diffArtifact.id,
       summary: 'Updates the auth callback.',
       stats: { filesChanged: 2, additions: 10, deletions: 3 },

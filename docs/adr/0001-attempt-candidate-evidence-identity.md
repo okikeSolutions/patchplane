@@ -11,7 +11,7 @@ PatchPlane must answer whether one specific AI-generated patch attempt has earne
 
 ### Attempt
 
-A V1 `WorkflowRun` is one immutable attempt. It records a pinned source revision and attempt number. A rerun creates a child attempt with `rootWorkflowRunId`, `parentWorkflowRunId`, a required reason, and an idempotency key. It never reopens or rewrites the parent. One atomic execution claim permits at most one sandbox execution path per attempt.
+A V1 `WorkflowRun` is one immutable attempt. It records a pinned source revision and attempt number. Intake without an authoritative source revision is not promoted to V1 and cannot enter the V1 execution path. A rerun creates a child attempt with `rootWorkflowRunId`, `parentWorkflowRunId`, a required reason, and an idempotency key. It never reopens or rewrites the parent. One atomic execution claim permits at most one sandbox execution path per attempt, and sandbox-execution persistence independently rejects a second execution.
 
 ### Candidate subject
 
@@ -26,7 +26,7 @@ A commit `headSha` may additionally identify a materialized candidate, but it ca
 
 ### Requirements and results
 
-Verification requirements are trusted inputs and are persisted before execution. A provider result cannot invent or weaken a requirement. Every verification result names its requirement, candidate, provider, command, platform, architecture, outcome, timing, produced artifacts, and candidate digest before/after execution. Candidate mutation or digest mismatch invalidates the result.
+Verification requirements are trusted inputs and are persisted before repository preparation or provider execution. A provider result cannot invent or weaken a requirement. Every verification result names its requirement, candidate, provider, command, platform, architecture, outcome, timing, produced artifacts, and candidate digest before/after execution. Candidate mutation or digest mismatch invalidates the result.
 
 Required evidence is complete only when every declared required requirement has a current candidate-bound passing result and all required artifact kinds. Missing, blocked, errored, stale, truncated, unavailable-platform, or mismatched evidence fails closed as incomplete/manual review.
 

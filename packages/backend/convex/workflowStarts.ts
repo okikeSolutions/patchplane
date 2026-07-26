@@ -737,6 +737,8 @@ async function createWorkflowStartRecord(
     const createdAt = Date.now()
     const promptRequestStatus = 'created' as const
     const workflowRunStatus = 'queued' as const
+    const sourceCommitSha = args.externalRef?.pullRequestHeadSha?.trim()
+    const createsV1Attempt = sourceCommitSha !== undefined && sourceCommitSha.length > 0
 
     const promptRequestId = await ctx.db.insert('promptRequests', {
       workspaceId: args.workspaceId,
@@ -755,15 +757,19 @@ async function createWorkflowStartRecord(
       workspaceId: args.workspaceId,
       traceId: args.traceId,
       status: workflowRunStatus,
-      modelVersion: 'v1',
-      attemptNumber: 1,
-      trigger: 'intake',
-      ...(args.externalRef?.pullRequestHeadSha === undefined
-        ? {}
-        : { sourceCommitSha: args.externalRef.pullRequestHeadSha }),
+      ...(createsV1Attempt
+        ? {
+          modelVersion: 'v1' as const,
+          attemptNumber: 1,
+          trigger: 'intake' as const,
+          sourceCommitSha,
+        }
+        : {}),
       createdAt,
     })
-    await ctx.db.patch('workflowRuns', workflowRunId, { rootWorkflowRunId: workflowRunId })
+    if (createsV1Attempt) {
+      await ctx.db.patch('workflowRuns', workflowRunId, { rootWorkflowRunId: workflowRunId })
+    }
 
     await insertProvenanceEvent(ctx, {
       workflowRunId,
@@ -804,13 +810,15 @@ async function createWorkflowStartRecord(
         workspaceId: args.workspaceId,
         traceId: args.traceId,
         status: workflowRunStatus,
-        modelVersion: 'v1' as const,
-        rootWorkflowRunId: workflowRunId,
-        attemptNumber: 1,
-        trigger: 'intake' as const,
-        ...(args.externalRef?.pullRequestHeadSha === undefined
-          ? {}
-          : { sourceCommitSha: args.externalRef.pullRequestHeadSha }),
+        ...(createsV1Attempt
+          ? {
+            modelVersion: 'v1' as const,
+            rootWorkflowRunId: workflowRunId,
+            attemptNumber: 1,
+            trigger: 'intake' as const,
+            sourceCommitSha,
+          }
+          : {}),
         createdAt,
       },
     }
@@ -1084,6 +1092,13 @@ export const createFromExternalIntake = mutation({
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
 
+    if (
+      args.externalRef.pullRequestHeadSha === undefined ||
+      args.externalRef.pullRequestHeadSha.trim().length === 0
+    ) {
+      throw new ConvexError('External workflow intake requires a pinned source commit SHA')
+    }
+
     const existing = await existingExternalWorkflowRef(ctx, args.externalRef)
 
     if (existing !== null) {
@@ -1138,6 +1153,9 @@ export const createRerun = mutation({
     }
     if (parent.modelVersion !== 'v1' || (parent.status !== 'reviewed' && parent.status !== 'failed')) {
       throw new ConvexError('Only a reviewed or failed V1 workflow attempt can be rerun')
+    }
+    if (parent.sourceCommitSha === undefined || parent.sourceCommitSha.trim().length === 0) {
+      throw new ConvexError('V1 rerun requires a pinned source commit SHA')
     }
 
     const existing = await ctx.db
@@ -1257,6 +1275,34 @@ export const claimWorkflowExecution = mutation({
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
     if (workflowRun.status !== 'queued') return false
+    if (
+      workflowRun.modelVersion === 'v1' &&
+      (workflowRun.sourceCommitSha === undefined || workflowRun.sourceCommitSha.trim().length === 0)
+    ) {
+      const failedAt = Date.now()
+      await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
+      await insertProvenanceEvent(ctx, {
+        workflowRunId: args.workflowRunId,
+        traceId: workflowRun.traceId ?? 'legacy',
+        type: 'workflow-start',
+        operation: 'workflowStarts.claimWorkflowExecution',
+        status: 'failed',
+        startedAt: failedAt,
+        completedAt: failedAt,
+        summary: 'V1 workflow execution requires a pinned source commit SHA.',
+        artifactRefs: [],
+        errorCategory: 'setup',
+        idempotencyKey: `${String(args.workflowRunId)}:missing-source-revision`,
+      })
+      return false
+    }
+    if (workflowRun.modelVersion === 'v1') {
+      const existingExecution = await ctx.db
+        .query('sandboxExecutions')
+        .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+        .first()
+      if (existingExecution !== null) return false
+    }
     await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'running' })
     return true
   },
@@ -1664,8 +1710,10 @@ export const recordCandidatePatchSet = mutation({
       if (args.baseSha === undefined) {
         throw new ConvexError('Captured candidate requires a base commit SHA')
       }
+      if (workflowRun.sourceCommitSha === undefined || workflowRun.sourceCommitSha.trim().length === 0) {
+        throw new ConvexError('Captured V1 candidate requires a pinned workflow source revision')
+      }
       if (
-        workflowRun.sourceCommitSha !== undefined &&
         args.baseSha.toLowerCase() !== workflowRun.sourceCommitSha.toLowerCase()
       ) {
         throw new ConvexError('Candidate base commit does not match the pinned workflow source revision')
@@ -2725,6 +2773,18 @@ export const recordSandboxExecution = mutation({
     const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
     if (workflowRun === null) {
       throw new ConvexError('Workflow run not found')
+    }
+    if (workflowRun.modelVersion === 'v1') {
+      if (workflowRun.status !== 'running') {
+        throw new ConvexError('V1 sandbox execution requires an active execution claim')
+      }
+      const existingExecution = await ctx.db
+        .query('sandboxExecutions')
+        .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', args.workflowRunId))
+        .first()
+      if (existingExecution !== null) {
+        throw new ConvexError('V1 workflow attempt already has a sandbox execution')
+      }
     }
 
     const id = await ctx.db.insert('sandboxExecutions', {

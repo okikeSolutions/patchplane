@@ -1,4 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
+import { makeCandidatePatchSetId, makeVerificationRequirementId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import { evaluateVerificationCoverage } from '../verification/evaluate-verification-coverage'
 import {
   configuredVerificationDefinitions,
   deriveDurableVerificationStatus,
@@ -20,6 +22,27 @@ describe('configured verification requirements', () => {
         requiredArtifactKinds: ['test-report'],
       }),
     ])
+  })
+
+  it('reports incomplete when a configured verifier produces no result', () => {
+    const definition = configuredVerificationDefinitions({ testCommand: 'bun test' })[0]
+    if (definition === undefined) throw new Error('Expected configured test requirement')
+    const requirementId = makeVerificationRequirementId('requirement-no-result')
+    const coverage = evaluateVerificationCoverage({
+      candidatePatchSetId: makeCandidatePatchSetId('candidate-no-result'),
+      requirements: [{
+        id: requirementId,
+        workflowRunId: makeWorkflowRunId('workflow-no-result'),
+        ...definition,
+        required: true,
+        source: 'policy',
+        createdAt: 1,
+      }],
+      results: [],
+    })
+
+    expect(coverage.status).toBe('incomplete')
+    expect(coverage.missingRequirementIds).toEqual([requirementId])
   })
 })
 

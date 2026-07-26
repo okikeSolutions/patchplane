@@ -101,7 +101,7 @@ describe('StartWorkflowFromIntake', () => {
         externalRef: {
           provider: 'github',
           deliveryId: 'delivery-1',
-          eventKind: 'github.issue.opened',
+          eventKind: 'github.pull_request.opened',
           repositoryProvider: 'github',
           repositoryInstallationId: '123',
           repositoryExternalId: '456',
@@ -110,6 +110,9 @@ describe('StartWorkflowFromIntake', () => {
           repositoryFullName: 'patchplane/demo',
           issueExternalId: '789',
           issueNumber: 7,
+          pullRequestExternalId: '789',
+          pullRequestNumber: 7,
+          pullRequestHeadSha: '0123456789012345678901234567890123456789',
         },
       })
 
@@ -121,6 +124,28 @@ describe('StartWorkflowFromIntake', () => {
       })
       expect(result.promptRequest.externalRef?.provider).toBe('github')
       expect(result.workflowRun.status).toBe('queued')
+    }).pipe(Effect.provide(Layer.merge(TestStorageLayer, TestSourceControlLayer))),
+  )
+
+  it.effect('rejects external intake without an authoritative source revision', () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(StartWorkflowFromIntake({
+        actor: {
+          id: makeGitHubAppActorId('123'),
+          displayName: 'GitHub App installation 123',
+        },
+        workspaceId: makeSystemWorkspaceId('workspace-1'),
+        source: 'external',
+        traceId: 'trace-unpinned',
+        prompt: 'Fix the bug',
+        externalRef: {
+          provider: 'github',
+          deliveryId: 'delivery-unpinned',
+          eventKind: 'github.issue.opened',
+        },
+      }))
+
+      expect(error.message).toBe('External workflow intake requires a pinned source commit SHA')
     }).pipe(Effect.provide(Layer.merge(TestStorageLayer, TestSourceControlLayer))),
   )
 })

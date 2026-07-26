@@ -43,6 +43,16 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
+  const verificationRequirements = yield* PersistConfiguredVerificationRequirements({
+    workflowRunId: input.workflowStart.workflowRun.id,
+    testCommand: input.evidenceTestReportCommand,
+    testPlatform: input.evidenceTestPlatform,
+    browserCommand: input.evidenceBrowserScreenshotCommand,
+    createdAt: yield* Clock.currentTimeMillis,
+    traceId: input.workflowStart.workflowRun.traceId,
+    operation: 'runSandboxCommandForWorkflow.persistVerificationRequirements',
+  })
+
   const clone = yield* PrepareRepositoryClone(input.workflowStart)
   if (clone === undefined) {
     return yield* new SandboxError({
@@ -57,15 +67,6 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     repositoryFullName: clone.repositoryFullName,
   })
 
-  const verificationRequirements = yield* PersistConfiguredVerificationRequirements({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    testCommand: input.evidenceTestReportCommand,
-    testPlatform: input.evidenceTestPlatform,
-    browserCommand: input.evidenceBrowserScreenshotCommand,
-    createdAt: yield* Clock.currentTimeMillis,
-    traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxCommandForWorkflow.persistVerificationRequirements',
-  })
   const sandbox = yield* SandboxService
   const runnableTestCommand = input.evidenceTestPlatform === undefined || input.evidenceTestPlatform === 'linux'
     ? input.evidenceTestReportCommand
