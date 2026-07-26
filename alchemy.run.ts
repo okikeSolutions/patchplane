@@ -27,13 +27,6 @@ const devWorkerObservability = {
     persist: true,
   },
 } as const
-const evidenceR2AccessKeyId = Config.redacted('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID').pipe(
-  Config.orElse(() => Config.redacted('CLOUDFLARE_ACCESS_KEY_ID')),
-)
-const evidenceR2SecretAccessKey = Config.redacted('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY').pipe(
-  Config.orElse(() => Config.redacted('CLOUDFLARE_SECRET_ACCESS_KEY')),
-)
-
 export default Alchemy.Stack(
   'PatchPlaneInfra',
   {
@@ -159,8 +152,6 @@ export default Alchemy.Stack(
         SOURCE_CONTROL_WORKER: sourceControlWorker,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
-        PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID: evidenceR2AccessKeyId,
-        PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY: evidenceR2SecretAccessKey,
         PATCHPLANE_AI_GATEWAY_ID: modelGateway.gatewayId,
         CLOUDFLARE_ACCOUNT_ID: evidenceBucket.accountId,
       },

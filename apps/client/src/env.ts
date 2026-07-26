@@ -1,5 +1,6 @@
 export interface ClientWorkerEnv {
   SOURCE_CONTROL_WORKER: Fetcher
+  PATCHPLANE_EVIDENCE_BUCKET: R2Bucket
 }
 
 declare global {
@@ -38,10 +39,27 @@ function sourceControlWorkerUrlFallback(): Fetcher | undefined {
   }
 }
 
+async function loadCloudflareEnv(): Promise<ClientWorkerEnv> {
+  const cf = await import(/* @vite-ignore */ 'cloudflare:workers') as CloudflareWorkersModule
+  return cf.env
+}
+
+export async function getEvidenceBucket(): Promise<R2Bucket> {
+  try {
+    const bucket = (await loadCloudflareEnv()).PATCHPLANE_EVIDENCE_BUCKET
+    if (bucket === undefined) throw new Error('binding is undefined')
+    return bucket
+  } catch (cause) {
+    throw new Error(
+      'PATCHPLANE_EVIDENCE_BUCKET binding is unavailable. Run through Alchemy Cloudflare.Vite.',
+      { cause },
+    )
+  }
+}
+
 export async function getSourceControlWorker(): Promise<Fetcher> {
   try {
-    const cf = await import(/* @vite-ignore */ 'cloudflare:workers') as CloudflareWorkersModule
-    return cf.env.SOURCE_CONTROL_WORKER
+    return (await loadCloudflareEnv()).SOURCE_CONTROL_WORKER
   } catch (cause) {
     const fallback = sourceControlWorkerUrlFallback()
     if (fallback !== undefined) return fallback
