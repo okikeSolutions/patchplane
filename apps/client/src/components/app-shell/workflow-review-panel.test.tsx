@@ -7,7 +7,6 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { WorkflowDetail } from './types'
 import { WorkflowReviewPanel } from './workflow-review-panel'
@@ -18,8 +17,7 @@ vi.mock('@/lib/review-decision', () => ({
   submitReviewDecisionServerFn: submitReviewDecision,
 }))
 
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test fixtures use stable fake Convex IDs.
-const workflowRunId = 'workflow-1' as Id<'workflowRuns'>
+const workflowRunId = 'workflow-1'
 
 const detail: WorkflowDetail = {
   workflowRun: {
@@ -163,6 +161,7 @@ describe('WorkflowReviewPanel', () => {
       fireEvent.click(button)
 
       await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(1))
+      expect(await screen.findByText('Decision recorded')).toBeTruthy()
       expect(submitReviewDecision).toHaveBeenCalledWith({
         data: {
           workflowRunId: 'workflow-1',

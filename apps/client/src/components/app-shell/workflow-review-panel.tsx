@@ -58,6 +58,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
   const [verificationOverrideReason, setVerificationOverrideReason] = useState('')
   const [submittingStatus, setSubmittingStatus] = useState<HumanDecisionStatus | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const [success, setSuccess] = useState<string | undefined>()
   const submissionAttempt = useRef<
     | {
         readonly fingerprint: string
@@ -120,6 +121,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
 
     setSubmittingStatus(status)
     setError(undefined)
+    setSuccess(undefined)
     try {
       const fingerprint = `${detail.workflowRun.id}:${sandboxExecution.id}:${candidatePatchSet.id}:${reviewRun.id}:${policyDecision.id}:${status}:${trimmedComment}:${requiresVerificationOverride ? trimmedOverrideReason : ''}`
       if (submissionAttempt.current?.fingerprint !== fingerprint) {
@@ -152,6 +154,11 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
       submissionAttempt.current = undefined
       setComment('')
       setVerificationOverrideReason('')
+      setSuccess(status === 'approved'
+        ? 'Decision approved and queued for source-control publication.'
+        : status === 'rejected'
+          ? 'Decision rejected and queued for source-control publication.'
+          : 'Changes requested and queued for source-control publication.')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to record decision')
     } finally {
@@ -162,7 +169,7 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-medium">Review decision</h3>
+        <h2 className="text-sm font-medium">Review decision</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Maintainer-controlled dogfooding requires an explicit comment before any decision.
         </p>
@@ -191,23 +198,34 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         </Alert>
       )}
       {error === undefined ? null : (
-        <Alert variant="destructive">
+        <Alert role="alert" variant="destructive">
           <MessageSquareWarningIcon />
           <AlertTitle>Decision failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      <div aria-live="polite">
+        {success === undefined ? null : (
+          <Alert>
+            <CheckCircle2Icon />
+            <AlertTitle>Decision recorded</AlertTitle>
+            <AlertDescription>{success}</AlertDescription>
+          </Alert>
+        )}
+      </div>
       <FieldGroup>
         <Field data-invalid={!hasComment && comment.length > 0 ? true : undefined}>
           <FieldLabel htmlFor="workflow-review-comment">Required comment</FieldLabel>
           <Textarea
             id="workflow-review-comment"
             value={comment}
+            required
+            aria-describedby="workflow-review-comment-description"
             aria-invalid={!hasComment && comment.length > 0}
             placeholder="Explain why this workflow should be approved, rejected, or changed."
             onChange={(event) => setComment(event.currentTarget.value)}
           />
-          <FieldDescription>
+          <FieldDescription id="workflow-review-comment-description">
             Comments are required for approve, reject, and request-changes actions.
           </FieldDescription>
         </Field>
@@ -217,20 +235,23 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
             <Textarea
               id="workflow-verification-override-reason"
               value={verificationOverrideReason}
+              aria-describedby="workflow-verification-override-description"
               aria-invalid={!hasOverrideReason && verificationOverrideReason.length > 0}
               maxLength={1000}
               placeholder="Explain why approval is justified despite incomplete or unconfigured verification."
               onChange={(event) => setVerificationOverrideReason(event.currentTarget.value)}
             />
-            <FieldDescription>
+            <FieldDescription id="workflow-verification-override-description">
               Required only for approval. This explicit override is stored in the Patch Report audit trail.
             </FieldDescription>
           </Field>
         )}
       </FieldGroup>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Button
           type="button"
+          className="min-h-11 w-full sm:w-auto"
+          aria-busy={submittingStatus === 'approved'}
           disabled={!hasComment || !policyAllowsReview || (!verificationCoverage.complete && (!verificationCoverage.canOverride || !hasOverrideReason)) || isSubmitting || !hasCurrentProjection || sandboxExecution.status !== 'succeeded' || candidatePatchSet.status !== 'captured' || reviewRun.status !== 'completed'}
           onClick={() => void submitDecision('approved')}
         >
@@ -240,6 +261,8 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <Button
           type="button"
           variant="secondary"
+          className="min-h-11 w-full sm:w-auto"
+          aria-busy={submittingStatus === 'changes-requested'}
           disabled={!hasComment || isSubmitting || !hasCurrentProjection}
           onClick={() => void submitDecision('changes-requested')}
         >
@@ -249,6 +272,8 @@ export function WorkflowReviewPanel({ detail }: { readonly detail: WorkflowDetai
         <Button
           type="button"
           variant="destructive"
+          className="min-h-11 w-full sm:w-auto"
+          aria-busy={submittingStatus === 'rejected'}
           disabled={!hasComment || isSubmitting || !hasCurrentProjection}
           onClick={() => void submitDecision('rejected')}
         >
@@ -264,7 +289,7 @@ function EvidenceCheck({ label, ready, status, detail }: { readonly label: strin
   return (
     <div className="flex min-w-0 items-start gap-2">
       {ready ? <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[var(--success-readable)]" /> : <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-[var(--destructive-readable)]" />}
-      <div className="min-w-0"><div className="font-medium">{label} · <span className="font-normal text-muted-foreground">{status ?? (ready ? 'ready' : 'missing')}</span></div><div className="truncate text-xs text-muted-foreground">{detail}</div></div>
+      <div className="min-w-0"><div className="font-medium">{label} · <span className="font-normal text-muted-foreground">{status ?? (ready ? 'ready' : 'missing')}</span></div><div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{detail}</div></div>
     </div>
   )
 }

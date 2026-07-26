@@ -113,13 +113,15 @@ function StartWorkflowForm() {
                   disabled={field.form.state.isSubmitting}
                   rows={5}
                   placeholder={m.app_workflow_prompt_placeholder()}
+                  required
+                  aria-describedby={`workflow-prompt-description${isInvalid ? ' workflow-prompt-error' : ''}`}
                   aria-label={m.app_workflow_prompt_label()}
                   aria-invalid={isInvalid}
                 />
-                <FieldDescription>
+                <FieldDescription id="workflow-prompt-description">
                   Describe the change and acceptance criteria. Pull-request workflows use the repository and ref supplied by GitHub.
                 </FieldDescription>
-                {isInvalid ? <FieldError errors={toFieldErrors(field.state.meta.errors)} /> : null}
+                {isInvalid ? <FieldError id="workflow-prompt-error" errors={toFieldErrors(field.state.meta.errors)} /> : null}
               </Field>
             )
           }}
@@ -135,6 +137,7 @@ function StartWorkflowForm() {
           {({ canSubmit, isSubmitting }) => (
             <Button
               type="submit"
+              className="min-h-11 w-full sm:w-auto"
               disabled={!hasAuthenticatedWorkspace || !canSubmit || isSubmitting}
             >
               {isSubmitting
@@ -154,9 +157,9 @@ function StartWorkflowForm() {
           </span>
         ) : null}
       </div>
-      {result ? <WorkflowStartResult result={result} /> : null}
+      <div aria-live="polite">{result ? <WorkflowStartResult result={result} /> : null}</div>
       {error ? (
-        <Alert variant="destructive">
+        <Alert role="alert" variant="destructive">
           <AlertTitle>Workflow start failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -196,18 +199,18 @@ function WorkflowStartResult({
       <AlertDescription>
         <span className="block">
           {m.app_workflow_prompt_request_id()}{' '}
-          <code className="font-mono">{result.promptRequestId}</code>
+          <code className="break-all font-mono">{result.promptRequestId}</code>
         </span>
         <span className="block">
           {m.app_workflow_run_id()}{' '}
-          <code className="font-mono">{result.workflowRunId}</code>
+          <code className="break-all font-mono">{result.workflowRunId}</code>
         </span>
         <span className="block">
           {m.app_workflow_run_status()}{' '}
           <code className="font-mono">{result.workflowStatus}</code>
         </span>
         <a
-          className="mt-2 inline-block font-medium underline underline-offset-4"
+          className="mt-2 inline-flex min-h-11 items-center font-medium underline underline-offset-4"
           href={`/app/workflows/${encodeURIComponent(result.workflowRunId)}`}
         >
           Open Patch Report

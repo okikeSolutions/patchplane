@@ -5,6 +5,7 @@ import {
   use,
   useEffect,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import type { T as Theme } from '@/lib/theme'
 
@@ -37,6 +38,23 @@ function applyTheme(theme: Theme) {
 }
 
 const localThemeKey = 'patchplane-theme'
+const localThemeChangeEvent = 'patchplane-theme-change'
+
+function localThemeSnapshot(fallback: Theme): Theme {
+  const storedTheme = window.localStorage.getItem(localThemeKey)
+  return storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system'
+    ? storedTheme
+    : fallback
+}
+
+function subscribeToLocalTheme(onStoreChange: () => void) {
+  window.addEventListener('storage', onStoreChange)
+  window.addEventListener(localThemeChangeEvent, onStoreChange)
+  return () => {
+    window.removeEventListener('storage', onStoreChange)
+    window.removeEventListener(localThemeChangeEvent, onStoreChange)
+  }
+}
 
 export function ThemeProvider({
   children,
@@ -45,24 +63,15 @@ export function ThemeProvider({
   persistTheme,
 }: Props) {
   const router = useRouter()
-  const [currentTheme, setCurrentTheme] = useState(theme)
-
-  useEffect(() => {
-    setCurrentTheme(theme)
-  }, [theme])
-
-  useEffect(() => {
-    if (persistence === 'local') {
-      const storedTheme = window.localStorage.getItem(localThemeKey)
-      if (
-        storedTheme === 'light' ||
-        storedTheme === 'dark' ||
-        storedTheme === 'system'
-      ) {
-        setCurrentTheme(storedTheme)
-      }
-    }
-  }, [persistence])
+  const [optimisticServerTheme, setOptimisticServerTheme] = useState<Theme>()
+  const localTheme = useSyncExternalStore(
+    subscribeToLocalTheme,
+    () => localThemeSnapshot(theme),
+    () => theme,
+  )
+  const currentTheme = persistence === 'local'
+    ? localTheme
+    : optimisticServerTheme ?? theme
 
   useEffect(() => {
     applyTheme(currentTheme)
@@ -79,9 +88,9 @@ export function ThemeProvider({
   }, [currentTheme])
 
   function setTheme(val: Theme) {
-    setCurrentTheme(val)
     if (persistence === 'local') {
       window.localStorage.setItem(localThemeKey, val)
+      window.dispatchEvent(new Event(localThemeChangeEvent))
       return
     }
 
@@ -89,7 +98,10 @@ export function ThemeProvider({
       throw new Error('Server theme persistence requires persistTheme')
     }
 
-    void persistTheme(val).then(() => router.invalidate())
+    setOptimisticServerTheme(val)
+    void persistTheme(val)
+      .then(() => router.invalidate())
+      .finally(() => setOptimisticServerTheme(undefined))
   }
 
   return (

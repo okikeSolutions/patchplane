@@ -1,10 +1,11 @@
+import { useEffect } from 'react'
 import { Authenticated, AuthLoading, Unauthenticated } from 'convex/react'
 import { createFileRoute } from '@tanstack/react-router'
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import { AppMobileHeader } from '@/components/app-shell/app-mobile-header'
 import { AppSidebar } from '@/components/app-shell/app-sidebar'
 import { LoadingWorkflowConsole } from '@/components/app-shell/loading-workflow-console'
 import { SignedOutWorkflowConsole } from '@/components/app-shell/signed-out-workflow-console'
+import { SkipLink } from '@/components/app-shell/skip-link'
 import { WorkflowDetailPage } from '@/components/app-shell/workflow-detail-page'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 
@@ -27,16 +28,24 @@ function WorkflowDetailRoute() {
   const { tab, returnTo } = Route.useSearch()
   const navigate = Route.useNavigate()
 
+  useEffect(() => {
+    document.title = `Patch Report ${workflowRunId} · patchplane`
+    const frame = requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('#main-content')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [workflowRunId])
+
   return (
     <SidebarProvider>
+      <SkipLink />
       <AppSidebar />
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
         <AppMobileHeader title="Patch report" />
-        <main className="flex min-h-0 flex-1 flex-col overflow-auto">
+        <main id="main-content" tabIndex={-1} aria-label="Patch report" className="flex min-h-0 flex-1 flex-col overflow-auto outline-none">
           <Authenticated>
             <WorkflowDetailPage
-              // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Route param is validated by Convex query authorization for workflowRuns.
-              workflowRunId={workflowRunId as Id<'workflowRuns'>}
+              workflowRunId={workflowRunId}
               tab={tab}
               returnTo={returnTo}
               onRerunCreated={(childWorkflowRunId) => {

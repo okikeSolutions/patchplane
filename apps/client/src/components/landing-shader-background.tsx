@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ErrorInfo,
   type ReactNode,
 } from 'react'
@@ -13,11 +14,12 @@ import ShaderScene from './landing-shader-scene'
 const minimumLoaderDurationMs = 700
 const loaderExitDurationMs = 420
 const shaderFallbackTimeoutMs = 2500
+const subscribeToHydration = () => () => undefined
 
 export function LandingShaderBackground() {
   const startedAt = useRef(Date.now())
   const revealScheduled = useRef(false)
-  const [isMounted, setIsMounted] = useState(false)
+  const isHydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false)
   const [isRevealing, setIsRevealing] = useState(false)
   const [isLoaderVisible, setIsLoaderVisible] = useState(true)
 
@@ -32,8 +34,6 @@ export function LandingShaderBackground() {
   }, [])
 
   useEffect(() => {
-    setIsMounted(true)
-
     const fallbackTimeout = window.setTimeout(
       revealShader,
       shaderFallbackTimeoutMs,
@@ -71,7 +71,7 @@ export function LandingShaderBackground() {
       </div>
 
       {isLoaderVisible ? (
-        isMounted ? (
+        isHydrated ? (
           createPortal(
             <ShaderLoader isRevealing={isRevealing} />,
             document.body,

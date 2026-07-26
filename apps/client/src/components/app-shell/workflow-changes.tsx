@@ -31,7 +31,7 @@ export function WorkflowChanges({ detail }: { readonly detail: WorkflowDetail })
     <div className="grid gap-4 lg:grid-cols-2">
       <Card className="ring-border">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><FileDiffIcon />Change summary</CardTitle>
+          <CardTitle as="h2" className="flex items-center gap-2"><FileDiffIcon />Change summary</CardTitle>
           <CardDescription>{candidate.summary ?? 'Candidate patch captured from the isolated sandbox.'}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-3 gap-3">
@@ -42,7 +42,7 @@ export function WorkflowChanges({ detail }: { readonly detail: WorkflowDetail })
       </Card>
       <Card className="ring-border">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><GitCommitIcon />Candidate identity</CardTitle>
+          <CardTitle as="h2" className="flex items-center gap-2"><GitCommitIcon />Candidate identity</CardTitle>
           <CardDescription>The exact patch projection evaluated by review and policy.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -59,17 +59,23 @@ export function WorkflowChanges({ detail }: { readonly detail: WorkflowDetail })
       </Card>
       <Card className="ring-border lg:col-span-2">
         <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div><CardTitle>Unified diff</CardTitle><CardDescription>Exact changed lines from the candidate’s referenced evidence artifact.</CardDescription></div>
-            {diff === undefined ? null : <Button size="sm" variant="outline" disabled={loadingDiff} onClick={() => void loadDiffPreview(diff.id, setLoadingDiff, setDiffPreview, setDiffError)}>{loadingDiff ? 'Loading…' : diffPreview === undefined ? 'Load diff' : 'Reload'}</Button>}
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+            <div><CardTitle as="h2">Unified diff</CardTitle><CardDescription>Exact changed lines from the candidate’s referenced evidence artifact.</CardDescription></div>
+            {diff === undefined ? null : <Button size="sm" variant="outline" className="min-h-11 w-full sm:min-h-8 sm:w-auto" aria-busy={loadingDiff} disabled={loadingDiff} onClick={() => void loadDiffPreview(diff.id, setLoadingDiff, setDiffPreview, setDiffError)}>{loadingDiff ? 'Loading…' : diffPreview === undefined ? 'Load diff' : 'Reload'}</Button>}
           </div>
         </CardHeader>
         <CardContent>
-          {diff === undefined ? <p className="m-0 text-sm text-muted-foreground">This candidate does not reference a diff artifact. Patch contents cannot be verified.</p> : diffError !== undefined ? <p className="m-0 text-sm text-[var(--destructive-readable)]">{diffError}</p> : diffPreview === undefined ? <p className="m-0 text-sm text-muted-foreground">Load the durable diff to inspect changed files and lines without leaving the Patch Report.</p> : <ScrollArea className="h-[32rem] rounded-lg bg-[var(--surface-nested)]"><pre className="p-3 font-mono text-xs whitespace-pre-wrap">{diffPreview}</pre></ScrollArea>}
+          {diff === undefined ? <p className="m-0 text-sm text-muted-foreground">This candidate does not reference a diff artifact. Patch contents cannot be verified.</p> : diffError !== undefined ? <p role="alert" className="m-0 text-sm text-[var(--destructive-readable)]">{diffError}</p> : diffPreview === undefined ? <p className="m-0 text-sm text-muted-foreground">Load the durable diff to inspect changed files and lines without leaving the Patch Report.</p> : <ScrollArea className="h-[32rem] rounded-lg bg-[var(--surface-nested)]"><pre className="break-words p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{diffPreview}</pre></ScrollArea>}
         </CardContent>
       </Card>
     </div>
   )
+}
+
+function artifactPreviewError(value: unknown) {
+  if (typeof value !== 'object' || value === null) return undefined
+  const error = Reflect.get(value, 'error')
+  return typeof error === 'string' ? error : undefined
 }
 
 async function loadDiffPreview(
@@ -83,8 +89,10 @@ async function loadDiffPreview(
   try {
     const response = await fetch(`/api/artifacts/url?artifactId=${encodeURIComponent(artifactId)}&preview=1`)
     if (!response.ok) {
-      const payload = await response.json().catch(() => undefined) as { error?: string } | undefined
-      throw new Error(payload?.error ?? `Diff preview failed (${response.status})`)
+      const payload: unknown = await response.json().catch(() => undefined)
+      throw new Error(
+        artifactPreviewError(payload) ?? `Diff preview failed (${response.status})`,
+      )
     }
     setPreview(await response.text())
   } catch (cause) {
@@ -105,5 +113,5 @@ function Metric({ label, value, tone }: { readonly label: string; readonly value
 }
 
 function Identity({ label, value }: { readonly label: string; readonly value: string }) {
-  return <div className="min-w-0"><div className="text-xs text-muted-foreground">{label}</div><code className="mt-1 block truncate text-xs">{value}</code></div>
+  return <div className="min-w-0"><div className="text-xs text-muted-foreground">{label}</div><code className="mt-1 block break-all text-xs">{value}</code></div>
 }

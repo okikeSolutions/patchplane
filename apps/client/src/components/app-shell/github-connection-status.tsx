@@ -17,11 +17,11 @@ export function GitHubConnectionStatus() {
   }
 
   return (
-    <Alert variant={status === 'failed' ? 'destructive' : 'default'} className="m-3 w-auto shrink-0">
+    <Alert role={status === 'failed' ? 'alert' : undefined} aria-live={status === 'connected' ? 'polite' : undefined} variant={status === 'failed' ? 'destructive' : 'default'} className="m-3 w-auto shrink-0">
       {status === 'failed' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
       <AlertTitle>{status === 'failed' ? 'GitHub connection failed' : 'GitHub connected'}</AlertTitle>
       <AlertDescription>{status === 'failed' ? 'Repository access could not be synchronized. Retry the connection or check the selected installation.' : 'Selected repositories are now available to this workspace.'}</AlertDescription>
-      <AlertAction><Button variant="ghost" size="icon-sm" aria-label="Dismiss GitHub connection status" onClick={dismiss}><XIcon /></Button></AlertAction>
+      <AlertAction><Button variant="ghost" size="icon-sm" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" aria-label="Dismiss GitHub connection status" onClick={dismiss}><XIcon /></Button></AlertAction>
     </Alert>
   )
 }

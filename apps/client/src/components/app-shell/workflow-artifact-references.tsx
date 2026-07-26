@@ -26,7 +26,7 @@ export function WorkflowArtifactReferences({
     return (
       <section className="flex flex-col gap-4">
         <div>
-          <h3 className="text-sm font-medium">Artifacts</h3>
+          <h2 className="text-sm font-medium">Artifacts</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
             Evidence artifact references linked from runtime events.
           </p>
@@ -47,12 +47,12 @@ export function WorkflowArtifactReferences({
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-medium">Artifacts</h3>
+        <h2 className="text-sm font-medium">Artifacts</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Evidence artifact references linked from runtime events.
         </p>
         {error === undefined ? null : (
-          <p className="m-0 mt-2 text-xs text-[var(--destructive-readable)]">{error}</p>
+          <p role="alert" className="m-0 mt-2 text-xs text-[var(--destructive-readable)]">{error}</p>
         )}
       </div>
       <div className="flex flex-col gap-2">
@@ -60,8 +60,8 @@ export function WorkflowArtifactReferences({
           <Card key={reference.id} id={`artifact-${reference.artifactId ?? reference.id}`} size="sm" className="scroll-mt-32 ring-border">
             <CardContent className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{reference.label}</div>
-                <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                <div className="break-words text-sm font-medium [overflow-wrap:anywhere]">{reference.label}</div>
+                <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
                   {reference.value}
                 </div>
               </div>
@@ -72,7 +72,9 @@ export function WorkflowArtifactReferences({
                 <Button
                   variant="secondary"
                   size="icon"
+                  className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
                   aria-label={`Open ${reference.label}`}
+                  aria-busy={openingId === reference.id}
                   title={`Open ${reference.label}`}
                   disabled={openingId === reference.id}
                   onClick={() => {
@@ -97,6 +99,19 @@ export function WorkflowArtifactReferences({
   )
 }
 
+function decodeArtifactUrlPayload(value: unknown) {
+  if (typeof value !== 'object' || value === null) return undefined
+  const ok = Reflect.get(value, 'ok')
+  const url = Reflect.get(value, 'url')
+  const error = Reflect.get(value, 'error')
+  if (ok === true && typeof url === 'string' && URL.canParse(url)) {
+    return { ok: true as const, url }
+  }
+  return ok === false && typeof error === 'string'
+    ? { ok: false as const, error }
+    : undefined
+}
+
 async function openArtifact(
   reference: WorkflowArtifactReference,
   callbacks: {
@@ -117,12 +132,16 @@ async function openArtifact(
       params.set('workflowRunId', reference.workflowRunId)
     }
     const response = await fetch(`/api/artifacts/url?${params.toString()}`)
-    const payload = await response.json() as { ok?: boolean; url?: string; error?: string }
-    if (!response.ok || payload.ok !== true || payload.url === undefined) {
-      callbacks.onError(payload.error ?? 'Artifact URL could not be created')
+    const payload = decodeArtifactUrlPayload(await response.json())
+    if (!response.ok || payload?.ok !== true) {
+      callbacks.onError(
+        payload?.ok === false
+          ? payload.error
+          : 'Artifact URL could not be created',
+      )
       return
     }
-    window.open(payload.url, '_blank', 'noreferrer')
+    window.location.assign(payload.url)
   } catch (cause) {
     callbacks.onError(cause instanceof Error ? cause.message : 'Artifact URL could not be created')
   } finally {

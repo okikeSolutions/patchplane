@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CopyIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -5,11 +6,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { RuntimeEventRow, SandboxExecutionRow } from './types'
 
-function copyText(value: string) {
-  if (typeof navigator === 'undefined') {
-    return
+async function copyText(value: string) {
+  if (typeof navigator === 'undefined' || navigator.clipboard === undefined) {
+    throw new Error('Clipboard access is unavailable')
   }
-  void navigator.clipboard?.writeText(value)
+  await navigator.clipboard.writeText(value)
 }
 
 function latestOutput(executions: ReadonlyArray<SandboxExecutionRow>) {
@@ -35,13 +36,13 @@ export function WorkflowLogViewer({
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-medium">Logs</h3>
+        <h2 className="text-sm font-medium">Logs</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Raw evidence stays one click away from the workflow summary.
         </p>
       </div>
       <Tabs defaultValue="runtime">
-        <TabsList variant="line">
+        <TabsList variant="line" aria-label="Log streams">
           <TabsTrigger value="runtime">Runtime events</TabsTrigger>
           <TabsTrigger value="stdout">Stdout</TabsTrigger>
           <TabsTrigger value="stderr">Stderr</TabsTrigger>
@@ -72,6 +73,8 @@ function LogBlock({
   readonly value: string
   readonly emptyTitle: string
 }) {
+  const [copyStatus, setCopyStatus] = useState<string>()
+
   if (value.length === 0) {
     return (
       <Empty>
@@ -88,14 +91,25 @@ function LogBlock({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex justify-end">
-        <Button variant="secondary" size="sm" onClick={() => copyText(value)}>
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-xs text-muted-foreground" aria-live="polite">{copyStatus}</span>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="min-h-11 md:min-h-8"
+          onClick={() => {
+            void copyText(value).then(
+              () => setCopyStatus('Copied to clipboard'),
+              () => setCopyStatus('Copy failed'),
+            )
+          }}
+        >
           <CopyIcon data-icon="inline-start" />
           Copy
         </Button>
       </div>
       <ScrollArea className="h-72 rounded-lg bg-[var(--surface-nested)]">
-        <pre className="p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap">
+        <pre className="break-words p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
           {value}
         </pre>
       </ScrollArea>

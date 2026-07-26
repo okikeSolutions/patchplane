@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
 
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import {
   cleanup,
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -23,13 +21,11 @@ vi.mock('convex/react', () => ({
   }),
 }))
 
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test fixtures use stable fake Convex IDs.
-const reviewedRunId = 'run_reviewed' as Id<'workflowRuns'>
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test fixtures use stable fake Convex IDs.
-const queuedRunId = 'run_queued' as Id<'workflowRuns'>
+const reviewedRunId = 'run_reviewed'
+const queuedRunId = 'run_queued'
 
 function workflowRow(
-  id: Id<'workflowRuns'>,
+  id: string,
   status: WorkflowStartRow['workflowRun']['status'],
   prompt: string,
 ): WorkflowStartRow {
@@ -172,7 +168,7 @@ describe('WorkflowConsole', () => {
     window.history.replaceState(null, '', '/')
   })
 
-  test('renders the workflow queue and inspector around trust-loop evidence', () => {
+  test('renders a full-width workflow queue with canonical trust state', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
@@ -186,21 +182,19 @@ describe('WorkflowConsole', () => {
 
     render(
       <WorkflowConsole
-        detailOverrides={{ [reviewedRunId]: workflowDetail(reviewed) }}
         metrics={{ appRequests: 1, externalRequests: 1, visibleRequests: 2 }}
         viewer={{ subject: 'user_123', name: 'Ugo' }}
         workflows={[reviewed, queued]}
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'Workflows' })).toBeTruthy()
+    expect(screen.getByText('Workflows')).toBeTruthy()
     expect(screen.getByPlaceholderText('Search workflows, repos, run IDs...')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Workflow queue' })).toBeTruthy()
+    expect(screen.getByText(/Workflow runs with execution status/)).toBeTruthy()
     expect(screen.getAllByText('okikeSolutions/guerillaglass').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Sandbox failed').length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('failed · exit 1')).toBeTruthy()
-    expect(screen.getByText('1 artifact ref')).toBeTruthy()
-    expect(screen.getByText('Untrusted')).toBeTruthy()
+    expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: /^patchplane smoke retry after GitHub App PEM fix\./ }).className).toContain('min-h-11')
   })
 
   test('filters workflow rows by search text and trust-state buttons', () => {
@@ -217,7 +211,6 @@ describe('WorkflowConsole', () => {
 
     render(
       <WorkflowConsole
-        detailOverrides={{ [reviewedRunId]: workflowDetail(reviewed) }}
         metrics={{ appRequests: 1, externalRequests: 1, visibleRequests: 2 }}
         viewer={{ subject: 'user_123', name: 'Ugo' }}
         workflows={[reviewed, queued]}
@@ -244,43 +237,27 @@ describe('WorkflowConsole', () => {
     expect(within(table).getByText('Review the recent authentication foundation')).toBeTruthy()
   })
 
-  test('opens workflow preview from the queue row with M9.5 full-page handoff', async () => {
+  test('links queue rows directly to the full workflow page with queue context', () => {
     const reviewed = workflowRow(
       reviewedRunId,
       'reviewed',
       'patchplane smoke retry after GitHub App PEM fix',
     )
+    window.history.replaceState(null, '', '/app?filter=needs-review')
 
     render(
       <WorkflowConsole
-        detailOverrides={{ [reviewedRunId]: workflowDetail(reviewed) }}
+        initialSearch={{ filter: 'needs-review', query: '', repository: 'all' }}
         metrics={{ appRequests: 0, externalRequests: 1, visibleRequests: 1 }}
         viewer={{ subject: 'user_123', name: 'Ugo' }}
         workflows={[reviewed]}
       />,
     )
 
-    const table = screen.getByRole('table')
-    const rowPrompt = within(table).getByRole('button', { name: 'patchplane smoke retry after GitHub App PEM fix' })
-    fireEvent.click(rowPrompt)
-
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeTruthy()
-    })
-
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByRole('heading', { name: 'patchplane smoke retry after GitHub App PEM fix' })).toBeTruthy()
-    expect(within(dialog).getByText('okikeSolutions/guerillaglass · Sandbox failed · run_reviewed')).toBeTruthy()
-
-    expect(within(dialog).getByRole('button', { name: 'Open full workflow' }).getAttribute('href')).toBe('/app/workflows/run_reviewed?returnTo=%2Fapp')
-    expect(within(dialog).getByRole('tab', { name: 'Overview' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'Timeline' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'Artifacts' })).toBeTruthy()
-    expect(within(dialog).queryByRole('tab', { name: 'Logs' })).toBeNull()
-
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Artifacts' }))
-
-    expect(await screen.findByText('r2://patchplane-dev-evidence-artifacts/run_reviewed/diff.patch')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('link', { name: /^patchplane smoke retry after GitHub App PEM fix\./ }).getAttribute('href')).toBe(
+      '/app/workflows/run_reviewed?returnTo=%2Fapp%3Ffilter%3Dneeds-review',
+    )
   })
 
   test('renders the streamlined workflow investigation page with evidence beside decisions', () => {

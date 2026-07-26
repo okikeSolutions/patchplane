@@ -66,7 +66,8 @@ describe('/app auth guard', () => {
 
     expect(layoutSource).toContain('component: Outlet')
     expect(layoutSource).not.toContain('component: AppWorkflowConsolePage')
-    expect(indexSource).toContain('component: AppWorkflowConsolePage')
+    expect(indexSource).toContain('component: WorkflowIndexRoute')
+    expect(indexSource).toContain('<AppWorkflowConsolePage initialSearch={search} />')
   })
 
   test('redirects signed-out users to sign in with the original app path', async () => {

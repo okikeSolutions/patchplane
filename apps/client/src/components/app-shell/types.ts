@@ -1,5 +1,3 @@
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
-
 export interface ViewerIdentity {
   subject: string
   name: string
@@ -44,14 +42,14 @@ export interface PromptRequestRow {
 }
 
 export interface WorkflowRunRow {
-  id: Id<'workflowRuns'>
+  id: string
   promptRequestId: string
   workspaceId: string
   traceId: string
   status: 'queued' | 'running' | 'reviewed' | 'failed'
   modelVersion?: 'v1'
-  parentWorkflowRunId?: Id<'workflowRuns'>
-  rootWorkflowRunId?: Id<'workflowRuns'>
+  parentWorkflowRunId?: string
+  rootWorkflowRunId?: string
   attemptNumber?: number
   trigger?: 'intake' | 'rerun'
   sourceCommitSha?: string
@@ -74,7 +72,7 @@ export interface WorkflowStartRow {
 
 export interface RuntimeEventRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   provider: string
   type: string
   occurredAt: number
@@ -90,7 +88,7 @@ export interface RuntimeEventRow {
 
 export interface RuntimeSessionRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   provider: string
   sandboxId: string
   sessionId: string
@@ -123,7 +121,7 @@ export interface SandboxPolicyRow {
 
 export interface EvidenceArtifactRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   traceId?: string
   kind:
     | 'raw-trace'
@@ -147,7 +145,7 @@ export interface EvidenceArtifactRow {
 
 export interface SandboxExecutionRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   provider: string
   sandboxId: string
   command: string
@@ -162,7 +160,7 @@ export interface SandboxExecutionRow {
 
 export interface CandidatePatchSetRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   status: 'captured' | 'empty' | 'failed'
   baseRef?: string
   baseSha?: string
@@ -180,7 +178,7 @@ export interface CandidatePatchSetRow {
 
 export interface ReviewRunRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   sandboxExecutionId?: string
   candidatePatchSetId?: string
   kind: 'test' | 'lint' | 'policy' | 'manual'
@@ -194,7 +192,7 @@ export interface ReviewRunRow {
 
 export interface ReviewFindingRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   reviewRunId?: string
   severity: 'info' | 'warning' | 'error' | 'critical'
   category: 'test' | 'lint' | 'security' | 'policy' | 'quality' | 'unknown'
@@ -208,7 +206,7 @@ export interface ReviewFindingRow {
 
 export interface VerificationRequirementRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   key: string
   label: string
   kind: 'test' | 'lint' | 'build' | 'browser' | 'security' | 'review'
@@ -223,7 +221,7 @@ export interface VerificationRequirementRow {
 
 export interface VerificationResultRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   requirementId: string
   candidatePatchSetId: string
   sandboxExecutionId?: string
@@ -249,7 +247,7 @@ export interface VerificationResultRow {
 
 export interface PolicyDecisionRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   reviewRunId?: string
   candidatePatchSetId?: string
   status: 'approved' | 'rejected' | 'changes-requested' | 'manual-review'
@@ -264,7 +262,7 @@ export interface PolicyDecisionRow {
 
 export interface HumanDecisionRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   sandboxExecutionId?: string
   candidatePatchSetId?: string
   reviewRunId?: string
@@ -280,7 +278,7 @@ export interface HumanDecisionRow {
 
 export interface PublicationResultRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   provider: string
   kind: 'issue-comment' | 'check-run' | 'draft-pull-request' | 'branch'
   status: 'pending' | 'published' | 'failed'
@@ -294,7 +292,7 @@ export interface PublicationResultRow {
 
 export interface ProvenanceEventRow {
   id: string
-  workflowRunId: Id<'workflowRuns'>
+  workflowRunId: string
   traceId: string
   parentEventId?: string
   sequence: number

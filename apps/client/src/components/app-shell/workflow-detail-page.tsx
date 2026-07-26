@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { api } from '@patchplane/backend/convex/_generated/api'
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import { useQuery } from 'convex/react'
 import { ArrowLeftIcon, BracesIcon, ExternalLinkIcon } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -26,7 +25,7 @@ const detailTabs: ReadonlyArray<DetailTab> = ['summary', 'changes', 'evidence', 
 
 export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summary', returnTo = '/app', onRerunCreated, onTabChange }: {
   readonly detailOverride?: WorkflowDetail
-  readonly workflowRunId: Id<'workflowRuns'>
+  readonly workflowRunId: string
   readonly tab?: DetailTab
   readonly returnTo?: string
   readonly onRerunCreated?: (workflowRunId: string) => void
@@ -49,35 +48,35 @@ export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summa
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
-      <header className="sticky top-0 z-20 border-b border-border bg-background/95 px-4 py-3 backdrop-blur lg:px-6">
+      <header className="z-20 border-b md:sticky md:top-0 border-border bg-background/95 px-4 py-3 backdrop-blur lg:px-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <Button variant="ghost" size="sm" className="mb-1 px-0" nativeButton={false} render={<a href={returnTo} aria-label="Back to workflows" />}>
+            <a className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'mb-1 min-h-11 px-2 md:min-h-8' })} href={returnTo} aria-label="Back to workflows">
               <ArrowLeftIcon data-icon="inline-start" />Workflows
-            </Button>
+            </a>
             <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <span>{detail.workflowRun.workspaceId.replace('workos:', '')}</span><span>/</span>
               <span>{externalRef?.repositoryFullName ?? detail.promptRequest.source}</span>
               {externalRef?.pullRequestNumber === undefined ? null : <><span>/</span><span>PR #{externalRef.pullRequestNumber}</span></>}
             </div>
-            <h1 className="line-clamp-2 text-xl font-semibold tracking-tight">{detail.promptRequest.prompt}</h1>
-            <p className="m-0 mt-1 truncate font-mono text-xs text-muted-foreground">{detail.workflowRun.id}</p>
+            <h1 tabIndex={-1} className="break-words rounded-sm text-xl font-semibold tracking-tight outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring">{detail.promptRequest.prompt}</h1>
+            <p className="m-0 mt-1 break-all font-mono text-xs text-muted-foreground">{detail.workflowRun.id}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <WorkflowRunStatusBadge status={detail.workflowRun.status} />
             <WorkflowTrustStateBadge state={trustState} />
             {externalRef?.url === undefined ? null : (
-              <Button variant="outline" size="sm" nativeButton={false} render={<a href={externalRef.url} target="_blank" rel="noreferrer" aria-label="Open source event on GitHub" />}>
+              <a className={buttonVariants({ variant: 'outline', size: 'sm', className: 'min-h-11 md:min-h-8' })} href={externalRef.url} target="_blank" rel="noreferrer" aria-label="Open source event on GitHub (opens in a new tab)">
                 GitHub<ExternalLinkIcon data-icon="inline-end" />
-              </Button>
+              </a>
             )}
           </div>
         </div>
       </header>
-      <main className="min-h-0 flex-1 p-4 lg:p-6">
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="min-h-0 flex-1 px-4 pt-4 pb-10 lg:px-6 lg:pt-6 lg:pb-12">
+        <div className="mx-auto grid w-full max-w-[100rem] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <Tabs value={activeTab} onValueChange={changeTab} className="min-w-0 gap-4">
-            <TabsList variant="line" className="w-full justify-start overflow-x-auto">
+            <TabsList variant="line" aria-label="Patch report sections" className="h-auto w-full flex-wrap justify-start overflow-visible [&_[role=tab]]:min-h-10 [&_[role=tab]]:min-w-fit">
               <TabsTrigger value="summary">Summary</TabsTrigger>
               <TabsTrigger value="changes">Changes</TabsTrigger>
               <TabsTrigger value="evidence">Evidence</TabsTrigger>
@@ -107,7 +106,7 @@ export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summa
             </Card>
           </aside>
         </div>
-      </main>
+      </div>
     </div>
   )
 }
@@ -115,7 +114,7 @@ export function WorkflowDetailPage({ detailOverride, workflowRunId, tab = 'summa
 function WorkflowEvidenceWorkspace({ detail }: { readonly detail: WorkflowDetail }) {
   return (
     <Tabs defaultValue="artifacts" className="gap-4">
-      <TabsList className="w-full justify-start overflow-x-auto">
+      <TabsList aria-label="Evidence views" className="h-auto w-full flex-wrap justify-start overflow-visible [&_[role=tab]]:min-h-10 [&_[role=tab]]:min-w-fit">
         <TabsTrigger value="artifacts">Artifacts ({detail.evidenceArtifacts.length})</TabsTrigger>
         <TabsTrigger value="sandbox">Sandbox ({detail.sandboxExecutions.length})</TabsTrigger>
         <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -132,8 +131,8 @@ function WorkflowEvidenceWorkspace({ detail }: { readonly detail: WorkflowDetail
 function WorkflowRawEvidence({ detail }: { readonly detail: WorkflowDetail }) {
   return (
     <Card className="ring-border">
-      <CardHeader><CardTitle className="flex items-center gap-2"><BracesIcon />Normalized diagnostics</CardTitle><CardDescription>PatchPlane-owned read-model data for debugging. Raw evidence remains in the linked artifacts.</CardDescription></CardHeader>
-      <CardContent><ScrollArea className="h-80 rounded-lg bg-[var(--surface-nested)]"><pre className="p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap">{JSON.stringify(detail, null, 2)}</pre></ScrollArea></CardContent>
+      <CardHeader><CardTitle as="h2" className="flex items-center gap-2"><BracesIcon />Normalized diagnostics</CardTitle><CardDescription>PatchPlane-owned read-model data for debugging. Raw evidence remains in the linked artifacts.</CardDescription></CardHeader>
+      <CardContent><ScrollArea className="h-80 rounded-lg bg-[var(--surface-nested)]"><pre className="break-words p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">{JSON.stringify(detail, null, 2)}</pre></ScrollArea></CardContent>
     </Card>
   )
 }

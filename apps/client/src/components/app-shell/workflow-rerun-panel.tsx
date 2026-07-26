@@ -66,7 +66,7 @@ export function WorkflowRerunPanel({
   if (!isOpen && childWorkflowRunId === undefined) {
     return (
       <div className="flex flex-col gap-2">
-        <Button type="button" variant="outline" className="w-full" disabled={unavailableReason !== undefined} onClick={() => setIsOpen(true)}>
+        <Button type="button" variant="outline" className="min-h-11 w-full" disabled={unavailableReason !== undefined} onClick={() => setIsOpen(true)}>
           <RotateCcwIcon data-icon="inline-start" />
           Request another run
         </Button>
@@ -79,8 +79,9 @@ export function WorkflowRerunPanel({
 
   return (
     <section className="flex flex-col gap-3 border-t border-border pt-4">
+      <span className="sr-only" aria-live="polite">{childWorkflowRunId === undefined ? '' : error === undefined ? 'Child run created.' : 'Child run created; dispatch needs attention.'}</span>
       <div>
-        <h3 className="text-sm font-medium">Request another run</h3>
+        <h2 className="text-sm font-medium">Request another run</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Creates a new immutable child attempt. This report and its evidence remain unchanged.
         </p>
@@ -88,7 +89,7 @@ export function WorkflowRerunPanel({
       {childWorkflowRunId === undefined ? (
         <>
           {error === undefined ? null : (
-            <Alert variant="destructive">
+            <Alert role="alert" variant="destructive">
               <AlertTitle>Another run could not be started</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
@@ -98,25 +99,27 @@ export function WorkflowRerunPanel({
             <Textarea
               id="workflow-rerun-reason"
               value={reason}
+              required
+              aria-describedby="workflow-rerun-reason-description"
               aria-invalid={reason.length > 0 && trimmedReason.length === 0}
               maxLength={1000}
               placeholder="Explain what should change or why another attempt is needed."
               onChange={(event) => setReason(event.currentTarget.value)}
             />
-            <FieldDescription>The reason is recorded with the child workflow lineage.</FieldDescription>
+            <FieldDescription id="workflow-rerun-reason-description">The reason is recorded with the child workflow lineage.</FieldDescription>
           </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" disabled={trimmedReason.length === 0 || isSubmitting} onClick={() => void submit()}>
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+            <Button type="button" className="min-h-11 w-full sm:w-auto" aria-busy={isSubmitting} disabled={trimmedReason.length === 0 || isSubmitting} onClick={() => void submit()}>
               <RotateCcwIcon data-icon="inline-start" />
               {isSubmitting ? 'Starting...' : 'Run again'}
             </Button>
-            <Button type="button" variant="ghost" disabled={isSubmitting} onClick={() => { setIsOpen(false); setError(undefined) }}>
+            <Button type="button" variant="ghost" className="min-h-11 w-full sm:w-auto" disabled={isSubmitting} onClick={() => { setIsOpen(false); setError(undefined) }}>
               Cancel
             </Button>
           </div>
         </>
       ) : (
-        <Alert>
+        <Alert role={error === undefined ? undefined : 'alert'}>
           <AlertTitle>{error === undefined ? 'Child run created' : 'Child run created; dispatch needs attention'}</AlertTitle>
           <AlertDescription>
             {error === undefined ? 'The new immutable attempt is ready. ' : `${error} `}

@@ -7,10 +7,21 @@ import { GitHubRepositoryConnections } from './github-repository-connections'
 import { NoOrganizationAlert } from './no-organization-alert'
 import { WorkflowConsole } from './workflow-console'
 import type { ViewerIdentity, WorkflowStartRow } from './types'
+import type { WorkflowFilter } from './workflow-console-model'
 
 const EMPTY_WORKFLOWS: ReadonlyArray<WorkflowStartRow> = []
 
-export function WorkflowConsoleContent() {
+export function WorkflowConsoleContent({
+  initialSearch,
+  onOpenWorkflow,
+}: {
+  readonly initialSearch: {
+    readonly filter: WorkflowFilter
+    readonly query: string
+    readonly repository: string
+  }
+  readonly onOpenWorkflow?: (workflowRunId: string, returnTo: string) => void
+}) {
   const { user, organizationId } = useAuth()
   const ensureCurrentUser = useMutation(api.auth.ensureCurrentUser)
   const viewer = useQuery(api.viewer.current, {}) as ViewerIdentity | undefined
@@ -40,14 +51,18 @@ export function WorkflowConsoleContent() {
   }, [visibleWorkflows])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-visible md:overflow-hidden">
+      <h1 className="sr-only">Workflows</h1>
       {user && !organizationId ? <NoOrganizationAlert /> : null}
       <GitHubConnectionStatus />
       <GitHubRepositoryConnections workspaceId={workspaceId} />
       <WorkflowConsole
+        key={JSON.stringify(initialSearch)}
+        initialSearch={initialSearch}
         metrics={metrics}
         viewer={viewer}
         workflows={visibleWorkflows}
+        onOpenWorkflow={onOpenWorkflow}
       />
     </div>
   )

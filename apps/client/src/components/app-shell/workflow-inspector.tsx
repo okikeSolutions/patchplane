@@ -184,9 +184,9 @@ function CompactTimeline({ detail }: { readonly detail: WorkflowDetail }) {
       time: execution.completedAt,
     })),
   ]
-  // oxlint-disable-next-line unicorn/no-array-sort -- TS target does not include toSorted.
-  items.sort((left, right) => right.time - left.time)
-  const visibleItems = items.slice(0, 4)
+  const visibleItems = items
+    .toSorted((left, right) => right.time - left.time)
+    .slice(0, 4)
 
   return (
     <div className="flex flex-col">

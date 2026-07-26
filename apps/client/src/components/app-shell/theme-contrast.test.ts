@@ -23,7 +23,7 @@ function luminance(hex: string) {
 }
 
 function contrast(left: string, right: string) {
-  const values = [luminance(left), luminance(right)].sort((a, b) => b - a)
+  const values = [luminance(left), luminance(right)].toSorted((a, b) => b - a)
   return (values[0] + 0.05) / (values[1] + 0.05)
 }
 

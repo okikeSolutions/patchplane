@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import type { Id } from '@patchplane/backend/convex/_generated/dataModel'
 import type { ColumnDef } from '@tanstack/react-table'
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { ListFilterIcon, WorkflowIcon } from 'lucide-react'
@@ -15,39 +14,38 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { WorkflowDetail, WorkflowStartRow } from './types'
+import type { WorkflowStartRow } from './types'
 import {
   formatRelative,
   lastEventLabel,
   sourceLabel,
   trustStateForList,
 } from './workflow-console-model'
-import { WorkflowRunStatusBadge, WorkflowTrustStateBadge } from './workflow-status-badge'
+import { workflowStatusLabel, WorkflowRunStatusBadge, WorkflowTrustStateBadge } from './workflow-status-badge'
 import type { WorkflowTrustState } from './workflow-trust-state'
-import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-trust-state'
+import { workflowTrustStateLabel } from './workflow-trust-state'
 
 export function WorkflowQueue({
   isLoading,
   rows,
-  selectedDetail,
-  selectedWorkflowRunId,
+  returnTo,
   onOpenWorkflow,
 }: {
   readonly isLoading: boolean
   readonly rows: ReadonlyArray<WorkflowStartRow>
-  readonly selectedDetail?: WorkflowDetail
-  readonly selectedWorkflowRunId: Id<'workflowRuns'> | undefined
-  readonly onOpenWorkflow: (id: Id<'workflowRuns'>) => void
+  readonly returnTo: string
+  readonly onOpenWorkflow?: (workflowRunId: string, returnTo: string) => void
 }) {
   const columns = useMemo(
-    () => workflowQueueColumns({ selectedDetail, selectedWorkflowRunId, onOpenWorkflow }),
-    [selectedDetail, selectedWorkflowRunId, onOpenWorkflow],
+    () => workflowQueueColumns(returnTo, onOpenWorkflow),
+    [onOpenWorkflow, returnTo],
   )
   // TanStack Table treats data identity as a change signal. An inline copy here
   // causes an unbounded rerender loop whenever selection state changes.
@@ -60,20 +58,20 @@ export function WorkflowQueue({
   })
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col bg-background">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background" aria-busy={isLoading} aria-labelledby="workflow-queue-heading">
       <div className="flex h-12 items-center justify-between border-b border-border px-4 lg:px-6">
         <div className="flex items-center gap-2">
           <ListFilterIcon className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">Workflow queue</h2>
+          <h2 id="workflow-queue-heading" className="text-sm font-medium">Workflow queue</h2>
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span className="hidden text-xs text-muted-foreground sm:inline">
           Source · trust · evidence
         </span>
       </div>
       {isLoading ? (
         <WorkflowQueueSkeleton />
       ) : rows.length === 0 ? (
-        <div className="p-6">
+        <div className="p-6" aria-live="polite">
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon"><WorkflowIcon /></EmptyMedia>
@@ -87,10 +85,11 @@ export function WorkflowQueue({
       ) : (
         <ScrollArea className="min-h-0 flex-1">
           <Table className="table-fixed">
+            <TableCaption className="sr-only">Workflow runs with execution status, trust state, source, latest event, and update time.</TableCaption>
             <colgroup>
               <col />
-              <col className="hidden w-28 md:table-column" />
-              <col className="w-32" />
+              <col className="hidden w-36 md:table-column" />
+              <col className="hidden w-44 sm:table-column" />
               <col className="hidden w-44 lg:table-column" />
               <col className="hidden w-40 2xl:table-column" />
               <col className="hidden w-28 2xl:table-column" />
@@ -99,7 +98,7 @@ export function WorkflowQueue({
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent [&_th]:text-muted-foreground">
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} className={columnClassName(header.column.id)}>
+                    <TableHead key={header.id} className={cn(columnClassName(header.column.id), 'last:pr-4 lg:last:pr-6')}>
                       {header.isPlaceholder
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
@@ -110,16 +109,13 @@ export function WorkflowQueue({
             </TableHeader>
             <TableBody>
               {table.getRowModel().rows.map((row) => {
-                const selected = row.original.workflowRun.id === selectedWorkflowRunId
                 return (
                   <TableRow
                     key={row.id}
-                    aria-selected={selected}
-                    data-state={selected ? 'selected' : undefined}
-                    className="border-border data-[state=selected]:bg-muted/80"
+                    className="border-border"
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className={columnClassName(cell.column.id, true)}>
+                      <TableCell key={cell.id} className={cn(columnClassName(cell.column.id, true), 'last:pr-4 lg:last:pr-6')}>
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
@@ -134,35 +130,42 @@ export function WorkflowQueue({
   )
 }
 
-function workflowQueueColumns(input: {
-  readonly selectedDetail?: WorkflowDetail
-  readonly selectedWorkflowRunId: Id<'workflowRuns'> | undefined
-  readonly onOpenWorkflow: (id: Id<'workflowRuns'>) => void
-}): Array<ColumnDef<WorkflowStartRow>> {
+function workflowQueueColumns(
+  returnTo: string,
+  onOpenWorkflow: ((workflowRunId: string, returnTo: string) => void) | undefined,
+): Array<ColumnDef<WorkflowStartRow>> {
   return [
     {
       id: 'workflow',
       header: 'Workflow',
       cell: ({ row }) => {
-        const trustState = trustStateForRow(row.original, input)
+        const trustState = trustStateForList(row.original)
         return (
-          <div className="flex min-w-0 items-start gap-3">
+          <a
+            aria-label={`${row.original.promptRequest.prompt}. Run ${row.original.workflowRun.id}. Source ${sourceLabel(row.original)}. Execution ${workflowStatusLabel(row.original.workflowRun.status)}. Trust ${workflowTrustStateLabel(trustState)}.`}
+            className="flex min-h-11 min-w-0 items-start gap-3 rounded-sm text-left underline-offset-4 hover:[&_.workflow-title]:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href={`/app/workflows/${row.original.workflowRun.id}?returnTo=${encodeURIComponent(returnTo)}`}
+            onClick={onOpenWorkflow === undefined ? undefined : (event) => {
+              event.preventDefault()
+              onOpenWorkflow(row.original.workflowRun.id, returnTo)
+            }}
+          >
             <TrustMarker state={trustState} />
             <div className="min-w-0">
-              <button
-                type="button"
-                className="block max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => input.onOpenWorkflow(row.original.workflowRun.id)}
-              >
+              <span className="workflow-title block max-w-full break-words whitespace-normal font-medium [overflow-wrap:anywhere]">
                 {row.original.promptRequest.prompt}
-              </button>
-              <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                <code className="truncate font-mono">{row.original.workflowRun.id}</code>
+              </span>
+              <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <code className="break-all whitespace-normal font-mono">{row.original.workflowRun.id}</code>
                 <span>·</span>
-                <span className="truncate">{sourceLabel(row.original)}</span>
-              </div>
+                <span className="break-words whitespace-normal [overflow-wrap:anywhere]">{sourceLabel(row.original)}</span>
+              </span>
+              <span className="mt-2 flex flex-wrap gap-1 sm:hidden" aria-hidden="true">
+                <WorkflowRunStatusBadge status={row.original.workflowRun.status} />
+                <WorkflowTrustStateBadge state={trustState} />
+              </span>
             </div>
-          </div>
+          </a>
         )
       },
     },
@@ -175,13 +178,13 @@ function workflowQueueColumns(input: {
       id: 'trust',
       header: 'Trust',
       cell: ({ row }) => (
-        <WorkflowTrustStateBadge state={trustStateForRow(row.original, input)} />
+        <WorkflowTrustStateBadge state={trustStateForList(row.original)} />
       ),
     },
     {
       id: 'source',
       header: 'Source',
-      cell: ({ row }) => <span className="block truncate text-sm">{sourceLabel(row.original)}</span>,
+      cell: ({ row }) => <span className="block break-words whitespace-normal text-sm [overflow-wrap:anywhere]">{sourceLabel(row.original)}</span>,
     },
     {
       id: 'lastEvent',
@@ -198,20 +201,6 @@ function workflowQueueColumns(input: {
   ]
 }
 
-function trustStateForRow(
-  row: WorkflowStartRow,
-  input: {
-    readonly selectedDetail?: WorkflowDetail
-    readonly selectedWorkflowRunId: Id<'workflowRuns'> | undefined
-  },
-) {
-  if (row.workflowRun.id === input.selectedWorkflowRunId && input.selectedDetail !== undefined) {
-    return deriveWorkflowTrustState(input.selectedDetail)
-  }
-
-  return trustStateForList(row)
-}
-
 function columnClassName(columnId: string, isCell = false) {
   switch (columnId) {
     case 'workflow':
@@ -219,7 +208,7 @@ function columnClassName(columnId: string, isCell = false) {
     case 'status':
       return 'hidden overflow-hidden md:table-cell'
     case 'trust':
-      return 'overflow-hidden'
+      return 'hidden overflow-hidden sm:table-cell'
     case 'source':
       return 'hidden overflow-hidden lg:table-cell'
     case 'lastEvent':
@@ -233,7 +222,8 @@ function columnClassName(columnId: string, isCell = false) {
 
 function WorkflowQueueSkeleton() {
   return (
-    <div className="flex flex-col gap-3 p-6">
+    <div className="flex flex-col gap-3 p-6" aria-live="polite">
+      <span className="sr-only">Loading workflow runs.</span>
       {Array.from({ length: 5 }).map((_, index) => (
         <Skeleton key={index} className="h-14 w-full" />
       ))}
@@ -254,6 +244,7 @@ function TrustMarker({ state }: { readonly state: WorkflowTrustState }) {
               ? 'bg-chart-2'
               : 'bg-muted-foreground',
       )}
+      aria-hidden="true"
       title={workflowTrustStateLabel(state)}
     />
   )

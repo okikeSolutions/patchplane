@@ -99,22 +99,22 @@ export function GitHubRepositoryConnections({
   return (
     <Card className="shrink-0 rounded-none border-x-0 border-t-0 border-border bg-card/65 py-0 shadow-none ring-0">
       <CardHeader className="gap-2 px-4 py-3 lg:px-6">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
           <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm">
+            <CardTitle as="h2" className="flex items-center gap-2 text-sm">
               <GitHubLogo className="size-4" />
               GitHub repositories
             </CardTitle>
-            <CardDescription className="line-clamp-1">
+            <CardDescription className="break-words [overflow-wrap:anywhere]">
               {repositories.length === 0
                 ? 'Connect a repository to receive evidence-backed Patch Reports for pull requests.'
                 : `${repositories.length} connected ${repositories.length === 1 ? 'repository' : 'repositories'} · status at a glance`}
             </CardDescription>
           </div>
           {workspaceId === undefined ? (
-            <Button type="button" size="sm" disabled>Connect GitHub</Button>
+            <Button type="button" size="sm" className="min-h-11 w-full sm:w-auto md:min-h-8" disabled>Connect GitHub</Button>
           ) : (
-            <a className={buttonVariants({ size: 'sm' })} href="/api/github/install/start?returnPathname=/app">
+            <a className={buttonVariants({ size: 'sm', className: 'min-h-11 w-full sm:w-auto md:min-h-8' })} href="/api/github/install/start?returnPathname=/app">
               {repositories.length === 0 ? 'Connect GitHub' : 'Manage GitHub repositories'}
             </a>
           )}
@@ -126,16 +126,16 @@ export function GitHubRepositoryConnections({
             Select an active WorkOS organization before connecting GitHub.
           </p>
         ) : paginationStatus === 'LoadingFirstPage' ? (
-          <p className="text-sm text-muted-foreground">Loading repositories…</p>
+          <output aria-live="polite" className="block text-sm text-muted-foreground">Loading repositories…</output>
         ) : repositories.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <output className="block text-sm text-muted-foreground">
             No repositories connected yet. Connect GitHub to start routing PR
             verification workflows.
-          </p>
+          </output>
         ) : (
           <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger
-              render={<Button type="button" variant="ghost" size="sm" className="mb-1 px-2" />}
+              render={<Button type="button" variant="ghost" size="sm" className="mb-1 min-h-11 px-2 md:min-h-8" />}
             >
               {open ? 'Hide repositories' : `Show ${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'}`}
               <ChevronDownIcon className={cn('transition-transform', open && 'rotate-180')} data-icon="inline-end" />
@@ -146,10 +146,10 @@ export function GitHubRepositoryConnections({
             {repositories.map(({ repository, latestVerification }) => (
               <div
                 key={repository.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                className="flex flex-col items-start gap-3 rounded-md border border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
+                  <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">
                     {repository.repositoryFullName}
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -193,7 +193,7 @@ export function GitHubRepositoryConnections({
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex shrink-0 flex-row flex-wrap items-start gap-1 sm:flex-col sm:items-end">
                   <Badge
                     variant={
                       repository.status === 'active' ? 'secondary' : 'outline'
@@ -220,7 +220,8 @@ export function GitHubRepositoryConnections({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="w-fit"
+                className="min-h-11 w-full sm:w-fit md:min-h-8"
+                aria-busy={paginationStatus === 'LoadingMore'}
                 disabled={paginationStatus === 'LoadingMore'}
                 onClick={() => loadMore(20)}
               >

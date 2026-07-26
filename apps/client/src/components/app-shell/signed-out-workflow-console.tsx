@@ -27,7 +27,7 @@ export function SignedOutWorkflowConsole() {
         />
       </div>
       <Separator className="bg-border" />
-      <a href="/api/auth/sign-in?returnPathname=/app" className={buttonVariants({ className: 'w-fit' })}>
+      <a href="/api/auth/sign-in?returnPathname=/app" className={buttonVariants({ className: 'min-h-11 w-full sm:w-fit' })}>
         {m.app_sign_in()}
       </a>
     </section>

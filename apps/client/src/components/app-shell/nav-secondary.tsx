@@ -23,13 +23,14 @@ export function NavSecondary({
   readonly label?: string
 } & ComponentProps<typeof SidebarGroup>) {
   return (
-    <SidebarGroup {...props}>
+    <nav aria-label={label}>
+      <SidebarGroup {...props}>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton render={<a href={item.href} aria-label={item.title} />}>
+              <SidebarMenuButton className="min-h-11 md:min-h-8" render={<a href={item.href} target="_blank" rel="noreferrer" aria-label={`${item.title} (opens in a new tab)`} />}>
                 <item.icon />
                 <span>{item.title}</span>
               </SidebarMenuButton>
@@ -37,6 +38,7 @@ export function NavSecondary({
           ))}
         </SidebarMenu>
       </SidebarGroupContent>
-    </SidebarGroup>
+      </SidebarGroup>
+    </nav>
   )
 }

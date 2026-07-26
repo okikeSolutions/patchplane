@@ -27,24 +27,24 @@ function timelineItems(detail: WorkflowDetail): ReadonlyArray<TimelineItem> {
   const canonicalItems = detail.provenanceEvents.length > 0
     ? items.filter((item) => item.key === 'prompt' || item.key.startsWith('provenance:'))
     : items
-  // oxlint-disable-next-line unicorn/no-array-sort -- TS target does not include toSorted.
-  canonicalItems.sort((left, right) => left.occurredAt - right.occurredAt)
-  return canonicalItems
+  return canonicalItems.toSorted(
+    (left, right) => left.occurredAt - right.occurredAt,
+  )
 }
 
 export function WorkflowTimeline({ detail }: { readonly detail: WorkflowDetail }) {
   const items = timelineItems(detail)
   return (
     <section className="flex flex-col gap-4">
-      <div><h3 className="text-sm font-medium">Provenance timeline</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Durable intake, execution, review, decision, and publication history.{detail.sandboxExecutionsTruncated ? ' Older sandbox execution previews are omitted; durable evidence remains available in artifacts.' : ''}</p></div>
-      <div className="flex flex-col">
+      <div><h2 className="text-sm font-medium">Provenance timeline</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Durable intake, execution, review, decision, and publication history.{detail.sandboxExecutionsTruncated ? ' Older sandbox execution previews are omitted; durable evidence remains available in artifacts.' : ''}</p></div>
+      <ol className="flex flex-col">
         {items.map((item, index) => (
-          <div key={item.key} className="flex gap-3">
-            <div className="flex flex-col items-center"><div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground"><TimelineIcon category={item.category} status={item.status} /></div>{index === items.length - 1 ? null : <Separator orientation="vertical" className="min-h-8 bg-border" />}</div>
-            <div className="min-w-0 flex-1 pb-4"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{item.title}</span><Badge variant={item.status === 'failed' ? 'destructive' : 'secondary'}>{item.status}</Badge></div><p className="m-0 mt-1 text-sm text-muted-foreground">{item.detail}</p><time className="text-xs text-muted-foreground" dateTime={new Date(item.occurredAt).toISOString()}>{formatTimestamp(item.occurredAt)}</time></div>
-          </div>
+          <li key={item.key} className="flex gap-3">
+            <div className="flex flex-col items-center"><div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground"><TimelineIcon category={item.category} status={item.status} /></div>{index === items.length - 1 ? null : <Separator aria-hidden="true" orientation="vertical" className="min-h-8 bg-border" />}</div>
+            <div className="min-w-0 flex-1 pb-4"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{item.title}</span><Badge variant={item.status === 'failed' ? 'destructive' : 'secondary'}>{item.status}</Badge></div><p className="m-0 mt-1 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{item.detail}</p><time className="text-xs text-muted-foreground" dateTime={new Date(item.occurredAt).toISOString()}>{formatTimestamp(item.occurredAt)}</time></div>
+          </li>
         ))}
-      </div>
+      </ol>
     </section>
   )
 }

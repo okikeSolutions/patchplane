@@ -18,7 +18,7 @@ export function WorkflowSandboxEvidence({
     return (
       <section className="flex flex-col gap-4">
         <div>
-          <h3 className="text-sm font-medium">Sandbox</h3>
+          <h2 className="text-sm font-medium">Sandbox</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
             Daytona execution evidence for this workflow.
           </p>
@@ -39,7 +39,7 @@ export function WorkflowSandboxEvidence({
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-medium">Sandbox</h3>
+        <h2 className="text-sm font-medium">Sandbox</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Daytona execution evidence for this workflow.
         </p>
@@ -48,17 +48,17 @@ export function WorkflowSandboxEvidence({
         {executions.map((execution) => (
           <div key={execution.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0">
             <div>
-              <h4 className="flex items-center gap-2 text-sm font-medium">
+              <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
                 Sandbox command
                 <Badge variant={execution.status === 'failed' ? 'destructive' : 'secondary'}>
                   {execution.status === 'failed' ? 'Failed' : 'Succeeded'}
                 </Badge>
-              </h4>
-              <p className="m-0 mt-1 text-sm text-muted-foreground">
+              </h3>
+              <p className="m-0 mt-1 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
                 {execution.provider} · {execution.sandboxId}
               </p>
             </div>
-            <div className="rounded-md bg-[var(--surface-nested)] p-3 font-mono text-xs">
+            <div className="break-words rounded-md bg-[var(--surface-nested)] p-3 font-mono text-xs [overflow-wrap:anywhere]">
               {execution.command}
             </div>
             <div className="grid gap-3 sm:grid-cols-3">

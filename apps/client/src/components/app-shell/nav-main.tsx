@@ -17,7 +17,8 @@ export interface NavMainItem {
 
 export function NavMain({ items }: { readonly items: ReadonlyArray<NavMainItem> }) {
   return (
-    <SidebarGroup>
+    <nav aria-label="Control plane">
+      <SidebarGroup>
       <SidebarGroupLabel>Control plane</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
@@ -25,6 +26,7 @@ export function NavMain({ items }: { readonly items: ReadonlyArray<NavMainItem> 
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton
                 isActive={item.isActive}
+                className="min-h-11 md:min-h-8"
                 tooltip={item.title}
                 render={<a href={item.href} aria-label={item.title} />}
               >
@@ -35,6 +37,7 @@ export function NavMain({ items }: { readonly items: ReadonlyArray<NavMainItem> 
           ))}
         </SidebarMenu>
       </SidebarGroupContent>
-    </SidebarGroup>
+      </SidebarGroup>
+    </nav>
   )
 }

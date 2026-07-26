@@ -26,12 +26,13 @@ export function NavUser({
       <SidebarMenu>
         <SidebarMenuItem>
           {isSignedIn ? (
-            <SidebarMenuButton tooltip="Sign out" onClick={onSignOut}>
+            <SidebarMenuButton className="min-h-11 md:min-h-8" tooltip="Sign out" onClick={onSignOut}>
               <LogOutIcon />
               <span className="truncate">{displayName}</span>
             </SidebarMenuButton>
           ) : (
             <SidebarMenuButton
+              className="min-h-11 md:min-h-8"
               render={
                 <a
                   href="/api/auth/sign-in?returnPathname=/app"

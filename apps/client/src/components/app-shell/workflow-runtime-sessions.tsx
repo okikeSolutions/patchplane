@@ -19,7 +19,7 @@ export function WorkflowRuntimeSessions({
     return (
       <section className="flex flex-col gap-4">
         <div>
-          <h3 className="text-sm font-medium">Runtime sessions</h3>
+          <h2 className="text-sm font-medium">Runtime sessions</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
             Pi/Daytona runtime session lifecycle for this workflow.
           </p>
@@ -40,7 +40,7 @@ export function WorkflowRuntimeSessions({
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-medium">Runtime sessions</h3>
+        <h2 className="text-sm font-medium">Runtime sessions</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
           Remote runtime process state captured from Daytona sessions.
         </p>
@@ -50,12 +50,12 @@ export function WorkflowRuntimeSessions({
           <div key={session.id} className="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto]">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h4 className="truncate text-sm font-medium">{session.provider}</h4>
+                <h3 className="break-words text-sm font-medium [overflow-wrap:anywhere]">{session.provider}</h3>
                 <Badge variant={session.status === 'running' ? 'secondary' : 'outline'}>
                   {session.status}
                 </Badge>
               </div>
-              <p className="m-0 mt-1 truncate font-mono text-xs text-muted-foreground">
+              <p className="m-0 mt-1 break-all font-mono text-xs text-muted-foreground">
                 session {session.sessionId} · command {session.commandId}
               </p>
             </div>
