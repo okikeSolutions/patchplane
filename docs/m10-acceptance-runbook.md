@@ -9,10 +9,13 @@ The ordered product and release stages are summarized in
 [`critical-path.md`](./critical-path.md). This runbook supplies their concrete
 credentialed acceptance procedure.
 
-The current smoke automates intake through review readiness, verifies the
-durable post-decision state against GitHub, and can actively replay publication
-from the same durable human decision. It does **not** authenticate as a WorkOS
-user or choose a decision.
+The current smoke automates the historical sandbox-generated plumbing path. It
+does **not** freeze or verify the exact incoming PR candidate and therefore
+cannot satisfy M10/M11 alpha acceptance or support a promotional “verification
+passed” claim. This runbook remains the target release procedure; the smoke must
+be upgraded to exact base/head candidate intake before it can produce current
+acceptance evidence. It also does **not** authenticate as a WorkOS user or
+choose a decision.
 
 ## Safety and evidence handling
 
@@ -111,7 +114,7 @@ requires interactive human pauses, and never accepts credentials as arguments.
 It is release evidence only after the operator completes the real provider
 screens; it is not part of ordinary CI.
 
-## 3. Start the deployed trust loop
+## 3. Start the deployed trust loop (blocked on exact PR candidate support)
 
 Create a local evidence transcript without exposing the environment:
 
@@ -122,9 +125,12 @@ bun --env-file=.env.local run smoke:trust-loop \
   | tee .patchplane/logs/m10-trust-loop-pre-decision.jsonl
 ```
 
-The smoke sends a signed synthetic `pull_request.synchronize` delivery for the
-real test PR. The requested patch exists only in the Daytona checkout; the
-smoke does not push it to the repository.
+The existing smoke sends a signed synthetic `pull_request.synchronize` delivery
+for the real test PR, then asks Pi to create a different sandbox-only patch.
+That behavior is plumbing evidence only and must not be used for alpha release
+acceptance. The upgraded smoke must instead persist the webhook-authenticated
+PR base/head identity, freeze and hash the exact incoming diff before dispatch,
+and check out that exact head in Daytona without allowing Pi to rewrite it.
 
 Expected structured states, in order:
 
@@ -140,7 +146,7 @@ Expected structured states, in order:
    - at least one policy decision;
    - provenance events; and
    - a non-empty `diff` artifact with a lowercase 64-character SHA-256.
-4. GitHub contains a new comment beginning `## PatchPlane Patch Report`.
+4. GitHub contains one canonical comment beginning `## PatchPlane Patch Report`, updated rather than duplicated for the root workflow.
 5. `trust_loop_review_ready` reports the `workflowRunId`, `sandboxStatus`,
    `hasRuntimeEvents: true`, a positive `artifactCount`,
    `hasProvenanceEvents: true`, and the Patch Report `publicationUrl`.
@@ -185,8 +191,9 @@ observed evidence:
 - **Reject** when the patch must not proceed.
 
 Expected durable/UI state is respectively `Approved`, `Changes requested`, or
-`Rejected`. GitHub must receive a `## PatchPlane Decision Update` comment and a
-completed `PatchPlane Review` check. Its conclusion is:
+`Rejected`. GitHub must update the one canonical `## PatchPlane Patch Report`
+comment and the exact-head `PatchPlane Review` check; it must not add a separate
+preliminary or decision report. Its conclusion is:
 
 | Human decision              | Expected check conclusion |
 | --------------------------- | ------------------------- |
@@ -302,9 +309,9 @@ lifecycle. Confirm no test sandbox remains; if one is orphaned, delete that
 specific sandbox through the Daytona provider after recording the cleanup.
 Do not destroy shared Cloudflare, Convex, GitHub App, or WorkOS resources.
 
-The candidate patch is sandbox-only, so no branch reset is expected. For a
-dedicated test PR, close it after evidence review according to repository
-policy. Keep GitHub comments/checks and Convex provenance as acceptance
+The candidate is the existing immutable test PR head; PatchPlane must not push
+or rewrite it, so no branch reset is expected. For a dedicated test PR, close it
+after evidence review according to repository policy. Keep GitHub comments/checks and Convex provenance as acceptance
 evidence. R2 evidence should expire under its configured short-lived retention
 policy; do not manually delete release evidence unless that policy requires it.
 

@@ -25,6 +25,7 @@ Core docs:
 - [docs/philosophy.md](./docs/philosophy.md): product and developer-experience decision principles
 - [docs/critical-path.md](./docs/critical-path.md): product path from intake through evidence, decision, publication, and release proof
 - [docs/ui-ux-review-tracker.md](./docs/ui-ux-review-tracker.md): authenticated UI/UX audit findings, diff viewer gates, and minimal changed-file navigation tracker
+- [docs/repository-verification-capability-tracker.md](./docs/repository-verification-capability-tracker.md): alpha PR-verification correctness gaps, dependencies, and completion evidence
 - [docs/telemetry-data-policy.md](./docs/telemetry-data-policy.md): Sentry allowlist, prohibited content, and sanitization requirements
 - [docs/m10-acceptance-runbook.md](./docs/m10-acceptance-runbook.md): repeatable human-gated trust-loop acceptance
 - [AGENTS.md](./AGENTS.md): repository map, trust boundaries, and automation protocol
@@ -96,11 +97,13 @@ Optional provider keys, such as `OPENAI_API_KEY`, are only needed for Pi modes.
 
 ## Current implementation
 
-The current alpha is being narrowed around one developer-first loop:
+The alpha is being narrowed around one developer-first loop:
 
 ```text
-request → immutable attempt → agent execution → frozen candidate → independent verification → policy → human decision → canonical GitHub Patch Report
+incoming GitHub PR → exact base/head candidate freeze → trusted requirements → Daytona verification → optional read-only review → policy → human decision → one canonical exact-head Patch Report
 ```
+
+The currently deployed sandbox-generated path is implementation foundation, not proof that an incoming PR was verified. PatchPlane is not ready to promote a PR as verified until it can freeze that exact incoming candidate before Daytona or Pi starts and bind every result to it.
 
 The current foundation includes two workflow-start paths:
 
@@ -126,7 +129,7 @@ GitHub webhook
 
 The authenticated dashboard lists connected GitHub repositories and their latest workspace-scoped trust status, with a direct link to the durable workflow investigation view.
 
-Each V1 run is an immutable attempt. A rerun creates a child attempt pinned to the same source revision; it does not overwrite the parent. Evidence applies only to the candidate produced by that attempt, identified by its producing sandbox execution and `sha256:` candidate digest. Agent exit `0`, diff capture, external review, independent verification, policy, human decision, and publication are separate states. Missing, blocked, stale, truncated, or candidate-mismatched required evidence cannot produce a trusted result. A human may still approve incomplete verification only with an explicit recorded override reason; the Patch Report continues to show the gap.
+Each V1 run is an immutable attempt. A rerun creates a child attempt pinned to the same candidate revisions; it does not overwrite the parent. For the alpha GitHub path, evidence applies only to the incoming PR candidate identified by repository/PR identity, webhook-authenticated base/head SHAs, exact diff artifact, and `sha256:` digest. A sandbox-generated diff is a different candidate and cannot verify the PR. Candidate freeze, agent exit `0`, external review, independent verification, policy, human decision, and publication are separate states. Missing, blocked, stale, truncated, or candidate-mismatched required evidence cannot produce a trusted result. A human may still approve incomplete verification only with an explicit recorded override reason; the Patch Report continues to show the gap.
 
 The canonical Patch Report V1 is assembled from durable Convex records and R2 artifact metadata for the exact attempt/candidate. GitHub issue comments and commit-bound check runs use stable canonical identities and update on replay; immutable attempts, publication rows, and provenance remain in PatchPlane.
 

@@ -24,9 +24,9 @@ This document is intentionally public and OSS-safe. It describes what PatchPlane
 
 PatchPlane should not be positioned as a broad AI workflow platform. Its core developer outcome is simple: help a human decide whether to trust or reject an AI-generated patch before merge.
 
-The primary product primitive is the **Patch Report**: an inspectable trust report for one AI-generated patch attempt.
+The primary product primitive is the **Patch Report**: an inspectable trust report for one exact AI-generated pull-request candidate.
 
-PatchPlane sits at the **pre-CI trust boundary**. Every AI-generated patch is treated as untrusted until it has been:
+PatchPlane sits at an **independent pre-merge trust boundary**. It runs outside repository CI and does not rely on CI conclusions as verification. Every AI-generated patch is treated as untrusted until it has been:
 
 1. executed in an isolated sandbox,
 2. captured as evidence and provenance,
@@ -51,6 +51,16 @@ The alpha product loop is intentionally boring and obvious:
 AI patch → sandbox verification → Patch Report → human decision → GitHub result
 ```
 
+Independent verification does not mean executing untrusted code on a developer
+machine or in a privileged repository CI environment. PatchPlane executes the
+exact frozen incoming candidate and the repository's declared commands in secret-free, ephemeral Daytona environments
+that match the required supported platform. The alpha environment envelope is
+Daytona Linux, Daytona `windows-small`, and isolated browser/GUI verification
+through Daytona Computer Use on supported Linux or Windows sandboxes.
+macOS-specific and production-credential-dependent checks remain explicit
+blocked requirements; they never become passing evidence through inference or
+an unrelated CI result.
+
 PatchPlane uses an Effect-native plugin model as implementation structure, not as the user-facing product promise:
 
 ```text
@@ -62,16 +72,16 @@ Applications compose plugins.
 The alpha goal is one credible, end-to-end trust loop:
 
 ```text
-GitHub/manual intake
-→ repository verification
-→ Daytona sandbox
-→ Pi runtime through configurable model access
-→ candidate patch
+GitHub pull-request intake
+→ exact base/head candidate freeze
+→ trusted bounded verification plan
+→ Daytona sandbox verification
+→ optional read-only Pi review
 → logs/tests/browser evidence
 → R2-backed evidence artifacts
 → Convex-backed provenance timeline
 → human approve/reject
-→ GitHub check/comment/draft PR publication
+→ canonical GitHub comment and exact-head check publication
 ```
 
 ---
@@ -88,7 +98,7 @@ untrusted agent output
 → trusted team workflow
 ```
 
-The first product wedge is GitHub-compatible AI patch verification. GitHub remains the initial collaboration surface, but PatchPlane owns the trust loop before an agent-generated change is allowed to enter normal CI, review, or merge paths.
+The first product wedge is GitHub-compatible AI patch verification. GitHub remains the initial collaboration surface, but PatchPlane owns an independent trust loop before a maintainer approves or merges an agent-generated change. Repository CI may run concurrently and remains contextual rather than PatchPlane verification evidence.
 
 ### 2.1 What PatchPlane is
 
@@ -651,19 +661,19 @@ The Patch Report may be materialized as a read model for the UI and GitHub publi
 #### Attempt, candidate, and evidence identity
 
 - A `WorkflowRun` with `modelVersion: "v1"` is one immutable attempt and must have an authoritative pinned source revision. Intake without one remains outside V1 and cannot enter the V1 execution path. A rerun creates a new child run with `rootWorkflowRunId`, `parentWorkflowRunId`, `attemptNumber`, a required reason, and the same pinned source revision.
-- Execution must be atomically claimed, and V1 sandbox-execution persistence independently rejects a second execution. Duplicate webhook delivery or rerun dispatch cannot start or persist a second sandbox for the same attempt.
-- The repository is prepared at the pinned source SHA. A captured candidate is valid only when its `baseSha` equals that pinned SHA and its `sandboxExecutionId` is the execution that produced it.
-- The candidate subject is its `candidateDigest`, currently `sha256:` over the exact captured diff. Verification records include that digest before and after the command; tracked-file mutation during verification invalidates the result.
-- Verification requirements come from trusted repository/intake configuration and are stored before repository preparation or agent execution. Results do not create or weaken requirements; a configured verifier that emits no result remains an explicit incomplete requirement.
+- Orchestration must be atomically claimed. A trusted bounded plan may declare multiple execution groups for supported environments. Each group has a stable identity and idempotent claim; duplicate delivery or rerun dispatch cannot start or persist a duplicate sandbox for the same group.
+- For alpha GitHub PR intake, the candidate is frozen before sandbox or agent execution from the webhook-authenticated `baseSha`, `headSha`, repository/PR identity, exact `baseSha...headSha` diff artifact, and SHA-256 digest of those bytes. The candidate record and artifact must exist before dispatch.
+- The repository is checked out at the exact candidate `headSha`. Verification records include the frozen candidate digest before and after each command; tracked-file mutation or digest mismatch invalidates the result. A sandbox-generated diff is a different candidate and cannot verify the incoming PR.
+- Verification requirements come from trusted repository/intake configuration and are stored before candidate freeze, repository preparation, or agent execution. Results do not create or weaken requirements; a configured verifier that emits no result remains an explicit incomplete requirement.
 - Review runs, findings, policy decisions, human decisions, publication results, and evidence artifacts are correlated to the same workflow/candidate subject. A record for candidate A cannot justify candidate B.
 - Policy evaluates a coherent evidence snapshot and stores a SHA-256 digest of its normalized inputs, policy version, considered verification results, and missing requirements.
 - Legacy runs are not silently projected as V1 Patch Reports.
 
 #### Trust dimensions and fail-closed language
 
-Agent execution, candidate capture, independent verification, external review, policy evaluation, human decision, and publication are separate dimensions. Agent exit `0` means only that agent execution completed. External-review confidence is review evidence, not test verification. `passed` is allowed only when every declared required check has a current candidate-bound passing result and required artifacts. Missing, blocked, errored, stale, truncated, unavailable-platform, or mismatched evidence is `incomplete` or `manual-review`, never `clean`.
+Incoming-candidate freeze, agent execution, independent verification, read-only external review, policy evaluation, human decision, and publication are separate dimensions. Agent exit `0` means only that agent execution completed. External-review confidence is review evidence, not test verification. `passed` is allowed only when every declared required check has a current candidate-bound passing result and required artifacts. Missing, blocked, errored, stale, truncated, unavailable-platform, or mismatched evidence is `incomplete` or `manual-review`, never `clean`.
 
-Human approval does not rewrite machine evidence. When required verification is incomplete, approval requires an explicit durable override reason and the Patch Report continues to display `approved-with-override` and the evidence gap. GitHub issue comments use one stable canonical Patch Report identity per root workflow. Check runs are published only against the candidate `headSha`; PatchPlane never attaches candidate claims to the original PR SHA as a fallback.
+Human approval does not rewrite machine evidence. When required verification is incomplete, approval requires an explicit durable override reason and the Patch Report continues to display `approved-with-override` and the evidence gap. GitHub issue comments use one stable canonical Patch Report identity per root workflow. Check runs are published only against the frozen candidate `headSha`; PatchPlane never falls back to the base SHA, a newer PR head, or an unrelated generated candidate.
 
 Failure categories remain explicit: setup failure, agent failure, verification failure, missing evidence, unavailable capability/platform, policy rejection, human rejection, superseded attempt, and publication failure.
 
@@ -949,8 +959,8 @@ The alpha is scoped around one end-to-end trusted patch workflow.
 - WorkOS auth plugin,
 - Convex storage/realtime plugin,
 - GitHub provider plugin,
-- Daytona sandbox plugin,
-- sandbox-backed Pi runtime adapter,
+- Daytona sandbox plugin with Linux execution and a bounded `windows-small` verification profile,
+- optional sandbox-backed read-only Pi review adapter,
 - Cloudflare R2 artifacts plugin,
 - Cloudflare AI Gateway model gateway plugin,
 - Sentry telemetry plugin,
@@ -959,10 +969,11 @@ The alpha is scoped around one end-to-end trusted patch workflow.
 - normalized runtime events,
 - evidence artifact capture,
 - provenance timeline,
-- candidate patch output,
+- exact incoming PR candidate freeze,
+- trusted bounded verification requirements and candidate-bound results,
 - deterministic policy/review result,
 - human approve/reject path,
-- GitHub check/comment/draft PR publication.
+- canonical exact-head GitHub check/comment publication.
 
 ### 16.2 Out of scope for alpha
 
@@ -975,9 +986,13 @@ The alpha is scoped around one end-to-end trusted patch workflow.
 - ClickHouse trace analytics,
 - PostHog AI observability,
 - automatic semantic conflict resolution,
+- sandbox-generated patch authoring as an alpha product mode,
+- synthetic-merge verification,
 - direct auto-merge without human approval,
 - mobile clients,
 - deep desktop-native feature work,
+- macOS execution in the alpha verification plane,
+- production deployment checks that require production credentials in the sandbox,
 - generic project management,
 - replacing GitHub as a forge,
 - replacing Pi as an agent runtime,
@@ -1033,9 +1048,21 @@ Runtime operations use the GitHub provider plugin, backed by GitHub APIs/Octokit
 
 ### 17.6 Sandbox
 
-Daytona is the first sandbox provider.
+Daytona is the alpha sandbox provider.
 
-Initial implementation should prefer ephemeral or auto-deleting sandboxes, explicit lifecycle policy, and network controls where supported by the selected profile.
+The supported alpha target is:
+
+- Linux execution in ephemeral Daytona sandboxes;
+- Windows verification in the bounded `windows-small` Daytona snapshot after
+  its PowerShell-compatible evidence path and credentialed smoke are complete;
+- isolated browser/GUI verification through Daytona Computer Use on a supported
+  Linux or Windows sandbox where explicitly required; and
+- explicit `blocked` results for macOS or production-dependent requirements
+  that have no secret-free supported environment.
+
+Daytona sandboxes are persistent by default, so alpha ordinary-execution profiles must be fresh and ephemeral. Stop, pause, or archive is not cleanup: successful completion requires explicit deletion and provider readback that the sandbox no longer exists. Auto-delete and ephemeral-on-stop behavior are defense in depth rather than deletion evidence. A deliberately retained RPC session must have a bounded owner, reason, deadline, reconciliation path, and eventual deletion evidence. Alpha verification profiles must not enable public previews, linked sandboxes, writable shared/external storage, pause/archive reuse, or candidate-created snapshots/forks. Snapshot/class and runtime boundary, operating system, architecture, effective resource limits, network tier/policy/exceptions, authenticated ingress posture, command identity, candidate digest, and cleanup outcome are evidence metadata rather than implicit provider defaults. Requested policy is not enforcement proof: live provider evidence must cover representative allowed/denied traffic and effective limits. Daytona organization isolation and proxy-substituted secrets do not replace PatchPlane workspace authorization and must not be described as secret-free execution when a credential is usable by sandbox code.
+
+The trusted plan and control plane bound both per-attempt and global sandbox concurrency, lifecycle/API retry budgets, command/session timeouts, and cancellation. Concurrent sessions in one sandbox share filesystem and network state and must be disclosed as one execution group, not independent verification. Runtime resource resizing and candidate-controlled fleet fan-out are forbidden. Every background command must terminate or be invalidated before group completion. Rate-limit or exhausted-capacity outcomes remain provider `error`/`blocked` facts and never become repository test failures.
 
 ### 17.7 Runtime
 
@@ -1119,7 +1146,7 @@ Initial integration tests:
 - Pi runtime can emit normalized runtime events,
 - R2 artifact upload stores metadata in Convex,
 - trust timeline can read back provenance events and artifact references,
-- GitHub publication can create a check/comment/draft PR output.
+- GitHub publication can update one canonical comment and exact-head check output.
 
 Core tests after the first real path is proven:
 
@@ -1157,19 +1184,19 @@ The foundation is successful when:
 The alpha is successful when:
 
 1. A user can connect or allowlist a GitHub repository.
-2. A verified GitHub webhook or app prompt can create a durable PromptRequest.
-3. PatchPlane can start a WorkflowRun for that request.
-4. Daytona can provision a sandbox.
-5. Pi can run through the configured model provider.
-6. Runtime events are normalized and persisted.
-7. At least one candidate patch can be produced.
+2. A verified GitHub PR webhook can create a durable PromptRequest with authoritative base and head SHAs.
+3. PatchPlane can start an immutable WorkflowRun and freeze the exact incoming `baseSha...headSha` candidate before execution.
+4. A trusted bounded verification plan is persisted before candidate execution.
+5. Daytona can provision the required supported sandbox and check out the exact candidate head.
+6. Optional Pi review is read-only and remains separate from verification.
+7. Required commands produce candidate-bound results with platform, command, timing, exit, digest, artifact, and cleanup evidence.
 8. Logs, diff, test output, and optional browser evidence can be stored as R2-backed EvidenceArtifacts.
 9. Convex can read back a provenance timeline with artifact references.
 10. A deterministic policy/review result can be recorded.
 11. A human can approve or reject the patch.
-12. PatchPlane can publish a check/comment/draft PR result back to GitHub.
-13. One real repository can run the loop end to end.
-14. No generated patch is treated as trusted before sandbox evidence and a recorded decision exist.
+12. PatchPlane can publish one canonical comment and exact-head check back to GitHub.
+13. One real incoming PR can run the loop end to end without duplicate reports.
+14. No incoming patch is treated as trusted before complete supported-platform evidence and a recorded decision exist; unsupported requirements remain visible and require an explicit override.
 
 ---
 

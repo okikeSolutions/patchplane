@@ -23,23 +23,25 @@ PatchPlane v2 has completed the authenticated foundation work and is now focused
 
 The product primitive is the **Patch Report**: an evidence-backed report that tells a developer what changed, what ran, where it ran, what passed or failed, what evidence exists, and who approved or rejected it.
 
-The first credible pre-CI trust-boundary demo is:
+The first credible independent pre-merge trust-boundary demo is:
 
 ```text
-GitHub/manual intake
+GitHub pull-request intake
 → authenticated or signed PatchPlane workflow
 → repository allowlist/access verification
-→ Daytona sandbox provisioning
-→ Pi runtime execution
-→ candidate patch + logs/tests/browser evidence
+→ exact base/head candidate freeze
+→ trusted bounded verification plan
+→ Daytona requirement execution
+→ optional read-only Pi review
+→ candidate-bound logs/tests/browser evidence
 → Patch Report
 → PatchPlane policy/review decision
 → human approve/reject
-→ GitHub comment/check/draft PR publication
+→ one canonical GitHub comment and exact-head check
 → persisted provenance timeline
 ```
 
-The next slice is **not more platform**. It is the smallest workflow that shows an AI-generated patch remaining untrusted until sandbox execution, Patch Report evidence, review, and explicit decision complete.
+The immediate slice remains closure of the smallest workflow that shows an exact incoming AI-generated PR candidate staying untrusted until candidate-bound sandbox execution, Patch Report evidence, read-only review, and explicit decision complete. The alpha verification envelope stays within Daytona: Linux is the implemented baseline, `windows-small` is the bounded Windows target, and browser/GUI verification uses Daytona Computer Use on supported Linux or Windows sandboxes only when explicitly required. macOS and production-credential-dependent checks remain blocked.
 
 For alpha, these remain deferred:
 
@@ -358,7 +360,7 @@ Acceptance criteria:
 
 ### M7 — GitHub Provider Plugin
 
-**Status:** Complete for alpha intake plus issue-comment/check-run publication; draft PR publication remains in M10 follow-up scope
+**Status:** Complete for alpha intake plus issue-comment/check-run foundations; exact incoming-candidate publication remains in M10 follow-up scope
 
 Tasks:
 
@@ -371,7 +373,7 @@ Tasks:
 - [x] Persist external event references for idempotency.
 - [x] Require an alpha repository allowlist for webhook-to-workspace routing.
 - [x] Implement check-run publication.
-- [ ] Implement draft PR publication after durable candidate branches exist.
+- [ ] Publish only one canonical report and check against the exact incoming candidate head; draft PR creation is not part of the alpha verifier.
 - [x] Add user-visible GitHub comment and check-run publication paths for the alpha demo.
 
 Acceptance criteria:
@@ -434,21 +436,36 @@ Acceptance criteria:
 
 ### M8 — Daytona Sandbox Plugin
 
-**Status:** Complete for Daytona lifecycle/policy and R2-backed evidence capture. The old Daytona-SDK-only live smoke has been removed in favor of the PatchPlane Daytona/Pi RPC smoke.
+**Status:** In progress — Daytona Linux lifecycle/policy and R2-backed evidence capture are verified; the bounded alpha `windows-small` and Computer Use verification profiles remain open. The old Daytona-SDK-only live smoke has been removed in favor of PatchPlane-owned platform smokes.
 
 Tasks:
 
 - [x] Add `DaytonaConfig` with redacted API key handling.
 - [x] Implement alpha-safe scoped sandbox execution via `SandboxService.runRepositoryCommand` / `runRepositoryAgent`.
-- [x] Prefer ephemeral or auto-deleting sandbox profiles for alpha.
+- [x] Use ephemeral ordinary-execution profiles for alpha; Daytona persistence is the provider default, so stop/pause/archive are not cleanup.
 - [x] Add explicit sandbox policy fields for lifecycle, resources, timeout, and network posture.
 - [x] Implement checkout/clone support.
 - [x] Implement command execution.
 - [x] Collect command logs in workflow storage and upload large/raw evidence through the R2 artifact path.
 - [x] Stop/destroy sandboxes on cancellation/failure where possible after acquisition succeeds.
+- [ ] Require every completed execution group to poll explicit deletion to not-found; ephemeral or auto-delete behavior is defense in depth, and stopped/paused/archived is not deleted.
+- [ ] Persist bounded ownership, reason, deadline, reconciliation state, and eventual deletion evidence for the RPC sessions intentionally retained after acquisition.
+- [ ] Reject verification profiles that create snapshots/forks, mount writable volumes/external storage, pause/archive for reuse, or otherwise derive persistent candidate-controlled state.
 - [x] Add live Daytona smoke script with redacted API-key handling, public repository clone, command execution, and cleanup polling.
 - [x] Persist normalized sandbox policy as typed Convex metadata rather than JSON glue.
 - [x] Add safe fake Daytona lifecycle tests for clone failure, command failure, non-zero exit, interruption, retain mode, and delete retry.
+- [ ] Add a trusted Daytona platform/snapshot selector that maps the bounded Windows requirement to `windows-small` without accepting arbitrary browser or candidate-controlled snapshot names.
+- [ ] Reuse Daytona exact-`commitId` Git clone on Windows; decode provider Git status/history through PatchPlane-owned schemas to prove clean detached checkout and exact head, without treating status as a candidate digest.
+- [ ] Replace remaining POSIX-only candidate/evidence probes with a PowerShell-compatible Windows path for architecture, cleanup, diff hashing, bounded artifact capture, and command execution.
+- [ ] Persist the resolved Daytona sandbox class/snapshot, runtime boundary, operating system, architecture, effective resource limits, network tier/policy/exceptions, command identity, candidate digest before/after, and cleanup outcome.
+- [ ] Reject public previews, linked sandboxes, writable shared volumes, and undisclosed snapshot/fork reuse in alpha verification profiles.
+- [ ] Add a bounded execution-group scheduler with per-attempt/global sandbox limits, command/session timeout budgets, cancellation, and typed Daytona rate/capacity outcomes; exhausted provider capacity is not a repository test failure.
+- [ ] Forbid runtime resource resizing during verification, record snapshot-inherited effective resources, and disclose when concurrent sessions share one sandbox filesystem/network.
+- [ ] Terminate or invalidate every background/session command before an execution group completes; command completion must not leave untracked work running.
+- [ ] Add credentialed isolation/persistence/scale smokes that verify representative allowed/denied egress, authenticated-only ingress, effective limits, absence of linked/shared/derived state, bounded rate-limit behavior, retained-RPC reconciliation, and delete-to-not-found cleanup; requested configuration alone is not enforcement evidence.
+- [ ] Add automated Windows adapter tests and a credentialed `windows-small` smoke that proves exact-commit clone, validated status/head, requirement execution, evidence readback, digest coherence, and deletion.
+- [ ] Add a PatchPlane-owned Daytona Computer Use adapter that starts and stops the desktop processes, bounds mouse/keyboard/display operations, and captures screenshots or recordings as untrusted candidate-bound artifacts.
+- [ ] Add Linux and Windows Computer Use lifecycle tests plus a credentialed browser/GUI smoke that proves process status, artifact readback and hashing, failure behavior, and sandbox deletion.
 
 Implementation note:
 
@@ -458,8 +475,13 @@ Acceptance criteria:
 
 - [x] A workflow can provision a sandbox, check out a GitHub repository ref, run at least one command, collect command logs, and tear down the sandbox.
 - [x] Sandboxes never receive long-lived WorkOS, Convex, or GitHub App credentials.
-- [x] Sandbox lifecycle and network policy are visible in stored workflow metadata.
+- [x] Requested sandbox lifecycle and network policy are visible in stored workflow metadata.
+- [ ] Effective isolation evidence records the runtime boundary, inherited/effective resource limits, network tier/exceptions, forbidden sharing/ingress/persistence posture, representative enforcement behavior, bounded concurrency/capacity outcome, and delete-to-not-found result.
 - [x] Durable raw artifact capture is backed by R2 rather than Convex stdout/stderr columns.
+- [ ] A required Windows check can run in Daytona `windows-small` with candidate-bound evidence and final sandbox deletion.
+- [ ] A required browser/GUI check can run through Daytona Computer Use on Linux or Windows and produce bounded candidate-bound visual evidence.
+- [x] A required macOS check remains explicitly blocked and cannot produce a clean policy result.
+- [ ] A production-dependent requirement either resolves to an explicitly trusted secret-free equivalent or remains blocked without receiving production credentials.
 
 ---
 
@@ -712,11 +734,11 @@ Acceptance criteria:
 
 ### M9.75 — Patch Report and evidence capture slice
 
-**Status:** Implementation complete for candidate-bound Patch Report V1; release claim reopened until a fresh real run proves the semantics
+**Status:** In progress — Patch Report V1 and sandbox-generated candidate foundations exist, but exact incoming-PR freeze and read-only review remain missing
 
 Purpose:
 
-Make the Patch Report the center of the alpha. Capture enough evidence to help a developer trust or reject the AI patch.
+Make the Patch Report the center of the alpha. Capture enough candidate-bound evidence to help a developer trust or reject the exact incoming PR patch.
 
 Scope:
 
@@ -734,8 +756,11 @@ Tasks:
 - [x] Assemble Patch Report V1 from candidate-correlated durable records and reject legacy projection.
 - [x] Publish the canonical Patch Report V1 through the decision publication path; sandbox completion remains an execution update, not a verification verdict.
 - [x] Persist trusted verification requirements before execution and candidate-bound verification results afterward.
-- [x] Freeze candidates with producing execution, pinned base SHA, and exact diff digest before verification.
+- [x] Freeze sandbox-generated candidates with producing execution, pinned base SHA, and exact diff digest before verification; this remains implementation foundation only.
+- [ ] Freeze the alpha incoming PR candidate before execution with repository/PR identity, webhook-authenticated base/head SHAs, exact diff artifact, and digest.
 - [x] Detect candidate mutation across verification and fail closed.
+- [ ] Separate read-only review from generation so Pi cannot change the frozen alpha candidate.
+- [ ] Replace the one-sandbox-per-attempt persistence guard with one orchestration claim plus bounded, idempotent execution-group claims for required Linux, Windows, and Computer Use environments.
 - [x] Define `EvidenceArtifact` schema.
 - [x] Define `ArtifactsService` interface.
 - [x] Implement R2-backed `ArtifactsService` plugin.
@@ -819,8 +844,8 @@ Tasks:
 - [x] Require a comment for approve/reject/request-changes decisions.
 - [x] Derive independent execution, candidate, verification, review, policy, human-decision, publication, and aggregate trust states.
 - [x] Add operator approval/rejection/request-changes path.
-- [x] Update one canonical GitHub issue comment and candidate-`headSha` check result after decision; never fall back to the original PR SHA.
-- [ ] Publish a draft PR result once candidate branches can be pushed and represented durably.
+- [x] Update one canonical GitHub issue comment and candidate-`headSha` check result after decision; never fall back to a base SHA, newer head, or unrelated generated candidate.
+- [ ] Supersede preliminary sandbox-result comments so one canonical exact-head Patch Report represents the attempt.
 - [x] Record workflow-scoped provenance for prompt/actor/workspace/repository, sandbox/runtime activity, commands/tests, candidate patch, review/policy result, human decision, and publication result.
 - [x] Keep Patch Report as a deterministic projection over durable workflow, evidence, review, decision, publication, and provenance records; avoid a second stale snapshot truth.
 - [x] Implement immutable rerun lineage with reason/idempotency, atomic execution claims, and authoritative rerun dispatch.
@@ -846,13 +871,13 @@ Current validation:
 - Domain, core, plugin, backend, architecture, and webhook suites pass with the durable decision/publication changes.
 - Plugin tests cover the clone-base diff command; a local Git probe confirmed it captures staged, committed, unstaged, and untracked candidate changes.
 - GitHub adapter tests verify retry reconciliation for both issue comments and check runs.
-- The 2026-07-10 Convex deployment was refreshed after CLI authentication. The hosted smoke then completed GitHub intake, Daytona/Pi JSON execution, runtime-event persistence, R2 evidence capture, candidate-patch capture, automated review, policy evaluation, provenance persistence, and Patch Report publication for workflow `ms75nyt9d572v6p7ab98vrq7158a8kgx` on test PR 96.
+- The 2026-07-10 Convex deployment was refreshed after CLI authentication. The hosted smoke then completed GitHub intake, Daytona/Pi JSON execution, runtime-event persistence, R2 evidence capture, sandbox-generated candidate capture, automated review, policy evaluation, provenance persistence, and Patch Report publication for workflow `ms75nyt9d572v6p7ab98vrq7158a8kgx` on test PR 96. This proves plumbing, not exact incoming-PR verification.
 - GitHub API readback confirmed the workflow-specific Patch Report comment. The dedicated Daytona/Pi RPC smoke separately verifies runtime-session persistence because hosted JSON-mode executions intentionally have no RPC session.
 - A final deployed WorkOS-authenticated human-decision-to-GitHub run and publication replay against that workflow remain required before marking M10 complete.
 
 Acceptance criteria:
 
-- A generated patch remains untrusted until all declared required candidate-bound verification passes, policy accepts the coherent snapshot, and human review completes; approval with incomplete verification is visibly `approved-with-override` and requires a reason.
+- An exact incoming PR candidate remains untrusted until all declared required candidate-bound verification passes, policy accepts the coherent snapshot, and human review completes; approval with incomplete verification is visibly `approved-with-override` and requires a reason.
 - A human can approve, reject, request changes, or create an immutable reasoned rerun from the Patch Report before publication/merge handoff.
 - The alpha demo can show why the decision was made using persisted Patch Report provenance and evidence, not only transient logs.
 
@@ -860,7 +885,7 @@ Acceptance criteria:
 
 ### M10.5 — Optional SQL durable workflow storage plugins
 
-**Status:** Deferred until after the pre-CI trust-boundary demo has real workflow/event shapes
+**Status:** Deferred until after the independent pre-merge trust-boundary demo has real workflow/event shapes
 
 Scope:
 
@@ -888,18 +913,20 @@ Acceptance criteria:
 
 ### M11 — Dogfood on a maintainer-controlled repository
 
-**Status:** Planned after M10 minimum loop
+**Status:** Planned after exact incoming-PR identity and execution closure
 
 Tasks:
 
 - [ ] Connect a PatchPlane-owned or maintainer-controlled repository through the GitHub plugin.
-- [ ] Run at least three real issue/prompt workflows through PatchPlane.
+- [ ] Run at least three real incoming PR candidates through PatchPlane without asking Pi to rewrite them.
+- [ ] Use PR 128 to prove the truthful incomplete/override path for its required macOS check, and use a supported-platform design-partner PR to prove a fully passed exact-candidate path.
 - [ ] Capture friction in setup, sandbox lifecycle, event readability, artifact usefulness, review usefulness, and approval ergonomics.
 - [ ] Convert dogfood findings into follow-up issues before broader launch.
 
 Acceptance criteria:
 
-- At least one real patch is generated, sandboxed, reviewed, approved, and published through the PatchPlane loop.
+- At least one exact incoming PR candidate is frozen, sandboxed, verified, reviewed, decided, and published through the PatchPlane loop.
+- The report never labels Pi completion, raw JSONL, hosted CI, or an unrelated smoke candidate as verification of the incoming PR.
 - The demo path is reproducible without manually editing database state.
 - The workflow is good enough to demonstrate publicly.
 

@@ -21,11 +21,11 @@ PatchPlane must answer whether one specific AI-generated patch attempt has
 earned human trust:
 
 ```text
-request
-→ immutable attempt
-→ isolated agent execution
-→ frozen candidate
-→ independent verification
+authenticated PR intake
+→ immutable attempt and trusted requirements
+→ exact incoming candidate freeze
+→ isolated Daytona verification
+→ optional read-only agent review
 → review and policy
 → human decision
 → canonical Patch Report publication
@@ -37,21 +37,21 @@ silently upgrade an earlier one.
 
 ## Critical-path stages
 
-| Stage | Product question                         | Owning implementation boundaries                                                         | Required invariant and fail-closed outcome                                                                                                                                                                         |
-| ----: | ---------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-|     1 | Is the request authentic and authorized? | `apps/source-control`, GitHub plugin, WorkOS/Convex authorization                        | Verify webhook signatures or authenticated WorkOS identity before persistence. Reject unauthorized or malformed input.                                                                                             |
-|     2 | What exact source is being changed?      | GitHub normalization, `StartWorkflowFromIntake`, Convex `createFromExternalIntake`       | A V1 attempt requires an authoritative immutable source revision. Unpinned intake cannot enter V1 execution.                                                                                                       |
-|     3 | Is this one immutable attempt?           | Convex workflow/rerun mutations, `StorageService.claimWorkflowExecution`                 | One V1 run is one attempt. Duplicate delivery reuses the existing run. One atomic claim and persistence guard permit at most one sandbox execution.                                                                |
-|     4 | What evidence is required?               | `PersistConfiguredVerificationRequirements`, trusted deployment/repository configuration | Persist requirements before repository preparation or provider execution. A provider result cannot create or weaken a requirement. No result means incomplete, not unconfigured.                                   |
-|     5 | Where does untrusted code run?           | `RunSandboxAgentForWorkflow`, `RunSandboxCommandForWorkflow`, Daytona plugin             | Clone the pinned revision into an ephemeral sandbox without long-lived control-plane credentials. Setup, execution, and cleanup failures remain explicit.                                                          |
-|     6 | What exact candidate was produced?       | Daytona evidence capture, R2 artifacts, Convex candidate persistence                     | Freeze the candidate before verification. Bind it to the producing execution, pinned `baseSha`, exact diff artifact, and SHA-256 candidate digest. Missing or mismatched identity is invalid.                      |
-|     7 | What independently passed or failed?     | `PersistSandboxVerificationEvidence`, `evaluateVerificationCoverage`                     | Correlate requirement, candidate, command, platform, architecture, artifacts, and digest before/after. Missing, blocked, errored, mutated, stale, truncated, or mismatched evidence is incomplete or failed.       |
-|     8 | What did review and policy conclude?     | `ProposeMergeDecision`, `ReviewService`, `PolicyService`                                 | Persist review findings and a policy digest over one coherent candidate/evidence snapshot. Review confidence is not test verification.                                                                             |
-|     9 | Can a human understand the evidence?     | `AssemblePatchReportV1`, Convex detail projection, workflow investigation UI             | Assemble only matching attempt/candidate records. Legacy or truncated evidence must not be silently represented as complete V1 evidence.                                                                           |
-|    10 | What did the authorized human decide?    | WorkOS-authenticated decision server function and Convex mutation                        | Bind the decision to the displayed execution, candidate, review, and policy IDs. Incomplete approval requires a durable override reason.                                                                           |
-|    11 | Is another attempt needed?               | `createRerun`, rerun Worker route, rerun UI                                              | Create one reasoned, idempotent child attempt pinned to the same source. Never reopen or rewrite the parent.                                                                                                       |
-|    12 | What is published externally?            | `PublishDecisionToSource`, GitHub plugin, publication claims                             | Update one root-scoped canonical comment. Publish a check only against a materialized candidate `headSha`; never fall back to the original PR SHA. Lease and fence dispatch to prevent stale or duplicate effects. |
-|    13 | Can the release claim be reproduced?     | Trust-loop smoke, browser acceptance, GitHub/Convex readback                             | From one release-candidate SHA, prove the decision, publication replay, stable external IDs, browser projection, and sandbox cleanup. Any `Missing` acceptance row keeps the release incomplete.                   |
+| Stage | Product question                         | Owning implementation boundaries                                                            | Required invariant and fail-closed outcome                                                                                                                                                                                                                                      |
+| ----: | ---------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     1 | Is the request authentic and authorized? | `apps/source-control`, GitHub plugin, WorkOS/Convex authorization                           | Verify webhook signatures or authenticated WorkOS identity before persistence. Reject unauthorized or malformed input.                                                                                                                                                          |
+|     2 | What exact PR candidate arrived?         | GitHub normalization, `StartWorkflowFromIntake`, Convex `createFromExternalIntake`          | A V1 PR attempt requires webhook-authenticated base and head SHAs plus repository/PR identity. Missing identity cannot enter V1 execution.                                                                                                                                      |
+|     3 | Is this one immutable attempt?           | Convex workflow/rerun mutations, orchestration and execution-group claims                   | One V1 run is one attempt. Duplicate delivery reuses it. One orchestration claim dispatches the bounded plan; stable per-group claims prevent duplicate Linux, Windows, or Computer Use sandboxes.                                                                              |
+|     4 | What evidence is required?               | `PersistConfiguredVerificationRequirements`, trusted deployment/repository configuration    | Persist a bounded trusted plan before candidate freeze or provider execution. A candidate or provider result cannot create or weaken a requirement. No result means incomplete, not unconfigured.                                                                               |
+|     5 | What exact candidate is being judged?    | GitHub intake, R2 candidate artifact, Convex candidate persistence                          | Before Daytona or Pi starts, freeze exact `baseSha...headSha` diff bytes and digest. Persist the candidate artifact and require exact `headSha` checkout. A generated diff is a different candidate.                                                                            |
+|     6 | Where does untrusted code run?           | execution-group scheduler, `RunSandboxCommandForWorkflow`, read-only review, Daytona plugin | Clone the exact candidate head into bounded ephemeral execution groups without long-lived control-plane credentials. Shared sessions are disclosed; resize/fan-out/background leakage is forbidden. Capacity, setup, execution, mutation, and cleanup outcomes remain distinct. |
+|     7 | What independently passed or failed?     | `PersistSandboxVerificationEvidence`, `evaluateVerificationCoverage`                        | Correlate requirement, candidate, command, platform, architecture, artifacts, and digest before/after. Missing, blocked, errored, mutated, stale, truncated, or mismatched evidence is incomplete or failed.                                                                    |
+|     8 | What did review and policy conclude?     | `ProposeMergeDecision`, `ReviewService`, `PolicyService`                                    | Persist review findings and a policy digest over one coherent candidate/evidence snapshot. Review confidence is not test verification.                                                                                                                                          |
+|     9 | Can a human understand the evidence?     | `AssemblePatchReportV1`, Convex detail projection, workflow investigation UI                | Assemble only matching attempt/candidate records. Legacy or truncated evidence must not be silently represented as complete V1 evidence.                                                                                                                                        |
+|    10 | What did the authorized human decide?    | WorkOS-authenticated decision server function and Convex mutation                           | Bind the decision to the displayed execution, candidate, review, and policy IDs. Incomplete approval requires a durable override reason.                                                                                                                                        |
+|    11 | Is another attempt needed?               | `createRerun`, rerun Worker route, rerun UI                                                 | Create one reasoned, idempotent child attempt pinned to the same source. Never reopen or rewrite the parent.                                                                                                                                                                    |
+|    12 | What is published externally?            | `PublishDecisionToSource`, GitHub plugin, publication claims                                | Update one root-scoped canonical comment. Publish a check only against the frozen candidate `headSha`; never fall back to a base SHA, newer head, or unrelated generated candidate. Lease and fence dispatch to prevent stale or duplicate effects.                             |
+|    13 | Can the release claim be reproduced?     | Trust-loop smoke, browser acceptance, GitHub/Convex readback                                | From one release-candidate SHA, prove the decision, publication replay, stable external IDs, browser projection, and sandbox cleanup. Any `Missing` acceptance row keeps the release incomplete.                                                                                |
 
 ## Runtime and decision flow
 
@@ -61,19 +61,17 @@ flowchart TD
     B -- No --> X1[Reject or keep outside V1]
     B -- Yes --> C[Create or reuse immutable V1 attempt]
 
-    C --> D{Atomic execution claim acquired?}
-    D -- Duplicate --> X2[Return existing attempt<br/>without another sandbox]
+    C --> D{Atomic orchestration claim acquired?}
+    D -- Duplicate --> X2[Return existing attempt<br/>without duplicate dispatch]
     D -- Yes --> E[Persist trusted verification requirements]
 
-    E --> F[Clone exact sourceCommitSha<br/>in ephemeral Daytona sandbox]
-    F --> G[Run Pi agent or configured command]
-    G --> H[Capture bounded metadata and<br/>R2-backed raw evidence]
+    E --> F[Capture exact base...head diff<br/>and freeze candidate]
+    F --> G{Candidate record, artifact,<br/>head SHA, and digest valid?}
+    G -- No --> X3[Candidate missing or invalid]
+    G -- Yes --> H[Dispatch bounded Daytona<br/>execution groups]
 
-    H --> I{Candidate bound to execution,<br/>base SHA, diff, and digest?}
-    I -- No --> X3[Candidate missing or invalid]
-    I -- Yes --> J[Freeze CandidatePatchSet]
-
-    J --> K[Run candidate-bound verification]
+    H --> J[Clone exact head and run<br/>candidate-bound requirements]
+    J --> K[Capture command envelope,<br/>digests, logs, artifacts, and cleanup]
     K --> L{All required evidence current,<br/>matching, and passing?}
     L -- No --> M[Verification incomplete or failed]
     L -- Yes --> N[Verification passed]
@@ -94,12 +92,9 @@ flowchart TD
     U --> W
     V --> W
 
-    W --> Y{Candidate materialized<br/>as a commit?}
-    Y -- No --> Z1[No candidate check run]
-    Y -- Yes --> Z2[Publish check on exact candidate head_sha]
+    W --> Z2[Publish check on exact candidate head_sha]
 
-    Z1 --> AA[Replay publication]
-    Z2 --> AA
+    Z2 --> AA[Replay publication]
     AA --> AB[GitHub, Convex, and browser readback]
     AB --> AC{Same identities, no duplicates,<br/>truthful visible evidence?}
     AC -- No --> X4[Release blocked]
@@ -110,7 +105,7 @@ flowchart TD
     classDef complete fill:#dcfce7,stroke:#16a34a,color:#14532d;
 
     class X1,X2,X3,X4 blocked;
-    class M,S,V,Y,Z1,AA,AB pending;
+    class M,S,V,AA,AB pending;
     class N,U,Z2,AD complete;
 ```
 
@@ -126,7 +121,13 @@ flowchart TD
   provenance. Sentry capture and breadcrumb research is documented in
   [`docs/sentry-error-capture-research.md`](./sentry-error-capture-research.md).
 - **Daytona and Pi output** remain untrusted until decoded and correlated to
-  PatchPlane-owned types.
+  PatchPlane-owned types. Requested Daytona isolation policy is not enforcement
+  evidence; effective class/boundary, limits, tier exceptions,
+  ingress/sharing/persistence posture, representative egress behavior, and
+  delete-to-not-found cleanup must be recorded. Stop, pause, archive, ephemeral,
+  or auto-delete configuration alone is not deletion proof. Concurrent sessions
+  share sandbox state; rate/capacity errors and incomplete background cleanup
+  are provider/execution gaps rather than repository test failures.
 - **The browser** supplies user intent, not authoritative workflow identity or
   trust facts.
 
@@ -139,8 +140,9 @@ maintainer-controlled test PR:
    `bun run format:check`.
 2. Deploy matching Convex functions, Workers, client assets, and configuration.
 3. Run the trust-loop preflight and create a fresh V1 workflow.
-4. Confirm the pinned source, single execution, frozen candidate, raw artifact
-   hashes, declared requirements, results, review, policy, and provenance.
+4. Confirm the pinned source, frozen candidate, bounded execution groups,
+   effective isolation evidence, raw artifact hashes, declared requirements,
+   results, review, policy, and provenance.
 5. Stop at the required human boundary and inspect the Patch Report in an
    authenticated browser.
 6. Record approve, reject, or request-changes with a rationale. If verification
@@ -160,24 +162,33 @@ The detailed commands, expected JSONL states, and cleanup procedure are in the
 
 ### Candidate-bound GitHub checks
 
-GitHub check runs are commit-bound. A sandbox-only diff has no candidate
-`headSha`, so PatchPlane must not attach its evidence to the original PR SHA.
-Before claiming live candidate-check publication, choose and implement one of:
-
-1. safely materialize the candidate as a durable commit/branch and publish the
-   check against that exact SHA; or
-2. explicitly scope alpha to canonical comment publication and keep candidate
-   checks out of the release claim.
-
-Draft PR publication depends on the same materialization decision.
+GitHub check runs are commit-bound. The alpha incoming PR candidate has an exact
+`headSha`, so PatchPlane publishes only against that SHA after candidate-bound
+evidence, review, policy, and human decision exist. A sandbox-generated diff or
+unrelated smoke candidate cannot be attached to the incoming PR head. Live
+acceptance also requires the operational GitHub App installation to grant
+`checks: write` and replay to update the same external check identity.
 
 ### Native-platform verification
 
-A Linux Daytona sandbox cannot prove macOS- or Windows-specific behavior.
-Native evidence remains blocked until a safe matching provider is configured.
-This does not prevent a truthful incomplete Patch Report or an explicit human
-override, but it does prevent a fully passed verification claim for a repository
-that requires that platform.
+The alpha verification envelope uses Daytona only:
+
+- Linux requirements run in ephemeral Daytona Linux sandboxes.
+- Windows requirements target the bounded Daytona `windows-small` snapshot, but
+  remain blocked until the PowerShell-compatible evidence adapter and live
+  smoke are complete.
+- Browser/GUI requirements run through Daytona Computer Use in an explicitly
+  configured Linux or Windows sandbox and require candidate-bound screenshots,
+  recordings, or other declared artifacts. Provider availability alone is not
+  implementation or verification evidence.
+- Daytona documents macOS Computer Use as private alpha; PatchPlane does not use
+  it. macOS and production-credential-dependent requirements have no supported
+  alpha executor and remain blocked.
+
+An unavailable environment does not prevent a truthful incomplete Patch Report
+or an explicit human override, but it prevents a fully passed verification
+claim. Normal GitHub CI results do not substitute for this independent
+PatchPlane execution plane.
 
 ## Non-critical work before alpha closure
 
