@@ -1,6 +1,16 @@
 import { Schema } from 'effect'
-import { CandidatePatchSetId, EvidenceArtifactId, VerificationResultId, WorkflowRunId } from './ids'
-import { EpochMillis, NonNegativeInt, Sha256Digest, Sha256Hex } from './refinements'
+import {
+  CandidatePatchSetId,
+  EvidenceArtifactId,
+  VerificationResultId,
+  WorkflowRunId,
+} from './ids'
+import {
+  EpochMillis,
+  NonNegativeInt,
+  Sha256Digest,
+  Sha256Hex,
+} from './refinements'
 
 /**
  * Raw evidence bytes live in an artifact store such as Cloudflare R2.
@@ -20,7 +30,9 @@ export const EvidenceArtifactKind = Schema.Literals([
   'policy-result',
   'trust-report',
 ])
-export type EvidenceArtifactKind = Schema.Schema.Type<typeof EvidenceArtifactKind>
+export type EvidenceArtifactKind = Schema.Schema.Type<
+  typeof EvidenceArtifactKind
+>
 
 export const EvidenceArtifactStorageProvider = Schema.Literals([
   'cloudflare-r2',
@@ -29,9 +41,21 @@ export type EvidenceArtifactStorageProvider = Schema.Schema.Type<
   typeof EvidenceArtifactStorageProvider
 >
 
-export const EvidenceArtifact = Schema.Struct({
+export const EvidenceArtifactStorageRecord = Schema.Struct({
   id: EvidenceArtifactId,
   workflowRunId: WorkflowRunId,
+  storageProvider: EvidenceArtifactStorageProvider,
+  storageKey: Schema.NonEmptyString,
+  contentType: Schema.NonEmptyString,
+  sizeBytes: NonNegativeInt,
+  sha256: Sha256Hex,
+})
+export type EvidenceArtifactStorageRecord = Schema.Schema.Type<
+  typeof EvidenceArtifactStorageRecord
+>
+
+export const EvidenceArtifact = Schema.Struct({
+  ...EvidenceArtifactStorageRecord.fields,
   candidatePatchSetId: Schema.optional(CandidatePatchSetId),
   verificationResultId: Schema.optional(VerificationResultId),
   producer: Schema.optional(Schema.NonEmptyString),
@@ -39,15 +63,13 @@ export const EvidenceArtifact = Schema.Struct({
   traceId: Schema.optional(Schema.NonEmptyString),
   kind: EvidenceArtifactKind,
   label: Schema.optional(Schema.String),
-  storageProvider: EvidenceArtifactStorageProvider,
-  storageKey: Schema.NonEmptyString,
-  contentType: Schema.NonEmptyString,
-  sizeBytes: NonNegativeInt,
-  sha256: Sha256Hex,
   retentionPolicy: Schema.optional(Schema.NonEmptyString),
   createdAt: EpochMillis,
 })
 export type EvidenceArtifact = Schema.Schema.Type<typeof EvidenceArtifact>
 
-export const decodeEvidenceArtifact = Schema.decodeUnknownEffect(EvidenceArtifact)
-export const decodeEvidenceArtifacts = Schema.decodeUnknownEffect(Schema.Array(EvidenceArtifact))
+export const decodeEvidenceArtifact =
+  Schema.decodeUnknownEffect(EvidenceArtifact)
+export const decodeEvidenceArtifacts = Schema.decodeUnknownEffect(
+  Schema.Array(EvidenceArtifact),
+)

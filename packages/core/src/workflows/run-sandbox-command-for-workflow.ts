@@ -7,6 +7,7 @@ import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
+import { CandidatePatchStatsFromSandboxResult } from './candidate-patch-stats'
 import {
   PersistConfiguredVerificationRequirements,
   PersistSandboxVerificationEvidence,
@@ -26,7 +27,7 @@ function truncatePreview(value: string) {
 
 export const RunSandboxCommandForWorkflow = Effect.fn(
   '@patchplane/core/workflows/RunSandboxCommandForWorkflow',
-)(function*(input: {
+)(function* (input: {
   readonly workflowStart: WorkflowStart
   readonly command: string
   readonly timeoutSeconds?: number | undefined
@@ -43,134 +44,146 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
-  const verificationRequirements = yield* PersistConfiguredVerificationRequirements({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    testCommand: input.evidenceTestReportCommand,
-    testPlatform: input.evidenceTestPlatform,
-    browserCommand: input.evidenceBrowserScreenshotCommand,
-    createdAt: yield* Clock.currentTimeMillis,
-    traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxCommandForWorkflow.persistVerificationRequirements',
-  })
+    const verificationRequirements =
+      yield* PersistConfiguredVerificationRequirements({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        testCommand: input.evidenceTestReportCommand,
+        testPlatform: input.evidenceTestPlatform,
+        browserCommand: input.evidenceBrowserScreenshotCommand,
+        createdAt: yield* Clock.currentTimeMillis,
+        traceId: input.workflowStart.workflowRun.traceId,
+        operation:
+          'runSandboxCommandForWorkflow.persistVerificationRequirements',
+      })
 
-  const clone = yield* PrepareRepositoryClone(input.workflowStart)
-  if (clone === undefined) {
-    return yield* new SandboxError({
-      operation: 'runSandboxCommandForWorkflow.prepareRepository',
-      message: 'Claimed workflow attempt has no repository clone target',
-      cause: undefined,
+    const clone = yield* PrepareRepositoryClone(input.workflowStart)
+    if (clone === undefined) {
+      return yield* new SandboxError({
+        operation: 'runSandboxCommandForWorkflow.prepareRepository',
+        message: 'Claimed workflow attempt has no repository clone target',
+        cause: undefined,
+      })
+    }
+    yield* Effect.annotateCurrentSpan({
+      traceId: input.workflowStart.workflowRun.traceId,
+      workflowRunId: input.workflowStart.workflowRun.id,
+      repositoryFullName: clone.repositoryFullName,
     })
-  }
-  yield* Effect.annotateCurrentSpan({
-    traceId: input.workflowStart.workflowRun.traceId,
-    workflowRunId: input.workflowStart.workflowRun.id,
-    repositoryFullName: clone.repositoryFullName,
-  })
 
-  const sandbox = yield* SandboxService
-  const runnableTestCommand = input.evidenceTestPlatform === undefined || input.evidenceTestPlatform === 'linux'
-    ? input.evidenceTestReportCommand
-    : undefined
-  const result = yield* sandbox.runRepositoryCommand({
-    ...clone,
-    command: input.command,
-    timeoutSeconds: input.timeoutSeconds,
-    evidenceTestReportCommand: runnableTestCommand,
-    evidenceBrowserScreenshotCommand: input.evidenceBrowserScreenshotCommand,
-    traceId: input.workflowStart.workflowRun.traceId,
-  })
+    const sandbox = yield* SandboxService
+    const runnableTestCommand =
+      input.evidenceTestPlatform === undefined ||
+      input.evidenceTestPlatform === 'linux'
+        ? input.evidenceTestReportCommand
+        : undefined
+    const result = yield* sandbox.runRepositoryCommand({
+      ...clone,
+      command: input.command,
+      timeoutSeconds: input.timeoutSeconds,
+      evidenceTestReportCommand: runnableTestCommand,
+      evidenceBrowserScreenshotCommand: input.evidenceBrowserScreenshotCommand,
+      traceId: input.workflowStart.workflowRun.traceId,
+    })
 
-  if (shouldCaptureAsArtifact(result.stdout)) {
-    yield* CaptureEvidenceArtifact({
+    if (shouldCaptureAsArtifact(result.stdout)) {
+      yield* CaptureEvidenceArtifact({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        traceId: input.workflowStart.workflowRun.traceId,
+        kind: 'stdout',
+        label: 'Sandbox stdout',
+        contentType: 'text/plain',
+        body: result.stdout,
+        retentionPolicy: 'alpha-14d',
+      })
+    }
+
+    if (shouldCaptureAsArtifact(result.stderr)) {
+      yield* CaptureEvidenceArtifact({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        traceId: input.workflowStart.workflowRun.traceId,
+        kind: 'stderr',
+        label: 'Sandbox stderr',
+        contentType: 'text/plain',
+        body: result.stderr!,
+        retentionPolicy: 'alpha-14d',
+      })
+    }
+
+    const evidenceArtifacts = yield* CaptureSandboxResultArtifacts({
       workflowRunId: input.workflowStart.workflowRun.id,
       traceId: input.workflowStart.workflowRun.traceId,
-      kind: 'stdout',
-      label: 'Sandbox stdout',
-      contentType: 'text/plain',
-      body: result.stdout,
-      retentionPolicy: 'alpha-14d',
+      result,
     })
-  }
 
-  if (shouldCaptureAsArtifact(result.stderr)) {
-    yield* CaptureEvidenceArtifact({
+    const sandboxExecution = yield* storage.recordSandboxExecution({
       workflowRunId: input.workflowStart.workflowRun.id,
-      traceId: input.workflowStart.workflowRun.traceId,
-      kind: 'stderr',
-      label: 'Sandbox stderr',
-      contentType: 'text/plain',
-      body: result.stderr!,
-      retentionPolicy: 'alpha-14d',
+      provider: result.provider,
+      sandboxId: result.sandboxId,
+      command: result.command,
+      status: result.exitCode === 0 ? 'succeeded' : 'failed',
+      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+      stdout: truncatePreview(result.stdout),
+      ...(result.stderr === undefined
+        ? {}
+        : { stderr: truncatePreview(result.stderr) }),
+      ...(result.policy === undefined ? {} : { policy: result.policy }),
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
     })
-  }
 
-  const evidenceArtifacts = yield* CaptureSandboxResultArtifacts({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    traceId: input.workflowStart.workflowRun.traceId,
-    result,
-  })
+    const diffArtifact = evidenceArtifacts.find(
+      (artifact) => artifact.kind === 'diff',
+    )
+    const captured = diffArtifact !== undefined && result.baseSha !== undefined
+    const stats = yield* CandidatePatchStatsFromSandboxResult(result)
+    const candidatePatchSet = yield* storage.recordCandidatePatchSet({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      status: captured ? 'captured' : 'empty',
+      ...(captured ? { candidateDigest: `sha256:${diffArtifact.sha256}` } : {}),
+      ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
+      ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
+      ...(captured && stats !== undefined ? { stats } : {}),
+      summary: captured
+        ? 'Captured candidate patch diff from sandbox worktree.'
+        : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
+      idempotencyKey: `${sandboxExecution.id}:candidate`,
+      createdAt: result.completedAt,
+      traceId: input.workflowStart.workflowRun.traceId,
+      operation: 'runSandboxCommandForWorkflow.recordCandidatePatchSet',
+    })
 
-  const sandboxExecution = yield* storage.recordSandboxExecution({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    provider: result.provider,
-    sandboxId: result.sandboxId,
-    command: result.command,
-    status: result.exitCode === 0 ? 'succeeded' : 'failed',
-    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-    stdout: truncatePreview(result.stdout),
-    ...(result.stderr === undefined ? {} : { stderr: truncatePreview(result.stderr) }),
-    ...(result.policy === undefined ? {} : { policy: result.policy }),
-    startedAt: result.startedAt,
-    completedAt: result.completedAt,
-  })
+    const verificationEvidence = yield* PersistSandboxVerificationEvidence({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      sandboxExecution,
+      candidatePatchSet,
+      evidenceArtifacts,
+      sandboxResult: result,
+      verificationRequirements,
+      traceId: input.workflowStart.workflowRun.traceId,
+      operation: 'runSandboxCommandForWorkflow.persistVerificationEvidence',
+    })
 
-  const diffArtifact = evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
-  const captured = diffArtifact !== undefined && result.baseSha !== undefined
-  const candidatePatchSet = yield* storage.recordCandidatePatchSet({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    sandboxExecutionId: sandboxExecution.id,
-    status: captured ? 'captured' : 'empty',
-    ...(captured ? { candidateDigest: `sha256:${diffArtifact.sha256}` } : {}),
-    ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
-    ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
-    summary: captured
-      ? 'Captured candidate patch diff from sandbox worktree.'
-      : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
-    idempotencyKey: `${sandboxExecution.id}:candidate`,
-    createdAt: result.completedAt,
-    traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxCommandForWorkflow.recordCandidatePatchSet',
-  })
+    yield* ProposeMergeDecision({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      sandboxExecution,
+      candidatePatchSet,
+      evidenceArtifacts,
+      verificationRequirements: verificationEvidence.requirements,
+      verificationResults: verificationEvidence.results,
+      traceId: input.workflowStart.workflowRun.traceId,
+      operation: 'runSandboxCommandForWorkflow.proposeMergeDecision',
+    })
 
-  const verificationEvidence = yield* PersistSandboxVerificationEvidence({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    sandboxExecution,
-    candidatePatchSet,
-    evidenceArtifacts,
-    sandboxResult: result,
-    verificationRequirements,
-    traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxCommandForWorkflow.persistVerificationEvidence',
-  })
-
-  yield* ProposeMergeDecision({
-    workflowRunId: input.workflowStart.workflowRun.id,
-    sandboxExecution,
-    candidatePatchSet,
-    evidenceArtifacts,
-    verificationRequirements: verificationEvidence.requirements,
-    verificationResults: verificationEvidence.results,
-    traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxCommandForWorkflow.proposeMergeDecision',
-  })
-
-  return sandboxExecution
+    return sandboxExecution
   }).pipe(
-    Effect.tapCause(() => storage.markWorkflowExecutionFailed({
-      workflowRunId: input.workflowStart.workflowRun.id,
-      summary: 'Workflow execution failed after the attempt was claimed.',
-      traceId: input.workflowStart.workflowRun.traceId,
-      operation: 'runSandboxCommandForWorkflow.markExecutionFailed',
-    })),
+    Effect.tapCause(() =>
+      storage.markWorkflowExecutionFailed({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        summary: 'Workflow execution failed after the attempt was claimed.',
+        traceId: input.workflowStart.workflowRun.traceId,
+        operation: 'runSandboxCommandForWorkflow.markExecutionFailed',
+      }),
+    ),
   )
 })

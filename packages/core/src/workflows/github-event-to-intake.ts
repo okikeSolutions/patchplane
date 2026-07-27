@@ -14,14 +14,15 @@ export interface GitHubEventToWorkflowIntakeContext {
 
 export const GitHubEventToWorkflowIntake = Effect.fn(
   '@patchplane/core/workflows/GitHubEventToWorkflowIntake',
-)(function*(
+)(function* (
   event: GitHubNormalizedWorkflowEvent,
   context: GitHubEventToWorkflowIntakeContext,
 ) {
   if (!('headSha' in event) || event.headSha.trim().length === 0) {
     return yield* new GitHubError({
       operation: 'GitHubEventToWorkflowIntake.requirePinnedRevision',
-      message: 'Executable GitHub workflow intake requires an authoritative pull request head SHA',
+      message:
+        'Executable GitHub workflow intake requires an authoritative pull request head SHA',
       cause: { eventKind: event.kind },
     })
   }
@@ -37,13 +38,18 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
     repositoryName: event.repo,
     repositoryFullName: `${event.owner}/${event.repo}`,
     issueExternalId: 'issueId' in event ? String(event.issueId) : undefined,
-    issueNumber: 'issueNumber' in event ? event.issueNumber : event.pullRequestNumber,
-    pullRequestExternalId: 'pullRequestId' in event ? String(event.pullRequestId) : undefined,
-    pullRequestNumber: 'pullRequestNumber' in event ? event.pullRequestNumber : undefined,
+    issueNumber:
+      'issueNumber' in event ? event.issueNumber : event.pullRequestNumber,
+    issueTitle: event.title,
+    pullRequestExternalId:
+      'pullRequestId' in event ? String(event.pullRequestId) : undefined,
+    pullRequestNumber:
+      'pullRequestNumber' in event ? event.pullRequestNumber : undefined,
     pullRequestHeadSha: 'headSha' in event ? event.headSha : undefined,
     pullRequestHeadRef: 'headRef' in event ? event.headRef : undefined,
     pullRequestBaseRef: 'baseRef' in event ? event.baseRef : undefined,
-    commentExternalId: 'commentId' in event ? String(event.commentId) : undefined,
+    commentExternalId:
+      'commentId' in event ? String(event.commentId) : undefined,
     url: event.url,
     senderProvider: 'github',
     senderLogin: event.sender,
@@ -52,7 +58,8 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
       (cause) =>
         new GitHubError({
           operation: 'GitHubEventToWorkflowIntake.decodeExternalRef',
-          message: 'GitHub event could not be mapped to a workflow intake reference',
+          message:
+            'GitHub event could not be mapped to a workflow intake reference',
           cause,
         }),
     ),

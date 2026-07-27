@@ -8,14 +8,17 @@ export const AlphaReviewServiceLayer = Layer.succeed(
     runReview: (input: ReviewCandidateInput) =>
       Effect.sync(() => {
         const findings = []
-        const diffArtifact = input.evidenceArtifacts.find((artifact) => artifact.kind === 'diff')
+        const diffArtifact = input.evidenceArtifacts.find(
+          (artifact) => artifact.kind === 'diff',
+        )
         const verificationResults = input.verificationResults ?? []
 
         if (verificationResults.length === 0) {
           findings.push({
             severity: 'warning' as const,
             category: 'test' as const,
-            message: 'No independent verification command was configured; agent completion is not test evidence.',
+            message:
+              'No independent verification command was configured; agent completion is not test evidence.',
           })
         }
 
@@ -23,9 +26,11 @@ export const AlphaReviewServiceLayer = Layer.succeed(
           if (verification.status === 'passed') continue
           const failed = verification.status === 'failed'
           findings.push({
-            severity: failed ? 'error' as const : 'warning' as const,
+            severity: failed ? ('error' as const) : ('warning' as const),
             category: 'test' as const,
-            message: verification.summary ?? `Verification ${verification.status} with exit ${verification.exitCode ?? 'unknown'}.`,
+            message:
+              verification.summary ??
+              `Verification ${verification.status} with exit ${verification.exitCode ?? 'unknown'}.`,
           })
         }
 
@@ -33,7 +38,8 @@ export const AlphaReviewServiceLayer = Layer.succeed(
           findings.push({
             severity: 'warning' as const,
             category: 'unknown' as const,
-            message: 'No sandbox execution has been recorded for this workflow.',
+            message:
+              'No sandbox execution has been recorded for this workflow.',
           })
         } else if (input.sandboxExecution.status === 'failed') {
           findings.push({
@@ -54,9 +60,10 @@ export const AlphaReviewServiceLayer = Layer.succeed(
         return {
           kind: 'test' as const,
           reviewer: 'patchplane:alpha-reviewer',
-          summary: findings.length === 0
-            ? 'Sandbox execution and candidate diff evidence are present.'
-            : `${findings.length} review finding${findings.length === 1 ? '' : 's'} recorded.`,
+          summary:
+            findings.length === 0
+              ? 'Sandbox execution and candidate diff evidence are present.'
+              : `${findings.length} review finding${findings.length === 1 ? '' : 's'} recorded.`,
           findings,
         }
       }),
@@ -68,10 +75,13 @@ export const AlphaPolicyServiceLayer = Layer.succeed(
   PolicyService.of({
     evaluatePolicy: (input) =>
       Effect.sync(() => {
-        const hasError = input.reviewFindings.some((finding) =>
-          finding.severity === 'error' || finding.severity === 'critical'
+        const hasError = input.reviewFindings.some(
+          (finding) =>
+            finding.severity === 'error' || finding.severity === 'critical',
         )
-        const hasWarning = input.reviewFindings.some((finding) => finding.severity === 'warning')
+        const hasWarning = input.reviewFindings.some(
+          (finding) => finding.severity === 'warning',
+        )
 
         if (
           input.sandboxExecution?.status === 'failed' ||
@@ -80,7 +90,8 @@ export const AlphaPolicyServiceLayer = Layer.succeed(
         ) {
           return {
             status: 'changes-requested' as const,
-            summary: 'PatchPlane found failing execution, verification, or error-level review findings.',
+            summary:
+              'PatchPlane found failing execution, verification, or error-level review findings.',
             reason: 'review:error',
           }
         }
@@ -93,18 +104,21 @@ export const AlphaPolicyServiceLayer = Layer.succeed(
         ) {
           return {
             status: 'manual-review' as const,
-            summary: input.verificationCoverage.status === 'passed'
-              ? 'PatchPlane needs human review before this patch can be trusted.'
-              : 'Verification is incomplete; PatchPlane needs human review before this patch can be trusted.',
-            reason: input.verificationCoverage.status === 'passed'
-              ? 'review:warning'
-              : 'verification:incomplete',
+            summary:
+              input.verificationCoverage.status === 'passed'
+                ? 'PatchPlane needs human review before this patch can be trusted.'
+                : 'Verification is incomplete; PatchPlane needs human review before this patch can be trusted.',
+            reason:
+              input.verificationCoverage.status === 'passed'
+                ? 'review:warning'
+                : 'verification:incomplete',
           }
         }
 
         return {
           status: 'manual-review' as const,
-          summary: 'PatchPlane found no blocking automated findings; human approval is still required.',
+          summary:
+            'Required verification passed and 0 blocking review findings were recorded; human approval is still required.',
           reason: 'review:clean',
         }
       }),
