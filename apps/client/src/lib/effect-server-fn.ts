@@ -12,7 +12,11 @@ import type {
 type ServerFnMethod = 'GET' | 'POST'
 type RuntimeRequirements = AuthService | StorageService | TelemetryService
 
-type EffectServerFnBaseOptions<S extends Schema.ConstraintDecoder<any>, A, E> = {
+type EffectServerFnBaseOptions<
+  S extends Schema.ConstraintDecoder<any>,
+  A,
+  E,
+> = {
   readonly method?: ServerFnMethod
   readonly input: S
   readonly operation: string
@@ -69,7 +73,10 @@ export function effectServerFn<
   Failure extends object,
 >(
   options: EffectServerFnBaseOptions<S, A, E> & {
-    readonly failure: (cause: unknown, context: ServerFunctionContext) => Failure
+    readonly failure: (
+      cause: unknown,
+      context: ServerFunctionContext,
+    ) => Failure
   },
 ): EffectServerFn<S, { readonly data: A }, Failure>
 export function effectServerFn<
@@ -81,7 +88,10 @@ export function effectServerFn<
 >(
   options: EffectServerFnOptions<S, A, E, Success, Failure> & {
     readonly success: (value: A, context: ServerFunctionContext) => Success
-    readonly failure: (cause: unknown, context: ServerFunctionContext) => Failure
+    readonly failure: (
+      cause: unknown,
+      context: ServerFunctionContext,
+    ) => Failure
   },
 ): EffectServerFn<S, Success, Failure>
 export function effectServerFn<
@@ -90,9 +100,7 @@ export function effectServerFn<
   E,
   Success extends object,
   Failure extends object,
->(
-  options: EffectServerFnOptions<S, A, E, Success, Failure>,
-) {
+>(options: EffectServerFnOptions<S, A, E, Success, Failure>) {
   const method = options.method ?? 'POST'
   const standardInput = Schema.toStandardSchemaV1(options.input)
 
@@ -121,7 +129,11 @@ export function effectServerFn<
         import('@patchplane/domain/errors'),
         import('@/effect/runtime'),
       ])
-      const { captureTelemetryCause, withTelemetrySpan } = telemetryModule
+      const {
+        captureTelemetryCause,
+        withCriticalPathBreadcrumbScope,
+        withTelemetrySpan,
+      } = telemetryModule
       const { publicErrorMessage } = errorsModule
       const { patchPlaneRuntime, randomTraceId } = runtimeModule
       const traceId = await randomTraceId()
@@ -137,35 +149,44 @@ export function effectServerFn<
           ? baseEffect
           : options.provide(baseEffect, data, context)
       }).pipe(
-        (effect) => withTelemetrySpan({
-          traceId: context.traceId,
-          operation: context.operation,
-          name: context.operation,
-        }, effect),
-        Effect.withLogSpan(context.operation),
-        Effect.tapCause((cause) =>
-          Effect.all([
-            Effect.logError(`${context.operation} failed`, {
-              traceId: context.traceId,
-              error: publicErrorMessage(Cause.squash(cause), fallback),
-              cause: Cause.pretty(cause),
-            }),
-            captureTelemetryCause({
+        (effect) =>
+          withTelemetrySpan(
+            {
               traceId: context.traceId,
               operation: context.operation,
-              cause,
-              message: `${context.operation} failed`,
-            }),
-          ], { concurrency: 'unbounded', discard: true }),
+              name: context.operation,
+            },
+            effect,
+          ),
+        Effect.withLogSpan(context.operation),
+        Effect.tapCause((cause) =>
+          Effect.all(
+            [
+              Effect.logError(`${context.operation} failed`, {
+                traceId: context.traceId,
+                error: publicErrorMessage(Cause.squash(cause), fallback),
+                cause: Cause.pretty(cause),
+              }),
+              captureTelemetryCause({
+                traceId: context.traceId,
+                operation: context.operation,
+                cause,
+                message: `${context.operation} failed`,
+              }),
+            ],
+            { concurrency: 'unbounded', discard: true },
+          ),
         ),
+        withCriticalPathBreadcrumbScope,
       )
 
       const exit = await patchPlaneRuntime.runPromiseExit(program)
 
       if (Exit.isSuccess(exit)) {
-        const successBody = options.success === undefined
-          ? { data: exit.value }
-          : options.success(exit.value, context)
+        const successBody =
+          options.success === undefined
+            ? { data: exit.value }
+            : options.success(exit.value, context)
 
         return {
           ok: true as const,
@@ -174,9 +195,10 @@ export function effectServerFn<
       }
 
       const errorCause = Cause.squash(exit.cause)
-      const failureBody = options.failure === undefined
-        ? { error: publicErrorMessage(errorCause, fallback) }
-        : options.failure(errorCause, context)
+      const failureBody =
+        options.failure === undefined
+          ? { error: publicErrorMessage(errorCause, fallback) }
+          : options.failure(errorCause, context)
 
       return {
         ok: false as const,

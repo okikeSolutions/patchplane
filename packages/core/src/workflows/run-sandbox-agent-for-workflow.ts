@@ -6,6 +6,13 @@ import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { PrepareRepositoryClone } from '../repository/prepare-repository-clone'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
+import {
+  withAttemptClaimTransition,
+  withCandidateFreezeTransition,
+  withRequirementsPersistedTransition,
+  withSandboxExecutionTransition,
+  withVerificationTransition,
+} from './sandbox-workflow-telemetry'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
 import { CandidatePatchStatsFromSandboxResult } from './candidate-patch-stats'
@@ -40,16 +47,30 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   readonly evidenceBrowserScreenshotCommand?: string | undefined
 }) {
   const storage = yield* StorageService
-  const claimed = yield* storage.claimWorkflowExecution({
-    workflowRunId: input.workflowStart.workflowRun.id,
+  const transitionContext = {
     traceId: input.workflowStart.workflowRun.traceId,
-    operation: 'runSandboxAgentForWorkflow.claimExecution',
-  })
+    workflowRunId: input.workflowStart.workflowRun.id,
+  } as const
+  const claimed = yield* withAttemptClaimTransition(
+    {
+      ...transitionContext,
+      operation: 'runSandboxAgentForWorkflow.claimExecution',
+    },
+    storage.claimWorkflowExecution({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      traceId: input.workflowStart.workflowRun.traceId,
+      operation: 'runSandboxAgentForWorkflow.claimExecution',
+    }),
+  )
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
-    const verificationRequirements =
-      yield* PersistConfiguredVerificationRequirements({
+    const verificationRequirements = yield* withRequirementsPersistedTransition(
+      {
+        ...transitionContext,
+        operation: 'runSandboxAgentForWorkflow.persistVerificationRequirements',
+      },
+      PersistConfiguredVerificationRequirements({
         workflowRunId: input.workflowStart.workflowRun.id,
         testCommand: input.evidenceTestReportCommand,
         testPlatform: input.evidenceTestPlatform,
@@ -57,7 +78,8 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
         createdAt: yield* Clock.currentTimeMillis,
         traceId: input.workflowStart.workflowRun.traceId,
         operation: 'runSandboxAgentForWorkflow.persistVerificationRequirements',
-      })
+      }),
+    )
 
     const clone = yield* PrepareRepositoryClone(input.workflowStart)
     if (clone === undefined) {
@@ -75,62 +97,71 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
         ? input.evidenceTestReportCommand
         : undefined
     let runtimeSession: RuntimeSession | undefined
-    const result = yield* sandbox.runRepositoryAgent({
-      ...clone,
-      prompt: input.workflowStart.promptRequest.prompt,
-      provider: input.provider,
-      model: input.model,
-      thinking: input.thinking,
-      mode: input.mode,
-      timeoutSeconds: input.timeoutSeconds,
-      evidenceTestReportCommand: runnableTestCommand,
-      evidenceBrowserScreenshotCommand: input.evidenceBrowserScreenshotCommand,
-      traceId: input.workflowStart.workflowRun.traceId,
-      onRuntimeSessionStarted: (session) =>
-        Effect.gen(function* () {
-          runtimeSession = yield* storage.recordRuntimeSessionStarted({
-            workflowRunId: input.workflowStart.workflowRun.id,
-            provider: session.provider,
-            sandboxId: session.sandboxId,
-            sessionId: session.sessionId,
-            commandId: session.commandId,
-            startedAt: session.startedAt,
-            traceId: input.workflowStart.workflowRun.traceId,
-          })
-        }),
-      onRuntimeEvents: (events) =>
-        storage.recordRuntimeEvents(
-          events.map((event) => ({
-            workflowRunId: input.workflowStart.workflowRun.id,
-            provider: event.provider,
-            type: event.type,
-            occurredAt: event.occurredAt,
-            ...(event.summary === undefined ? {} : { summary: event.summary }),
-            ...(event.payloadJson === undefined
-              ? {}
-              : { payloadJson: event.payloadJson }),
-            ...(event.idempotencyKey === undefined
-              ? {}
-              : { idempotencyKey: event.idempotencyKey }),
-            ...(event.sourceSessionId === undefined
-              ? {}
-              : { sourceSessionId: event.sourceSessionId }),
-            ...(event.sourceCommandId === undefined
-              ? {}
-              : { sourceCommandId: event.sourceCommandId }),
-            ...(event.sourceStream === undefined
-              ? {}
-              : { sourceStream: event.sourceStream }),
-            ...(event.sourceLine === undefined
-              ? {}
-              : { sourceLine: event.sourceLine }),
-            ...(event.sourceOffset === undefined
-              ? {}
-              : { sourceOffset: event.sourceOffset }),
-            traceId: input.workflowStart.workflowRun.traceId,
-          })),
-        ),
-    })
+    const result = yield* withSandboxExecutionTransition(
+      {
+        ...transitionContext,
+        operation: 'runSandboxAgentForWorkflow.executeSandbox',
+      },
+      sandbox.runRepositoryAgent({
+        ...clone,
+        prompt: input.workflowStart.promptRequest.prompt,
+        provider: input.provider,
+        model: input.model,
+        thinking: input.thinking,
+        mode: input.mode,
+        timeoutSeconds: input.timeoutSeconds,
+        evidenceTestReportCommand: runnableTestCommand,
+        evidenceBrowserScreenshotCommand:
+          input.evidenceBrowserScreenshotCommand,
+        traceId: input.workflowStart.workflowRun.traceId,
+        onRuntimeSessionStarted: (session) =>
+          Effect.gen(function* () {
+            runtimeSession = yield* storage.recordRuntimeSessionStarted({
+              workflowRunId: input.workflowStart.workflowRun.id,
+              provider: session.provider,
+              sandboxId: session.sandboxId,
+              sessionId: session.sessionId,
+              commandId: session.commandId,
+              startedAt: session.startedAt,
+              traceId: input.workflowStart.workflowRun.traceId,
+            })
+          }),
+        onRuntimeEvents: (events) =>
+          storage.recordRuntimeEvents(
+            events.map((event) => ({
+              workflowRunId: input.workflowStart.workflowRun.id,
+              provider: event.provider,
+              type: event.type,
+              occurredAt: event.occurredAt,
+              ...(event.summary === undefined
+                ? {}
+                : { summary: event.summary }),
+              ...(event.payloadJson === undefined
+                ? {}
+                : { payloadJson: event.payloadJson }),
+              ...(event.idempotencyKey === undefined
+                ? {}
+                : { idempotencyKey: event.idempotencyKey }),
+              ...(event.sourceSessionId === undefined
+                ? {}
+                : { sourceSessionId: event.sourceSessionId }),
+              ...(event.sourceCommandId === undefined
+                ? {}
+                : { sourceCommandId: event.sourceCommandId }),
+              ...(event.sourceStream === undefined
+                ? {}
+                : { sourceStream: event.sourceStream }),
+              ...(event.sourceLine === undefined
+                ? {}
+                : { sourceLine: event.sourceLine }),
+              ...(event.sourceOffset === undefined
+                ? {}
+                : { sourceOffset: event.sourceOffset }),
+              traceId: input.workflowStart.workflowRun.traceId,
+            })),
+          ),
+      }),
+    )
 
     runtimeSession =
       runtimeSession ??
@@ -246,33 +277,47 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     )
     const captured = diffArtifact !== undefined && result.baseSha !== undefined
     const stats = yield* CandidatePatchStatsFromSandboxResult(result)
-    const candidatePatchSet = yield* storage.recordCandidatePatchSet({
-      workflowRunId: input.workflowStart.workflowRun.id,
-      sandboxExecutionId: sandboxExecution.id,
-      status: captured ? 'captured' : 'empty',
-      ...(captured ? { candidateDigest: `sha256:${diffArtifact.sha256}` } : {}),
-      ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
-      ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
-      ...(captured && stats !== undefined ? { stats } : {}),
-      summary: captured
-        ? 'Captured candidate patch diff from sandbox worktree.'
-        : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
-      idempotencyKey: `${sandboxExecution.id}:candidate`,
-      createdAt: result.completedAt,
-      traceId: input.workflowStart.workflowRun.traceId,
-      operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
-    })
+    const candidatePatchSet = yield* withCandidateFreezeTransition(
+      {
+        ...transitionContext,
+        operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
+      },
+      storage.recordCandidatePatchSet({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        sandboxExecutionId: sandboxExecution.id,
+        status: captured ? 'captured' : 'empty',
+        ...(captured
+          ? { candidateDigest: `sha256:${diffArtifact.sha256}` }
+          : {}),
+        ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
+        ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
+        ...(captured && stats !== undefined ? { stats } : {}),
+        summary: captured
+          ? 'Captured candidate patch diff from sandbox worktree.'
+          : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
+        idempotencyKey: `${sandboxExecution.id}:candidate`,
+        createdAt: result.completedAt,
+        traceId: input.workflowStart.workflowRun.traceId,
+        operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
+      }),
+    )
 
-    const verificationEvidence = yield* PersistSandboxVerificationEvidence({
-      workflowRunId: input.workflowStart.workflowRun.id,
-      sandboxExecution,
-      candidatePatchSet,
-      evidenceArtifacts,
-      sandboxResult: result,
-      verificationRequirements,
-      traceId: input.workflowStart.workflowRun.traceId,
-      operation: 'runSandboxAgentForWorkflow.persistVerificationEvidence',
-    })
+    const verificationEvidence = yield* withVerificationTransition(
+      {
+        ...transitionContext,
+        operation: 'runSandboxAgentForWorkflow.persistVerificationEvidence',
+      },
+      PersistSandboxVerificationEvidence({
+        workflowRunId: input.workflowStart.workflowRun.id,
+        sandboxExecution,
+        candidatePatchSet,
+        evidenceArtifacts,
+        sandboxResult: result,
+        verificationRequirements,
+        traceId: input.workflowStart.workflowRun.traceId,
+        operation: 'runSandboxAgentForWorkflow.persistVerificationEvidence',
+      }),
+    )
 
     yield* ProposeMergeDecision({
       workflowRunId: input.workflowStart.workflowRun.id,

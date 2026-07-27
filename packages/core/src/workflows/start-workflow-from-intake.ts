@@ -3,12 +3,18 @@ import { WorkflowStateError } from '@patchplane/domain/errors'
 import type { WorkflowIntake } from '@patchplane/domain/workflow-intake'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
+import {
+  addCriticalPathBreadcrumb,
+  criticalPathBreadcrumbStatuses,
+  criticalPathStages,
+  withCriticalPathTransition,
+} from '../services/telemetry-service'
 
 export type StartWorkflowFromIntakeInput = WorkflowIntake
 
 export const StartWorkflowFromIntake = Effect.fn(
   '@patchplane/core/workflows/StartWorkflowFromIntake',
-)(function*(input: StartWorkflowFromIntakeInput) {
+)(function* (input: StartWorkflowFromIntakeInput) {
   yield* Effect.annotateCurrentSpan({
     traceId: input.traceId,
     actorId: input.actor.id,
@@ -20,10 +26,8 @@ export const StartWorkflowFromIntake = Effect.fn(
 
   if (
     input.source === 'external' &&
-    (
-      input.externalRef?.pullRequestHeadSha === undefined ||
-      input.externalRef.pullRequestHeadSha.trim().length === 0
-    )
+    (input.externalRef?.pullRequestHeadSha === undefined ||
+      input.externalRef.pullRequestHeadSha.trim().length === 0)
   ) {
     return yield* new WorkflowStateError({
       message: 'External workflow intake requires a pinned source commit SHA',
@@ -46,8 +50,22 @@ export const StartWorkflowFromIntake = Effect.fn(
     })
   }
 
+  yield* addCriticalPathBreadcrumb({
+    traceId: input.traceId,
+    operation: 'startWorkflowFromIntake.acceptIntake',
+    stage: criticalPathStages.intakeAccepted,
+    status: criticalPathBreadcrumbStatuses.succeeded,
+  })
+
   const storage = yield* StorageService
-  const result = yield* storage.createWorkflowFromIntake(input)
+  const result = yield* withCriticalPathTransition(
+    {
+      traceId: input.traceId,
+      operation: 'startWorkflowFromIntake.createAttempt',
+      stage: criticalPathStages.attemptCreated,
+    },
+    storage.createWorkflowFromIntake(input),
+  )
 
   yield* Effect.logInfo('Started workflow from generic intake', {
     promptRequestId: result.promptRequest.id,

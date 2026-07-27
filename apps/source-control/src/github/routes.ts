@@ -46,10 +46,7 @@ import {
   AlphaPolicyServiceLayer,
   AlphaReviewServiceLayer,
 } from '@patchplane/core/services/alpha-review-policy'
-import {
-  captureTelemetryCause,
-  withTelemetrySpan,
-} from '@patchplane/core/services/telemetry-service'
+import { withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
 import {
   ArtifactsError,
   SourceControlError,
@@ -78,6 +75,7 @@ import {
   VerificationResult,
 } from '@patchplane/domain/verification'
 import { WorkflowStart } from '@patchplane/domain/workflow-start'
+import { withCapturedCriticalPathScope } from '../critical-path-telemetry'
 
 const lookupGitHubWebhookRoute = makeFunctionReference<
   'query',
@@ -703,8 +701,19 @@ export async function executeWorkflowRerun(
         withTelemetrySpan(
           {
             traceId: input.traceId,
+            workflowRunId: workflowStart.workflowRun.id,
             operation: 'githubWorker.executeWorkflowRerun',
             name: 'githubWorker.executeWorkflowRerun',
+          },
+          effect,
+        ),
+      (effect) =>
+        withCapturedCriticalPathScope(
+          {
+            traceId: input.traceId,
+            workflowRunId: workflowStart.workflowRun.id,
+            operation: 'githubWorker.executeWorkflowRerun',
+            message: 'Rerun execution failed',
           },
           effect,
         ),
@@ -890,15 +899,27 @@ export async function publishDecision(
       ...(patchReport === undefined ? {} : { patchReport }),
       verification: fixture.verification,
       publicationResults: fixture.publicationResults,
-    }).pipe((effect) =>
-      withTelemetrySpan(
-        {
-          traceId: input.traceId,
-          operation: 'githubWorker.publishDecision',
-          name: 'githubWorker.publishDecision',
-        },
-        effect,
-      ),
+    }).pipe(
+      (effect) =>
+        withTelemetrySpan(
+          {
+            traceId: input.traceId,
+            workflowRunId,
+            operation: 'githubWorker.publishDecision',
+            name: 'githubWorker.publishDecision',
+          },
+          effect,
+        ),
+      (effect) =>
+        withCapturedCriticalPathScope(
+          {
+            traceId: input.traceId,
+            workflowRunId,
+            operation: 'githubWorker.publishDecision',
+            message: 'Decision publication failed',
+          },
+          effect,
+        ),
     ),
   )
 
@@ -1160,6 +1181,16 @@ export async function handleGitHubWebhook(
         effect,
       ),
     Effect.withLogSpan('githubWorker.webhook'),
+    (effect) =>
+      withCapturedCriticalPathScope(
+        {
+          traceId,
+          operation: 'githubWorker.webhook',
+          message: 'GitHub webhook ingestion failed',
+          attributes: { deliveryId, eventName },
+        },
+        effect,
+      ),
   )
 
   const exit = await runtime.runPromiseExit(program)
@@ -1187,16 +1218,6 @@ export async function handleGitHubWebhook(
 
   const cause = Cause.squash(exit.cause)
   const error = publicErrorMessage(cause, 'GitHub webhook ingestion failed')
-
-  await runtime.runPromise(
-    captureTelemetryCause({
-      traceId,
-      operation: 'githubWorker.webhook',
-      cause: exit.cause,
-      message: 'GitHub webhook ingestion failed',
-      attributes: { deliveryId, eventName },
-    }),
-  )
 
   console.error('githubWorker.webhook failed', {
     traceId,

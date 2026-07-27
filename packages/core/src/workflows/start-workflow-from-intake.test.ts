@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import {
   makeGitHubAppActorId,
@@ -8,16 +8,18 @@ import {
 } from '@patchplane/domain/ids'
 import { StorageService } from '../services/storage-service'
 import { SourceControlService } from '../services/source-control-service'
+import { TelemetryService } from '../services/telemetry-service'
 import { StartWorkflowFromIntake } from './start-workflow-from-intake'
 
 let verifiedRepository: unknown
+let breadcrumbs: Array<{ readonly stage: string; readonly status: string }> = []
 
 const TestStorageLayer = Layer.succeed(
   StorageService,
   StorageService.of({
     listRecentWorkflowStarts: () => Effect.succeed([]),
     claimWorkflowExecution: () => Effect.succeed(true),
-          markWorkflowExecutionFailed: () => Effect.succeed(true),
+    markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
@@ -43,7 +45,9 @@ const TestStorageLayer = Layer.succeed(
           traceId: input.traceId,
           source: input.source,
           prompt: input.prompt,
-          ...(input.externalRef === undefined ? {} : { externalRef: input.externalRef }),
+          ...(input.externalRef === undefined
+            ? {}
+            : { externalRef: input.externalRef }),
           status: 'created',
           createdAt: 1,
         },
@@ -56,6 +60,20 @@ const TestStorageLayer = Layer.succeed(
           createdAt: 1,
         },
       }),
+  }),
+)
+
+const TestTelemetryLayer = Layer.succeed(
+  TelemetryService,
+  TelemetryService.of({
+    recordEvent: () => Effect.void,
+    addBreadcrumb: (input) =>
+      Effect.sync(() => {
+        breadcrumbs.push({ stage: input.stage, status: input.status })
+      }),
+    withBreadcrumbScope: (effect) => effect,
+    captureError: () => Effect.void,
+    withSpan: (_input, effect) => effect,
   }),
 )
 
@@ -85,67 +103,97 @@ const TestSourceControlLayer = Layer.succeed(
 )
 
 describe('StartWorkflowFromIntake', () => {
-  it.effect('verifies repository access before storing external workflow intake', () =>
-    Effect.gen(function* () {
-      verifiedRepository = undefined
+  it.effect(
+    'verifies repository access before storing external workflow intake',
+    () =>
+      Effect.gen(function* () {
+        verifiedRepository = undefined
+        breadcrumbs = []
 
-      const result = yield* StartWorkflowFromIntake({
-        actor: {
-          id: makeGitHubAppActorId('123'),
-          displayName: 'GitHub App installation 123',
-        },
-        workspaceId: makeSystemWorkspaceId('workspace-1'),
-        source: 'external',
-        traceId: 'trace-1',
-        prompt: 'Fix the bug',
-        externalRef: {
+        const result = yield* StartWorkflowFromIntake({
+          actor: {
+            id: makeGitHubAppActorId('123'),
+            displayName: 'GitHub App installation 123',
+          },
+          workspaceId: makeSystemWorkspaceId('workspace-1'),
+          source: 'external',
+          traceId: 'trace-1',
+          prompt: 'Fix the bug',
+          externalRef: {
+            provider: 'github',
+            deliveryId: 'delivery-1',
+            eventKind: 'github.pull_request.opened',
+            repositoryProvider: 'github',
+            repositoryInstallationId: '123',
+            repositoryExternalId: '456',
+            repositoryOwner: 'patchplane',
+            repositoryName: 'demo',
+            repositoryFullName: 'patchplane/demo',
+            issueExternalId: '789',
+            issueNumber: 7,
+            pullRequestExternalId: '789',
+            pullRequestNumber: 7,
+            pullRequestHeadSha: '0123456789012345678901234567890123456789',
+          },
+        })
+
+        expect(verifiedRepository).toEqual({
           provider: 'github',
-          deliveryId: 'delivery-1',
-          eventKind: 'github.pull_request.opened',
-          repositoryProvider: 'github',
-          repositoryInstallationId: '123',
-          repositoryExternalId: '456',
-          repositoryOwner: 'patchplane',
-          repositoryName: 'demo',
-          repositoryFullName: 'patchplane/demo',
-          issueExternalId: '789',
-          issueNumber: 7,
-          pullRequestExternalId: '789',
-          pullRequestNumber: 7,
-          pullRequestHeadSha: '0123456789012345678901234567890123456789',
-        },
-      })
-
-      expect(verifiedRepository).toEqual({
-        provider: 'github',
-        installationId: '123',
-        owner: 'patchplane',
-        name: 'demo',
-      })
-      expect(result.promptRequest.externalRef?.provider).toBe('github')
-      expect(result.workflowRun.status).toBe('queued')
-    }).pipe(Effect.provide(Layer.merge(TestStorageLayer, TestSourceControlLayer))),
+          installationId: '123',
+          owner: 'patchplane',
+          name: 'demo',
+        })
+        expect(result.promptRequest.externalRef?.provider).toBe('github')
+        expect(result.workflowRun.status).toBe('queued')
+        assert.deepStrictEqual(breadcrumbs, [
+          { stage: 'intake-accepted', status: 'succeeded' },
+          { stage: 'attempt-created', status: 'started' },
+          { stage: 'attempt-created', status: 'succeeded' },
+        ])
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestStorageLayer,
+            TestSourceControlLayer,
+            TestTelemetryLayer,
+          ),
+        ),
+      ),
   )
 
-  it.effect('rejects external intake without an authoritative source revision', () =>
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(StartWorkflowFromIntake({
-        actor: {
-          id: makeGitHubAppActorId('123'),
-          displayName: 'GitHub App installation 123',
-        },
-        workspaceId: makeSystemWorkspaceId('workspace-1'),
-        source: 'external',
-        traceId: 'trace-unpinned',
-        prompt: 'Fix the bug',
-        externalRef: {
-          provider: 'github',
-          deliveryId: 'delivery-unpinned',
-          eventKind: 'github.issue.opened',
-        },
-      }))
+  it.effect(
+    'rejects external intake without an authoritative source revision',
+    () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          StartWorkflowFromIntake({
+            actor: {
+              id: makeGitHubAppActorId('123'),
+              displayName: 'GitHub App installation 123',
+            },
+            workspaceId: makeSystemWorkspaceId('workspace-1'),
+            source: 'external',
+            traceId: 'trace-unpinned',
+            prompt: 'Fix the bug',
+            externalRef: {
+              provider: 'github',
+              deliveryId: 'delivery-unpinned',
+              eventKind: 'github.issue.opened',
+            },
+          }),
+        )
 
-      expect(error.message).toBe('External workflow intake requires a pinned source commit SHA')
-    }).pipe(Effect.provide(Layer.merge(TestStorageLayer, TestSourceControlLayer))),
+        expect(error.message).toBe(
+          'External workflow intake requires a pinned source commit SHA',
+        )
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            TestStorageLayer,
+            TestSourceControlLayer,
+            TestTelemetryLayer,
+          ),
+        ),
+      ),
   )
 })

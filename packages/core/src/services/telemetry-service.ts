@@ -1,12 +1,15 @@
-import type {
-  CriticalPathBreadcrumbStatus,
-  CriticalPathStage,
+import {
+  criticalPathBreadcrumbStatuses,
+  type CriticalPathBreadcrumbStatus,
+  type CriticalPathStage,
 } from '@patchplane/domain/telemetry'
-import { Cause, Context, Effect } from 'effect'
+import { Cause, Context, Effect, Exit } from 'effect'
 
 export {
   CriticalPathBreadcrumbStatus,
   CriticalPathStage,
+  criticalPathBreadcrumbStatuses,
+  criticalPathStages,
   makeCriticalPathBreadcrumbStatus,
   makeCriticalPathStage,
 } from '@patchplane/domain/telemetry'
@@ -105,6 +108,10 @@ export interface RecordCriticalPathBreadcrumbInput extends TelemetryContextField
   readonly status: CriticalPathBreadcrumbStatus
 }
 
+export interface CriticalPathTransitionInput extends TelemetryContextFields {
+  readonly stage: CriticalPathStage
+}
+
 export interface CaptureTelemetryErrorInput extends TelemetryContextFields {
   readonly error: unknown
   readonly message?: string | undefined
@@ -130,6 +137,67 @@ export interface CaptureTelemetryCauseInput extends TelemetryContextFields {
   readonly cause: Cause.Cause<unknown>
   readonly message: string
   readonly attributes?: TelemetryAttributes | undefined
+}
+
+export function addCriticalPathBreadcrumb(
+  input: RecordCriticalPathBreadcrumbInput,
+): Effect.Effect<void, never, TelemetryService> {
+  return TelemetryService.pipe(
+    Effect.flatMap((telemetry) => telemetry.addBreadcrumb(input)),
+    Effect.catchDefect(() => Effect.void),
+  )
+}
+
+export function withCriticalPathTransitionOutcome<A, E, R>(
+  input: CriticalPathTransitionInput,
+  effect: Effect.Effect<A, E, R>,
+  status: (value: A) => CriticalPathBreadcrumbStatus,
+): Effect.Effect<A, E, R | TelemetryService> {
+  return TelemetryService.pipe(
+    Effect.flatMap((telemetry) =>
+      telemetry
+        .addBreadcrumb({
+          ...input,
+          status: criticalPathBreadcrumbStatuses.started,
+        })
+        .pipe(
+          Effect.catchDefect(() => Effect.void),
+          Effect.andThen(
+            effect.pipe(
+              Effect.onExit((exit) =>
+                telemetry
+                  .addBreadcrumb({
+                    ...input,
+                    status: Exit.isSuccess(exit)
+                      ? status(exit.value)
+                      : criticalPathBreadcrumbStatuses.failed,
+                  })
+                  .pipe(Effect.catchDefect(() => Effect.void)),
+              ),
+            ),
+          ),
+        ),
+    ),
+  )
+}
+
+export function withCriticalPathTransition<A, E, R>(
+  input: CriticalPathTransitionInput,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | TelemetryService> {
+  return withCriticalPathTransitionOutcome(
+    input,
+    effect,
+    () => criticalPathBreadcrumbStatuses.succeeded,
+  )
+}
+
+export function withCriticalPathBreadcrumbScope<A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | TelemetryService> {
+  return TelemetryService.pipe(
+    Effect.flatMap((telemetry) => telemetry.withBreadcrumbScope(effect)),
+  )
 }
 
 export function captureTelemetryCause(
