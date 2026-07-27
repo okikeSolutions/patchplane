@@ -36,7 +36,9 @@ describe('GitHubEventToWorkflowIntake', () => {
         traceId: 'trace-1',
       }).pipe(Effect.flip)
 
-      expect(error.message).toContain('authoritative pull request head SHA')
+      expect(error.message).toContain(
+        'authoritative pull request base and head SHAs',
+      )
     }),
   )
 
@@ -44,6 +46,7 @@ describe('GitHubEventToWorkflowIntake', () => {
     'maps GitHub pull request events to workflow intake with PR provenance',
     () =>
       Effect.gen(function* () {
+        const baseSha = 'def456def456def456def456def456def456defa'
         const headSha = 'abc123abc123abc123abc123abc123abc123abcd'
         const event = yield* decodeEvent({
           kind: 'github.pull_request.synchronize',
@@ -54,10 +57,13 @@ describe('GitHubEventToWorkflowIntake', () => {
           repositoryId: 456,
           pullRequestId: 987,
           pullRequestNumber: 12,
+          pullRequestUpdatedAt: 1_000,
           title: 'Fix auth callback',
           body: '## Summary\n\nUpdated branch.',
           prompt: 'Fix auth callback\n\nUpdated branch.',
+          baseSha,
           headSha,
+          previousHeadSha: '0000000000000000000000000000000000000000',
           headRef: 'feature/auth-callback',
           baseRef: 'main',
           url: 'https://github.com/patchplane/demo/pull/12',
@@ -76,12 +82,17 @@ describe('GitHubEventToWorkflowIntake', () => {
           provider: 'github',
           eventKind: 'github.pull_request.synchronize',
           repositoryExternalId: '456',
+          issueExternalId: '987',
           issueNumber: 12,
           issueTitle: 'Fix auth callback',
           issueBody: '## Summary\n\nUpdated branch.',
           pullRequestExternalId: '987',
           pullRequestNumber: 12,
+          pullRequestUpdatedAt: 1_000,
+          pullRequestBaseSha: baseSha,
           pullRequestHeadSha: headSha,
+          pullRequestPreviousHeadSha:
+            '0000000000000000000000000000000000000000',
           pullRequestHeadRef: 'feature/auth-callback',
           pullRequestBaseRef: 'main',
           senderLogin: 'octocat',

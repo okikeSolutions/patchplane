@@ -1,7 +1,7 @@
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import { Schema } from 'effect'
 import { EvidenceArtifact } from './evidence-artifact'
-import { HttpUrl } from './refinements'
+import { GitCommitSha, HttpUrl } from './refinements'
 import { SandboxPolicy } from './sandbox-policy'
 import { VerificationResult } from './verification'
 
@@ -10,6 +10,17 @@ const decodePolicy = Schema.decodeUnknownSync(SandboxPolicy)
 const decodeVerificationResult = Schema.decodeUnknownSync(VerificationResult)
 
 describe('trust primitive refinements', () => {
+  it('accepts only full SHA-1 or SHA-256 commit identifiers', () => {
+    const decodeCommitSha = Schema.decodeUnknownSync(GitCommitSha)
+    assert.strictEqual(decodeCommitSha('a'.repeat(40)), 'a'.repeat(40))
+    assert.strictEqual(decodeCommitSha('B'.repeat(64)), 'b'.repeat(64))
+    assert.throws(() => decodeCommitSha('a'.repeat(39)))
+    assert.throws(() => decodeCommitSha('a'.repeat(41)))
+    assert.throws(() => decodeCommitSha('g'.repeat(40)))
+    assert.throws(() => decodeCommitSha('a'.repeat(63)))
+    assert.throws(() => decodeCommitSha('a'.repeat(65)))
+  })
+
   it('rejects syntactically invalid HTTP URLs', () => {
     const decodeUrl = Schema.decodeUnknownSync(HttpUrl)
     expect(() => decodeUrl('http://%')).toThrow()
@@ -17,7 +28,9 @@ describe('trust primitive refinements', () => {
     expect(() => decodeUrl('https://#')).toThrow()
     expect(() => decodeUrl('https://example.com:99999')).toThrow()
     expect(() => decodeUrl('https://256.256.256.256')).toThrow()
-    expect(decodeUrl('https://example.com/path')).toBe('https://example.com/path')
+    expect(decodeUrl('https://example.com/path')).toBe(
+      'https://example.com/path',
+    )
   })
   it('rejects malformed artifact digests, sizes, and timestamps', () => {
     const artifact = {
@@ -32,7 +45,9 @@ describe('trust primitive refinements', () => {
       createdAt: 1,
     }
 
-    expect(() => decodeArtifact({ ...artifact, sha256: 'not-a-digest' })).toThrow()
+    expect(() =>
+      decodeArtifact({ ...artifact, sha256: 'not-a-digest' }),
+    ).toThrow()
     expect(() => decodeArtifact({ ...artifact, sizeBytes: -1 })).toThrow()
     expect(() => decodeArtifact({ ...artifact, createdAt: 1.5 })).toThrow()
   })
@@ -66,16 +81,22 @@ describe('trust primitive refinements', () => {
       startedAt: 1,
     }
 
-    expect(() => decodeVerificationResult({
-      ...result,
-      candidateDigestBefore: 'sha256:not-a-digest',
-    })).toThrow()
-    expect(() => decodeVerificationResult({ ...result, passedCount: -1 })).toThrow()
-    expect(() => decodeVerificationResult({
-      ...result,
-      status: 'invalidated',
-      candidateDigestBefore: undefined,
-      candidateDigestAfter: undefined,
-    })).not.toThrow()
+    expect(() =>
+      decodeVerificationResult({
+        ...result,
+        candidateDigestBefore: 'sha256:not-a-digest',
+      }),
+    ).toThrow()
+    expect(() =>
+      decodeVerificationResult({ ...result, passedCount: -1 }),
+    ).toThrow()
+    expect(() =>
+      decodeVerificationResult({
+        ...result,
+        status: 'invalidated',
+        candidateDigestBefore: undefined,
+        candidateDigestAfter: undefined,
+      }),
+    ).not.toThrow()
   })
 })

@@ -19,15 +19,22 @@ import type {
   ReviewRunStatus,
 } from '@patchplane/domain/decision-review'
 import type { StorageError } from '@patchplane/domain/errors'
-import type { EvidenceArtifact, EvidenceArtifactKind } from '@patchplane/domain/evidence-artifact'
+import type {
+  EvidenceArtifact,
+  EvidenceArtifactKind,
+} from '@patchplane/domain/evidence-artifact'
 import type { ExternalWorkflowRef } from '@patchplane/domain/external-workflow-ref'
 import type { WorkflowRunId, WorkspaceId } from '@patchplane/domain/ids'
 import type { ListRecentWorkflowStartsInput } from '@patchplane/domain/list-recent-workflow-starts'
 import type { PromptRequestSource } from '@patchplane/domain/prompt-request'
 import type { RuntimeEvent as StoredRuntimeEvent } from '@patchplane/domain/runtime-event'
-import type { RuntimeSession, RuntimeSessionStatus } from '@patchplane/domain/runtime-session'
+import type {
+  RuntimeSession,
+  RuntimeSessionStatus,
+} from '@patchplane/domain/runtime-session'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import type { GitCommitSha } from '@patchplane/domain/refinements'
 import type {
   VerificationRequirement,
   VerificationRequirementKind,
@@ -142,16 +149,18 @@ export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
   readonly status: CandidatePatchSetStatus
   readonly candidateDigest?: string | undefined
   readonly baseRef?: string | undefined
-  readonly baseSha?: string | undefined
+  readonly baseSha?: GitCommitSha | undefined
   readonly headRef?: string | undefined
-  readonly headSha?: string | undefined
+  readonly headSha?: GitCommitSha | undefined
   readonly diffArtifactId?: EvidenceArtifact['id'] | undefined
   readonly summary?: string | undefined
-  readonly stats?: {
-    readonly filesChanged: number
-    readonly additions: number
-    readonly deletions: number
-  } | undefined
+  readonly stats?:
+    | {
+        readonly filesChanged: number
+        readonly additions: number
+        readonly deletions: number
+      }
+    | undefined
   readonly idempotencyKey: string
   readonly createdAt: number
 }
@@ -232,9 +241,13 @@ export interface RecordPolicyDecisionInput extends TelemetryContextFields {
   readonly reason?: string | undefined
   readonly policyVersion?: string | undefined
   readonly inputDigest?: string | undefined
-  readonly verificationResultIds?: ReadonlyArray<VerificationResult['id']> | undefined
+  readonly verificationResultIds?:
+    | ReadonlyArray<VerificationResult['id']>
+    | undefined
   readonly reviewFindingIds?: ReadonlyArray<ReviewFinding['id']> | undefined
-  readonly missingRequirementIds?: ReadonlyArray<VerificationRequirement['id']> | undefined
+  readonly missingRequirementIds?:
+    | ReadonlyArray<VerificationRequirement['id']>
+    | undefined
   readonly idempotencyKey: string
   readonly createdAt?: number | undefined
 }
@@ -243,7 +256,7 @@ export interface RecordPublicationResultInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
   readonly humanDecisionId?: HumanDecision['id'] | undefined
   readonly candidatePatchSetId?: CandidatePatchSet['id'] | undefined
-  readonly targetSha?: string | undefined
+  readonly targetSha?: GitCommitSha | undefined
   readonly provider: string
   readonly kind: PublicationResultKind
   readonly status: PublicationResultStatus
@@ -272,65 +285,68 @@ export interface RecordProvenanceEventInput extends TelemetryContextFields {
   readonly idempotencyKey?: string | undefined
 }
 
-export class StorageService extends Context.Service<StorageService, {
-  readonly createWorkflowFromIntake: (
-    input: WorkflowIntake,
-  ) => Effect.Effect<WorkflowStart, StorageError>
-  readonly createWorkflowFromPrompt: (
-    input: CreateWorkflowFromPromptInput,
-  ) => Effect.Effect<WorkflowStart, StorageError>
-  readonly listRecentWorkflowStarts: (
-    input: StorageListRecentWorkflowStartsInput,
-  ) => Effect.Effect<ReadonlyArray<WorkflowStart>, StorageError>
-  readonly claimWorkflowExecution: (
-    input: ClaimWorkflowExecutionInput,
-  ) => Effect.Effect<boolean, StorageError>
-  readonly markWorkflowExecutionFailed: (
-    input: MarkWorkflowExecutionFailedInput,
-  ) => Effect.Effect<boolean, StorageError>
-  readonly recordSandboxExecution: (
-    input: RecordSandboxExecutionInput,
-  ) => Effect.Effect<SandboxExecution, StorageError>
-  readonly recordRuntimeEvents: (
-    input: ReadonlyArray<RecordRuntimeEventInput>,
-  ) => Effect.Effect<ReadonlyArray<StoredRuntimeEvent>, StorageError>
-  readonly recordRuntimeSessionStarted: (
-    input: RecordRuntimeSessionStartedInput,
-  ) => Effect.Effect<RuntimeSession, StorageError>
-  readonly markRuntimeSessionStatus: (
-    input: MarkRuntimeSessionStatusInput,
-  ) => Effect.Effect<RuntimeSession, StorageError>
-  readonly getActiveRuntimeSession: (
-    input: GetActiveRuntimeSessionInput,
-  ) => Effect.Effect<Option.Option<RuntimeSession>, StorageError>
-  readonly recordEvidenceArtifact: (
-    input: RecordEvidenceArtifactInput,
-  ) => Effect.Effect<EvidenceArtifact, StorageError>
-  readonly getEvidenceArtifact: (
-    input: GetEvidenceArtifactInput,
-  ) => Effect.Effect<Option.Option<EvidenceArtifact>, StorageError>
-  readonly recordCandidatePatchSet: (
-    input: RecordCandidatePatchSetInput,
-  ) => Effect.Effect<CandidatePatchSet, StorageError>
-  readonly recordVerificationRequirement: (
-    input: RecordVerificationRequirementInput,
-  ) => Effect.Effect<VerificationRequirement, StorageError>
-  readonly recordVerificationResult: (
-    input: RecordVerificationResultInput,
-  ) => Effect.Effect<VerificationResult, StorageError>
-  readonly recordReviewRun: (
-    input: RecordReviewRunInput,
-  ) => Effect.Effect<ReviewRun, StorageError>
-  readonly recordReviewFinding: (
-    input: RecordReviewFindingInput,
-  ) => Effect.Effect<ReviewFinding, StorageError>
-  readonly recordPolicyDecision: (
-    input: RecordPolicyDecisionInput,
-  ) => Effect.Effect<PolicyDecision, StorageError>
-  readonly recordPublicationResult: (
-    input: RecordPublicationResultInput,
-  ) => Effect.Effect<PublicationResult, StorageError>
-  readonly recordProvenanceEvent: (
-    input: RecordProvenanceEventInput,
-  ) => Effect.Effect<ProvenanceEvent, StorageError>
-}>()('@patchplane/core/services/StorageService') {}
+export class StorageService extends Context.Service<
+  StorageService,
+  {
+    readonly createWorkflowFromIntake: (
+      input: WorkflowIntake,
+    ) => Effect.Effect<WorkflowStart, StorageError>
+    readonly createWorkflowFromPrompt: (
+      input: CreateWorkflowFromPromptInput,
+    ) => Effect.Effect<WorkflowStart, StorageError>
+    readonly listRecentWorkflowStarts: (
+      input: StorageListRecentWorkflowStartsInput,
+    ) => Effect.Effect<ReadonlyArray<WorkflowStart>, StorageError>
+    readonly claimWorkflowExecution: (
+      input: ClaimWorkflowExecutionInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly markWorkflowExecutionFailed: (
+      input: MarkWorkflowExecutionFailedInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly recordSandboxExecution: (
+      input: RecordSandboxExecutionInput,
+    ) => Effect.Effect<SandboxExecution, StorageError>
+    readonly recordRuntimeEvents: (
+      input: ReadonlyArray<RecordRuntimeEventInput>,
+    ) => Effect.Effect<ReadonlyArray<StoredRuntimeEvent>, StorageError>
+    readonly recordRuntimeSessionStarted: (
+      input: RecordRuntimeSessionStartedInput,
+    ) => Effect.Effect<RuntimeSession, StorageError>
+    readonly markRuntimeSessionStatus: (
+      input: MarkRuntimeSessionStatusInput,
+    ) => Effect.Effect<RuntimeSession, StorageError>
+    readonly getActiveRuntimeSession: (
+      input: GetActiveRuntimeSessionInput,
+    ) => Effect.Effect<Option.Option<RuntimeSession>, StorageError>
+    readonly recordEvidenceArtifact: (
+      input: RecordEvidenceArtifactInput,
+    ) => Effect.Effect<EvidenceArtifact, StorageError>
+    readonly getEvidenceArtifact: (
+      input: GetEvidenceArtifactInput,
+    ) => Effect.Effect<Option.Option<EvidenceArtifact>, StorageError>
+    readonly recordCandidatePatchSet: (
+      input: RecordCandidatePatchSetInput,
+    ) => Effect.Effect<CandidatePatchSet, StorageError>
+    readonly recordVerificationRequirement: (
+      input: RecordVerificationRequirementInput,
+    ) => Effect.Effect<VerificationRequirement, StorageError>
+    readonly recordVerificationResult: (
+      input: RecordVerificationResultInput,
+    ) => Effect.Effect<VerificationResult, StorageError>
+    readonly recordReviewRun: (
+      input: RecordReviewRunInput,
+    ) => Effect.Effect<ReviewRun, StorageError>
+    readonly recordReviewFinding: (
+      input: RecordReviewFindingInput,
+    ) => Effect.Effect<ReviewFinding, StorageError>
+    readonly recordPolicyDecision: (
+      input: RecordPolicyDecisionInput,
+    ) => Effect.Effect<PolicyDecision, StorageError>
+    readonly recordPublicationResult: (
+      input: RecordPublicationResultInput,
+    ) => Effect.Effect<PublicationResult, StorageError>
+    readonly recordProvenanceEvent: (
+      input: RecordProvenanceEventInput,
+    ) => Effect.Effect<ProvenanceEvent, StorageError>
+  }
+>()('@patchplane/core/services/StorageService') {}

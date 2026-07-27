@@ -25,6 +25,8 @@ const GitHubIssueOpenedPayload = Schema.Struct({
 
 const GitHubPullRequestPayload = Schema.Struct({
   action: Schema.Literals(['opened', 'synchronize']),
+  before: Schema.optional(Schema.String),
+  after: Schema.optional(Schema.String),
   installation: Schema.Struct({ id: Schema.Finite }),
   repository: Schema.Struct({
     id: Schema.Finite,
@@ -35,6 +37,7 @@ const GitHubPullRequestPayload = Schema.Struct({
   pull_request: Schema.Struct({
     id: Schema.Finite,
     number: Schema.Finite,
+    updated_at: Schema.String,
     title: Schema.String,
     body: Schema.optional(Schema.NullOr(Schema.String)),
     html_url: Schema.optional(Schema.String),
@@ -44,6 +47,7 @@ const GitHubPullRequestPayload = Schema.Struct({
     }),
     base: Schema.Struct({
       ref: Schema.String,
+      sha: Schema.String,
     }),
   }),
 })
@@ -133,6 +137,38 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       ),
     )
 
+    const pullRequestUpdatedAt = Date.parse(payload.pull_request.updated_at)
+    if (
+      !Number.isSafeInteger(pullRequestUpdatedAt) ||
+      pullRequestUpdatedAt < 0
+    ) {
+      return yield* new GitHubError({
+        operation: 'normalizeGitHubWebhookEvent.pull_request.updated_at',
+        message: 'GitHub pull request webhook requires a valid updated_at',
+        cause: payload.pull_request.updated_at,
+      })
+    }
+    if (
+      payload.action === 'synchronize' &&
+      (payload.before === undefined ||
+        payload.after === undefined ||
+        payload.after.toLowerCase() !==
+          payload.pull_request.head.sha.toLowerCase())
+    ) {
+      return yield* new GitHubError({
+        operation: 'normalizeGitHubWebhookEvent.pull_request.synchronize',
+        message:
+          'GitHub synchronize webhook requires coherent before/after head SHAs',
+        cause: {
+          hasBefore: payload.before !== undefined,
+          hasAfter: payload.after !== undefined,
+          afterMatchesHead:
+            payload.after?.toLowerCase() ===
+            payload.pull_request.head.sha.toLowerCase(),
+        },
+      })
+    }
+
     return yield* decodeGitHubNormalizedWorkflowEvent({
       kind:
         payload.action === 'opened'
@@ -145,12 +181,17 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       repositoryId: payload.repository.id,
       pullRequestId: payload.pull_request.id,
       pullRequestNumber: payload.pull_request.number,
+      pullRequestUpdatedAt,
       title: payload.pull_request.title,
       body: payload.pull_request.body ?? '',
       prompt: [payload.pull_request.title, payload.pull_request.body ?? '']
         .filter(Boolean)
         .join('\n\n'),
+      baseSha: payload.pull_request.base.sha,
       headSha: payload.pull_request.head.sha,
+      ...(payload.action === 'synchronize'
+        ? { previousHeadSha: payload.before! }
+        : {}),
       headRef: payload.pull_request.head.ref,
       baseRef: payload.pull_request.base.ref,
       ...(payload.pull_request.html_url === undefined

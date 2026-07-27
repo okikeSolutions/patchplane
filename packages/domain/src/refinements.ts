@@ -1,8 +1,6 @@
-import { Exit, Schema } from 'effect'
+import { Exit, Schema, SchemaTransformation } from 'effect'
 
-export const NonNegativeInt = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(0),
-)
+export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 
@@ -18,16 +16,21 @@ export const Sha256Digest = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/i),
 )
 
-export const GitCommitSha = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{40,64}$/i),
+const GitCommitShaHex = Schema.String.check(
+  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i),
 )
+export const GitCommitSha = GitCommitShaHex.pipe(
+  Schema.decodeTo(GitCommitShaHex, SchemaTransformation.toLowerCase()),
+  Schema.brand('GitCommitSha'),
+)
+export type GitCommitSha = Schema.Schema.Type<typeof GitCommitSha>
+export const makeGitCommitSha = Schema.decodeUnknownSync(GitCommitSha)
 
 const decodeUrl = Schema.decodeUnknownExit(Schema.URLFromString)
 
 export const HttpUrl = Schema.String.check(
   Schema.makeFilter(
-    (value) =>
-      /^https?:\/\//i.test(value) && Exit.isSuccess(decodeUrl(value)),
+    (value) => /^https?:\/\//i.test(value) && Exit.isSuccess(decodeUrl(value)),
     { expected: 'a valid HTTP or HTTPS URL' },
   ),
 )

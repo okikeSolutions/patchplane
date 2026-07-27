@@ -191,7 +191,10 @@ export default defineSchema({
         issueBody: v.optional(v.string()),
         pullRequestExternalId: v.optional(v.string()),
         pullRequestNumber: v.optional(v.number()),
+        pullRequestUpdatedAt: v.optional(v.number()),
+        pullRequestBaseSha: v.optional(v.string()),
         pullRequestHeadSha: v.optional(v.string()),
+        pullRequestPreviousHeadSha: v.optional(v.string()),
         pullRequestHeadRef: v.optional(v.string()),
         pullRequestBaseRef: v.optional(v.string()),
         commentExternalId: v.optional(v.string()),
@@ -225,7 +228,10 @@ export default defineSchema({
     issueBody: v.optional(v.string()),
     pullRequestExternalId: v.optional(v.string()),
     pullRequestNumber: v.optional(v.number()),
+    pullRequestUpdatedAt: v.optional(v.number()),
+    pullRequestBaseSha: v.optional(v.string()),
     pullRequestHeadSha: v.optional(v.string()),
+    pullRequestPreviousHeadSha: v.optional(v.string()),
     pullRequestHeadRef: v.optional(v.string()),
     pullRequestBaseRef: v.optional(v.string()),
     commentExternalId: v.optional(v.string()),
@@ -244,6 +250,17 @@ export default defineSchema({
       'issueExternalId',
       'eventKind',
     ])
+    .index('by_workspace_repo_issue_candidate', {
+      fields: [
+        'workspaceId',
+        'provider',
+        'repositoryExternalId',
+        'issueExternalId',
+        'pullRequestBaseSha',
+        'pullRequestHeadSha',
+      ],
+      staged: true,
+    })
     .index('by_comment', ['provider', 'commentExternalId'])
     .index('by_provider_and_repository_external_id', [
       'provider',
@@ -603,6 +620,8 @@ export default defineSchema({
     rootWorkflowRunId: v.optional(v.id('workflowRuns')),
     attemptNumber: v.optional(v.number()),
     trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    candidateIdentityVersion: v.optional(v.literal('incoming-pr-v1')),
+    sourceBaseSha: v.optional(v.string()),
     sourceCommitSha: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),

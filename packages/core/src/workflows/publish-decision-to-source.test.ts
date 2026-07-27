@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
+import { makePullRequestNumber } from '@patchplane/domain/candidate-subject'
 import {
   makeCandidatePatchSetId,
   makeGitHubAppActorId,
@@ -13,12 +14,15 @@ import {
   makeWorkflowRunId,
 } from '@patchplane/domain/ids'
 import { SourceControlError, StorageError } from '@patchplane/domain/errors'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
 import { TelemetryService } from '../services/telemetry-service'
 import { PublishDecisionToSource } from './publish-decision-to-source'
 
 const workflowRunId = makeWorkflowRunId('run-1')
+const baseSha = makeGitCommitSha('a'.repeat(40))
+const headSha = makeGitCommitSha('b'.repeat(40))
 const workflowStart = {
   promptRequest: {
     id: makePromptRequestId('prompt-1'),
@@ -37,8 +41,8 @@ const workflowStart = {
       repositoryName: 'demo',
       repositoryFullName: 'patchplane/demo',
       issueNumber: 12,
-      pullRequestNumber: 12,
-      pullRequestHeadSha: 'abc123',
+      pullRequestNumber: makePullRequestNumber(12),
+      pullRequestHeadSha: headSha,
     },
     status: 'created' as const,
     createdAt: 1,
@@ -72,8 +76,8 @@ const candidatePatchSet = {
   sandboxExecutionId: sandboxExecution.id,
   status: 'captured' as const,
   candidateDigest: 'sha256:candidate',
-  baseSha: 'base-sha',
-  headSha: 'abc123',
+  baseSha,
+  headSha,
   createdAt: 4,
 }
 

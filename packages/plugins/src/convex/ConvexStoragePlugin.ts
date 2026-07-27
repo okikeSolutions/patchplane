@@ -62,7 +62,10 @@ interface ExternalWorkflowRefInput {
   readonly issueBody?: string | undefined
   readonly pullRequestExternalId?: string | undefined
   readonly pullRequestNumber?: number | undefined
+  readonly pullRequestUpdatedAt?: number | undefined
+  readonly pullRequestBaseSha?: string | undefined
   readonly pullRequestHeadSha?: string | undefined
+  readonly pullRequestPreviousHeadSha?: string | undefined
   readonly pullRequestHeadRef?: string | undefined
   readonly pullRequestBaseRef?: string | undefined
   readonly commentExternalId?: string | undefined

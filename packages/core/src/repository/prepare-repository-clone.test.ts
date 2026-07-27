@@ -1,6 +1,13 @@
 import { describe, expect, it } from '@effect/vitest'
+import { makeRepositoryExternalId } from '@patchplane/domain/candidate-subject'
 import { Effect, Layer } from 'effect'
-import { makeGitHubAppActorId, makePromptRequestId, makeSystemWorkspaceId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makeGitHubAppActorId,
+  makePromptRequestId,
+  makeSystemWorkspaceId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { SourceControlService } from '../services/source-control-service'
 import { PrepareRepositoryClone } from './prepare-repository-clone'
 
@@ -41,9 +48,9 @@ describe('PrepareRepositoryClone', () => {
             repositoryOwner: 'owner',
             repositoryName: 'repo',
             repositoryFullName: 'owner/repo',
-            repositoryExternalId: '456',
+            repositoryExternalId: makeRepositoryExternalId('456'),
             pullRequestHeadRef: 'feature/patch',
-            pullRequestHeadSha: 'webhook-head-sha',
+            pullRequestHeadSha: makeGitCommitSha('1'.repeat(40)),
           },
           status: 'created',
           createdAt: 1,
@@ -55,7 +62,7 @@ describe('PrepareRepositoryClone', () => {
           traceId: 'trace-1',
           status: 'queued',
           modelVersion: 'v1',
-          sourceCommitSha: 'pinned-source-sha',
+          sourceCommitSha: makeGitCommitSha('2'.repeat(40)),
           createdAt: 1,
         },
       })
@@ -64,7 +71,7 @@ describe('PrepareRepositoryClone', () => {
         repositoryUrl: 'https://github.com/owner/repo.git',
         repositoryFullName: 'owner/repo',
         branch: 'feature/patch',
-        commitId: 'pinned-source-sha',
+        commitId: '2'.repeat(40),
         gitUsername: 'x-access-token',
         gitPassword: 'github:123:456',
       })

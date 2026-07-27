@@ -1,12 +1,18 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import {
+  makePullRequestExternalId,
+  makePullRequestNumber,
+  makeRepositoryExternalId,
+} from '@patchplane/domain/candidate-subject'
+import {
   makeGitHubAppActorId,
   makePromptRequestId,
   makeSandboxExecutionId,
   makeWorkOSWorkspaceId,
   makeWorkflowRunId,
 } from '@patchplane/domain/ids'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { SourceControlService } from '../services/source-control-service'
 import { PublishSandboxResultToSource } from './publish-sandbox-result-to-source'
 
@@ -20,91 +26,97 @@ interface CapturedComment {
 }
 
 describe('PublishSandboxResultToSource', () => {
-  it.effect('publishes PR trust reports through GitHub issue comments using the PR number', () =>
-    Effect.gen(function* () {
-      const comments: Array<CapturedComment> = []
-      const sourceControlLayer = Layer.succeed(
-        SourceControlService,
-        SourceControlService.of({
-          verifyRepositoryAccess: () => Effect.die('unused'),
-          getInstallationAccount: () => Effect.die('unused'),
-          listInstallationRepositories: () => Effect.die('unused'),
-          createRepositoryCloneCredentials: () => Effect.die('unused'),
-          createCheckRun: () => Effect.die('unused'),
-          createDraftPullRequest: () => Effect.die('unused'),
-          createIssueComment: (input) =>
-            Effect.sync(() => {
-              comments.push(input)
-              return { externalId: 'comment-1' }
-            }),
-        }),
-      )
+  it.effect(
+    'publishes PR trust reports through GitHub issue comments using the PR number',
+    () =>
+      Effect.gen(function* () {
+        const comments: Array<CapturedComment> = []
+        const sourceControlLayer = Layer.succeed(
+          SourceControlService,
+          SourceControlService.of({
+            verifyRepositoryAccess: () => Effect.die('unused'),
+            getInstallationAccount: () => Effect.die('unused'),
+            listInstallationRepositories: () => Effect.die('unused'),
+            createRepositoryCloneCredentials: () => Effect.die('unused'),
+            createCheckRun: () => Effect.die('unused'),
+            createDraftPullRequest: () => Effect.die('unused'),
+            createIssueComment: (input) =>
+              Effect.sync(() => {
+                comments.push(input)
+                return { externalId: 'comment-1' }
+              }),
+          }),
+        )
 
-      const publication = yield* PublishSandboxResultToSource({
-        workflowStart: {
-          promptRequest: {
-            id: makePromptRequestId('prompt-pr-1'),
-            workspaceId: makeWorkOSWorkspaceId('org_123'),
-            actorId: makeGitHubAppActorId('123'),
-            traceId: 'trace-pr-1',
-            source: 'external',
-            prompt: 'Fix auth callback',
-            externalRef: {
-              provider: 'github',
-              deliveryId: 'delivery-pr-1',
-              eventKind: 'github.pull_request.synchronize',
-              repositoryProvider: 'github',
-              repositoryInstallationId: '123',
-              repositoryExternalId: '456',
-              repositoryOwner: 'patchplane',
-              repositoryName: 'demo',
-              repositoryFullName: 'patchplane/demo',
-              issueNumber: 12,
-              pullRequestExternalId: '987',
-              pullRequestNumber: 12,
-              pullRequestHeadSha: 'abc123',
-              pullRequestHeadRef: 'feature/auth-callback',
-              pullRequestBaseRef: 'main',
+        const publication = yield* PublishSandboxResultToSource({
+          workflowStart: {
+            promptRequest: {
+              id: makePromptRequestId('prompt-pr-1'),
+              workspaceId: makeWorkOSWorkspaceId('org_123'),
+              actorId: makeGitHubAppActorId('123'),
+              traceId: 'trace-pr-1',
+              source: 'external',
+              prompt: 'Fix auth callback',
+              externalRef: {
+                provider: 'github',
+                deliveryId: 'delivery-pr-1',
+                eventKind: 'github.pull_request.synchronize',
+                repositoryProvider: 'github',
+                repositoryInstallationId: '123',
+                repositoryExternalId: makeRepositoryExternalId('456'),
+                repositoryOwner: 'patchplane',
+                repositoryName: 'demo',
+                repositoryFullName: 'patchplane/demo',
+                issueNumber: 12,
+                pullRequestExternalId: makePullRequestExternalId('987'),
+                pullRequestNumber: makePullRequestNumber(12),
+                pullRequestHeadSha: makeGitCommitSha('a'.repeat(40)),
+                pullRequestHeadRef: 'feature/auth-callback',
+                pullRequestBaseRef: 'main',
+              },
+              status: 'created',
+              createdAt: 1,
             },
-            status: 'created',
-            createdAt: 1,
+            workflowRun: {
+              id: makeWorkflowRunId('run-pr-1'),
+              promptRequestId: makePromptRequestId('prompt-pr-1'),
+              workspaceId: makeWorkOSWorkspaceId('org_123'),
+              traceId: 'trace-pr-1',
+              status: 'queued',
+              createdAt: 1,
+            },
           },
-          workflowRun: {
-            id: makeWorkflowRunId('run-pr-1'),
-            promptRequestId: makePromptRequestId('prompt-pr-1'),
-            workspaceId: makeWorkOSWorkspaceId('org_123'),
-            traceId: 'trace-pr-1',
-            status: 'queued',
-            createdAt: 1,
+          sandboxExecution: {
+            id: makeSandboxExecutionId('sandbox-exec-pr-1'),
+            workflowRunId: makeWorkflowRunId('run-pr-1'),
+            provider: 'daytona',
+            sandboxId: 'sandbox-pr-1',
+            command: 'bun test',
+            status: 'succeeded',
+            exitCode: 0,
+            stdout: 'ok',
+            startedAt: 1,
+            completedAt: 2,
           },
-        },
-        sandboxExecution: {
-          id: makeSandboxExecutionId('sandbox-exec-pr-1'),
-          workflowRunId: makeWorkflowRunId('run-pr-1'),
-          provider: 'daytona',
-          sandboxId: 'sandbox-pr-1',
-          command: 'bun test',
-          status: 'succeeded',
-          exitCode: 0,
-          stdout: 'ok',
-          startedAt: 1,
-          completedAt: 2,
-        },
-      }).pipe(Effect.provide(sourceControlLayer))
+        }).pipe(Effect.provide(sourceControlLayer))
 
-      expect(publication).toEqual({ provider: 'github', issueNumber: 12 })
-      expect(comments).toHaveLength(1)
-      expect(comments[0]).toMatchObject({
-        provider: 'github',
-        installationId: '123',
-        owner: 'patchplane',
-        name: 'demo',
-        issueNumber: 12,
-      })
-      expect(comments[0]?.body).toContain('## PatchPlane Patch Report')
-      expect(comments[0]?.body).toContain('**Execution:** sandbox execution completed')
-      expect(comments[0]?.body).toContain('**Verification:** incomplete')
-      expect(comments[0]?.body).toContain('- Decision: pending human approval')
-    }),
+        expect(publication).toEqual({ provider: 'github', issueNumber: 12 })
+        expect(comments).toHaveLength(1)
+        expect(comments[0]).toMatchObject({
+          provider: 'github',
+          installationId: '123',
+          owner: 'patchplane',
+          name: 'demo',
+          issueNumber: 12,
+        })
+        expect(comments[0]?.body).toContain('## PatchPlane Patch Report')
+        expect(comments[0]?.body).toContain(
+          '**Execution:** sandbox execution completed',
+        )
+        expect(comments[0]?.body).toContain('**Verification:** incomplete')
+        expect(comments[0]?.body).toContain(
+          '- Decision: pending human approval',
+        )
+      }),
   )
 })

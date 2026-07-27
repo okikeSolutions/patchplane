@@ -18,11 +18,16 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
   event: GitHubNormalizedWorkflowEvent,
   context: GitHubEventToWorkflowIntakeContext,
 ) {
-  if (!('headSha' in event) || event.headSha.trim().length === 0) {
+  if (
+    !('baseSha' in event) ||
+    event.baseSha.trim().length === 0 ||
+    !('headSha' in event) ||
+    event.headSha.trim().length === 0
+  ) {
     return yield* new GitHubError({
       operation: 'GitHubEventToWorkflowIntake.requirePinnedRevision',
       message:
-        'Executable GitHub workflow intake requires an authoritative pull request head SHA',
+        'Executable GitHub workflow intake requires authoritative pull request base and head SHAs',
       cause: { eventKind: event.kind },
     })
   }
@@ -37,7 +42,12 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
     repositoryOwner: event.owner,
     repositoryName: event.repo,
     repositoryFullName: `${event.owner}/${event.repo}`,
-    issueExternalId: 'issueId' in event ? String(event.issueId) : undefined,
+    issueExternalId:
+      'issueId' in event
+        ? String(event.issueId)
+        : 'pullRequestId' in event
+          ? String(event.pullRequestId)
+          : undefined,
     issueNumber:
       'issueNumber' in event ? event.issueNumber : event.pullRequestNumber,
     issueTitle: event.title,
@@ -46,7 +56,12 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
       'pullRequestId' in event ? String(event.pullRequestId) : undefined,
     pullRequestNumber:
       'pullRequestNumber' in event ? event.pullRequestNumber : undefined,
+    pullRequestUpdatedAt:
+      'pullRequestUpdatedAt' in event ? event.pullRequestUpdatedAt : undefined,
+    pullRequestBaseSha: 'baseSha' in event ? event.baseSha : undefined,
     pullRequestHeadSha: 'headSha' in event ? event.headSha : undefined,
+    pullRequestPreviousHeadSha:
+      'previousHeadSha' in event ? event.previousHeadSha : undefined,
     pullRequestHeadRef: 'headRef' in event ? event.headRef : undefined,
     pullRequestBaseRef: 'baseRef' in event ? event.baseRef : undefined,
     commentExternalId:

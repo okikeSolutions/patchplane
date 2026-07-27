@@ -1,6 +1,11 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
-import type { CandidatePatchSet, HumanDecision, PolicyDecision, ReviewRun } from '@patchplane/domain/decision-review'
+import type {
+  CandidatePatchSet,
+  HumanDecision,
+  PolicyDecision,
+  ReviewRun,
+} from '@patchplane/domain/decision-review'
 import {
   makeCandidatePatchSetId,
   makeEvidenceArtifactId,
@@ -16,7 +21,11 @@ import {
   makeWorkflowRunId,
 } from '@patchplane/domain/ids'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
-import type { VerificationRequirement, VerificationResult } from '@patchplane/domain/verification'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
+import type {
+  VerificationRequirement,
+  VerificationResult,
+} from '@patchplane/domain/verification'
 import { AssemblePatchReportV1 } from './assemble-patch-report-v1'
 
 const workflowRunId = makeWorkflowRunId('run-1')
@@ -41,7 +50,7 @@ const workflowStart = {
     rootWorkflowRunId: workflowRunId,
     attemptNumber: 1,
     trigger: 'intake' as const,
-    sourceCommitSha: 'a'.repeat(40),
+    sourceCommitSha: makeGitCommitSha('a'.repeat(40)),
     createdAt: 1,
   },
 }
@@ -63,7 +72,7 @@ const candidate: CandidatePatchSet = {
   sandboxExecutionId: execution.id,
   status: 'captured',
   candidateDigest: `sha256:${'b'.repeat(64)}`,
-  baseSha: 'a'.repeat(40),
+  baseSha: makeGitCommitSha('a'.repeat(40)),
   diffArtifactId: makeEvidenceArtifactId('diff-1'),
   createdAt: 4,
 }
@@ -137,7 +146,9 @@ const decision: HumanDecision = {
   decidedAt: 7,
 }
 
-function assemble(overrides: Partial<Parameters<typeof AssemblePatchReportV1>[0]> = {}) {
+function assemble(
+  overrides: Partial<Parameters<typeof AssemblePatchReportV1>[0]> = {},
+) {
   return AssemblePatchReportV1({
     workflowStart,
     sandboxExecutions: [execution],
@@ -175,37 +186,55 @@ describe('AssemblePatchReportV1', () => {
       trustDataTruncated: false,
     }).pipe(
       Effect.flip,
-      Effect.tap((error) => Effect.sync(() => expect(error.message).toContain('Legacy workflow evidence'))),
+      Effect.tap((error) =>
+        Effect.sync(() =>
+          expect(error.message).toContain('Legacy workflow evidence'),
+        ),
+      ),
       Effect.asVoid,
     ),
   )
 
-  it.effect('does not correlate a candidate produced by another execution', () =>
-    Effect.gen(function* () {
-      const report = yield* assemble({
-        candidatePatchSets: [{ ...candidate, sandboxExecutionId: makeSandboxExecutionId('another-execution') }],
-      })
-      expect(report.candidate.status).toBe('missing')
-      expect(report.trustStatus).toBe('untrusted')
-    }),
+  it.effect(
+    'does not correlate a candidate produced by another execution',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* assemble({
+          candidatePatchSets: [
+            {
+              ...candidate,
+              sandboxExecutionId: makeSandboxExecutionId('another-execution'),
+            },
+          ],
+        })
+        expect(report.candidate.status).toBe('missing')
+        expect(report.trustStatus).toBe('untrusted')
+      }),
   )
-  it.effect('projects separate execution, verification, policy, and trust states', () =>
-    Effect.gen(function* () {
-      const report = yield* assemble()
-      expect(report).toMatchObject({
-        trustStatus: 'approved',
-        execution: { status: 'completed' },
-        candidate: { status: 'captured', digest: `sha256:${'b'.repeat(64)}` },
-        verification: { status: 'passed', requiredCount: 1, passedCount: 1 },
-        policy: { status: 'manual-review', policyVersion: 'alpha-v1' },
-        decision: { status: 'approved' },
-      })
-    }),
+  it.effect(
+    'projects separate execution, verification, policy, and trust states',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* assemble()
+        expect(report).toMatchObject({
+          trustStatus: 'approved',
+          execution: { status: 'completed' },
+          candidate: { status: 'captured', digest: `sha256:${'b'.repeat(64)}` },
+          verification: { status: 'passed', requiredCount: 1, passedCount: 1 },
+          policy: { status: 'manual-review', policyVersion: 'alpha-v1' },
+          decision: { status: 'approved' },
+        })
+      }),
   )
 
   it.effect('does not apply a decision or result from another candidate', () =>
     Effect.gen(function* () {
-      const newerCandidate = { ...candidate, id: makeCandidatePatchSetId('candidate-2'), candidateDigest: `sha256:${'c'.repeat(64)}`, createdAt: 8 }
+      const newerCandidate = {
+        ...candidate,
+        id: makeCandidatePatchSetId('candidate-2'),
+        candidateDigest: `sha256:${'c'.repeat(64)}`,
+        createdAt: 8,
+      }
       const report = yield* assemble({
         candidatePatchSets: [candidate, newerCandidate],
       })
@@ -216,48 +245,56 @@ describe('AssemblePatchReportV1', () => {
     }),
   )
 
-  it.effect('keeps an approved report bound to policy-time verification when later evidence arrives', () =>
-    Effect.gen(function* () {
-      const laterFailure: VerificationResult = {
-        ...result,
-        id: makeVerificationResultId('result-later-failure'),
-        status: 'failed',
-        exitCode: 2,
-        startedAt: 8,
-        completedAt: 9,
-      }
-      const report = yield* assemble({ verificationResults: [result, laterFailure] })
+  it.effect(
+    'keeps an approved report bound to policy-time verification when later evidence arrives',
+    () =>
+      Effect.gen(function* () {
+        const laterFailure: VerificationResult = {
+          ...result,
+          id: makeVerificationResultId('result-later-failure'),
+          status: 'failed',
+          exitCode: 2,
+          startedAt: 8,
+          completedAt: 9,
+        }
+        const report = yield* assemble({
+          verificationResults: [result, laterFailure],
+        })
 
-      expect(report.trustStatus).toBe('approved')
-      expect(report.verification.status).toBe('passed')
-      expect(report.verification.checks[0]?.resultId).toBe(result.id)
-    }),
+        expect(report.trustStatus).toBe('approved')
+        expect(report.verification.status).toBe('passed')
+        expect(report.verification.checks[0]?.resultId).toBe(result.id)
+      }),
   )
 
-  it.effect('fails closed when any trust-bearing report input was truncated', () =>
-    Effect.gen(function* () {
-      const report = yield* assemble({ trustDataTruncated: true })
+  it.effect(
+    'fails closed when any trust-bearing report input was truncated',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* assemble({ trustDataTruncated: true })
 
-      expect(report.trustStatus).toBe('untrusted')
-      expect(report.verification.status).toBe('incomplete')
-      expect(report.decision.status).toBe('pending')
-      expect(report.reasons).toContain('report:trust-data-truncated')
-    }),
+        expect(report.trustStatus).toBe('untrusted')
+        expect(report.verification.status).toBe('incomplete')
+        expect(report.decision.status).toBe('pending')
+        expect(report.reasons).toContain('report:trust-data-truncated')
+      }),
   )
 
-  it.effect('reports successful agent execution without checks as not configured, not verified', () =>
-    Effect.gen(function* () {
-      const report = yield* assemble({
-        verificationRequirements: [],
-        verificationResults: [],
-        reviewRuns: [],
-        policyDecisions: [],
-        humanDecisions: [],
-      })
-      expect(report.execution.status).toBe('completed')
-      expect(report.verification.status).toBe('not-configured')
-      expect(report.trustStatus).toBe('untrusted')
-      expect(report.reasons).toContain('verification:not-configured')
-    }),
+  it.effect(
+    'reports successful agent execution without checks as not configured, not verified',
+    () =>
+      Effect.gen(function* () {
+        const report = yield* assemble({
+          verificationRequirements: [],
+          verificationResults: [],
+          reviewRuns: [],
+          policyDecisions: [],
+          humanDecisions: [],
+        })
+        expect(report.execution.status).toBe('completed')
+        expect(report.verification.status).toBe('not-configured')
+        expect(report.trustStatus).toBe('untrusted')
+        expect(report.reasons).toContain('verification:not-configured')
+      }),
   )
 })

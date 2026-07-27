@@ -27,6 +27,8 @@ interface WorkflowStartResult {
   workflowRun: {
     id: Id<'workflowRuns'>
     modelVersion?: 'v1' | undefined
+    candidateIdentityVersion?: 'incoming-pr-v1' | undefined
+    sourceBaseSha?: string | undefined
     sourceCommitSha?: string | undefined
   }
 }
@@ -306,6 +308,7 @@ async function createWorkflowStartForTest(
       rootWorkflowRunId: result.workflowRun.id,
       attemptNumber: 1,
       trigger: 'intake',
+      sourceBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
       sourceCommitSha: '0123456789012345678901234567890123456789',
     }),
   )
@@ -513,8 +516,78 @@ describe('workflowStarts V1 execution claim', () => {
         },
       }),
     ).rejects.toThrow(
-      'External workflow intake requires a pinned source commit SHA',
+      'External workflow intake requires complete valid GitHub pull request identity',
     )
+  })
+
+  test('rejects malformed external pull request identity at the Convex boundary', async () => {
+    const t = authenticatedTest()
+    const input = {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external' as const,
+      traceId: 'trace-invalid-pr',
+      prompt: 'Verify pull request 7',
+      externalRef: {
+        provider: 'github',
+        deliveryId: 'delivery-invalid-pr',
+        eventKind: 'github.pull_request.synchronize',
+        repositoryProvider: 'github',
+        repositoryExternalId: '456',
+        repositoryOwner: 'patchplane',
+        repositoryName: 'demo',
+        repositoryFullName: 'patchplane/demo',
+        issueExternalId: '789',
+        pullRequestExternalId: '789',
+        pullRequestNumber: 7,
+        pullRequestUpdatedAt: 1_000,
+        pullRequestBaseSha: 'not-a-sha',
+        pullRequestHeadSha: '0123456789012345678901234567890123456789',
+        pullRequestPreviousHeadSha: '0000000000000000000000000000000000000000',
+      },
+    }
+
+    await expect(
+      t.mutation(createWorkflowStartFromExternalIntake, input),
+    ).rejects.toThrow(
+      'External workflow intake requires complete valid GitHub pull request identity',
+    )
+    const rejectIdentity = async (externalRef: typeof input.externalRef) =>
+      expect(
+        t.mutation(createWorkflowStartFromExternalIntake, {
+          ...input,
+          externalRef,
+        }),
+      ).rejects.toThrow(
+        'External workflow intake requires complete valid GitHub pull request identity',
+      )
+
+    await rejectIdentity({
+      ...input.externalRef,
+      deliveryId: 'delivery-invalid-pr-number',
+      pullRequestNumber: 0,
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    })
+    await rejectIdentity({
+      ...input.externalRef,
+      deliveryId: 'delivery-incoherent-repository',
+      repositoryFullName: 'other/demo',
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    })
+    await rejectIdentity({
+      ...input.externalRef,
+      deliveryId: 'delivery-incoherent-pr',
+      issueExternalId: 'different',
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    })
+    await rejectIdentity({
+      ...input.externalRef,
+      deliveryId: 'delivery-unsupported-event',
+      eventKind: 'github.pull_request.closed',
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    })
   })
 
   test('deduplicates webhook delivery and permits exactly one sandbox execution', async () => {
@@ -541,6 +614,8 @@ describe('workflowStarts V1 execution claim', () => {
         issueNumber: 7,
         pullRequestExternalId: '789',
         pullRequestNumber: 7,
+        pullRequestUpdatedAt: 1_000,
+        pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
         pullRequestHeadSha: '0123456789012345678901234567890123456789',
       },
     }
@@ -638,6 +713,8 @@ describe('workflowStarts V1 rerun lineage', () => {
         rootWorkflowRunId: parent.workflowRun.id,
         attemptNumber: 2,
         trigger: 'rerun',
+        sourceBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        sourceCommitSha: '0123456789012345678901234567890123456789',
       },
     })
     expect(replay).toMatchObject({
@@ -675,6 +752,44 @@ describe('workflowStarts V1 rerun lineage', () => {
         idempotencyKey: 'rerun-request-1',
       }),
     ).rejects.toThrow('Rerun idempotency key conflict')
+  })
+
+  test('preserves pre-base-SHA V1 rows as explicit legacy rerun lineage', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const legacy = await t.mutation(createWorkflowStart, createArgs())
+    if (!isWorkflowStartResult(legacy)) {
+      throw new Error('Expected workflow start result')
+    }
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', legacy.workflowRun.id, {
+        modelVersion: 'v1',
+        rootWorkflowRunId: legacy.workflowRun.id,
+        attemptNumber: 1,
+        trigger: 'intake',
+        sourceCommitSha: '0123456789012345678901234567890123456789',
+        status: 'reviewed',
+      }),
+    )
+
+    const child = await t.mutation(createWorkflowRerun, {
+      parentWorkflowRunId: legacy.workflowRun.id,
+      reason: 'Preserve historical generated-candidate lineage.',
+      idempotencyKey: 'legacy-rerun-1',
+    })
+    expect(child).toMatchObject({
+      workflowRun: {
+        modelVersion: 'v1',
+        parentWorkflowRunId: legacy.workflowRun.id,
+        sourceCommitSha: '0123456789012345678901234567890123456789',
+      },
+    })
+    expect(
+      (child as WorkflowStartResult).workflowRun.candidateIdentityVersion,
+    ).toBeUndefined()
+    expect(
+      (child as WorkflowStartResult).workflowRun.sourceBaseSha,
+    ).toBeUndefined()
   })
 })
 
@@ -920,6 +1035,7 @@ describe('workflowStarts trusted boundary and authz', () => {
         rootWorkflowRunId: parent.workflowRun.id,
         attemptNumber: 2,
         trigger: 'rerun',
+        sourceBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
         sourceCommitSha: '0123456789012345678901234567890123456789',
         createdAt: 5,
       })
@@ -1098,6 +1214,8 @@ describe('workflowStarts trusted boundary and authz', () => {
         issueBody: '## Summary\n\nRepair the callback.',
         pullRequestExternalId: '789',
         pullRequestNumber: 7,
+        pullRequestUpdatedAt: 1_000,
+        pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
         pullRequestHeadSha: '0123456789012345678901234567890123456789',
         url: 'https://github.com/patchplane/demo/pull/7',
         senderProvider: 'github',
@@ -1124,6 +1242,8 @@ describe('workflowStarts trusted boundary and authz', () => {
     expect(second.promptRequest.id).toBe(first.promptRequest.id)
     expect(first.workflowRun).toMatchObject({
       modelVersion: 'v1',
+      candidateIdentityVersion: 'incoming-pr-v1',
+      sourceBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
       sourceCommitSha: '0123456789012345678901234567890123456789',
     })
     expect(first.promptRequest).toMatchObject({
@@ -1132,6 +1252,8 @@ describe('workflowStarts trusted boundary and authz', () => {
       source: 'external',
       prompt: 'Fix auth callback',
       externalRef: {
+        pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        pullRequestHeadSha: '0123456789012345678901234567890123456789',
         issueTitle: 'Fix auth callback',
         issueBody: '## Summary\n\nRepair the callback.',
       },
@@ -1142,9 +1264,320 @@ describe('workflowStarts trusted boundary and authz', () => {
     )
     expect(refs).toHaveLength(1)
     expect(refs[0]).toMatchObject({
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      pullRequestHeadSha: '0123456789012345678901234567890123456789',
       issueTitle: 'Fix auth callback',
       issueBody: '## Summary\n\nRepair the callback.',
     })
+  })
+
+  test('creates a new immutable attempt for a synchronized PR head', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const externalRef = {
+      provider: 'github',
+      deliveryId: 'delivery-sync-1',
+      eventKind: 'github.pull_request.synchronize',
+      repositoryProvider: 'github',
+      repositoryInstallationId: '123',
+      repositoryExternalId: '456',
+      repositoryOwner: 'patchplane',
+      repositoryName: 'demo',
+      repositoryFullName: 'patchplane/demo',
+      issueExternalId: '789',
+      issueNumber: 7,
+      pullRequestExternalId: '789',
+      pullRequestNumber: 7,
+      pullRequestUpdatedAt: 1_000,
+      pullRequestBaseSha: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      pullRequestHeadSha: '1111111111111111111111111111111111111111',
+      pullRequestPreviousHeadSha: '0000000000000000000000000000000000000000',
+    }
+    const input = {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external' as const,
+      traceId: 'trace-sync-1',
+      prompt: 'Verify pull request 7',
+      externalRef,
+    }
+
+    const first = await t.mutation(createWorkflowStartFromExternalIntake, input)
+    const replay = await t.mutation(createWorkflowStartFromExternalIntake, {
+      ...input,
+      traceId: 'trace-sync-replay',
+      externalRef: {
+        ...externalRef,
+        deliveryId: 'delivery-sync-replay',
+        pullRequestBaseSha: externalRef.pullRequestBaseSha.toUpperCase(),
+      },
+    })
+    if (!isWorkflowStartResult(first) || !isWorkflowStartResult(replay)) {
+      throw new Error('Expected workflow start results')
+    }
+    expect(replay.workflowRun.id).toBe(first.workflowRun.id)
+    const unchangedPair = await t.mutation(
+      createWorkflowStartFromExternalIntake,
+      {
+        ...input,
+        traceId: 'trace-sync-unchanged-pair',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-unchanged-pair',
+          pullRequestUpdatedAt: 1_500,
+          pullRequestPreviousHeadSha:
+            '1111111111111111111111111111111111111111',
+        },
+      },
+    )
+    if (!isWorkflowStartResult(unchangedPair)) {
+      throw new Error('Expected unchanged-pair result')
+    }
+    expect(unchangedPair.workflowRun.id).toBe(first.workflowRun.id)
+
+    const {
+      pullRequestPreviousHeadSha: _previousHeadSha,
+      ...openedExternalRef
+    } = externalRef
+    const delayedOpened = await t.mutation(
+      createWorkflowStartFromExternalIntake,
+      {
+        ...input,
+        traceId: 'trace-delayed-opened',
+        externalRef: {
+          ...openedExternalRef,
+          deliveryId: 'delivery-delayed-opened',
+          eventKind: 'github.pull_request.opened',
+          pullRequestUpdatedAt: 500,
+        },
+      },
+    )
+    if (!isWorkflowStartResult(delayedOpened)) {
+      throw new Error('Expected delayed opened result')
+    }
+    expect(delayedOpened.workflowRun.id).toBe(first.workflowRun.id)
+
+    await expect(
+      t.mutation(createWorkflowStartFromExternalIntake, {
+        ...input,
+        workspaceId: 'system:other-workspace',
+        traceId: 'trace-sync-cross-workspace',
+      }),
+    ).rejects.toThrow('External delivery is already bound to another workspace')
+
+    await t.run((ctx) =>
+      ctx.db.insert('candidatePatchSets', {
+        workflowRunId: first.workflowRun.id,
+        status: 'captured',
+        candidateDigest: `sha256:${'a'.repeat(64)}`,
+        createdAt: 1,
+      }),
+    )
+
+    const updated = await t.mutation(createWorkflowStartFromExternalIntake, {
+      ...input,
+      traceId: 'trace-sync-2',
+      externalRef: {
+        ...externalRef,
+        deliveryId: 'delivery-sync-2',
+        pullRequestUpdatedAt: 2_000,
+        pullRequestHeadSha: '2222222222222222222222222222222222222222',
+        pullRequestPreviousHeadSha: '1111111111111111111111111111111111111111',
+      },
+    })
+    const rebased = await t.mutation(createWorkflowStartFromExternalIntake, {
+      ...input,
+      traceId: 'trace-sync-rebased',
+      externalRef: {
+        ...externalRef,
+        deliveryId: 'delivery-sync-rebased',
+        pullRequestUpdatedAt: 3_000,
+        pullRequestBaseSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        pullRequestHeadSha: '2222222222222222222222222222222222222222',
+        pullRequestPreviousHeadSha: '2222222222222222222222222222222222222222',
+      },
+    })
+    if (!isWorkflowStartResult(updated) || !isWorkflowStartResult(rebased)) {
+      throw new Error('Expected updated workflow start results')
+    }
+
+    expect(updated.workflowRun.id).not.toBe(first.workflowRun.id)
+    expect(rebased.workflowRun.id).not.toBe(updated.workflowRun.id)
+    expect(updated.workflowRun).toMatchObject({
+      parentWorkflowRunId: first.workflowRun.id,
+      rootWorkflowRunId: first.workflowRun.id,
+      attemptNumber: 2,
+    })
+    expect(rebased.workflowRun).toMatchObject({
+      parentWorkflowRunId: updated.workflowRun.id,
+      rootWorkflowRunId: first.workflowRun.id,
+      attemptNumber: 3,
+    })
+    expect(
+      await t.mutation(claimWorkflowExecution, {
+        systemSecret: 'system_test',
+        workflowRunId: first.workflowRun.id,
+      }),
+    ).toBe(false)
+    expect(
+      await t.mutation(claimWorkflowExecution, {
+        systemSecret: 'system_test',
+        workflowRunId: updated.workflowRun.id,
+      }),
+    ).toBe(false)
+    expect(first.workflowRun).toMatchObject({
+      sourceBaseSha: externalRef.pullRequestBaseSha,
+      sourceCommitSha: externalRef.pullRequestHeadSha,
+    })
+    expect(updated.workflowRun).toMatchObject({
+      sourceBaseSha: externalRef.pullRequestBaseSha,
+      sourceCommitSha: '2222222222222222222222222222222222222222',
+    })
+
+    const delayedReplay = await t.mutation(
+      createWorkflowStartFromExternalIntake,
+      {
+        ...input,
+        traceId: 'trace-sync-delayed-replay',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-delayed-replay',
+        },
+      },
+    )
+    if (!isWorkflowStartResult(delayedReplay)) {
+      throw new Error('Expected delayed replay workflow start result')
+    }
+    expect(delayedReplay.workflowRun.id).toBe(first.workflowRun.id)
+    expect(
+      await t.mutation(claimWorkflowExecution, {
+        systemSecret: 'system_test',
+        workflowRunId: rebased.workflowRun.id,
+      }),
+    ).toBe(true)
+
+    expect(rebased.workflowRun).toMatchObject({
+      sourceBaseSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      sourceCommitSha: '2222222222222222222222222222222222222222',
+    })
+
+    await expect(
+      t.mutation(createWorkflowStartFromExternalIntake, {
+        ...input,
+        traceId: 'trace-sync-unseen-stale',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-unseen-stale',
+          pullRequestUpdatedAt: 1_500,
+          pullRequestHeadSha: '1212121212121212121212121212121212121212',
+          pullRequestPreviousHeadSha:
+            '1111111111111111111111111111111111111111',
+        },
+      }),
+    ).rejects.toThrow(
+      'Out-of-order pull request event cannot supersede the current candidate',
+    )
+
+    const returnedPair = await t.mutation(
+      createWorkflowStartFromExternalIntake,
+      {
+        ...input,
+        traceId: 'trace-sync-returned-pair',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-returned-pair',
+          pullRequestUpdatedAt: 3_500,
+          pullRequestHeadSha: '2222222222222222222222222222222222222222',
+          pullRequestPreviousHeadSha:
+            '2222222222222222222222222222222222222222',
+        },
+      },
+    )
+    if (!isWorkflowStartResult(returnedPair)) {
+      throw new Error('Expected returned-pair workflow start result')
+    }
+    expect(returnedPair.workflowRun).toMatchObject({
+      parentWorkflowRunId: rebased.workflowRun.id,
+      rootWorkflowRunId: first.workflowRun.id,
+      attemptNumber: 4,
+    })
+    expect(returnedPair.workflowRun.id).not.toBe(updated.workflowRun.id)
+    const returnedPairReplay = await t.mutation(
+      createWorkflowStartFromExternalIntake,
+      {
+        ...input,
+        traceId: 'trace-sync-returned-pair-replay',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-returned-pair-replay',
+          pullRequestUpdatedAt: 3_500,
+          pullRequestHeadSha: '2222222222222222222222222222222222222222',
+          pullRequestPreviousHeadSha:
+            '2222222222222222222222222222222222222222',
+        },
+      },
+    )
+    if (!isWorkflowStartResult(returnedPairReplay)) {
+      throw new Error('Expected returned-pair replay result')
+    }
+    expect(returnedPairReplay.workflowRun.id).toBe(returnedPair.workflowRun.id)
+
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', returnedPair.workflowRun.id, {
+        status: 'reviewed',
+      }),
+    )
+    const rerun = await t.mutation(createWorkflowRerun, {
+      parentWorkflowRunId: returnedPair.workflowRun.id,
+      reason: 'Recheck the current candidate.',
+      idempotencyKey: 'sync-lineage-rerun-1',
+    })
+    if (!isWorkflowStartResult(rerun)) {
+      throw new Error('Expected rerun workflow start result')
+    }
+    const afterRerun = await t.mutation(createWorkflowStartFromExternalIntake, {
+      ...input,
+      traceId: 'trace-sync-after-rerun',
+      externalRef: {
+        ...externalRef,
+        deliveryId: 'delivery-sync-after-rerun',
+        pullRequestUpdatedAt: 3_500,
+        pullRequestBaseSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        pullRequestHeadSha: '3333333333333333333333333333333333333333',
+        pullRequestPreviousHeadSha: '2222222222222222222222222222222222222222',
+      },
+    })
+    if (!isWorkflowStartResult(afterRerun)) {
+      throw new Error('Expected post-rerun synchronize result')
+    }
+    expect(afterRerun.workflowRun).toMatchObject({
+      parentWorkflowRunId: rerun.workflowRun.id,
+      rootWorkflowRunId: first.workflowRun.id,
+      attemptNumber: 6,
+    })
+    await expect(
+      t.mutation(createWorkflowRerun, {
+        parentWorkflowRunId: returnedPair.workflowRun.id,
+        reason: 'Do not rerun a superseded candidate.',
+        idempotencyKey: 'sync-lineage-stale-rerun',
+      }),
+    ).rejects.toThrow('A newer workflow attempt supersedes this rerun parent')
+
+    const candidateRows = await t.run((ctx) =>
+      ctx.db
+        .query('candidatePatchSets')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', updated.workflowRun.id),
+        )
+        .collect(),
+    )
+    expect(candidateRows).toEqual([])
+    const updatedDetail = await t.query(getWorkflowDetail, {
+      workflowRunId: updated.workflowRun.id,
+    })
+    expect(updatedDetail.candidatePatchSets).toEqual([])
   })
 
   test('public workflow start requires authentication', async () => {

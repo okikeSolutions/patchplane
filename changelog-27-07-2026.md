@@ -19,3 +19,23 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after remediation.
 - Herdr documentation/tracker audit — no actionable findings after remediation.
 - Herdr code review — no actionable findings after remediation.
+
+## Task 2 — CAND-003/CAND-004 incoming PR identity
+
+Status: Complete
+
+- Added PatchPlane-owned discriminated candidate-subject schemas that keep incoming pull-request and sandbox-generated origins distinct without provider SDK objects.
+- Incoming PR subjects carry normalized repository/PR identity, authenticated base/head SHAs, and source-event identity; captured candidate records continue to carry the exact diff digest.
+- GitHub pull-request webhook decoding now requires both `base.sha` and `head.sha` and preserves both through normalized events and generic external workflow refs.
+- Current `incoming-pr-v1` workflow attempts persist `sourceBaseSha` and the existing head `sourceCommitSha`; current reruns copy both revisions while historical V1 rows remain compatible.
+- Fixed PR-event idempotency so redelivery of the same base/head pair reuses its attempt across opened/synchronize actions while either revision changing creates a new linked attempt that cannot inherit candidate rows from the prior attempt.
+- Bound PR attempt ordering to GitHub's signed `updated_at` plus synchronize `before`/`after` head transition, rejecting delayed unseen events, stale reruns, stale execution claims, and cross-workspace delivery reuse.
+- Added domain, GitHub normalization/intake, Convex persistence, rerun-lineage, and synchronize-attempt regression coverage.
+- Marked sequence item 2 complete and updated `CAND-003` to `Implemented` and `CAND-004` to `Verified`; exact R2-backed candidate capture remains task 3.
+
+Validation:
+
+- `bun run verify` — passed.
+- Herdr Effect/branded-types audit — no actionable findings after remediation.
+- Herdr documentation/tracker audit — no actionable findings after remediation.
+- Herdr code/security review — no actionable findings after remediation.

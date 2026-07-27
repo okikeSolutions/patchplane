@@ -1,5 +1,10 @@
 import { Schema } from 'effect'
-import { GitCommitSha, HttpUrl, PositiveInt } from './refinements'
+import {
+  PullRequestExternalId,
+  PullRequestNumber,
+  RepositoryExternalId,
+} from './candidate-subject'
+import { EpochMillis, GitCommitSha, HttpUrl, PositiveInt } from './refinements'
 
 /**
  * Provider-specific provenance stored beside a generic PatchPlane workflow.
@@ -14,7 +19,7 @@ export const ExternalWorkflowRef = Schema.Struct({
   eventKind: Schema.NonEmptyString,
   repositoryProvider: Schema.optional(Schema.NonEmptyString),
   repositoryInstallationId: Schema.optional(Schema.NonEmptyString),
-  repositoryExternalId: Schema.optional(Schema.NonEmptyString),
+  repositoryExternalId: Schema.optional(RepositoryExternalId),
   repositoryOwner: Schema.optional(Schema.NonEmptyString),
   repositoryName: Schema.optional(Schema.NonEmptyString),
   repositoryFullName: Schema.optional(Schema.NonEmptyString),
@@ -22,9 +27,12 @@ export const ExternalWorkflowRef = Schema.Struct({
   issueNumber: Schema.optional(PositiveInt),
   issueTitle: Schema.optional(Schema.String),
   issueBody: Schema.optional(Schema.String),
-  pullRequestExternalId: Schema.optional(Schema.NonEmptyString),
-  pullRequestNumber: Schema.optional(PositiveInt),
+  pullRequestExternalId: Schema.optional(PullRequestExternalId),
+  pullRequestNumber: Schema.optional(PullRequestNumber),
+  pullRequestUpdatedAt: Schema.optional(EpochMillis),
+  pullRequestBaseSha: Schema.optional(GitCommitSha),
   pullRequestHeadSha: Schema.optional(GitCommitSha),
+  pullRequestPreviousHeadSha: Schema.optional(GitCommitSha),
   pullRequestHeadRef: Schema.optional(Schema.NonEmptyString),
   pullRequestBaseRef: Schema.optional(Schema.NonEmptyString),
   commentExternalId: Schema.optional(Schema.NonEmptyString),

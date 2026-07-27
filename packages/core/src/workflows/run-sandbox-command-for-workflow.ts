@@ -1,7 +1,8 @@
-import { Clock, Effect } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 import { SandboxError } from '@patchplane/domain/errors'
 import type { VerificationPlatform } from '@patchplane/domain/verification'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
+import { GitCommitSha } from '@patchplane/domain/refinements'
 import { PrepareRepositoryClone } from '../repository/prepare-repository-clone'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
@@ -164,7 +165,20 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     const diffArtifact = evidenceArtifacts.find(
       (artifact) => artifact.kind === 'diff',
     )
-    const captured = diffArtifact !== undefined && result.baseSha !== undefined
+    const baseSha =
+      result.baseSha === undefined
+        ? undefined
+        : yield* Schema.decodeUnknownEffect(GitCommitSha)(result.baseSha).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SandboxError({
+                  operation: 'runSandboxCommandForWorkflow.decodeBaseSha',
+                  message: 'Sandbox returned an invalid candidate base SHA',
+                  cause,
+                }),
+            ),
+          )
+    const captured = diffArtifact !== undefined && baseSha !== undefined
     const stats = yield* CandidatePatchStatsFromSandboxResult(result)
     const candidatePatchSet = yield* withCandidateFreezeTransition(
       {
@@ -178,7 +192,7 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
         ...(captured
           ? { candidateDigest: `sha256:${diffArtifact.sha256}` }
           : {}),
-        ...(result.baseSha === undefined ? {} : { baseSha: result.baseSha }),
+        ...(baseSha === undefined ? {} : { baseSha }),
         ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
         ...(captured && stats !== undefined ? { stats } : {}),
         summary: captured

@@ -1,6 +1,12 @@
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import {
+  makePullRequestExternalId,
+  makePullRequestNumber,
+  makeRepositoryExternalId,
+} from '@patchplane/domain/candidate-subject'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
+import {
   makeGitHubAppActorId,
   makePromptRequestId,
   makeSystemWorkspaceId,
@@ -125,15 +131,21 @@ describe('StartWorkflowFromIntake', () => {
             eventKind: 'github.pull_request.opened',
             repositoryProvider: 'github',
             repositoryInstallationId: '123',
-            repositoryExternalId: '456',
+            repositoryExternalId: makeRepositoryExternalId('456'),
             repositoryOwner: 'patchplane',
             repositoryName: 'demo',
             repositoryFullName: 'patchplane/demo',
             issueExternalId: '789',
             issueNumber: 7,
-            pullRequestExternalId: '789',
-            pullRequestNumber: 7,
-            pullRequestHeadSha: '0123456789012345678901234567890123456789',
+            pullRequestExternalId: makePullRequestExternalId('789'),
+            pullRequestNumber: makePullRequestNumber(7),
+            pullRequestUpdatedAt: 1_000,
+            pullRequestBaseSha: makeGitCommitSha(
+              'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+            ),
+            pullRequestHeadSha: makeGitCommitSha(
+              '0123456789012345678901234567890123456789',
+            ),
           },
         })
 
@@ -184,7 +196,7 @@ describe('StartWorkflowFromIntake', () => {
         )
 
         expect(error.message).toBe(
-          'External workflow intake requires a pinned source commit SHA',
+          'External workflow intake requires complete GitHub pull request identity with pinned base and head SHAs',
         )
       }).pipe(
         Effect.provide(

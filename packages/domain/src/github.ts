@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { GitCommitSha, HttpUrl } from './refinements'
+import { EpochMillis, GitCommitSha, HttpUrl } from './refinements'
 
 const PositiveSafeInteger = Schema.Int.check(Schema.isGreaterThan(0))
 
@@ -28,8 +28,6 @@ export const GitHubPullRequestId = PositiveSafeInteger.pipe(
 export const GitHubPullRequestNumber = PositiveSafeInteger.pipe(
   Schema.brand('GitHubPullRequestNumber'),
 )
-const BrandedGitCommitSha = GitCommitSha.pipe(Schema.brand('GitCommitSha'))
-
 export const GitHubRepositoryRef = Schema.Struct({
   provider: Schema.Literal('github'),
   installationId: GitHubInstallationId,
@@ -100,16 +98,27 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
     repositoryId: GitHubRepositoryId,
     pullRequestId: GitHubPullRequestId,
     pullRequestNumber: GitHubPullRequestNumber,
+    pullRequestUpdatedAt: EpochMillis,
     title: Schema.String,
     body: Schema.String,
     prompt: Schema.String,
-    headSha: BrandedGitCommitSha,
+    baseSha: GitCommitSha,
+    headSha: GitCommitSha,
+    previousHeadSha: Schema.optional(GitCommitSha),
     headRef: Schema.NonEmptyString,
     baseRef: Schema.NonEmptyString,
     url: Schema.optional(HttpUrl),
     sender: Schema.optional(Schema.String),
   }),
-])
+]).check(
+  Schema.makeFilter(
+    (event) =>
+      event.kind === 'github.pull_request.synchronize'
+        ? 'previousHeadSha' in event && event.previousHeadSha !== undefined
+        : !('previousHeadSha' in event) || event.previousHeadSha === undefined,
+    { expected: 'synchronize event with a previous head SHA' },
+  ),
+)
 export type GitHubNormalizedWorkflowEvent = Schema.Schema.Type<
   typeof GitHubNormalizedWorkflowEvent
 >

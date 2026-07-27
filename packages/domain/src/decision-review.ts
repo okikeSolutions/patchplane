@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { CandidateSubject } from './candidate-subject'
 import {
   ActorId,
   CandidatePatchSetId,
@@ -28,19 +29,24 @@ export const CandidatePatchSetStatus = Schema.Literals([
   'empty',
   'failed',
 ])
-export type CandidatePatchSetStatus = Schema.Schema.Type<typeof CandidatePatchSetStatus>
+export type CandidatePatchSetStatus = Schema.Schema.Type<
+  typeof CandidatePatchSetStatus
+>
 
 export const CandidatePatchSetStats = Schema.Struct({
   filesChanged: NonNegativeInt,
   additions: NonNegativeInt,
   deletions: NonNegativeInt,
 })
-export type CandidatePatchSetStats = Schema.Schema.Type<typeof CandidatePatchSetStats>
+export type CandidatePatchSetStats = Schema.Schema.Type<
+  typeof CandidatePatchSetStats
+>
 
 export const CandidatePatchSet = Schema.Struct({
   id: CandidatePatchSetId,
   workflowRunId: WorkflowRunId,
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
+  subject: Schema.optional(CandidateSubject),
   status: CandidatePatchSetStatus,
   candidateDigest: Schema.optional(Sha256Digest),
   baseRef: Schema.optional(Schema.NonEmptyString),
@@ -52,7 +58,41 @@ export const CandidatePatchSet = Schema.Struct({
   stats: Schema.optional(CandidatePatchSetStats),
   idempotencyKey: Schema.optional(Schema.NonEmptyString),
   createdAt: EpochMillis,
-})
+}).check(
+  Schema.makeFilter(
+    (candidate) => {
+      if (candidate.subject === undefined) return true
+      if (candidate.subject.kind === 'sandbox-generated') {
+        const executionMatches =
+          candidate.sandboxExecutionId === candidate.subject.sandboxExecutionId
+        return (
+          executionMatches &&
+          (candidate.status === 'captured'
+            ? candidate.candidateDigest !== undefined &&
+              candidate.diffArtifactId !== undefined
+            : candidate.candidateDigest === undefined &&
+              candidate.diffArtifactId === undefined)
+        )
+      }
+      const revisionsMatch =
+        candidate.baseSha === candidate.subject.baseSha &&
+        candidate.headSha === candidate.subject.headSha
+      return (
+        revisionsMatch &&
+        ((candidate.status === 'failed' &&
+          candidate.candidateDigest === undefined &&
+          candidate.diffArtifactId === undefined) ||
+          (candidate.status === 'captured' &&
+            candidate.candidateDigest !== undefined &&
+            candidate.diffArtifactId !== undefined))
+      )
+    },
+    {
+      expected:
+        'candidate subject identity consistent with revisions, digest, artifact, and producing execution',
+    },
+  ),
+)
 export type CandidatePatchSet = Schema.Schema.Type<typeof CandidatePatchSet>
 
 export const ReviewRunKind = Schema.Literals([
@@ -96,7 +136,9 @@ export const ReviewFindingSeverity = Schema.Literals([
   'error',
   'critical',
 ])
-export type ReviewFindingSeverity = Schema.Schema.Type<typeof ReviewFindingSeverity>
+export type ReviewFindingSeverity = Schema.Schema.Type<
+  typeof ReviewFindingSeverity
+>
 
 export const ReviewFindingCategory = Schema.Literals([
   'test',
@@ -106,7 +148,9 @@ export const ReviewFindingCategory = Schema.Literals([
   'quality',
   'unknown',
 ])
-export type ReviewFindingCategory = Schema.Schema.Type<typeof ReviewFindingCategory>
+export type ReviewFindingCategory = Schema.Schema.Type<
+  typeof ReviewFindingCategory
+>
 
 export const ReviewFinding = Schema.Struct({
   id: ReviewFindingId,
@@ -137,7 +181,9 @@ export const PolicyDecisionStatus = Schema.Literals([
   'changes-requested',
   'manual-review',
 ])
-export type PolicyDecisionStatus = Schema.Schema.Type<typeof PolicyDecisionStatus>
+export type PolicyDecisionStatus = Schema.Schema.Type<
+  typeof PolicyDecisionStatus
+>
 
 export const PolicyDecision = Schema.Struct({
   id: PolicyDecisionId,
@@ -151,7 +197,9 @@ export const PolicyDecision = Schema.Struct({
   inputDigest: Schema.optional(Sha256Digest),
   verificationResultIds: Schema.optional(Schema.Array(VerificationResultId)),
   reviewFindingIds: Schema.optional(Schema.Array(ReviewFindingId)),
-  missingRequirementIds: Schema.optional(Schema.Array(VerificationRequirementId)),
+  missingRequirementIds: Schema.optional(
+    Schema.Array(VerificationRequirementId),
+  ),
   idempotencyKey: Schema.optional(Schema.NonEmptyString),
   createdAt: EpochMillis,
 })
@@ -180,14 +228,18 @@ export const PublicationResultKind = Schema.Literals([
   'draft-pull-request',
   'branch',
 ])
-export type PublicationResultKind = Schema.Schema.Type<typeof PublicationResultKind>
+export type PublicationResultKind = Schema.Schema.Type<
+  typeof PublicationResultKind
+>
 
 export const PublicationResultStatus = Schema.Literals([
   'pending',
   'published',
   'failed',
 ])
-export type PublicationResultStatus = Schema.Schema.Type<typeof PublicationResultStatus>
+export type PublicationResultStatus = Schema.Schema.Type<
+  typeof PublicationResultStatus
+>
 
 export const PublicationResult = Schema.Struct({
   id: PublicationResultId,
@@ -214,7 +266,9 @@ export const ProvenanceEventStatus = Schema.Literals([
   'failed',
   'blocked',
 ])
-export type ProvenanceEventStatus = Schema.Schema.Type<typeof ProvenanceEventStatus>
+export type ProvenanceEventStatus = Schema.Schema.Type<
+  typeof ProvenanceEventStatus
+>
 
 export const ProvenanceEvent = Schema.Struct({
   id: ProvenanceEventId,
@@ -235,10 +289,12 @@ export const ProvenanceEvent = Schema.Struct({
 })
 export type ProvenanceEvent = Schema.Schema.Type<typeof ProvenanceEvent>
 
-export const decodeCandidatePatchSet = Schema.decodeUnknownEffect(CandidatePatchSet)
+export const decodeCandidatePatchSet =
+  Schema.decodeUnknownEffect(CandidatePatchSet)
 export const decodeReviewRun = Schema.decodeUnknownEffect(ReviewRun)
 export const decodeReviewFinding = Schema.decodeUnknownEffect(ReviewFinding)
 export const decodePolicyDecision = Schema.decodeUnknownEffect(PolicyDecision)
 export const decodeHumanDecision = Schema.decodeUnknownEffect(HumanDecision)
-export const decodePublicationResult = Schema.decodeUnknownEffect(PublicationResult)
+export const decodePublicationResult =
+  Schema.decodeUnknownEffect(PublicationResult)
 export const decodeProvenanceEvent = Schema.decodeUnknownEffect(ProvenanceEvent)

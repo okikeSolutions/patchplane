@@ -195,7 +195,10 @@ const externalWorkflowRefArg = v.object({
   issueBody: v.optional(v.string()),
   pullRequestExternalId: v.optional(v.string()),
   pullRequestNumber: v.optional(v.number()),
+  pullRequestUpdatedAt: v.optional(v.number()),
+  pullRequestBaseSha: v.optional(v.string()),
   pullRequestHeadSha: v.optional(v.string()),
+  pullRequestPreviousHeadSha: v.optional(v.string()),
   pullRequestHeadRef: v.optional(v.string()),
   pullRequestBaseRef: v.optional(v.string()),
   commentExternalId: v.optional(v.string()),
@@ -627,6 +630,8 @@ const workflowDetailReturn = v.object({
     rootWorkflowRunId: v.optional(v.id('workflowRuns')),
     attemptNumber: v.optional(v.number()),
     trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    candidateIdentityVersion: v.optional(v.literal('incoming-pr-v1')),
+    sourceBaseSha: v.optional(v.string()),
     sourceCommitSha: v.optional(v.string()),
     createdAt: v.number(),
   }),
@@ -699,6 +704,8 @@ const workflowStartReturn = v.object({
     rootWorkflowRunId: v.optional(v.id('workflowRuns')),
     attemptNumber: v.optional(v.number()),
     trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
+    candidateIdentityVersion: v.optional(v.literal('incoming-pr-v1')),
+    sourceBaseSha: v.optional(v.string()),
     sourceCommitSha: v.optional(v.string()),
     trustState: v.optional(
       v.union(
@@ -753,6 +760,11 @@ async function createWorkflowStartRecord(
     source: 'dev' | 'app' | 'external'
     traceId: string
     prompt: string
+    lineageParent?: {
+      workflowRunId: Id<'workflowRuns'>
+      rootWorkflowRunId: Id<'workflowRuns'>
+      attemptNumber: number
+    }
     externalRef?: {
       provider: string
       deliveryId: string
@@ -769,7 +781,10 @@ async function createWorkflowStartRecord(
       issueBody?: string
       pullRequestExternalId?: string
       pullRequestNumber?: number
+      pullRequestUpdatedAt?: number
+      pullRequestBaseSha?: string
       pullRequestHeadSha?: string
+      pullRequestPreviousHeadSha?: string
       pullRequestHeadRef?: string
       pullRequestBaseRef?: string
       commentExternalId?: string
@@ -783,9 +798,15 @@ async function createWorkflowStartRecord(
   const createdAt = Date.now()
   const promptRequestStatus = 'created' as const
   const workflowRunStatus = 'queued' as const
+  const sourceBaseSha = args.externalRef?.pullRequestBaseSha?.trim()
   const sourceCommitSha = args.externalRef?.pullRequestHeadSha?.trim()
   const createsV1Attempt =
-    sourceCommitSha !== undefined && sourceCommitSha.length > 0
+    sourceBaseSha !== undefined &&
+    sourceBaseSha.length > 0 &&
+    sourceCommitSha !== undefined &&
+    sourceCommitSha.length > 0
+  const attemptNumber =
+    args.lineageParent === undefined ? 1 : args.lineageParent.attemptNumber + 1
 
   const promptRequestId = await ctx.db.insert('promptRequests', {
     workspaceId: args.workspaceId,
@@ -809,14 +830,22 @@ async function createWorkflowStartRecord(
     ...(createsV1Attempt
       ? {
           modelVersion: 'v1' as const,
-          attemptNumber: 1,
+          ...(args.lineageParent === undefined
+            ? {}
+            : {
+                parentWorkflowRunId: args.lineageParent.workflowRunId,
+                rootWorkflowRunId: args.lineageParent.rootWorkflowRunId,
+              }),
+          attemptNumber,
           trigger: 'intake' as const,
+          candidateIdentityVersion: 'incoming-pr-v1' as const,
+          sourceBaseSha,
           sourceCommitSha,
         }
       : {}),
     createdAt,
   })
-  if (createsV1Attempt) {
+  if (createsV1Attempt && args.lineageParent === undefined) {
     await ctx.db.patch('workflowRuns', workflowRunId, {
       rootWorkflowRunId: workflowRunId,
     })
@@ -867,9 +896,15 @@ async function createWorkflowStartRecord(
       ...(createsV1Attempt
         ? {
             modelVersion: 'v1' as const,
-            rootWorkflowRunId: workflowRunId,
-            attemptNumber: 1,
+            rootWorkflowRunId:
+              args.lineageParent?.rootWorkflowRunId ?? workflowRunId,
+            ...(args.lineageParent === undefined
+              ? {}
+              : { parentWorkflowRunId: args.lineageParent.workflowRunId }),
+            attemptNumber,
             trigger: 'intake' as const,
+            candidateIdentityVersion: 'incoming-pr-v1' as const,
+            sourceBaseSha,
             sourceCommitSha,
           }
         : {}),
@@ -929,6 +964,12 @@ async function workflowStartFromIds(
       ...(workflowRun.trigger === undefined
         ? {}
         : { trigger: workflowRun.trigger }),
+      ...(workflowRun.candidateIdentityVersion === undefined
+        ? {}
+        : { candidateIdentityVersion: workflowRun.candidateIdentityVersion }),
+      ...(workflowRun.sourceBaseSha === undefined
+        ? {}
+        : { sourceBaseSha: workflowRun.sourceBaseSha }),
       ...(workflowRun.sourceCommitSha === undefined
         ? {}
         : { sourceCommitSha: workflowRun.sourceCommitSha }),
@@ -939,15 +980,36 @@ async function workflowStartFromIds(
 
 async function existingExternalWorkflowRef(
   ctx: MutationCtx,
+  workspaceId: string,
+  permitRepeatedCandidatePair: boolean,
   externalRef: {
     provider: string
     deliveryId: string
     eventKind: string
     repositoryExternalId?: string
     issueExternalId?: string
+    pullRequestBaseSha?: string
+    pullRequestHeadSha?: string
     commentExternalId?: string
   },
 ) {
+  const byDelivery = await ctx.db
+    .query('externalWorkflowRefs')
+    .withIndex('by_delivery', (q) =>
+      q
+        .eq('provider', externalRef.provider)
+        .eq('deliveryId', externalRef.deliveryId),
+    )
+    .unique()
+  if (byDelivery !== null) {
+    if (byDelivery.workspaceId !== workspaceId) {
+      throw new ConvexError(
+        'External delivery is already bound to another workspace',
+      )
+    }
+    return byDelivery
+  }
+
   if (externalRef.commentExternalId !== undefined) {
     const byComment = await ctx.db
       .query('externalWorkflowRefs')
@@ -959,15 +1021,78 @@ async function existingExternalWorkflowRef(
       .unique()
 
     if (byComment !== null) {
+      if (byComment.workspaceId !== workspaceId) {
+        throw new ConvexError(
+          'External comment is already bound to another workspace',
+        )
+      }
       return byComment
     }
   }
 
   if (
     externalRef.repositoryExternalId !== undefined &&
+    externalRef.issueExternalId !== undefined &&
+    ['github.pull_request.opened', 'github.pull_request.synchronize'].includes(
+      externalRef.eventKind,
+    ) &&
+    externalRef.pullRequestBaseSha !== undefined &&
+    externalRef.pullRequestHeadSha !== undefined
+  ) {
+    // Transitional path while the exact base/head index is staged and backfilled.
+    // Switch to that index only after Convex reports it enabled in production.
+    const eventKinds = [
+      'github.pull_request.opened',
+      'github.pull_request.synchronize',
+    ] as const
+    const batches = await Promise.all(
+      eventKinds.map((eventKind) =>
+        ctx.db
+          .query('externalWorkflowRefs')
+          .withIndex('by_issue_event', (q) =>
+            q
+              .eq('provider', externalRef.provider)
+              .eq('repositoryExternalId', externalRef.repositoryExternalId)
+              .eq('issueExternalId', externalRef.issueExternalId)
+              .eq('eventKind', eventKind),
+          )
+          .take(1_001),
+      ),
+    )
+    if (batches.some((batch) => batch.length > 1_000)) {
+      throw new ConvexError(
+        'Pull request attempt lookup exceeded the staged-index migration bound',
+      )
+    }
+    if (permitRepeatedCandidatePair) return null
+    const matchingRefs = batches
+      .flat()
+      .filter(
+        (attempt) =>
+          attempt.workspaceId === workspaceId &&
+          attempt.pullRequestBaseSha === externalRef.pullRequestBaseSha &&
+          attempt.pullRequestHeadSha === externalRef.pullRequestHeadSha,
+      )
+    const matchingRuns = await Promise.all(
+      matchingRefs.map(async (ref) => ({
+        ref,
+        run: await ctx.db.get('workflowRuns', ref.workflowRunId),
+      })),
+    )
+    matchingRuns.sort(
+      (left, right) =>
+        (right.run?.attemptNumber ?? 0) - (left.run?.attemptNumber ?? 0) ||
+        (right.ref.pullRequestUpdatedAt ?? 0) -
+          (left.ref.pullRequestUpdatedAt ?? 0),
+    )
+    return matchingRuns[0]?.ref ?? null
+  }
+
+  if (
+    externalRef.repositoryExternalId !== undefined &&
     externalRef.issueExternalId !== undefined
   ) {
-    const byIssueEvent = await ctx.db
+    const issueAttempts = await ctx.db
       .query('externalWorkflowRefs')
       .withIndex('by_issue_event', (q) =>
         q
@@ -976,21 +1101,158 @@ async function existingExternalWorkflowRef(
           .eq('issueExternalId', externalRef.issueExternalId)
           .eq('eventKind', externalRef.eventKind),
       )
-      .unique()
-
-    if (byIssueEvent !== null) {
-      return byIssueEvent
+      .take(1_001)
+    if (issueAttempts.length > 1_000) {
+      throw new ConvexError('External issue lookup exceeded its bound')
     }
+    return (
+      issueAttempts.find((attempt) => attempt.workspaceId === workspaceId) ??
+      null
+    )
   }
 
-  return ctx.db
-    .query('externalWorkflowRefs')
-    .withIndex('by_delivery', (q) =>
-      q
-        .eq('provider', externalRef.provider)
-        .eq('deliveryId', externalRef.deliveryId),
+  return null
+}
+
+async function latestPullRequestLineage(
+  ctx: MutationCtx,
+  externalRef: {
+    provider: string
+    workspaceId: string
+    repositoryExternalId: string
+    issueExternalId: string
+  },
+) {
+  const eventKinds = [
+    'github.pull_request.opened',
+    'github.pull_request.synchronize',
+  ] as const
+  const batches = await Promise.all(
+    eventKinds.map((eventKind) =>
+      ctx.db
+        .query('externalWorkflowRefs')
+        .withIndex('by_issue_event', (q) =>
+          q
+            .eq('provider', externalRef.provider)
+            .eq('repositoryExternalId', externalRef.repositoryExternalId)
+            .eq('issueExternalId', externalRef.issueExternalId)
+            .eq('eventKind', eventKind),
+        )
+        .take(1_001),
+    ),
+  )
+  if (batches.some((batch) => batch.length > 1_000)) {
+    throw new ConvexError('Pull request lineage lookup exceeded its bound')
+  }
+  const runs = await Promise.all(
+    batches.flat().map((ref) => ctx.db.get('workflowRuns', ref.workflowRunId)),
+  )
+  const candidates = runs.filter(
+    (run) =>
+      run !== null &&
+      run.workspaceId === externalRef.workspaceId &&
+      run.candidateIdentityVersion === 'incoming-pr-v1' &&
+      run.rootWorkflowRunId !== undefined &&
+      run.attemptNumber !== undefined,
+  )
+  candidates.sort(
+    (left, right) =>
+      (right?.attemptNumber ?? 0) - (left?.attemptNumber ?? 0) ||
+      (right?.createdAt ?? 0) - (left?.createdAt ?? 0),
+  )
+  const latestWebhookAttempt = candidates[0]
+  if (
+    latestWebhookAttempt === undefined ||
+    latestWebhookAttempt === null ||
+    latestWebhookAttempt.rootWorkflowRunId === undefined
+  ) {
+    return undefined
+  }
+  const latestWebhookRef = batches
+    .flat()
+    .find((ref) => ref.workflowRunId === latestWebhookAttempt['_id'])
+  if (latestWebhookRef?.pullRequestUpdatedAt === undefined) {
+    throw new ConvexError('Current pull request lineage lacks trusted ordering')
+  }
+  const latestAttempt = await ctx.db
+    .query('workflowRuns')
+    .withIndex('by_root_attempt', (q) =>
+      q.eq('rootWorkflowRunId', latestWebhookAttempt.rootWorkflowRunId),
     )
-    .unique()
+    .order('desc')
+    .first()
+  if (latestAttempt === null || latestAttempt.attemptNumber === undefined) {
+    throw new ConvexError('Pull request lineage is missing its latest attempt')
+  }
+  return {
+    workflowRunId: latestAttempt['_id'],
+    rootWorkflowRunId: latestWebhookAttempt.rootWorkflowRunId,
+    attemptNumber: latestAttempt.attemptNumber,
+    sourceBaseSha: latestAttempt.sourceBaseSha,
+    sourceCommitSha: latestAttempt.sourceCommitSha,
+    pullRequestUpdatedAt: latestWebhookRef.pullRequestUpdatedAt,
+  }
+}
+
+function isGitCommitSha(value: string) {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)
+}
+
+function requireIncomingPullRequestIdentity(externalRef: {
+  provider: string
+  eventKind: string
+  repositoryProvider?: string
+  repositoryExternalId?: string
+  repositoryOwner?: string
+  repositoryName?: string
+  repositoryFullName?: string
+  issueExternalId?: string
+  pullRequestExternalId?: string
+  pullRequestNumber?: number
+  pullRequestUpdatedAt?: number
+  pullRequestBaseSha?: string
+  pullRequestHeadSha?: string
+  pullRequestPreviousHeadSha?: string
+}) {
+  const requiredStrings = [
+    externalRef.repositoryExternalId,
+    externalRef.repositoryOwner,
+    externalRef.repositoryName,
+    externalRef.repositoryFullName,
+    externalRef.issueExternalId,
+    externalRef.pullRequestExternalId,
+  ]
+  if (
+    externalRef.provider !== 'github' ||
+    externalRef.repositoryProvider !== 'github' ||
+    !['github.pull_request.opened', 'github.pull_request.synchronize'].includes(
+      externalRef.eventKind,
+    ) ||
+    requiredStrings.some(
+      (value) => value === undefined || value.trim().length === 0,
+    ) ||
+    externalRef.repositoryFullName !==
+      `${externalRef.repositoryOwner}/${externalRef.repositoryName}` ||
+    externalRef.issueExternalId !== externalRef.pullRequestExternalId ||
+    externalRef.pullRequestNumber === undefined ||
+    !Number.isSafeInteger(externalRef.pullRequestNumber) ||
+    externalRef.pullRequestNumber <= 0 ||
+    externalRef.pullRequestUpdatedAt === undefined ||
+    !Number.isSafeInteger(externalRef.pullRequestUpdatedAt) ||
+    externalRef.pullRequestUpdatedAt < 0 ||
+    externalRef.pullRequestBaseSha === undefined ||
+    !isGitCommitSha(externalRef.pullRequestBaseSha) ||
+    externalRef.pullRequestHeadSha === undefined ||
+    !isGitCommitSha(externalRef.pullRequestHeadSha) ||
+    (externalRef.eventKind === 'github.pull_request.synchronize'
+      ? externalRef.pullRequestPreviousHeadSha === undefined ||
+        !isGitCommitSha(externalRef.pullRequestPreviousHeadSha)
+      : externalRef.pullRequestPreviousHeadSha !== undefined)
+  ) {
+    throw new ConvexError(
+      'External workflow intake requires complete valid GitHub pull request identity',
+    )
+  }
 }
 
 function requireSystemIngestionSecret(secret: string) {
@@ -1186,22 +1448,77 @@ export const createFromExternalIntake = mutation({
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
 
-    if (
-      args.externalRef.pullRequestHeadSha === undefined ||
-      args.externalRef.pullRequestHeadSha.trim().length === 0
-    ) {
-      throw new ConvexError(
-        'External workflow intake requires a pinned source commit SHA',
-      )
+    requireIncomingPullRequestIdentity(args.externalRef)
+    const externalRef = {
+      ...args.externalRef,
+      pullRequestBaseSha: args.externalRef.pullRequestBaseSha!.toLowerCase(),
+      pullRequestHeadSha: args.externalRef.pullRequestHeadSha!.toLowerCase(),
+      ...(args.externalRef.pullRequestPreviousHeadSha === undefined
+        ? {}
+        : {
+            pullRequestPreviousHeadSha:
+              args.externalRef.pullRequestPreviousHeadSha.toLowerCase(),
+          }),
     }
 
-    const existing = await existingExternalWorkflowRef(ctx, args.externalRef)
+    const lineageParent = await latestPullRequestLineage(ctx, {
+      provider: externalRef.provider,
+      workspaceId: args.workspaceId,
+      repositoryExternalId: externalRef.repositoryExternalId!,
+      issueExternalId: externalRef.issueExternalId!,
+    })
+    const advancesCurrentHead =
+      lineageParent !== undefined &&
+      externalRef.eventKind === 'github.pull_request.synchronize' &&
+      externalRef.pullRequestPreviousHeadSha ===
+        lineageParent.sourceCommitSha &&
+      externalRef.pullRequestHeadSha !== lineageParent.sourceCommitSha
+    const advancesCurrentBase =
+      lineageParent !== undefined &&
+      externalRef.eventKind === 'github.pull_request.synchronize' &&
+      externalRef.pullRequestPreviousHeadSha ===
+        lineageParent.sourceCommitSha &&
+      externalRef.pullRequestHeadSha === lineageParent.sourceCommitSha &&
+      externalRef.pullRequestBaseSha !== lineageParent.sourceBaseSha &&
+      externalRef.pullRequestUpdatedAt! > lineageParent.pullRequestUpdatedAt
+    const permitRepeatedCandidatePair =
+      advancesCurrentBase ||
+      (advancesCurrentHead &&
+        externalRef.pullRequestUpdatedAt! >= lineageParent.pullRequestUpdatedAt)
+    const existing = await existingExternalWorkflowRef(
+      ctx,
+      args.workspaceId,
+      permitRepeatedCandidatePair,
+      externalRef,
+    )
 
     if (existing !== null) {
       return workflowStartFromIds(ctx, {
         promptRequestId: existing.promptRequestId,
         workflowRunId: existing.workflowRunId,
       })
+    }
+
+    if (
+      lineageParent !== undefined &&
+      (externalRef.pullRequestUpdatedAt! < lineageParent.pullRequestUpdatedAt ||
+        (externalRef.pullRequestUpdatedAt ===
+          lineageParent.pullRequestUpdatedAt &&
+          !advancesCurrentHead))
+    ) {
+      throw new ConvexError(
+        'Out-of-order pull request event cannot supersede the current candidate',
+      )
+    }
+    if (
+      lineageParent !== undefined &&
+      (externalRef.eventKind !== 'github.pull_request.synchronize' ||
+        lineageParent.sourceCommitSha !==
+          externalRef.pullRequestPreviousHeadSha)
+    ) {
+      throw new ConvexError(
+        'Pull request synchronize transition does not advance the current head',
+      )
     }
 
     const workflowStart = await createWorkflowStartRecord(ctx, {
@@ -1211,11 +1528,12 @@ export const createFromExternalIntake = mutation({
       source: args.source,
       traceId: args.traceId,
       prompt: args.prompt,
-      externalRef: args.externalRef,
+      ...(lineageParent === undefined ? {} : { lineageParent }),
+      externalRef,
     })
 
     await ctx.db.insert('externalWorkflowRefs', {
-      ...args.externalRef,
+      ...externalRef,
       workspaceId: args.workspaceId,
       promptRequestId: workflowStart.promptRequest.id,
       workflowRunId: workflowStart.workflowRun.id,
@@ -1264,9 +1582,14 @@ export const createRerun = mutation({
     }
     if (
       parent.sourceCommitSha === undefined ||
-      parent.sourceCommitSha.trim().length === 0
+      parent.sourceCommitSha.trim().length === 0 ||
+      (parent.candidateIdentityVersion === 'incoming-pr-v1' &&
+        (parent.sourceBaseSha === undefined ||
+          parent.sourceBaseSha.trim().length === 0))
     ) {
-      throw new ConvexError('V1 rerun requires a pinned source commit SHA')
+      throw new ConvexError(
+        'Current incoming-PR rerun requires pinned pull request base and head SHAs',
+      )
     }
 
     const existing = await ctx.db
@@ -1288,6 +1611,19 @@ export const createRerun = mutation({
         promptRequestId: parent.promptRequestId,
         workflowRunId: existing.workflowRunId,
       })
+    }
+
+    const latestAttempt = await ctx.db
+      .query('workflowRuns')
+      .withIndex('by_root_attempt', (q) =>
+        q.eq('rootWorkflowRunId', parent.rootWorkflowRunId ?? parent._id),
+      )
+      .order('desc')
+      .first()
+    if (latestAttempt !== null && latestAttempt._id !== parent._id) {
+      throw new ConvexError(
+        'A newer workflow attempt supersedes this rerun parent',
+      )
     }
 
     const activePublications = await ctx.db
@@ -1328,6 +1664,12 @@ export const createRerun = mutation({
       rootWorkflowRunId,
       attemptNumber: (parent.attemptNumber ?? 1) + 1,
       trigger: 'rerun',
+      ...(parent.candidateIdentityVersion === undefined
+        ? {}
+        : { candidateIdentityVersion: parent.candidateIdentityVersion }),
+      ...(parent.sourceBaseSha === undefined
+        ? {}
+        : { sourceBaseSha: parent.sourceBaseSha }),
       ...(parent.sourceCommitSha === undefined
         ? {}
         : { sourceCommitSha: parent.sourceCommitSha }),
@@ -1410,7 +1752,10 @@ export const claimWorkflowExecution = mutation({
     if (
       workflowRun.modelVersion === 'v1' &&
       (workflowRun.sourceCommitSha === undefined ||
-        workflowRun.sourceCommitSha.trim().length === 0)
+        workflowRun.sourceCommitSha.trim().length === 0 ||
+        (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+          (workflowRun.sourceBaseSha === undefined ||
+            workflowRun.sourceBaseSha.trim().length === 0)))
     ) {
       const failedAt = Date.now()
       await ctx.db.patch('workflowRuns', args.workflowRunId, {
@@ -1430,6 +1775,21 @@ export const claimWorkflowExecution = mutation({
         idempotencyKey: `${String(args.workflowRunId)}:missing-source-revision`,
       })
       return false
+    }
+    if (
+      workflowRun.modelVersion === 'v1' &&
+      workflowRun.rootWorkflowRunId !== undefined
+    ) {
+      const latestAttempt = await ctx.db
+        .query('workflowRuns')
+        .withIndex('by_root_attempt', (q) =>
+          q.eq('rootWorkflowRunId', workflowRun.rootWorkflowRunId),
+        )
+        .order('desc')
+        .first()
+      if (latestAttempt !== null && latestAttempt._id !== workflowRun._id) {
+        return false
+      }
     }
     if (workflowRun.modelVersion === 'v1') {
       const existingExecution = await ctx.db
@@ -3591,13 +3951,8 @@ export const recordHumanDecision = mutation({
         )
         .order('desc')
         .first()
-      if (
-        latestAttempt !== null &&
-        latestAttempt._id !== workflowRun._id
-      ) {
-        throw new ConvexError(
-          'A newer workflow attempt supersedes this report',
-        )
+      if (latestAttempt !== null && latestAttempt._id !== workflowRun._id) {
+        throw new ConvexError('A newer workflow attempt supersedes this report')
       }
       const activePublications = await ctx.db
         .query('canonicalPublicationClaims')
@@ -4449,6 +4804,14 @@ export const getDecisionPublicationReplayFixture = query({
           ...(workflowRun.trigger === undefined
             ? {}
             : { trigger: workflowRun.trigger }),
+          ...(workflowRun.candidateIdentityVersion === undefined
+            ? {}
+            : {
+                candidateIdentityVersion: workflowRun.candidateIdentityVersion,
+              }),
+          ...(workflowRun.sourceBaseSha === undefined
+            ? {}
+            : { sourceBaseSha: workflowRun.sourceBaseSha }),
           ...(workflowRun.sourceCommitSha === undefined
             ? {}
             : { sourceCommitSha: workflowRun.sourceCommitSha }),
@@ -4833,8 +5196,7 @@ export const getDetail = query({
       throw new ConvexError('Workflow prompt request not found')
     }
 
-    const rootWorkflowRunId =
-      workflowRun.rootWorkflowRunId ?? workflowRun._id
+    const rootWorkflowRunId = workflowRun.rootWorkflowRunId ?? workflowRun._id
     const latestAttempt =
       workflowRun.modelVersion === 'v1'
         ? await ctx.db
@@ -4848,8 +5210,7 @@ export const getDetail = query({
     const newerAttempt =
       latestAttempt !== null &&
       latestAttempt._id !== workflowRun._id &&
-      (latestAttempt.attemptNumber ?? 1) >
-        (workflowRun.attemptNumber ?? 1)
+      (latestAttempt.attemptNumber ?? 1) > (workflowRun.attemptNumber ?? 1)
         ? latestAttempt
         : undefined
 
@@ -5042,6 +5403,12 @@ export const getDetail = query({
         ...(workflowRun.trigger === undefined
           ? {}
           : { trigger: workflowRun.trigger }),
+        ...(workflowRun.candidateIdentityVersion === undefined
+          ? {}
+          : { candidateIdentityVersion: workflowRun.candidateIdentityVersion }),
+        ...(workflowRun.sourceBaseSha === undefined
+          ? {}
+          : { sourceBaseSha: workflowRun.sourceBaseSha }),
         ...(workflowRun.sourceCommitSha === undefined
           ? {}
           : { sourceCommitSha: workflowRun.sourceCommitSha }),
@@ -5616,6 +5983,14 @@ export const listRecent = query({
           ...(workflowRun.trigger === undefined
             ? {}
             : { trigger: workflowRun.trigger }),
+          ...(workflowRun.candidateIdentityVersion === undefined
+            ? {}
+            : {
+                candidateIdentityVersion: workflowRun.candidateIdentityVersion,
+              }),
+          ...(workflowRun.sourceBaseSha === undefined
+            ? {}
+            : { sourceBaseSha: workflowRun.sourceBaseSha }),
           ...(workflowRun.sourceCommitSha === undefined
             ? {}
             : { sourceCommitSha: workflowRun.sourceCommitSha }),

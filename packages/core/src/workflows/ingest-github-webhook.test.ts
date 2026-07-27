@@ -73,6 +73,7 @@ describe('IngestGitHubWebhook', () => {
         pullRequestId: 987,
         pullRequestNumber: 12,
         body: '',
+        baseSha: 'def456def456def456def456def456def456defa',
         headSha: 'abc123abc123abc123abc123abc123abc123abcd',
       })
     }).pipe(
@@ -84,13 +85,17 @@ describe('IngestGitHubWebhook', () => {
           pull_request: {
             id: 987,
             number: 12,
+            updated_at: '2026-07-27T00:00:00Z',
             title: 'Fix auth callback',
             body: null,
             head: {
               ref: 'feature/auth-callback',
               sha: 'abc123abc123abc123abc123abc123abc123abcd',
             },
-            base: { ref: 'main' },
+            base: {
+              ref: 'main',
+              sha: 'def456def456def456def456def456def456defa',
+            },
           },
           sender: { login: 'octocat' },
         }),
@@ -117,7 +122,9 @@ describe('IngestGitHubWebhook', () => {
         pullRequestId: 987,
         pullRequestNumber: 12,
         body: 'Updated the branch after review.',
+        baseSha: 'def456def456def456def456def456def456defa',
         headSha: 'abc123abc123abc123abc123abc123abc123abcd',
+        previousHeadSha: '0000000000000000000000000000000000000000',
         headRef: 'feature/auth-callback',
         baseRef: 'main',
         sender: 'octocat',
@@ -127,11 +134,14 @@ describe('IngestGitHubWebhook', () => {
       Effect.provide(
         gitHubWebhookLayer({
           action: 'synchronize',
+          before: '0000000000000000000000000000000000000000',
+          after: 'abc123abc123abc123abc123abc123abc123abcd',
           installation: { id: 123 },
           repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
           pull_request: {
             id: 987,
             number: 12,
+            updated_at: '2026-07-27T00:00:01Z',
             title: 'Fix auth callback',
             body: 'Updated the branch after review.',
             html_url: 'https://github.com/patchplane/demo/pull/12',
@@ -139,7 +149,10 @@ describe('IngestGitHubWebhook', () => {
               ref: 'feature/auth-callback',
               sha: 'abc123abc123abc123abc123abc123abc123abcd',
             },
-            base: { ref: 'main' },
+            base: {
+              ref: 'main',
+              sha: 'def456def456def456def456def456def456defa',
+            },
           },
           sender: { login: 'octocat' },
         }),
