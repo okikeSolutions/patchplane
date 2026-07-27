@@ -24,6 +24,8 @@
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
     "@patchplane/plugins": "workspace:*",
+    "@pierre/diffs": "1.2.12",
+    "@pierre/trees": "1.0.0-beta.6",
     "@react-three/fiber": "9.6.1",
     "@sentry/tanstackstart-react": "10.62.0",
     "@shadergradient/react": "2.4.20",

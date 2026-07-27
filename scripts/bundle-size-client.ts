@@ -38,14 +38,25 @@ interface Report {
   readonly client: BundleStats
 }
 
+// Keep the pre-renderer application envelope visible instead of losing it in a
+// single raised ceiling. @pierre/diffs@1.2.12 emits a broad lazy language/theme
+// graph under Vite; DIFF-001 measured a 9.84 MiB raw / 1.88 MiB gzip delta.
+// The dedicated allowance rounds that evidence up for production integration
+// while preserving the existing largest-chunk guard.
+const baseClientBudgetMiB = 3
+const pierreDiffsClientAllowanceMiB = 11
+const baseClientJsGzipBudgetKiB = 762
+const pierreDiffsClientJsGzipAllowanceKiB = 2_048
+
 function parseOptions(argv: readonly string[]): Options {
   let check = false
   let json = false
   let skipBuild = false
   let top = 10
   let serverBudgetMiB = 7.5
-  let clientBudgetMiB = 3
-  let clientJsGzipBudgetKiB = 762
+  let clientBudgetMiB = baseClientBudgetMiB + pierreDiffsClientAllowanceMiB
+  let clientJsGzipBudgetKiB =
+    baseClientJsGzipBudgetKiB + pierreDiffsClientJsGzipAllowanceKiB
   // The landing page intentionally keeps the shader runtime in the entry chunk
   // so the canvas can start immediately; its visual-startup benchmark guards
   // that behavior separately. Keep a modest ceiling above the measured 1.54 MiB
@@ -116,9 +127,9 @@ Options:
   --skip-build               Measure existing apps/client/dist output
   --top=N                    Number of largest files to show (default: 10)
   --server-budget-mib=N      Server total budget for --check (default: 7.5)
-  --client-budget-mib=N      Client total budget for --check (default: 3)
+  --client-budget-mib=N      Client total budget for --check (default: 14)
   --client-js-gzip-budget-kib=N
-                             Client JavaScript gzip budget (default: 762)
+                             Client JavaScript gzip budget (default: 2810)
   --client-largest-js-budget-mib=N
                              Largest client JavaScript chunk budget (default: 1.75)
 `)
