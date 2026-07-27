@@ -2,14 +2,14 @@
   "authKit": {
     "dev": {
       "configure": {
-        "redirectUris": ["http://localhost:3000/api/auth/callback"],
-        "appHomepageUrl": "http://localhost:3000",
-        "corsOrigins": ["http://localhost:3000"]
+        "redirectUris": ["https://patchplaneinfra-client-dev-e4b...solutions.workers.dev/api/auth/callback"],
+        "appHomepageUrl": "https://patchplaneinfra-client-dev-e4bibstlpemdjqcd.okike-solutions.workers.dev",
+        "corsOrigins": ["https://patchplaneinfra-client-dev-e4bibstlpemdjqcd.okike-solutions.workers.dev"]
       },
       "localEnvVars": {
         "WORKOS_CLIENT_ID": "${authEnv.WORKOS_CLIENT_ID}",
         "WORKOS_API_KEY": "${authEnv.WORKOS_API_KEY}",
-        "WORKOS_REDIRECT_URI": "http://localhost:3000/api/auth/callback"
+        "WORKOS_REDIRECT_URI": "https://patchplaneinfra-client-dev-e4b...solutions.workers.dev/api/auth/callback"
       }
     },
     "preview": {

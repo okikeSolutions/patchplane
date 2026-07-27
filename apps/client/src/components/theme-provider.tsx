@@ -1,9 +1,11 @@
-import { useRouter } from '@tanstack/react-router'
+import { ScriptOnce } from '@tanstack/react-router'
 import {
   createContext,
   type PropsWithChildren,
   use,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react'
@@ -17,6 +19,8 @@ type Props = PropsWithChildren<{
 }>
 
 const ThemeContext = createContext<ThemeContextVal | null>(null)
+const localThemeKey = 'patchplane-theme'
+const localThemeChangeEvent = 'patchplane-theme-change'
 
 function getSystemTheme(): Exclude<Theme, 'system'> {
   if (
@@ -35,14 +39,27 @@ function applyTheme(theme: Theme) {
 
   root.classList.remove('light', 'dark', 'system')
   root.classList.add(resolvedTheme)
+  root.style.colorScheme = resolvedTheme
 }
 
-const localThemeKey = 'patchplane-theme'
-const localThemeChangeEvent = 'patchplane-theme-change'
+export function createThemeBootstrapScript(
+  theme: Theme,
+  persistence: Props['persistence'] = 'server',
+) {
+  const fallback = JSON.stringify(theme)
+  const storedTheme =
+    persistence === 'local'
+      ? `localStorage.getItem(${JSON.stringify(localThemeKey)})`
+      : fallback
+
+  return `(function(){try{var t=${storedTheme};if(t!=='light'&&t!=='dark'&&t!=='system'){t=${fallback}}var d=matchMedia('(prefers-color-scheme: dark)').matches;var r=t==='system'?(d?'dark':'light'):t;var e=document.documentElement;e.classList.remove('light','dark','system');e.classList.add(r);e.style.colorScheme=r}catch(e){}})();`
+}
 
 function localThemeSnapshot(fallback: Theme): Theme {
   const storedTheme = window.localStorage.getItem(localThemeKey)
-  return storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system'
+  return storedTheme === 'light' ||
+    storedTheme === 'dark' ||
+    storedTheme === 'system'
     ? storedTheme
     : fallback
 }
@@ -62,20 +79,21 @@ export function ThemeProvider({
   persistence = 'server',
   persistTheme,
 }: Props) {
-  const router = useRouter()
   const [optimisticServerTheme, setOptimisticServerTheme] = useState<Theme>()
+  const persistenceRequest = useRef(0)
   const localTheme = useSyncExternalStore(
     subscribeToLocalTheme,
     () => localThemeSnapshot(theme),
     () => theme,
   )
-  const currentTheme = persistence === 'local'
-    ? localTheme
-    : optimisticServerTheme ?? theme
+  const currentTheme =
+    persistence === 'local' ? localTheme : (optimisticServerTheme ?? theme)
+
+  useLayoutEffect(() => {
+    applyTheme(currentTheme)
+  }, [currentTheme])
 
   useEffect(() => {
-    applyTheme(currentTheme)
-
     if (currentTheme !== 'system') {
       return undefined
     }
@@ -88,6 +106,9 @@ export function ThemeProvider({
   }, [currentTheme])
 
   function setTheme(val: Theme) {
+    if (val === currentTheme) return
+    applyTheme(val)
+
     if (persistence === 'local') {
       window.localStorage.setItem(localThemeKey, val)
       window.dispatchEvent(new Event(localThemeChangeEvent))
@@ -98,14 +119,19 @@ export function ThemeProvider({
       throw new Error('Server theme persistence requires persistTheme')
     }
 
+    const request = persistenceRequest.current + 1
+    persistenceRequest.current = request
     setOptimisticServerTheme(val)
-    void persistTheme(val)
-      .then(() => router.invalidate())
-      .finally(() => setOptimisticServerTheme(undefined))
+    void persistTheme(val).catch(() => {
+      if (persistenceRequest.current === request) {
+        setOptimisticServerTheme(undefined)
+      }
+    })
   }
 
   return (
     <ThemeContext value={{ theme: currentTheme, setTheme }}>
+      <ScriptOnce>{createThemeBootstrapScript(theme, persistence)}</ScriptOnce>
       {children}
     </ThemeContext>
   )

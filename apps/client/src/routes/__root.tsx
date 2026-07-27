@@ -21,7 +21,6 @@ import Footer from '@/components/footer'
 import Header from '@/components/header'
 import { ThemeProvider } from '@/components/theme-provider'
 import appCss from '../styles.css?url'
-import { cn } from '@/lib/utils'
 import { getThemeServerFn, setThemeServerFn } from '@/lib/theme'
 import { getInitialAuthServerFn } from '@/lib/workos-initial-auth'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -107,7 +106,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang={documentLocale}
-      className={cn('scroll-smooth', theme)}
+      className="scroll-smooth"
       suppressHydrationWarning
     >
       <head>

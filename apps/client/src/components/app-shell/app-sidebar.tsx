@@ -18,8 +18,6 @@ import { localizeAppHref } from './app-language'
 
 export function AppSidebar() {
   const { user, signOut } = useAuth()
-  const displayName =
-    user?.firstName ?? user?.email ?? m.app_operator_fallback()
   const navMain = [
     {
       title: m.app_nav_workflows(),
@@ -72,7 +70,6 @@ export function AppSidebar() {
         <NavSecondary items={navSecondary} className="mt-auto" />
       </SidebarContent>
       <NavUser
-        displayName={displayName}
         isSignedIn={Boolean(user)}
         onSignOut={() => {
           void signOut()

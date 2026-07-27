@@ -16,9 +16,7 @@ vi.mock('@workos/authkit-tanstack-react-start/client', () => ({
 }))
 
 vi.mock('./nav-user', () => ({
-  NavUser: ({ displayName }: { readonly displayName: string }) => (
-    <div data-testid="nav-user">{displayName}</div>
-  ),
+  NavUser: () => <div data-testid="nav-user">Logout</div>,
 }))
 
 describe('AppSidebar', () => {

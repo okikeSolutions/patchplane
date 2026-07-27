@@ -52,6 +52,11 @@ function composite(foreground: string, background: string, opacity: number) {
 }
 
 describe('app theme contrast contract', () => {
+  test('does not animate the entire document during theme changes', () => {
+    expect(stylesheet).not.toContain('html[data-theme-transition]')
+    expect(stylesheet).not.toContain('transition-duration: 180ms')
+  })
+
   test('keeps production dark surfaces and secondary text readable', () => {
     const background = token(darkTokens, 'background')
     const card = token(darkTokens, 'card')
@@ -67,6 +72,7 @@ describe('app theme contrast contract', () => {
   test('keeps production light controls and tinted status text readable', () => {
     const canvas = token(rootTokens, 'brand-cream')
     const success = token(rootTokens, 'success-readable')
+    const warning = token(rootTokens, 'warning-foreground')
     expect(
       contrast(token(rootTokens, 'input'), '#ffffff'),
     ).toBeGreaterThanOrEqual(3)
@@ -78,6 +84,25 @@ describe('app theme contrast contract', () => {
     ).toBeGreaterThanOrEqual(4.5)
     expect(
       contrast(success, composite(success, canvas, 0.18)),
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(warning, composite(token(rootTokens, 'warning'), canvas, 0.12)),
+    ).toBeGreaterThanOrEqual(4.5)
+  })
+
+  test('keeps dark success and warning status text readable', () => {
+    const card = token(darkTokens, 'card')
+    expect(
+      contrast(
+        token(darkTokens, 'success-foreground'),
+        composite(token(darkTokens, 'success'), card, 0.12),
+      ),
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(
+        token(darkTokens, 'warning-foreground'),
+        composite(token(darkTokens, 'warning'), card, 0.12),
+      ),
     ).toBeGreaterThanOrEqual(4.5)
   })
 })

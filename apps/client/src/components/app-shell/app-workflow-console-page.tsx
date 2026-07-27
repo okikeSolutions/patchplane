@@ -44,7 +44,13 @@ export function AppWorkflowConsolePage({
                 void navigate({
                   to: '/app/workflows/$workflowRunId',
                   params: { workflowRunId },
-                  search: { tab: 'summary', returnTo },
+                  search: {
+                    tab: 'summary',
+                    returnTo,
+                    file: undefined,
+                    diff: 'unified',
+                    focus: undefined,
+                  },
                 })
               }}
             />

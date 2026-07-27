@@ -29,7 +29,7 @@ export function GitHubConnectionStatus() {
     <Alert
       role={status === 'failed' ? 'alert' : undefined}
       aria-live={status === 'connected' ? 'polite' : undefined}
-      variant={status === 'failed' ? 'destructive' : 'default'}
+      variant={status === 'failed' ? 'destructive' : 'success'}
       className="m-3 w-auto shrink-0"
     >
       {status === 'failed' ? <CircleAlertIcon /> : <CheckCircle2Icon />}

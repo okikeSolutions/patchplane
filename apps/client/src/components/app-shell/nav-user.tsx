@@ -11,11 +11,9 @@ import {
 import { localizeAppHref } from './app-language'
 
 export function NavUser({
-  displayName,
   isSignedIn,
   onSignOut,
 }: {
-  readonly displayName: string
   readonly isSignedIn: boolean
   readonly onSignOut: () => void
 }) {
@@ -34,7 +32,7 @@ export function NavUser({
               onClick={onSignOut}
             >
               <LogOutIcon />
-              <span className="truncate">{displayName}</span>
+              <span>{m.app_nav_sign_out()}</span>
             </SidebarMenuButton>
           ) : (
             <SidebarMenuButton

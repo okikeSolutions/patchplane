@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Sidebar, SidebarProvider } from '@/components/ui/sidebar'
 import { AppShellHeader } from './app-shell-header'
@@ -25,12 +31,25 @@ describe('AppShellHeader', () => {
   test('exposes the off-canvas navigation trigger on small screens', () => {
     render(
       <SidebarProvider>
-        <AppShellHeader title="Patch report" />
+        <AppShellHeader
+          parent={{ href: '/en/app', label: 'Workflows' }}
+          title="Patch Report"
+        />
       </SidebarProvider>,
     )
     const trigger = screen.getByRole('button', { name: 'Toggle navigation' })
     const separator = screen.getByRole('separator')
-    expect(screen.getByText('Patch report')).toBeTruthy()
+    const breadcrumb = screen.getByRole('navigation', { name: 'breadcrumb' })
+    expect(
+      within(breadcrumb)
+        .getByRole('link', { name: 'Workflows' })
+        .getAttribute('href'),
+    ).toBe('/en/app')
+    expect(
+      within(breadcrumb)
+        .getByRole('link', { name: 'Patch Report' })
+        .getAttribute('aria-current'),
+    ).toBe('page')
     expect(trigger.className).toContain('size-11')
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(separator.getAttribute('aria-orientation')).toBe('vertical')

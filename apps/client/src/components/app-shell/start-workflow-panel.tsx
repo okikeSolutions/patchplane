@@ -204,7 +204,7 @@ function WorkflowStartResult({
   }
 }) {
   return (
-    <Alert>
+    <Alert variant="success">
       <CheckCircle2Icon />
       <AlertTitle>{m.app_workflow_start_success()}</AlertTitle>
       <AlertDescription>

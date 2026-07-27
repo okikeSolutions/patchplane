@@ -28,5 +28,14 @@ describe('alpha app language', () => {
     )
     expect(m.app_update_reload({}, { locale: 'de' })).toBe('Neu laden')
     expect(m.app_update_reload({}, { locale: 'en' })).toBe('Reload')
+    expect(m.app_nav_sign_out({}, { locale: 'de' })).toBe('Abmelden')
+    expect(m.app_nav_sign_out({}, { locale: 'en' })).toBe('Logout')
+    expect(m.app_diff_a11y_added({}, { locale: 'de' })).toBe('Hinzugefügt.')
+    expect(m.app_diff_a11y_deleted({}, { locale: 'de' })).toBe('Gelöscht.')
+    expect(m.app_diff_a11y_unchanged({}, { locale: 'de' })).toBe('Unverändert.')
+    expect(m.app_diff_a11y_old_line({ line: '34' }, { locale: 'de' })).toBe(
+      'Alte Zeile 34.',
+    )
+    expect(m.app_diff_a11y_added({}, { locale: 'en' })).toBe('Added.')
   })
 })
