@@ -24,6 +24,7 @@ Core docs:
 - [CONTRIBUTING.md](./CONTRIBUTING.md): development and contribution guide
 - [docs/philosophy.md](./docs/philosophy.md): product and developer-experience decision principles
 - [docs/critical-path.md](./docs/critical-path.md): product path from intake through evidence, decision, publication, and release proof
+- [docs/ui-ux-review-tracker.md](./docs/ui-ux-review-tracker.md): authenticated UI/UX audit findings, diff viewer gates, and minimal changed-file navigation tracker
 - [docs/telemetry-data-policy.md](./docs/telemetry-data-policy.md): Sentry allowlist, prohibited content, and sanitization requirements
 - [docs/m10-acceptance-runbook.md](./docs/m10-acceptance-runbook.md): repeatable human-gated trust-loop acceptance
 - [AGENTS.md](./AGENTS.md): repository map, trust boundaries, and automation protocol
