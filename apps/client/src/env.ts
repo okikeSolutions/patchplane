@@ -1,6 +1,19 @@
+import {
+  appVersionIdFrom,
+  localAppVersionId,
+  type AppVersionId,
+} from '@/lib/app-version'
+
+interface WorkerVersionMetadata {
+  readonly id: string
+  readonly tag: string
+  readonly timestamp: string
+}
+
 export interface ClientWorkerEnv {
   SOURCE_CONTROL_WORKER: Fetcher
   PATCHPLANE_EVIDENCE_BUCKET: R2Bucket
+  CF_VERSION_METADATA?: WorkerVersionMetadata
 }
 
 declare global {
@@ -69,4 +82,18 @@ export async function getSourceControlWorker(): Promise<Fetcher> {
       { cause },
     )
   }
+}
+
+export async function getClientVersionId(): Promise<AppVersionId> {
+  try {
+    const versionId = (await loadCloudflareEnv()).CF_VERSION_METADATA?.id
+    if (versionId !== undefined) return appVersionIdFrom(versionId)
+  } catch {
+    // Local Vite and route discovery do not expose Cloudflare bindings.
+  }
+
+  const configuredVersionId = process.env.PATCHPLANE_BUILD_ID?.trim()
+  return configuredVersionId
+    ? appVersionIdFrom(configuredVersionId)
+    : localAppVersionId
 }

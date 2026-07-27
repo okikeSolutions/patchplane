@@ -183,6 +183,7 @@ export default Alchemy.Stack(
       env: {
         ...clientRuntimeEnv,
         PATCHPLANE_DEBUG_LOGGING: true,
+        CF_VERSION_METADATA: Cloudflare.Workers.VersionMetadata(),
         SOURCE_CONTROL_WORKER: sourceControlWorker,
         PATCHPLANE_EVIDENCE_R2_BUCKET: evidenceBucket.bucketName,
         PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,

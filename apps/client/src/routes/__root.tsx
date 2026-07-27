@@ -1,102 +1,113 @@
-import { useCallback, useMemo } from "react";
-import { QueryClient } from "@tanstack/react-query";
-import { type AuthTokenFetcher } from "convex/react";
+import { useCallback, useMemo } from 'react'
+import { QueryClient } from '@tanstack/react-query'
+import { type AuthTokenFetcher } from 'convex/react'
 import {
   createRootRouteWithContext,
   HeadContent,
   Scripts,
   useRouterState,
-} from "@tanstack/react-router";
-import { ConvexProviderWithAuthKit } from "@convex-dev/workos";
+} from '@tanstack/react-router'
+import { ConvexProviderWithAuthKit } from '@convex-dev/workos'
 import {
   AuthKitProvider,
   useAccessToken,
   useAuth,
-} from "@workos/authkit-tanstack-react-start/client";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { TanStackDevtools } from "@tanstack/react-devtools";
-import * as m from "@/paraglide/messages";
-import { getLocale } from "@/paraglide/runtime";
-import Footer from "@/components/footer";
-import Header from "@/components/header";
-import { ThemeProvider } from "@/components/theme-provider";
-import appCss from "../styles.css?url";
-import { cn } from "@/lib/utils";
-import { getThemeServerFn, setThemeServerFn } from "@/lib/theme";
-import { getInitialAuthServerFn } from "@/lib/workos-initial-auth";
-import { TooltipProvider } from "@/components/ui/tooltip";
+} from '@workos/authkit-tanstack-react-start/client'
+import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
+import { TanStackDevtools } from '@tanstack/react-devtools'
+import * as m from '@/paraglide/messages'
+import { getLocale } from '@/paraglide/runtime'
+import Footer from '@/components/footer'
+import Header from '@/components/header'
+import { ThemeProvider } from '@/components/theme-provider'
+import appCss from '../styles.css?url'
+import { cn } from '@/lib/utils'
+import { getThemeServerFn, setThemeServerFn } from '@/lib/theme'
+import { getInitialAuthServerFn } from '@/lib/workos-initial-auth'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { documentLocaleForPathname } from '@/components/app-shell/app-language'
+import { Toaster } from '@/components/ui/sonner'
+import { AppVersionNotifier } from '@/components/app-version-notifier'
+import { getClientVersionIdServerFn } from '@/lib/app-version-server'
 
 interface ConvexAuthClient {
-  setAuth(fetchToken: AuthTokenFetcher): void;
-  clearAuth(): void;
+  setAuth(fetchToken: AuthTokenFetcher): void
+  clearAuth(): void
 }
 
 export const Route = createRootRouteWithContext<{
-  queryClient: QueryClient;
-  convexClient: ConvexAuthClient;
+  queryClient: QueryClient
+  convexClient: ConvexAuthClient
 }>()({
   head: () => ({
     meta: [
       {
-        charSet: "utf-8",
+        charSet: 'utf-8',
       },
       {
-        name: "viewport",
-        content: "width=device-width, initial-scale=1",
+        name: 'viewport',
+        content: 'width=device-width, initial-scale=1',
       },
       {
         title: m.meta_title(),
       },
       {
-        name: "description",
+        name: 'description',
         content: m.meta_description(),
       },
     ],
     links: [
       {
-        rel: "stylesheet",
+        rel: 'stylesheet',
         href: appCss,
       },
       {
-        rel: "icon",
-        type: "image/svg+xml",
-        href: "/brand/patchplane-favicon-light.svg",
-        media: "(prefers-color-scheme: light)",
+        rel: 'icon',
+        type: 'image/svg+xml',
+        href: '/brand/patchplane-favicon-light.svg',
+        media: '(prefers-color-scheme: light)',
       },
       {
-        rel: "icon",
-        type: "image/svg+xml",
-        href: "/brand/patchplane-favicon-dark.svg",
-        media: "(prefers-color-scheme: dark)",
+        rel: 'icon',
+        type: 'image/svg+xml',
+        href: '/brand/patchplane-favicon-dark.svg',
+        media: '(prefers-color-scheme: dark)',
       },
       {
-        rel: "apple-touch-icon",
-        href: "/apple-touch-icon.png",
+        rel: 'apple-touch-icon',
+        href: '/apple-touch-icon.png',
       },
       {
-        rel: "manifest",
-        href: "/manifest.json",
+        rel: 'manifest',
+        href: '/manifest.json',
       },
     ],
   }),
-  loader: async () => ({
-    theme: await getThemeServerFn(),
-    initialAuth: await getInitialAuthServerFn(),
-  }),
+  loader: async () => {
+    const [theme, initialAuth, appVersionId] = await Promise.all([
+      getThemeServerFn(),
+      getInitialAuthServerFn(),
+      getClientVersionIdServerFn(),
+    ])
+    return { theme, initialAuth, appVersionId }
+  },
   shellComponent: RootDocument,
-});
+})
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const { convexClient } = Route.useRouteContext();
-  const { theme, initialAuth } = Route.useLoaderData();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const locale = getLocale();
-  const isAppShellRoute = pathname.startsWith('/app');
+  const { convexClient } = Route.useRouteContext()
+  const { theme, initialAuth, appVersionId } = Route.useLoaderData()
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  const locale = getLocale()
+  const isAppShellRoute = pathname.startsWith('/app')
+  const documentLocale = documentLocaleForPathname(pathname, locale)
 
   return (
     <html
-      lang={locale}
-      className={cn("scroll-smooth", theme)}
+      lang={documentLocale}
+      className={cn('scroll-smooth', theme)}
       suppressHydrationWarning
     >
       <head>
@@ -105,28 +116,28 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="min-h-screen wrap-anywhere bg-background bg-[radial-gradient(circle_at_top_left,var(--hero-glow),transparent_30rem),radial-gradient(circle_at_85%_15%,var(--hero-glow-soft),transparent_24rem),linear-gradient(180deg,rgb(255_255_255/0.02),transparent_28rem)] bg-fixed font-sans text-foreground antialiased selection:bg-primary/28">
         <ThemeProvider
           theme={theme}
-          persistTheme={(nextTheme) =>
-            setThemeServerFn({ data: nextTheme })
-          }
+          persistTheme={(nextTheme) => setThemeServerFn({ data: nextTheme })}
         >
           <TooltipProvider>
+            <AppVersionNotifier bootVersionId={appVersionId} />
+            <Toaster position="bottom-right" />
             <AuthKitProvider initialAuth={initialAuth}>
               <ConvexProviderWithAuthKit
                 client={convexClient}
                 useAuth={useConvexAuthFromWorkOS}
               >
                 {isAppShellRoute ? null : <Header />}
-                <div key={locale}>{children}</div>
+                <div key={documentLocale}>{children}</div>
                 {isAppShellRoute ? null : <Footer />}
               </ConvexProviderWithAuthKit>
             </AuthKitProvider>
             <TanStackDevtools
               config={{
-                position: "bottom-right",
+                position: 'bottom-right',
               }}
               plugins={[
                 {
-                  name: "Tanstack Router",
+                  name: 'Tanstack Router',
                   render: <TanStackRouterDevtoolsPanel />,
                 },
               ]}
@@ -136,16 +147,16 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         </ThemeProvider>
       </body>
     </html>
-  );
+  )
 }
 
 function useConvexAuthFromWorkOS() {
-  const auth = useAuth();
-  const { getAccessToken } = useAccessToken();
+  const auth = useAuth()
+  const { getAccessToken } = useAccessToken()
   const getConvexAccessToken = useCallback(
     async () => (await getAccessToken()) ?? null,
     [getAccessToken],
-  );
+  )
 
   return useMemo(
     () => ({
@@ -155,5 +166,5 @@ function useConvexAuthFromWorkOS() {
       getAccessToken: getConvexAccessToken,
     }),
     [auth.loading, auth.user, getConvexAccessToken],
-  );
+  )
 }

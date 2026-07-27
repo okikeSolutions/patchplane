@@ -31,7 +31,11 @@ describe('browser Sentry instrumentation', () => {
   it.effect(
     'disables automatic sensitive collection and bounds breadcrumbs',
     () =>
-      Effect.promise(() => import('./instrument-client-runtime')).pipe(
+      Effect.promise(async () => {
+        const { initializeClientInstrumentation } =
+          await import('./instrument-client-runtime')
+        initializeClientInstrumentation()
+      }).pipe(
         Effect.andThen(
           Effect.sync(() => {
             assert.strictEqual(sentryMocks.init.mock.calls.length, 1)

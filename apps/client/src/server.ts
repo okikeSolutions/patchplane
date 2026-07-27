@@ -2,9 +2,17 @@ import { withCloudflareSentry, type CloudflareSentryEnv } from '@patchplane/plug
 import { wrapFetchWithSentry } from '@sentry/tanstackstart-react'
 import handler from '@tanstack/react-start/server-entry'
 import { paraglideMiddleware } from './paraglide/server'
+import {
+  appVersionIdFrom,
+  createAppVersionResponse,
+  localAppVersionId,
+} from './lib/app-version'
 
 type ClientWorkerEnv = CloudflareSentryEnv & {
   readonly PATCHPLANE_DEBUG_LOGGING?: boolean | string
+  readonly CF_VERSION_METADATA?: {
+    readonly id: string
+  }
 }
 
 function enabled(value: boolean | string | undefined) {
@@ -37,6 +45,20 @@ const clientHandler = {
     }
 
     try {
+      if (
+        pathname === '/api/version' &&
+        (request.method === 'GET' || request.method === 'HEAD')
+      ) {
+        const configuredVersionId = process.env.PATCHPLANE_BUILD_ID?.trim()
+        const versionId =
+          env?.CF_VERSION_METADATA?.id !== undefined
+            ? appVersionIdFrom(env.CF_VERSION_METADATA.id)
+            : configuredVersionId
+              ? appVersionIdFrom(configuredVersionId)
+              : localAppVersionId
+        return createAppVersionResponse(versionId, request.method)
+      }
+
       const response = await tanstackHandler.fetch(request)
 
       if (debug) {
