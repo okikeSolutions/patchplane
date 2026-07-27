@@ -71,7 +71,7 @@ const GitHubIssueCommentCreatedPayload = Schema.Struct({
 
 export const NormalizeGitHubWebhookEvent = Effect.fn(
   '@patchplane/core/github/NormalizeGitHubWebhookEvent',
-)(function*(input: GitHubWebhookVerification) {
+)(function* (input: GitHubWebhookVerification) {
   if (input.eventName === 'issues') {
     const payload = yield* Schema.decodeUnknownEffect(GitHubIssueOpenedPayload)(
       input.payload,
@@ -96,9 +96,16 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       issueId: payload.issue.id,
       issueNumber: payload.issue.number,
       title: payload.issue.title,
-      prompt: [payload.issue.title, payload.issue.body ?? ''].filter(Boolean).join('\n\n'),
-      ...(payload.issue.html_url === undefined ? {} : { url: payload.issue.html_url }),
-      ...(payload.sender?.login === undefined ? {} : { sender: payload.sender.login }),
+      body: payload.issue.body ?? '',
+      prompt: [payload.issue.title, payload.issue.body ?? '']
+        .filter(Boolean)
+        .join('\n\n'),
+      ...(payload.issue.html_url === undefined
+        ? {}
+        : { url: payload.issue.html_url }),
+      ...(payload.sender?.login === undefined
+        ? {}
+        : { sender: payload.sender.login }),
     }).pipe(
       Effect.mapError(
         (cause) =>
@@ -119,16 +126,18 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
         (cause) =>
           new GitHubError({
             operation: 'normalizeGitHubWebhookEvent.pull_request',
-            message: 'GitHub pull request webhook payload is missing pull request data',
+            message:
+              'GitHub pull request webhook payload is missing pull request data',
             cause,
           }),
       ),
     )
 
     return yield* decodeGitHubNormalizedWorkflowEvent({
-      kind: payload.action === 'opened'
-        ? 'github.pull_request.opened'
-        : 'github.pull_request.synchronize',
+      kind:
+        payload.action === 'opened'
+          ? 'github.pull_request.opened'
+          : 'github.pull_request.synchronize',
       deliveryId: input.deliveryId,
       installationId: payload.installation.id,
       owner: payload.repository.owner.login,
@@ -137,12 +146,19 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       pullRequestId: payload.pull_request.id,
       pullRequestNumber: payload.pull_request.number,
       title: payload.pull_request.title,
-      prompt: [payload.pull_request.title, payload.pull_request.body ?? ''].filter(Boolean).join('\n\n'),
+      body: payload.pull_request.body ?? '',
+      prompt: [payload.pull_request.title, payload.pull_request.body ?? '']
+        .filter(Boolean)
+        .join('\n\n'),
       headSha: payload.pull_request.head.sha,
       headRef: payload.pull_request.head.ref,
       baseRef: payload.pull_request.base.ref,
-      ...(payload.pull_request.html_url === undefined ? {} : { url: payload.pull_request.html_url }),
-      ...(payload.sender?.login === undefined ? {} : { sender: payload.sender.login }),
+      ...(payload.pull_request.html_url === undefined
+        ? {}
+        : { url: payload.pull_request.html_url }),
+      ...(payload.sender?.login === undefined
+        ? {}
+        : { sender: payload.sender.login }),
     }).pipe(
       Effect.mapError(
         (cause) =>
@@ -156,23 +172,25 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
   }
 
   if (input.eventName === 'issue_comment') {
-    const payload = yield* Schema.decodeUnknownEffect(GitHubIssueCommentCreatedPayload)(
-      input.payload,
-    ).pipe(
+    const payload = yield* Schema.decodeUnknownEffect(
+      GitHubIssueCommentCreatedPayload,
+    )(input.payload).pipe(
       Effect.mapError(
         (cause) =>
           new GitHubError({
             operation: 'normalizeGitHubWebhookEvent.issue_comment.created',
-            message: 'GitHub issue comment webhook payload is missing comment data',
+            message:
+              'GitHub issue comment webhook payload is missing comment data',
             cause,
           }),
       ),
     )
 
     return yield* decodeGitHubNormalizedWorkflowEvent({
-      kind: payload.issue.pull_request === undefined
-        ? 'github.issue_comment.created'
-        : 'github.pull_request_comment.created',
+      kind:
+        payload.issue.pull_request === undefined
+          ? 'github.issue_comment.created'
+          : 'github.pull_request_comment.created',
       deliveryId: input.deliveryId,
       installationId: payload.installation.id,
       owner: payload.repository.owner.login,
@@ -182,8 +200,12 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       issueNumber: payload.issue.number,
       commentId: payload.comment.id,
       prompt: payload.comment.body,
-      ...(payload.comment.html_url === undefined ? {} : { url: payload.comment.html_url }),
-      ...(payload.sender?.login === undefined ? {} : { sender: payload.sender.login }),
+      ...(payload.comment.html_url === undefined
+        ? {}
+        : { url: payload.comment.html_url }),
+      ...(payload.sender?.login === undefined
+        ? {}
+        : { sender: payload.sender.login }),
     }).pipe(
       Effect.mapError(
         (cause) =>

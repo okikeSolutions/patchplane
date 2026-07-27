@@ -32,6 +32,15 @@ interface WorkflowStartResult {
 }
 
 interface WorkflowDetailResult {
+  readonly workflowRun: {
+    readonly id: string
+  }
+  readonly newerAttempt?: {
+    readonly workflowRunId: string
+    readonly attemptNumber: number
+    readonly status: 'queued' | 'running' | 'reviewed' | 'failed'
+    readonly createdAt: number
+  }
   readonly runtimeEvents: ReadonlyArray<{
     readonly type: string
     readonly payloadJson?: string | undefined
@@ -634,6 +643,24 @@ describe('workflowStarts V1 rerun lineage', () => {
     expect(replay).toMatchObject({
       workflowRun: { id: (first as WorkflowStartResult).workflowRun.id },
     })
+    const parentDetail = await t.query(getWorkflowDetail, {
+      workflowRunId: parent.workflowRun.id,
+    })
+    const childDetail = await t.query(getWorkflowDetail, {
+      workflowRunId: (first as WorkflowStartResult).workflowRun.id,
+    })
+    expect(parentDetail).toMatchObject({
+      workflowRun: { id: parent.workflowRun.id },
+      newerAttempt: {
+        workflowRunId: (first as WorkflowStartResult).workflowRun.id,
+        attemptNumber: 2,
+        status: 'queued',
+      },
+    })
+    expect(childDetail).toMatchObject({
+      workflowRun: { id: (first as WorkflowStartResult).workflowRun.id },
+    })
+    expect(childDetail.newerAttempt).toBeUndefined()
     const executionFixture = (await t.query(getWorkflowExecutionFixture, {
       systemSecret: 'system_test',
       workflowRunId: (first as WorkflowStartResult).workflowRun.id,
@@ -829,6 +856,92 @@ describe('workflowStarts candidate-bound verification evidence', () => {
 })
 
 describe('workflowStarts trusted boundary and authz', () => {
+  test('rejects a new human decision after a child attempt supersedes the report', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t, {
+      permissions: [
+        'workspace:view',
+        'prompt:create',
+        'run:start',
+        'decision:reject',
+      ],
+    })
+    const parent = await createWorkflowStartForTest(t)
+    const records = await t.run(async (ctx) => {
+      await ctx.db.patch('workflowRuns', parent.workflowRun.id, {
+        status: 'reviewed',
+      })
+      const sandboxExecutionId = await ctx.db.insert('sandboxExecutions', {
+        workflowRunId: parent.workflowRun.id,
+        provider: 'daytona',
+        sandboxId: 'sandbox-1',
+        command: 'bun test',
+        status: 'succeeded',
+        stdout: 'ok',
+        startedAt: 1,
+        completedAt: 2,
+        createdAt: 2,
+      })
+      const candidatePatchSetId = await ctx.db.insert('candidatePatchSets', {
+        workflowRunId: parent.workflowRun.id,
+        sandboxExecutionId,
+        status: 'captured',
+        candidateDigest: `sha256:${'a'.repeat(64)}`,
+        createdAt: 3,
+      })
+      const reviewRunId = await ctx.db.insert('reviewRuns', {
+        workflowRunId: parent.workflowRun.id,
+        sandboxExecutionId,
+        candidatePatchSetId,
+        kind: 'test',
+        reviewer: 'patchplane:test',
+        status: 'completed',
+        startedAt: 3,
+        completedAt: 4,
+        createdAt: 3,
+      })
+      const policyDecisionId = await ctx.db.insert('policyDecisions', {
+        workflowRunId: parent.workflowRun.id,
+        reviewRunId,
+        candidatePatchSetId,
+        status: 'approved',
+        summary: 'Ready',
+        policyVersion: 'alpha-v1',
+        inputDigest: `sha256:${'b'.repeat(64)}`,
+        createdAt: 4,
+      })
+      await ctx.db.insert('workflowRuns', {
+        promptRequestId: parent.promptRequest.id,
+        workspaceId: 'workos:org_123',
+        traceId: 'trace-child',
+        status: 'queued',
+        modelVersion: 'v1',
+        parentWorkflowRunId: parent.workflowRun.id,
+        rootWorkflowRunId: parent.workflowRun.id,
+        attemptNumber: 2,
+        trigger: 'rerun',
+        sourceCommitSha: '0123456789012345678901234567890123456789',
+        createdAt: 5,
+      })
+      return {
+        sandboxExecutionId,
+        candidatePatchSetId,
+        reviewRunId,
+        policyDecisionId,
+      }
+    })
+
+    await expect(
+      t.mutation(recordHumanDecision, {
+        workflowRunId: parent.workflowRun.id,
+        ...records,
+        status: 'rejected',
+        comment: 'Reject the superseded attempt.',
+        idempotencyKey: 'superseded-decision',
+      }),
+    ).rejects.toThrow('newer workflow attempt supersedes')
+  })
+
   test('returns a bounded decision publication replay fixture', async () => {
     const t = authenticatedTest()
     await seedMembership(t)
@@ -982,6 +1095,7 @@ describe('workflowStarts trusted boundary and authz', () => {
         issueExternalId: '789',
         issueNumber: 7,
         issueTitle: 'Fix auth callback',
+        issueBody: '## Summary\n\nRepair the callback.',
         pullRequestExternalId: '789',
         pullRequestNumber: 7,
         pullRequestHeadSha: '0123456789012345678901234567890123456789',
@@ -1017,12 +1131,20 @@ describe('workflowStarts trusted boundary and authz', () => {
       actorId: 'github-app:123',
       source: 'external',
       prompt: 'Fix auth callback',
+      externalRef: {
+        issueTitle: 'Fix auth callback',
+        issueBody: '## Summary\n\nRepair the callback.',
+      },
     })
 
     const refs = await t.run((ctx) =>
       ctx.db.query('externalWorkflowRefs').collect(),
     )
     expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({
+      issueTitle: 'Fix auth callback',
+      issueBody: '## Summary\n\nRepair the callback.',
+    })
   })
 
   test('public workflow start requires authentication', async () => {

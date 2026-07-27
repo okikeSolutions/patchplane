@@ -41,6 +41,7 @@ export const GitHubEventToWorkflowIntake = Effect.fn(
     issueNumber:
       'issueNumber' in event ? event.issueNumber : event.pullRequestNumber,
     issueTitle: event.title,
+    issueBody: event.body,
     pullRequestExternalId:
       'pullRequestId' in event ? String(event.pullRequestId) : undefined,
     pullRequestNumber:

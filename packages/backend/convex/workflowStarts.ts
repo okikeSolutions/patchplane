@@ -192,6 +192,7 @@ const externalWorkflowRefArg = v.object({
   issueExternalId: v.optional(v.string()),
   issueNumber: v.optional(v.number()),
   issueTitle: v.optional(v.string()),
+  issueBody: v.optional(v.string()),
   pullRequestExternalId: v.optional(v.string()),
   pullRequestNumber: v.optional(v.number()),
   pullRequestHeadSha: v.optional(v.string()),
@@ -629,6 +630,19 @@ const workflowDetailReturn = v.object({
     sourceCommitSha: v.optional(v.string()),
     createdAt: v.number(),
   }),
+  newerAttempt: v.optional(
+    v.object({
+      workflowRunId: v.string(),
+      attemptNumber: v.number(),
+      status: v.union(
+        v.literal('queued'),
+        v.literal('running'),
+        v.literal('reviewed'),
+        v.literal('failed'),
+      ),
+      createdAt: v.number(),
+    }),
+  ),
   runtimeEvents: v.array(runtimeEventReturn),
   runtimeEventsTruncated: v.boolean(),
   runtimeSessions: v.array(runtimeSessionReturn),
@@ -752,6 +766,7 @@ async function createWorkflowStartRecord(
       issueExternalId?: string
       issueNumber?: number
       issueTitle?: string
+      issueBody?: string
       pullRequestExternalId?: string
       pullRequestNumber?: number
       pullRequestHeadSha?: string
@@ -3566,6 +3581,24 @@ export const recordHumanDecision = mutation({
     }
 
     if (existingDecision === null && workflowRun.modelVersion === 'v1') {
+      const latestAttempt = await ctx.db
+        .query('workflowRuns')
+        .withIndex('by_root_attempt', (q) =>
+          q.eq(
+            'rootWorkflowRunId',
+            workflowRun.rootWorkflowRunId ?? workflowRun._id,
+          ),
+        )
+        .order('desc')
+        .first()
+      if (
+        latestAttempt !== null &&
+        latestAttempt._id !== workflowRun._id
+      ) {
+        throw new ConvexError(
+          'A newer workflow attempt supersedes this report',
+        )
+      }
       const activePublications = await ctx.db
         .query('canonicalPublicationClaims')
         .withIndex('by_root', (q) =>
@@ -4800,6 +4833,26 @@ export const getDetail = query({
       throw new ConvexError('Workflow prompt request not found')
     }
 
+    const rootWorkflowRunId =
+      workflowRun.rootWorkflowRunId ?? workflowRun._id
+    const latestAttempt =
+      workflowRun.modelVersion === 'v1'
+        ? await ctx.db
+            .query('workflowRuns')
+            .withIndex('by_root_attempt', (q) =>
+              q.eq('rootWorkflowRunId', rootWorkflowRunId),
+            )
+            .order('desc')
+            .first()
+        : null
+    const newerAttempt =
+      latestAttempt !== null &&
+      latestAttempt._id !== workflowRun._id &&
+      (latestAttempt.attemptNumber ?? 1) >
+        (workflowRun.attemptNumber ?? 1)
+        ? latestAttempt
+        : undefined
+
     const runtimeEventPage = await ctx.db
       .query('runtimeEvents')
       .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRunId))
@@ -4994,6 +5047,16 @@ export const getDetail = query({
           : { sourceCommitSha: workflowRun.sourceCommitSha }),
         createdAt: workflowRun.createdAt,
       },
+      ...(newerAttempt === undefined
+        ? {}
+        : {
+            newerAttempt: {
+              workflowRunId: newerAttempt._id,
+              attemptNumber: newerAttempt.attemptNumber ?? 1,
+              status: newerAttempt.status,
+              createdAt: newerAttempt.createdAt,
+            },
+          }),
       runtimeEvents: sortedByNumber(
         runtimeEvents,
         (event) => event.occurredAt,

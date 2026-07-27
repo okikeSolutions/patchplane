@@ -51,6 +51,7 @@ describe('IngestGitHubWebhook', () => {
         issueId: 789,
         issueNumber: 7,
         title: 'Fix auth callback',
+        body: 'The callback route fails intermittently.',
         sender: 'octocat',
       })
       expect(event.prompt).toContain('Fix auth callback')
@@ -71,22 +72,30 @@ describe('IngestGitHubWebhook', () => {
         kind: 'github.pull_request.opened',
         pullRequestId: 987,
         pullRequestNumber: 12,
+        body: '',
         headSha: 'abc123abc123abc123abc123abc123abc123abcd',
       })
-    }).pipe(Effect.provide(gitHubWebhookLayer({
-      action: 'opened',
-      installation: { id: 123 },
-      repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
-      pull_request: {
-        id: 987,
-        number: 12,
-        title: 'Fix auth callback',
-        body: null,
-        head: { ref: 'feature/auth-callback', sha: 'abc123abc123abc123abc123abc123abc123abcd' },
-        base: { ref: 'main' },
-      },
-      sender: { login: 'octocat' },
-    }))),
+    }).pipe(
+      Effect.provide(
+        gitHubWebhookLayer({
+          action: 'opened',
+          installation: { id: 123 },
+          repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
+          pull_request: {
+            id: 987,
+            number: 12,
+            title: 'Fix auth callback',
+            body: null,
+            head: {
+              ref: 'feature/auth-callback',
+              sha: 'abc123abc123abc123abc123abc123abc123abcd',
+            },
+            base: { ref: 'main' },
+          },
+          sender: { login: 'octocat' },
+        }),
+      ),
+    ),
   )
 
   it.effect('normalizes pull_request.synchronize webhook payloads', () =>
@@ -107,27 +116,35 @@ describe('IngestGitHubWebhook', () => {
         repositoryId: 456,
         pullRequestId: 987,
         pullRequestNumber: 12,
+        body: 'Updated the branch after review.',
         headSha: 'abc123abc123abc123abc123abc123abc123abcd',
         headRef: 'feature/auth-callback',
         baseRef: 'main',
         sender: 'octocat',
       })
       expect(event.prompt).toContain('Fix auth callback')
-    }).pipe(Effect.provide(gitHubWebhookLayer({
-      action: 'synchronize',
-      installation: { id: 123 },
-      repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
-      pull_request: {
-        id: 987,
-        number: 12,
-        title: 'Fix auth callback',
-        body: 'Updated the branch after review.',
-        html_url: 'https://github.com/patchplane/demo/pull/12',
-        head: { ref: 'feature/auth-callback', sha: 'abc123abc123abc123abc123abc123abc123abcd' },
-        base: { ref: 'main' },
-      },
-      sender: { login: 'octocat' },
-    }))),
+    }).pipe(
+      Effect.provide(
+        gitHubWebhookLayer({
+          action: 'synchronize',
+          installation: { id: 123 },
+          repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
+          pull_request: {
+            id: 987,
+            number: 12,
+            title: 'Fix auth callback',
+            body: 'Updated the branch after review.',
+            html_url: 'https://github.com/patchplane/demo/pull/12',
+            head: {
+              ref: 'feature/auth-callback',
+              sha: 'abc123abc123abc123abc123abc123abc123abcd',
+            },
+            base: { ref: 'main' },
+          },
+          sender: { login: 'octocat' },
+        }),
+      ),
+    ),
   )
 
   it.effect('rejects malformed pull_request webhook payloads', () =>
@@ -143,10 +160,14 @@ describe('IngestGitHubWebhook', () => {
         _tag: 'GitHubError',
         operation: 'normalizeGitHubWebhookEvent.pull_request',
       })
-    }).pipe(Effect.provide(gitHubWebhookLayer({
-      action: 'opened',
-      installation: { id: 123 },
-      repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
-    }))),
+    }).pipe(
+      Effect.provide(
+        gitHubWebhookLayer({
+          action: 'opened',
+          installation: { id: 123 },
+          repository: { id: 456, owner: { login: 'patchplane' }, name: 'demo' },
+        }),
+      ),
+    ),
   )
 })

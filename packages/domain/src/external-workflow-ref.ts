@@ -21,6 +21,7 @@ export const ExternalWorkflowRef = Schema.Struct({
   issueExternalId: Schema.optional(Schema.NonEmptyString),
   issueNumber: Schema.optional(PositiveInt),
   issueTitle: Schema.optional(Schema.String),
+  issueBody: Schema.optional(Schema.String),
   pullRequestExternalId: Schema.optional(Schema.NonEmptyString),
   pullRequestNumber: Schema.optional(PositiveInt),
   pullRequestHeadSha: Schema.optional(GitCommitSha),
@@ -34,6 +35,5 @@ export const ExternalWorkflowRef = Schema.Struct({
 })
 export type ExternalWorkflowRef = Schema.Schema.Type<typeof ExternalWorkflowRef>
 
-export const decodeExternalWorkflowRef = Schema.decodeUnknownEffect(
-  ExternalWorkflowRef,
-)
+export const decodeExternalWorkflowRef =
+  Schema.decodeUnknownEffect(ExternalWorkflowRef)

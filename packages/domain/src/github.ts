@@ -39,9 +39,7 @@ export const GitHubRepositoryRef = Schema.Struct({
   repositoryExternalId: Schema.optional(Schema.NonEmptyString),
   private: Schema.optional(Schema.Boolean),
 })
-export type GitHubRepositoryRef = Schema.Schema.Type<
-  typeof GitHubRepositoryRef
->
+export type GitHubRepositoryRef = Schema.Schema.Type<typeof GitHubRepositoryRef>
 export const decodeGitHubRepositoryRef =
   Schema.decodeUnknownEffect(GitHubRepositoryRef)
 
@@ -68,6 +66,7 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
     issueId: GitHubIssueId,
     issueNumber: GitHubIssueNumber,
     title: Schema.String,
+    body: Schema.String,
     prompt: Schema.String,
     url: Schema.optional(HttpUrl),
     sender: Schema.optional(Schema.String),
@@ -102,6 +101,7 @@ export const GitHubNormalizedWorkflowEvent = Schema.Union([
     pullRequestId: GitHubPullRequestId,
     pullRequestNumber: GitHubPullRequestNumber,
     title: Schema.String,
+    body: Schema.String,
     prompt: Schema.String,
     headSha: BrandedGitCommitSha,
     headRef: Schema.NonEmptyString,

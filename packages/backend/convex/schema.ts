@@ -172,11 +172,7 @@ export default defineSchema({
     actorId: v.string(),
     actorDisplayName: v.string(),
     traceId: v.optional(v.string()),
-    source: v.union(
-      v.literal('dev'),
-      v.literal('app'),
-      v.literal('external'),
-    ),
+    source: v.union(v.literal('dev'), v.literal('app'), v.literal('external')),
     prompt: v.string(),
     externalRef: v.optional(
       v.object({
@@ -192,6 +188,7 @@ export default defineSchema({
         issueExternalId: v.optional(v.string()),
         issueNumber: v.optional(v.number()),
         issueTitle: v.optional(v.string()),
+        issueBody: v.optional(v.string()),
         pullRequestExternalId: v.optional(v.string()),
         pullRequestNumber: v.optional(v.number()),
         pullRequestHeadSha: v.optional(v.string()),
@@ -225,6 +222,7 @@ export default defineSchema({
     issueExternalId: v.optional(v.string()),
     issueNumber: v.optional(v.number()),
     issueTitle: v.optional(v.string()),
+    issueBody: v.optional(v.string()),
     pullRequestExternalId: v.optional(v.string()),
     pullRequestNumber: v.optional(v.number()),
     pullRequestHeadSha: v.optional(v.string()),
@@ -343,11 +341,13 @@ export default defineSchema({
     headSha: v.optional(v.string()),
     diffArtifactId: v.optional(v.id('evidenceArtifacts')),
     summary: v.optional(v.string()),
-    stats: v.optional(v.object({
-      filesChanged: v.number(),
-      additions: v.number(),
-      deletions: v.number(),
-    })),
+    stats: v.optional(
+      v.object({
+        filesChanged: v.number(),
+        additions: v.number(),
+        deletions: v.number(),
+      }),
+    ),
     idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
@@ -394,7 +394,10 @@ export default defineSchema({
   })
     .index('by_workflow_run', ['workflowRunId'])
     .index('by_candidate_patch_set', ['candidatePatchSetId'])
-    .index('by_workflow_run_and_idempotency_key', ['workflowRunId', 'idempotencyKey']),
+    .index('by_workflow_run_and_idempotency_key', [
+      'workflowRunId',
+      'idempotencyKey',
+    ]),
 
   reviewRuns: defineTable({
     workflowRunId: v.id('workflowRuns'),
@@ -439,7 +442,9 @@ export default defineSchema({
     inputDigest: v.optional(v.string()),
     verificationResultIds: v.optional(v.array(v.id('verificationResults'))),
     reviewFindingIds: v.optional(v.array(v.id('reviewFindings'))),
-    missingRequirementIds: v.optional(v.array(v.id('verificationRequirements'))),
+    missingRequirementIds: v.optional(
+      v.array(v.id('verificationRequirements')),
+    ),
     idempotencyKey: v.optional(v.string()),
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
@@ -583,10 +588,14 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index('by_parent_workflow_run', ['parentWorkflowRunId'])
-    .index('by_parent_workflow_run_and_idempotency_key', ['parentWorkflowRunId', 'idempotencyKey'])
+    .index('by_parent_workflow_run_and_idempotency_key', [
+      'parentWorkflowRunId',
+      'idempotencyKey',
+    ])
     .index('by_workflow_run', ['workflowRunId']),
 
-  workflowRuns: defineTable({    promptRequestId: v.id('promptRequests'),
+  workflowRuns: defineTable({
+    promptRequestId: v.id('promptRequests'),
     workspaceId: v.string(),
     traceId: v.optional(v.string()),
     modelVersion: v.optional(v.literal('v1')),
