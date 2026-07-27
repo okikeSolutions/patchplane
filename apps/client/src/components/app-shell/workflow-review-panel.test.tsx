@@ -216,7 +216,7 @@ describe('WorkflowReviewPanel', () => {
   })
 
   test('does not present unconfigured verification as a clean automated verdict', () => {
-    render(
+    const { container } = render(
       <WorkflowDetailOverview
         detail={{
           ...detail,
@@ -256,6 +256,55 @@ describe('WorkflowReviewPanel', () => {
       screen.queryByText(/found no blocking automated findings/i),
     ).toBeNull()
     expect(screen.queryByText('review:clean')).toBeNull()
+    expect(
+      screen.getByRole('region', { name: 'Trust dimensions' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('region', { name: 'Automated verdict' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('region', { name: 'Decision and publication' }),
+    ).toBeTruthy()
+    expect(container.querySelectorAll('[data-slot="card"]')).toHaveLength(1)
+    expect(
+      screen
+        .getByRole('heading', { name: 'Requested change' })
+        .closest('[data-slot="card"]'),
+    ).not.toBeNull()
+    expect(
+      screen.getByText('Needs review').closest('[data-slot="alert"]')
+        ?.className,
+    ).toContain('border-warning/30')
+    expect(container.querySelector('.bg-primary\\/15')).toBeNull()
+  })
+
+  test('blocks every decision when the report identity is incoherent', () => {
+    render(
+      <WorkflowReviewPanel
+        detail={detail}
+        coherence={{
+          status: 'blocked',
+          issues: ['superseded-attempt'],
+        }}
+      />,
+    )
+
+    expect(
+      (screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Request changes',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Reject' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    expect(screen.getByText('Decision unavailable')).toBeTruthy()
   })
 
   test('requires an explicit reason when approval overrides incomplete verification', async () => {

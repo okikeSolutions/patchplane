@@ -22,9 +22,13 @@ import {
 import { Effect } from 'effect'
 
 const sentinel = 'PATCHPLANE_BROWSER_TRANSPORT_SENTINEL_8b1a'
-const rawDiffSentinel = `diff --git a/private.ts b/private.ts
---- a/private.ts
-+++ b/private.ts
+const sourceSentinel = 'PATCHPLANE_SOURCE_CONTENT_SENTINEL_31ce'
+const rawSourceSentinel = `export const privateCustomerSource = '${sourceSentinel}'`
+const rawPathSegmentSentinel = 'PATCHPLANE_RAW_PATH_SENTINEL_6a4e'
+const rawPathSentinel = `src/private/${rawPathSegmentSentinel}/customer-secrets.ts`
+const rawDiffSentinel = `diff --git a/${rawPathSentinel} b/${rawPathSentinel}
+--- a/${rawPathSentinel}
++++ b/${rawPathSentinel}
 @@ -1 +1 @@
 -const privateValue = 'before'
 +const privateValue = '${sentinel}'`
@@ -78,23 +82,46 @@ describe('browser Sentry transport boundary', () => {
         Sentry.addBreadcrumb({
           category: 'ui.click',
           message: `clicked ${sentinel}`,
-          data: { url: `/private?token=${sentinel}`, prompt: sentinel },
+          data: {
+            url: `/${rawPathSentinel}?token=${sentinel}`,
+            from: rawPathSentinel,
+            prompt: sentinel,
+            selectedPath: rawPathSentinel,
+            sourceExcerpt: rawSourceSentinel,
+          },
         })
         Sentry.logger.info(`browser log ${sentinel}`, {
           telemetryPolicy: sentryTelemetryPolicyMarker,
           operation: 'browser.render',
+          from: rawPathSentinel,
           prompt: sentinel,
+          sourceExcerpt: rawSourceSentinel,
         })
         Sentry.metrics.count('patchplane.operation.count', 1, {
-          attributes: { operation: 'browser.render', prompt: sentinel },
+          attributes: {
+            operation: 'browser.render',
+            prompt: sentinel,
+            sourceExcerpt: rawSourceSentinel,
+            to: rawPathSentinel,
+          },
         })
         Sentry.startSpan(
-          { name: `browser span ${sentinel}`, op: 'browser.render' },
+          {
+            name: `/workspace/${rawPathSentinel}`,
+            op: 'browser.render',
+            attributes: {
+              selectedPath: rawPathSentinel,
+              sourceExcerpt: rawSourceSentinel,
+            },
+          },
           () => undefined,
         )
         Sentry.captureEvent({
           message: `browser failure ${sentinel}`,
-          extra: { candidateDiff: rawDiffSentinel },
+          extra: {
+            candidateDiff: rawDiffSentinel,
+            sourceExcerpt: rawSourceSentinel,
+          },
           exception: {
             values: [
               {
@@ -103,11 +130,14 @@ describe('browser Sentry transport boundary', () => {
                 stacktrace: {
                   frames: [
                     {
-                      filename: `/private/${sentinel}.ts`,
-                      context_line: sentinel,
-                      pre_context: [sentinel],
-                      post_context: [sentinel],
-                      vars: { token: sentinel },
+                      filename: `/workspace/${rawPathSentinel}`,
+                      context_line: rawSourceSentinel,
+                      pre_context: [sourceSentinel],
+                      post_context: [rawSourceSentinel],
+                      vars: {
+                        sourceExcerpt: rawSourceSentinel,
+                        token: sentinel,
+                      },
                     },
                   ],
                 },
@@ -116,10 +146,34 @@ describe('browser Sentry transport boundary', () => {
           },
           request: {
             method: 'GET',
-            url: `https://patchplane.example/private?token=${sentinel}`,
+            url: `https://patchplane.example/${rawPathSentinel}?token=${sentinel}`,
             headers: { cookie: `session=${sentinel}` },
           },
           user: { email: `${sentinel}@example.com` },
+        })
+        const routeError = new Error(rawDiffSentinel)
+        routeError.stack = [
+          `Error: ${rawDiffSentinel}`,
+          `    at renderDiff (/workspace/${rawPathSentinel}:42:7)`,
+        ].join('\n')
+        Sentry.captureException(routeError, {
+          tags: { surface: 'client-router' },
+          extra: {
+            candidateDiff: rawDiffSentinel,
+            selectedPath: rawPathSentinel,
+          },
+        })
+        const sourceError = new Error(rawSourceSentinel)
+        sourceError.stack = [
+          `Error: ${rawSourceSentinel}`,
+          `    at renderSource (/workspace/${rawPathSentinel}:7:3)`,
+        ].join('\n')
+        Sentry.captureException(sourceError, {
+          tags: { surface: 'client-router' },
+          extra: {
+            sourceExcerpt: rawSourceSentinel,
+            selectedPath: rawPathSentinel,
+          },
         })
 
         yield* Effect.sync(() => {
@@ -140,8 +194,15 @@ describe('browser Sentry transport boundary', () => {
         assert.ok(itemTypes.includes('log'))
         assert.ok(itemTypes.includes('trace_metric'))
         assert.ok(itemTypes.includes('transaction'))
-        assert.ok(!JSON.stringify(envelopes).includes(sentinel))
-        assert.ok(!JSON.stringify(envelopes).includes(rawDiffSentinel))
+        const serialized = JSON.stringify(envelopes)
+        assert.ok(!serialized.includes(sentinel))
+        assert.ok(!serialized.includes(rawSourceSentinel))
+        assert.ok(!serialized.includes(sourceSentinel))
+        assert.ok(!serialized.includes(rawDiffSentinel))
+        assert.ok(!serialized.includes(rawPathSentinel))
+        assert.ok(!serialized.includes(rawPathSegmentSentinel))
+        assert.ok(!serialized.includes('customer-secrets.ts'))
+        assert.ok(serialized.includes('/:path'))
       }).pipe(
         Effect.ensuring(
           Effect.promise(() => Sentry.close(2_000)).pipe(Effect.asVoid),

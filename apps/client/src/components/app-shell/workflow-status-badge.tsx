@@ -1,5 +1,4 @@
 import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
 import * as m from '@/paraglide/messages'
 import type { WorkflowTrustState } from './workflow-trust-state'
 import { workflowTrustStateLabel } from './workflow-trust-state'
@@ -9,7 +8,11 @@ export function WorkflowRunStatusBadge({
 }: {
   readonly status: 'queued' | 'running' | 'reviewed' | 'failed'
 }) {
-  return <Badge variant="secondary">{workflowStatusLabel(status)}</Badge>
+  return (
+    <Badge variant={workflowRunStatusVariant(status)}>
+      {workflowStatusLabel(status)}
+    </Badge>
+  )
 }
 
 export function WorkflowTrustStateBadge({
@@ -18,22 +21,59 @@ export function WorkflowTrustStateBadge({
   readonly state: WorkflowTrustState
 }) {
   return (
-    <Badge
-      variant="secondary"
-      className={cn(
-        'border-transparent',
-        state === 'sandbox-failed' || state === 'rejected'
-          ? 'bg-destructive/15 text-[var(--destructive-readable)]'
-          : state === 'needs-review' || state === 'changes-requested'
-            ? 'bg-primary/15 text-[var(--brand-readable)]'
-            : state === 'approved'
-              ? 'bg-[color-mix(in_oklch,var(--success-readable),transparent_82%)] text-[var(--success-readable)]'
-              : 'bg-muted text-muted-foreground',
-      )}
-    >
+    <Badge variant={workflowTrustStateVariant(state)}>
       {workflowTrustStateLabel(state)}
     </Badge>
   )
+}
+
+export function workflowRunStatusVariant(
+  status: 'queued' | 'running' | 'reviewed' | 'failed',
+) {
+  switch (status) {
+    case 'reviewed':
+      return 'success' as const
+    case 'failed':
+      return 'destructive' as const
+    case 'running':
+      return 'outline' as const
+    case 'queued':
+      return 'secondary' as const
+  }
+}
+
+export function workflowTrustStateVariant(state: WorkflowTrustState) {
+  switch (state) {
+    case 'approved':
+      return 'success' as const
+    case 'needs-review':
+    case 'changes-requested':
+      return 'warning' as const
+    case 'sandbox-failed':
+    case 'rejected':
+      return 'destructive' as const
+    case 'queued':
+    case 'running':
+    case 'no-sandbox-run':
+      return 'secondary' as const
+  }
+}
+
+export function workflowTrustAlertVariant(state: WorkflowTrustState) {
+  switch (state) {
+    case 'approved':
+      return 'success' as const
+    case 'needs-review':
+    case 'changes-requested':
+      return 'warning' as const
+    case 'sandbox-failed':
+    case 'rejected':
+      return 'destructive' as const
+    case 'queued':
+    case 'running':
+    case 'no-sandbox-run':
+      return 'default' as const
+  }
 }
 
 export function workflowStatusLabel(

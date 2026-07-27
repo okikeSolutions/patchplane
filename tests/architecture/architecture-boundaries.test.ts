@@ -377,6 +377,62 @@ describe('architecture boundaries', () => {
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
+  it.effect('keeps product analytics SDKs behind plugin boundaries', () =>
+    Effect.gen(function* () {
+      const imports = yield* importsForFiles([
+        ...(yield* sourceFilesUnder('apps')),
+        ...(yield* sourceFilesUnder('packages')),
+      ])
+      const analyticsSdkPattern =
+        /^(?:@posthog\/|posthog(?:-js|-node)?(?:\/|$)|@amplitude\/|mixpanel(?:-browser)?(?:\/|$)|@segment\/)/
+      const violations = imports.filter(
+        ({ file, specifier }) =>
+          analyticsSdkPattern.test(specifier) &&
+          !file.startsWith('packages/plugins/src/analytics/') &&
+          !file.endsWith('.test.ts') &&
+          !file.endsWith('.test.tsx'),
+      )
+
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect(
+    'keeps candidate diff content and paths out of direct telemetry and analytics calls',
+    () =>
+      Effect.gen(function* () {
+        const diffSurfaceFiles = (yield* sourceFilesUnder(
+          'apps/client/src',
+        )).filter((file) =>
+          /\/(?:candidate-(?:changed-files|diff|file|unified)[^/]*|use-candidate-diff-preview|workflow-changes)(?:\.test)?\.tsx?$/.test(
+            file,
+          ),
+        )
+        const imports = yield* importsForFiles(diffSurfaceFiles)
+        const forbiddenImportPattern =
+          /(?:^@sentry\/|posthog|analytics-service|telemetry-service)/
+        const importViolations = imports.filter(({ specifier }) =>
+          forbiddenImportPattern.test(specifier),
+        )
+        const directTransportPattern =
+          /\b(?:captureException|captureEvent|captureMessage|addBreadcrumb|identify)\s*\(|\.(?:capture|track)\s*\(/
+        const directCallViolations = (yield* Effect.all(
+          diffSurfaceFiles.map((file) =>
+            Effect.gen(function* () {
+              const source = yield* fileText(file)
+              return directTransportPattern.test(source)
+                ? yield* relativeToRepo(file)
+                : undefined
+            }),
+          ),
+        )).filter((file) => file !== undefined)
+
+        expect(diffSurfaceFiles.length).toBeGreaterThan(0)
+        expect(importViolations).toEqual([])
+        expect(directCallViolations).toEqual([])
+      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
   it.effect(
     'keeps the Sentry plugin dependent on core rather than domain',
     () =>
@@ -603,6 +659,61 @@ describe('architecture boundaries', () => {
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
+  it.effect('keeps app-shell feature UI composed from shared primitives', () =>
+    Effect.gen(function* () {
+      const featureFiles = (yield* sourceFilesUnder(
+        'apps/client/src/components/app-shell',
+      )).filter(
+        (file) => !file.endsWith('.test.ts') && !file.endsWith('.test.tsx'),
+      )
+      const featureImports = yield* importsForFiles(featureFiles)
+      const featureSources = yield* Effect.all(
+        featureFiles.map((file) =>
+          fileText(file).pipe(Effect.map((source) => ({ file, source }))),
+        ),
+      )
+      const toolbar = yield* fileText(
+        'apps/client/src/components/app-shell/workflow-console-toolbar.tsx',
+      )
+      const artifactReferences = yield* fileText(
+        'apps/client/src/components/app-shell/workflow-artifact-references.tsx',
+      )
+      const reviewPanel = yield* fileText(
+        'apps/client/src/components/app-shell/workflow-review-panel.tsx',
+      )
+
+      expect(
+        featureImports.filter(
+          ({ specifier }) =>
+            specifier === 'sonner' ||
+            specifier.startsWith('@base-ui/') ||
+            specifier.startsWith('@radix-ui/'),
+        ),
+      ).toEqual([])
+
+      const forbiddenMarkup =
+        /<(?:button|input|textarea|select|option|table|thead|tbody|tr|th|td|hr)\b/
+      expect(
+        featureSources
+          .filter(
+            ({ source }) =>
+              forbiddenMarkup.test(source) ||
+              /\b(?:animate-pulse|space-x-|space-y-)/.test(source),
+          )
+          .map(({ file }) => file),
+      ).toEqual([])
+
+      expect(toolbar).toContain("from '@/components/ui/toggle-group'")
+      expect(toolbar).toContain('<ToggleGroup')
+      expect(toolbar).not.toContain('function FilterButton')
+      expect(artifactReferences).toContain("from '@/components/ui/alert'")
+      expect(artifactReferences).toContain("from '@/components/ui/item'")
+      expect(artifactReferences).not.toContain('<Card')
+      expect(reviewPanel).toContain("from '@/components/ui/item'")
+      expect(reviewPanel).toContain('<ItemGroup')
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
   it.effect(
     'keeps hosted artifact reads behind authorization and a native R2 binding',
     () =>
@@ -653,6 +764,9 @@ describe('architecture boundaries', () => {
         )
         const renderer = yield* fileText(
           'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
+        )
+        const rendererFailureBoundary = yield* fileText(
+          'apps/client/src/components/app-shell/candidate-diff-failure-boundary.tsx',
         )
         const pierreRenderer = yield* fileText(
           'apps/client/src/components/app-shell/candidate-unified-diff.tsx',
@@ -708,8 +822,19 @@ describe('architecture boundaries', () => {
         )
         expect(renderer).toContain('import.meta.env.SSR')
         expect(renderer).toContain("import('./candidate-unified-diff')")
+        expect(renderer).toContain('CandidateDiffProcessorUnavailableError')
+        expect(renderer).toContain('fallbackKind="malformed"')
+        expect(renderer).toContain('fallbackKind="processor-unavailable"')
+        expect(rendererFailureBoundary).toContain(
+          "CandidateDiffRendererFailure = 'malformed' | 'processor-unavailable'",
+        )
+        expect(rendererFailureBoundary).toContain(
+          "from '@/components/ui/alert'",
+        )
+        expect(rendererFailureBoundary).not.toContain('console.')
         expect(pierreRenderer).toContain('<PatchDiff')
-        expect(pierreRenderer).toContain("diffStyle: 'unified'")
+        expect(pierreRenderer).toContain('diffStyle: view')
+        expect(pierreRenderer).toContain('readonly view: WorkflowDiffView')
         expect(pierreRenderer).toContain("preferredHighlighter: 'shiki-js'")
         expect(pierreRenderer).toContain('disableWorkerPool')
         expect(pierreRenderer).not.toContain('new Worker')

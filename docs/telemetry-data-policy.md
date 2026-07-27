@@ -27,7 +27,7 @@ The following content must not be sent through Sentry events, logs, metrics, spa
 
 - authorization, cookie, session, OAuth, password, private-key, API-key, token, or other credential material;
 - user prompts or rerun instructions;
-- patches, diffs, source excerpts, command text, stdout/stderr, Pi JSONL, or other runtime output;
+- patches, diffs, source excerpts, raw repository or file paths, command text, stdout/stderr, Pi JSONL, or other runtime output;
 - webhook/request bodies, Sentry attachments, artifact bodies, screenshots, test reports, or provider response bodies;
 - URL credentials, query parameters, and fragments;
 - arbitrary user identity or application `extra` values;
@@ -49,4 +49,4 @@ Telemetry sanitization is best-effort operational protection, not permission to 
 
 ## Verification
 
-Automated verification must use synthetic sentinel secrets in every supported Sentry payload shape and assert that no sentinel reaches transport-bound events, logs, metrics, spans, breadcrumbs, URLs, or stack context. Deployed deliberate-failure checks must use non-sensitive test values only. Direct sanitizer tests are necessary but do not satisfy this requirement until SDK transport-bound coverage also passes.
+Automated verification must use synthetic sentinel secrets, diff bodies, and repository paths in every supported Sentry payload shape and assert that no sentinel reaches transport-bound events, logs, metrics, spans, breadcrumbs, URLs, or stack context. Architecture checks must also prevent diff surfaces from importing telemetry or analytics transports directly. Deployed deliberate-failure checks must use non-sensitive test values only. Direct sanitizer tests are necessary but do not satisfy this requirement until SDK transport-bound coverage also passes.

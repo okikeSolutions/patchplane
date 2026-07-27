@@ -1,14 +1,21 @@
 import { useState } from 'react'
-import { ExternalLinkIcon } from 'lucide-react'
+import { CircleAlertIcon, ExternalLinkIcon } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from '@/components/ui/empty'
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from '@/components/ui/item'
 import type { WorkflowDetail } from './types'
 import {
   artifactReferences,
@@ -54,64 +61,59 @@ export function WorkflowArtifactReferences({
           {m.app_artifacts_intro()}
         </p>
         {error === undefined ? null : (
-          <p
-            role="alert"
-            className="m-0 mt-2 text-xs text-[var(--destructive-readable)]"
-          >
-            {error}
-          </p>
+          <Alert role="alert" variant="destructive">
+            <CircleAlertIcon />
+            <AlertTitle>{m.app_artifact_open_failed()}</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
-      <div className="flex flex-col gap-2">
+      <ItemGroup className="gap-2">
         {references.map((reference) => (
-          <Card
+          <Item
             key={reference.id}
             id={`artifact-${reference.artifactId ?? reference.id}`}
             size="sm"
-            className="scroll-mt-32 ring-border"
+            variant="outline"
+            className="scroll-mt-32"
           >
-            <CardContent className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-              <div className="min-w-0">
-                <div className="break-words text-sm font-medium [overflow-wrap:anywhere]">
-                  {reference.label}
-                </div>
-                <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {reference.value}
-                </div>
-              </div>
-              <Badge
+            <ItemContent className="min-w-0">
+              <ItemTitle className="line-clamp-none break-words [overflow-wrap:anywhere]">
+                {reference.label}
+              </ItemTitle>
+              <ItemDescription className="line-clamp-none break-all font-mono text-xs">
+                {reference.value}
+              </ItemDescription>
+            </ItemContent>
+            <Badge variant="secondary" className="w-fit">
+              {reference.source}
+            </Badge>
+            {reference.artifactId === undefined ? null : (
+              <Button
                 variant="secondary"
-                className="w-fit bg-muted text-muted-foreground"
+                size="icon"
+                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
+                aria-label={m.app_artifact_open({ label: reference.label })}
+                aria-busy={openingId === reference.id}
+                title={m.app_artifact_open({ label: reference.label })}
+                disabled={openingId === reference.id}
+                onClick={() => {
+                  void openArtifact(reference, {
+                    onStart: () => {
+                      setError(undefined)
+                      setOpeningId(reference.id)
+                    },
+                    onComplete: () => setOpeningId(undefined),
+                    onError: (message) => setError(message),
+                  })
+                }}
               >
-                {reference.source}
-              </Badge>
-              {reference.artifactId === undefined ? null : (
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
-                  aria-label={`Open ${reference.label}`}
-                  aria-busy={openingId === reference.id}
-                  title={`Open ${reference.label}`}
-                  disabled={openingId === reference.id}
-                  onClick={() => {
-                    void openArtifact(reference, {
-                      onStart: () => {
-                        setError(undefined)
-                        setOpeningId(reference.id)
-                      },
-                      onComplete: () => setOpeningId(undefined),
-                      onError: (message) => setError(message),
-                    })
-                  }}
-                >
-                  <ExternalLinkIcon />
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+                <ExternalLinkIcon />
+              </Button>
+            )}
+          </Item>
         ))}
-      </div>
+      </ItemGroup>
     </section>
   )
 }

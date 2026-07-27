@@ -18,10 +18,19 @@ import {
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field'
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item'
 import { Textarea } from '@/components/ui/textarea'
 import { submitReviewDecisionServerFn } from '@/lib/review-decision'
 import * as m from '@/paraglide/messages'
 import type { WorkflowDetail } from './types'
+import type { WorkflowReportCoherence } from './workflow-report-coherence'
 import { formatDuration } from './workflow-sandbox-evidence'
 import {
   deriveWorkflowTrustSummary,
@@ -29,6 +38,7 @@ import {
   type WorkflowTrustDimension,
   type TrustDimensionTone,
 } from './workflow-trust-summary'
+import { workflowTrustAlertVariant } from './workflow-status-badge'
 
 function latestBy<A>(items: ReadonlyArray<A>, timestamp: (item: A) => number) {
   return items.reduce<A | undefined>(
@@ -41,8 +51,10 @@ function latestBy<A>(items: ReadonlyArray<A>, timestamp: (item: A) => number) {
 }
 
 export function WorkflowReviewPanel({
+  coherence,
   detail,
 }: {
+  readonly coherence?: WorkflowReportCoherence
   readonly detail: WorkflowDetail
 }) {
   const [comment, setComment] = useState('')
@@ -97,6 +109,7 @@ export function WorkflowReviewPanel({
     policyDecision,
   )
   const hasCurrentProjection =
+    coherence?.status !== 'blocked' &&
     detail.workflowRun.status === 'reviewed' &&
     sandboxExecution !== undefined &&
     candidatePatchSet !== undefined &&
@@ -211,7 +224,7 @@ export function WorkflowReviewPanel({
           {m.app_review_intro()}
         </p>
       </div>
-      <Alert>
+      <Alert variant={workflowTrustAlertVariant(trustSummary.state)}>
         <CircleAlertIcon />
         <AlertTitle>{trustSummary.label}</AlertTitle>
         <AlertDescription>
@@ -227,7 +240,7 @@ export function WorkflowReviewPanel({
           )}
         </AlertDescription>
       </Alert>
-      <div className="grid gap-2 rounded-lg border border-border bg-[var(--surface-nested)] p-3 text-sm">
+      <ItemGroup className="gap-1 rounded-lg border border-border bg-[var(--surface-nested)] p-1">
         {trustSummary.dimensions.map((dimension) =>
           dimension.key === 'execution' ? (
             <RuntimeSummary
@@ -246,7 +259,7 @@ export function WorkflowReviewPanel({
             />
           ),
         )}
-      </div>
+      </ItemGroup>
       {hasCurrentProjection ? null : (
         <Alert variant="destructive">
           <CircleAlertIcon />
@@ -265,7 +278,7 @@ export function WorkflowReviewPanel({
       )}
       <div aria-live="polite">
         {success === undefined ? null : (
-          <Alert>
+          <Alert variant="success">
             <CheckCircle2Icon />
             <AlertTitle>{m.app_review_recorded()}</AlertTitle>
             <AlertDescription>{success}</AlertDescription>
@@ -451,28 +464,32 @@ function EvidenceCheck({
   readonly tone: TrustDimensionTone
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2">
-      {tone === 'positive' ? (
-        <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[var(--success-readable)]" />
-      ) : (
-        <CircleAlertIcon
-          className={
-            tone === 'negative'
-              ? 'mt-0.5 size-4 shrink-0 text-[var(--destructive-readable)]'
-              : 'mt-0.5 size-4 shrink-0 text-muted-foreground'
-          }
-        />
-      )}
-      <div className="min-w-0">
-        <div className="font-medium">
+    <Item size="xs">
+      <ItemMedia variant="icon">
+        {tone === 'positive' ? (
+          <CheckCircle2Icon className="text-success-foreground" />
+        ) : (
+          <CircleAlertIcon
+            className={
+              tone === 'negative'
+                ? 'text-[var(--destructive-readable)]'
+                : tone === 'warning'
+                  ? 'text-warning-foreground'
+                  : 'text-muted-foreground'
+            }
+          />
+        )}
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="line-clamp-none">
           {label} ·{' '}
           <span className="font-normal text-muted-foreground">{status}</span>
-        </div>
-        <div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
+        </ItemTitle>
+        <ItemDescription className="line-clamp-none break-words text-xs [overflow-wrap:anywhere]">
           {detail}
-        </div>
-      </div>
-    </div>
+        </ItemDescription>
+      </ItemContent>
+    </Item>
   )
 }
 
@@ -497,31 +514,39 @@ function RuntimeSummary({
   }
 
   return (
-    <div className="flex min-w-0 items-start gap-2">
-      {dimension.tone === 'positive' ? (
-        <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-[var(--success-readable)]" />
-      ) : (
-        <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-[var(--destructive-readable)]" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">
+    <Item size="xs">
+      <ItemMedia variant="icon">
+        {dimension.tone === 'positive' ? (
+          <CheckCircle2Icon className="text-success-foreground" />
+        ) : (
+          <CircleAlertIcon
+            className={
+              dimension.tone === 'negative'
+                ? 'text-[var(--destructive-readable)]'
+                : 'text-warning-foreground'
+            }
+          />
+        )}
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle className="line-clamp-none">
           {m.app_review_execution()} ·{' '}
           <span className="font-normal text-muted-foreground">
             {dimension.status}
           </span>
-        </div>
-        <p className="m-0 text-xs text-muted-foreground">
+        </ItemTitle>
+        <ItemDescription className="line-clamp-none text-xs">
           {m.app_review_provider()} {execution.provider} ·{' '}
           {m.app_review_model()}{' '}
           {execution.runtimeModel ?? m.app_review_not_reported()} ·{' '}
           {m.app_review_duration()}{' '}
           {formatDuration(execution.startedAt, execution.completedAt)} ·{' '}
           {m.app_review_exit()} {execution.exitCode ?? m.app_changes_unknown()}
-        </p>
-        <p className="m-0 break-all text-xs text-muted-foreground">
+        </ItemDescription>
+        <ItemDescription className="line-clamp-none break-all text-xs">
           {m.app_changes_candidate()}{' '}
           {candidate?.id ?? m.app_review_not_captured()}
-        </p>
+        </ItemDescription>
         <Collapsible>
           <CollapsibleTrigger
             render={
@@ -541,8 +566,8 @@ function RuntimeSummary({
             </pre>
           </CollapsibleContent>
         </Collapsible>
-      </div>
-    </div>
+      </ItemContent>
+    </Item>
   )
 }
 

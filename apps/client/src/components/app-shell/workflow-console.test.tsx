@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   cleanup,
   fireEvent,
@@ -13,6 +13,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { WorkflowDetail, WorkflowStartRow } from './types'
 import { WorkflowConsole } from './workflow-console'
 import { WorkflowDetailPage } from './workflow-detail-page'
+import type { WorkflowDiffNavigation } from './workflow-diff-navigation'
 
 vi.mock('convex/react', () => ({
   useQuery: () => undefined,
@@ -722,6 +723,126 @@ describe('WorkflowConsole', () => {
     expect(fetchPreview).not.toHaveBeenCalled()
   })
 
+  test('keeps the app shell while the diff occupies the report workspace', async () => {
+    const reviewed = workflowRow(
+      reviewedRunId,
+      'reviewed',
+      'Focus the candidate diff',
+    )
+    const body = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1 +1 @@
+-old
++new
+`
+    const size = new TextEncoder().encode(body).byteLength
+    const baseDetail = workflowDetail(reviewed)
+    const detailWithDiff: WorkflowDetail = {
+      ...baseDetail,
+      evidenceArtifacts: [
+        {
+          id: 'artifact-diff',
+          workflowRunId: reviewedRunId,
+          kind: 'diff',
+          storageProvider: 'cloudflare-r2',
+          storageKey: `${reviewedRunId}/diff.patch`,
+          contentType: 'text/x-diff',
+          sizeBytes: size,
+          sha256: 'a'.repeat(64),
+          createdAt: 1_778_000_310_000,
+        },
+      ],
+      candidatePatchSets: baseDetail.candidatePatchSets.map((candidate) => ({
+        ...candidate,
+        diffArtifactId: 'artifact-diff',
+      })),
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: {
+              'x-patchplane-artifact-sha256': 'a'.repeat(64),
+              'x-patchplane-artifact-size': String(size),
+              'x-patchplane-preview-bytes': String(size),
+              'x-patchplane-preview-truncated': 'false',
+              'x-patchplane-diff-stats': 'parsed',
+              'x-patchplane-diff-files': '1',
+              'x-patchplane-diff-additions': '1',
+              'x-patchplane-diff-deletions': '1',
+            },
+          }),
+      ),
+    )
+    function Harness() {
+      const [diffNavigation, setDiffNavigation] =
+        useState<WorkflowDiffNavigation>({
+          expanded: false,
+          selectedFileIndex: undefined,
+          view: 'unified',
+        })
+      return (
+        <WorkflowDetailPage
+          detailOverride={detailWithDiff}
+          workflowRunId={reviewedRunId}
+          diffNavigation={diffNavigation}
+          onDiffNavigationChange={setDiffNavigation}
+        />
+      )
+    }
+    renderWithQueryClient(<Harness />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Changes' }))
+    const expand = await screen.findByRole('button', {
+      name: 'Expand diff',
+    })
+    const reportHeader = screen.getByRole('banner')
+    const reportTabs = screen.getByRole('tablist', {
+      name: 'Patch report sections',
+    })
+    const reportContent = document.querySelector<HTMLElement>(
+      '[data-slot="workflow-report-content"]',
+    )
+    const reviewPane = document.querySelector<HTMLElement>(
+      '[data-slot="workflow-review-pane"]',
+    )
+
+    fireEvent.click(expand)
+
+    expect(reportHeader.className.split(' ')).toContain('hidden')
+    expect(reportTabs.className.split(' ')).toContain('hidden')
+    expect(reviewPane?.className.split(' ')).toContain('hidden')
+    expect(reportContent?.dataset.diffExpanded).toBe('true')
+    expect(
+      screen.getByRole('button', { name: 'Back to Patch Report' }),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }))
+    expect(
+      screen
+        .getByRole('button', { name: 'Split' })
+        .hasAttribute('data-pressed'),
+    ).toBe(true)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Back to Patch Report' }),
+    )
+
+    expect(reportHeader.className.split(' ')).not.toContain('hidden')
+    expect(reportTabs.className.split(' ')).not.toContain('hidden')
+    expect(reviewPane?.className.split(' ')).not.toContain('hidden')
+    expect(reportContent?.dataset.diffExpanded).toBeUndefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand diff' }))
+    expect(
+      screen
+        .getByRole('button', { name: 'Split' })
+        .hasAttribute('data-pressed'),
+    ).toBe(true)
+  })
+
   test('keeps one descriptive h1, logical headings, and named links across report tabs', () => {
     const title = 'feat(agent): make local runs discoverable and verifiable'
     const reviewed = workflowRow(reviewedRunId, 'reviewed', title)
@@ -743,5 +864,46 @@ describe('WorkflowConsole', () => {
       fireEvent.click(screen.getByRole('tab', { name: tab }))
       expectAccessibleReportOutline(title)
     }
+  })
+
+  test('keeps a superseded report pinned and requires intentional navigation', () => {
+    const reviewed = workflowRow(
+      reviewedRunId,
+      'reviewed',
+      'Review the selected attempt',
+    )
+    const detail = workflowDetail(reviewed)
+    detail.workflowRun.modelVersion = 'v1'
+    detail.workflowRun.rootWorkflowRunId = reviewedRunId
+    detail.workflowRun.attemptNumber = 1
+    detail.newerAttempt = {
+      workflowRunId: 'run_attempt_2',
+      attemptNumber: 2,
+      status: 'running',
+      createdAt: 1_778_000_400_000,
+    }
+    const onOpenAttempt = vi.fn()
+
+    render(
+      <WorkflowDetailPage
+        detailOverride={detail}
+        workflowRunId={reviewedRunId}
+        onOpenAttempt={onOpenAttempt}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        'A newer immutable attempt exists. This report remains pinned to the selected attempt and cannot receive another decision.',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText(reviewedRunId)).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open attempt 2' }))
+    expect(onOpenAttempt).toHaveBeenCalledWith('run_attempt_2')
   })
 })

@@ -26,6 +26,10 @@
   --muted-foreground: oklch(0.32 0.025 252);
   --accent: oklch(0.93 0.03 82);
   --accent-foreground: oklch(0.23 0.03 252);
+  --success: #17824a;
+  --success-foreground: #0d6634;
+  --warning: #b96c00;
+  --warning-foreground: #704000;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(1 0 0);
   --border: #aaa39c;
@@ -107,6 +111,10 @@
   --muted-foreground: #b8b8be;
   --accent: #303035;
   --accent-foreground: #fafafa;
+  --success: #4fd08b;
+  --success-foreground: #77e5ad;
+  --warning: #e6a23c;
+  --warning-foreground: #ffd28a;
   --destructive: #ff766f;
   --destructive-foreground: #160706;
   --border: #505058;
@@ -369,6 +377,10 @@ body:has(.shader-loader) > header {
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);

@@ -17,6 +17,7 @@ export interface ExternalWorkflowRefRow {
   issueExternalId?: string
   issueNumber?: number
   issueTitle?: string
+  issueBody?: string
   pullRequestExternalId?: string
   pullRequestNumber?: number
   pullRequestHeadSha?: string
@@ -123,6 +124,8 @@ export interface SandboxPolicyRow {
 export interface EvidenceArtifactRow {
   id: string
   workflowRunId: string
+  producer?: string
+  subjectDigest?: string
   traceId?: string
   kind:
     | 'raw-trace'
@@ -163,7 +166,9 @@ export interface SandboxExecutionRow {
 export interface CandidatePatchSetRow {
   id: string
   workflowRunId: string
+  sandboxExecutionId?: string
   status: 'captured' | 'empty' | 'failed'
+  candidateDigest?: string
   baseRef?: string
   baseSha?: string
   headRef?: string
@@ -267,6 +272,7 @@ export interface PolicyDecisionRow {
   policyVersion?: string
   inputDigest?: string
   verificationResultIds?: ReadonlyArray<string>
+  reviewFindingIds?: ReadonlyArray<string>
   missingRequirementIds?: ReadonlyArray<string>
   createdAt: number
 }
@@ -290,6 +296,9 @@ export interface HumanDecisionRow {
 export interface PublicationResultRow {
   id: string
   workflowRunId: string
+  humanDecisionId?: string
+  candidatePatchSetId?: string
+  targetSha?: string
   provider: string
   kind: 'issue-comment' | 'check-run' | 'draft-pull-request' | 'branch'
   status: 'pending' | 'published' | 'failed'
@@ -320,6 +329,12 @@ export interface ProvenanceEventRow {
 }
 
 export interface WorkflowDetail extends WorkflowStartRow {
+  newerAttempt?: {
+    readonly workflowRunId: string
+    readonly attemptNumber: number
+    readonly status: WorkflowRunRow['status']
+    readonly createdAt: number
+  }
   runtimeEvents: ReadonlyArray<RuntimeEventRow>
   runtimeEventsTruncated: boolean
   runtimeSessions: ReadonlyArray<RuntimeSessionRow>

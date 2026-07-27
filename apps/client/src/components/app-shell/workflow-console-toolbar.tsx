@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { PlusIcon, SearchIcon, WorkflowIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,6 +7,7 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import * as m from '@/paraglide/messages'
 import {
   Sheet,
@@ -130,70 +130,47 @@ export function WorkflowConsoleToolbar({
               </div>
             </SheetContent>
           </Sheet>
-          <fieldset className="flex min-w-0 max-w-full flex-wrap items-center gap-1 rounded-md border border-border bg-card p-1 sm:col-span-3 2xl:col-span-1">
-            <legend className="sr-only">{m.app_queue_filter_label()}</legend>
-            <FilterButton
-              active={filter === 'all'}
-              onClick={() => onFilterChange('all')}
-            >
-              {m.app_queue_filter_all()}
-            </FilterButton>
-            <FilterButton
-              active={filter === 'needs-review'}
-              onClick={() => onFilterChange('needs-review')}
-            >
-              {m.app_queue_filter_review()}
-            </FilterButton>
-            <FilterButton
-              active={filter === 'running'}
-              onClick={() => onFilterChange('running')}
-            >
-              {m.app_queue_filter_running()}
-            </FilterButton>
-            <FilterButton
-              active={filter === 'queued'}
-              onClick={() => onFilterChange('queued')}
-            >
-              {m.app_queue_filter_queued()}
-            </FilterButton>
-            <FilterButton
-              active={filter === 'sandbox-failed'}
-              onClick={() => onFilterChange('sandbox-failed')}
-            >
-              {m.app_queue_filter_failed()}
-            </FilterButton>
-            <FilterButton
-              active={filter === 'approved'}
-              onClick={() => onFilterChange('approved')}
-            >
-              {m.app_queue_filter_approved()}
-            </FilterButton>
-          </fieldset>
+          <ToggleGroup
+            aria-label={m.app_queue_filter_label()}
+            value={[filter]}
+            size="sm"
+            spacing={0}
+            className="min-w-0 max-w-full flex-wrap bg-card p-1 sm:col-span-3 2xl:col-span-1"
+            onValueChange={(values) => {
+              const selected = filterOptions().find(
+                ({ value }) => value === values[0],
+              )
+              if (selected !== undefined) {
+                onFilterChange(selected.value)
+              }
+            }}
+          >
+            {filterOptions().map(({ label, value }) => (
+              <ToggleGroupItem
+                key={value}
+                value={value}
+                className="min-h-10 px-3 text-xs md:min-h-8 md:px-2"
+              >
+                {label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
       </div>
     </header>
   )
 }
 
-function FilterButton({
-  active,
-  children,
-  onClick,
-}: {
-  readonly active: boolean
-  readonly children: ReactNode
-  readonly onClick: () => void
-}) {
-  return (
-    <Button
-      type="button"
-      aria-pressed={active}
-      variant={active ? 'secondary' : 'ghost'}
-      size="sm"
-      className="min-h-10 px-3 text-xs md:min-h-8 md:px-2"
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  )
+function filterOptions(): ReadonlyArray<{
+  readonly label: string
+  readonly value: WorkflowFilter
+}> {
+  return [
+    { value: 'all', label: m.app_queue_filter_all() },
+    { value: 'needs-review', label: m.app_queue_filter_review() },
+    { value: 'running', label: m.app_queue_filter_running() },
+    { value: 'queued', label: m.app_queue_filter_queued() },
+    { value: 'sandbox-failed', label: m.app_queue_filter_failed() },
+    { value: 'approved', label: m.app_queue_filter_approved() },
+  ]
 }

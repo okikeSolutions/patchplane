@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState } from 'react'
 import { api } from '@patchplane/backend/convex/_generated/api'
 import { useQuery } from 'convex/react'
-import { ExternalLinkIcon } from 'lucide-react'
+import { CircleAlertIcon, ExternalLinkIcon } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,6 +13,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import * as m from '@/paraglide/messages'
 import type { WorkflowDetail } from './types'
 import { workflowDisplayTitle } from './workflow-console-model'
@@ -22,6 +24,7 @@ import {
   type WorkflowEvidenceTableRow,
 } from './workflow-evidence-table'
 import { WorkflowLogViewer } from './workflow-log-viewer'
+import { LoadingWorkflowDetail } from './loading-workflow-detail'
 import { WorkflowReviewPanel } from './workflow-review-panel'
 import { WorkflowRerunPanel } from './workflow-rerun-panel'
 import { WorkflowRuntimeSessions } from './workflow-runtime-sessions'
@@ -29,7 +32,12 @@ import { WorkflowSandboxEvidence } from './workflow-sandbox-evidence'
 import { WorkflowTrustStateBadge } from './workflow-status-badge'
 import { WorkflowTimeline } from './workflow-timeline'
 import { deriveWorkflowTrustState } from './workflow-trust-state'
-import { localizeAppHref } from './app-language'
+import type { WorkflowDiffNavigation } from './workflow-diff-navigation'
+import {
+  assessWorkflowReportCoherence,
+  type WorkflowReportCoherence,
+  type WorkflowReportCoherenceIssue,
+} from './workflow-report-coherence'
 
 const WorkflowChanges = lazy(() =>
   import('./workflow-changes').then((module) => ({
@@ -49,16 +57,22 @@ export function WorkflowDetailPage({
   detailOverride,
   workflowRunId,
   tab = 'summary',
-  returnTo = '/app',
+  diffNavigation,
   onRerunCreated,
+  onOpenAttempt,
   onTabChange,
+  onDiffNavigationChange,
 }: {
   readonly detailOverride?: WorkflowDetail
   readonly workflowRunId: string
   readonly tab?: DetailTab
-  readonly returnTo?: string
+  readonly diffNavigation?: WorkflowDiffNavigation
   readonly onRerunCreated?: (workflowRunId: string) => void
+  readonly onOpenAttempt?: (workflowRunId: string) => void
   readonly onTabChange?: (tab: DetailTab) => Promise<void> | void
+  readonly onDiffNavigationChange?: (
+    navigation: WorkflowDiffNavigation,
+  ) => Promise<void> | void
 }) {
   const queriedDetail = useQuery(
     api.workflowStarts.getDetail,
@@ -66,9 +80,17 @@ export function WorkflowDetailPage({
   ) as WorkflowDetail | undefined
   const detail = detailOverride ?? queriedDetail
   const [internalTab, setInternalTab] = useState<DetailTab>(tab)
+  const [internalDiffNavigation, setInternalDiffNavigation] =
+    useState<WorkflowDiffNavigation>({
+      expanded: false,
+      selectedFileIndex: undefined,
+      view: 'unified',
+    })
+  const activeDiffNavigation = diffNavigation ?? internalDiffNavigation
+  const diffExpanded = activeDiffNavigation.expanded
   const activeTab = onTabChange === undefined ? internalTab : tab
 
-  if (detail === undefined) return <WorkflowDetailPageSkeleton />
+  if (detail === undefined) return <LoadingWorkflowDetail tab={activeTab} />
   const trustState = deriveWorkflowTrustState(detail)
   const externalRef = detail.promptRequest.externalRef
   const title = workflowDisplayTitle(detail)
@@ -76,34 +98,39 @@ export function WorkflowDetailPage({
     externalRef?.repositoryFullName ?? detail.promptRequest.source
   const attemptNumber = detail.workflowRun.attemptNumber ?? 1
   const candidateStats = detail.candidatePatchSets.at(-1)?.stats
+  const coherence = assessWorkflowReportCoherence(detail)
 
   function changeTab(value: string) {
     const next = detailTabs.includes(value as DetailTab)
       ? (value as DetailTab)
       : 'summary'
+    if (next !== 'changes') {
+      setInternalDiffNavigation((current) => ({
+        ...current,
+        expanded: false,
+      }))
+    }
     setInternalTab(next)
     void onTabChange?.(next)
+  }
+
+  function changeDiffNavigation(next: Partial<WorkflowDiffNavigation>) {
+    const navigation = { ...activeDiffNavigation, ...next }
+    setInternalDiffNavigation(navigation)
+    void onDiffNavigationChange?.(navigation)
   }
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
       <header
         aria-labelledby="patch-report-title"
-        className="border-b border-border bg-background px-4 py-3 lg:px-6"
+        className={cn(
+          'border-b border-border bg-background px-4 py-3 lg:px-6',
+          diffExpanded && 'hidden',
+        )}
       >
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <a
-              className={buttonVariants({
-                variant: 'ghost',
-                size: 'sm',
-                className: 'mb-1 min-h-11 px-2 md:min-h-8',
-              })}
-              href={localizeAppHref(returnTo)}
-              aria-label={m.app_detail_back()}
-            >
-              {m.app_nav_workflows()}
-            </a>
             <Breadcrumb aria-label={m.app_detail_context()} className="mb-1">
               <BreadcrumbList className="gap-1 text-xs">
                 <BreadcrumbItem>{repository}</BreadcrumbItem>
@@ -181,15 +208,36 @@ export function WorkflowDetailPage({
       </header>
       <div
         data-slot="workflow-report-content"
-        className="flex-1 px-4 pt-4 pb-10 lg:px-6 lg:pt-6 lg:pb-12"
+        data-diff-expanded={diffExpanded || undefined}
+        className={cn(
+          'flex-1 px-4 pt-4 pb-10 lg:px-6 lg:pt-6 lg:pb-12',
+          diffExpanded && 'min-h-0 p-3 lg:p-4',
+        )}
       >
-        <div className="mx-auto grid w-full max-w-[100rem] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        {coherence.status === 'blocked' && !diffExpanded ? (
+          <div className="mx-auto mb-4 w-full max-w-[100rem]">
+            <WorkflowCoherenceAlert
+              coherence={coherence}
+              detail={detail}
+              onOpenAttempt={onOpenAttempt}
+            />
+          </div>
+        ) : null}
+        <div
+          className={cn(
+            'mx-auto grid w-full max-w-[100rem] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]',
+            diffExpanded && 'max-w-none xl:grid-cols-1',
+          )}
+        >
           <div className="min-w-0">
             <Tabs value={activeTab} onValueChange={changeTab} className="gap-6">
               <TabsList
                 variant="line"
                 aria-label={m.app_detail_sections()}
-                className="sticky top-0 z-20 h-auto w-full flex-wrap justify-start overflow-visible border-b border-border bg-background/95 py-1 backdrop-blur group-data-horizontal/tabs:h-auto supports-[backdrop-filter]:bg-background/80"
+                className={cn(
+                  'sticky top-0 z-20 h-auto w-full flex-wrap justify-start overflow-visible border-b border-border bg-background/95 py-1 backdrop-blur group-data-horizontal/tabs:h-auto supports-[backdrop-filter]:bg-background/80',
+                  diffExpanded && 'hidden',
+                )}
               >
                 <TabsTrigger
                   value="summary"
@@ -222,7 +270,19 @@ export function WorkflowDetailPage({
               <TabsContent value="changes">
                 {activeTab === 'changes' ? (
                   <Suspense fallback={<WorkflowChangesSkeleton />}>
-                    <WorkflowChanges detail={detail} />
+                    <WorkflowChanges
+                      detail={detail}
+                      expanded={diffExpanded}
+                      selectedFileIndex={activeDiffNavigation.selectedFileIndex}
+                      view={activeDiffNavigation.view}
+                      onExpandedChange={(expanded) =>
+                        changeDiffNavigation({ expanded })
+                      }
+                      onSelectedFileIndexChange={(selectedFileIndex) =>
+                        changeDiffNavigation({ selectedFileIndex })
+                      }
+                      onViewChange={(view) => changeDiffNavigation({ view })}
+                    />
                   </Suspense>
                 ) : null}
               </TabsContent>
@@ -239,11 +299,17 @@ export function WorkflowDetailPage({
           </div>
           <aside
             data-slot="workflow-review-pane"
-            className="self-start xl:sticky xl:top-4"
+            className={cn(
+              'self-start xl:sticky xl:top-4',
+              diffExpanded && 'hidden',
+            )}
           >
             <Card className="ring-border">
               <CardContent className="flex flex-col gap-4">
-                <WorkflowReviewPanel detail={detail} />
+                <WorkflowReviewPanel
+                  coherence={coherence}
+                  detail={detail}
+                />
                 <WorkflowRerunPanel
                   parentWorkflowRunId={detail.workflowRun.id}
                   onCreated={onRerunCreated}
@@ -263,6 +329,57 @@ export function WorkflowDetailPage({
       </div>
     </div>
   )
+}
+
+function WorkflowCoherenceAlert({
+  coherence,
+  detail,
+  onOpenAttempt,
+}: {
+  readonly coherence: Extract<WorkflowReportCoherence, { status: 'blocked' }>
+  readonly detail: WorkflowDetail
+  readonly onOpenAttempt?: ((workflowRunId: string) => void) | undefined
+}) {
+  return (
+    <Alert role="alert" variant="destructive">
+      <CircleAlertIcon />
+      <AlertTitle>{m.app_coherence_blocked_title()}</AlertTitle>
+      <AlertDescription className="grid gap-3">
+        <ul className="m-0 flex list-disc flex-col gap-1 pl-4">
+          {coherence.issues.map((issue) => (
+            <li key={issue}>{coherenceIssueCopy(issue)}</li>
+          ))}
+        </ul>
+        {detail.newerAttempt === undefined ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-fit"
+            onClick={() =>
+              onOpenAttempt?.(detail.newerAttempt!.workflowRunId)
+            }
+          >
+            {m.app_coherence_open_attempt({
+              attempt: detail.newerAttempt.attemptNumber,
+            })}
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+function coherenceIssueCopy(issue: WorkflowReportCoherenceIssue) {
+  switch (issue) {
+    case 'candidate-stale':
+      return m.app_coherence_stale()
+    case 'candidate-mutated':
+      return m.app_coherence_mutated()
+    case 'candidate-mismatch':
+      return m.app_coherence_mismatched()
+    case 'superseded-attempt':
+      return m.app_coherence_superseded()
+  }
 }
 
 function WorkflowEvidenceWorkspace({
@@ -459,17 +576,6 @@ function WorkflowRawEvidence({ detail }: { readonly detail: WorkflowDetail }) {
         rows={rows}
       />
     </section>
-  )
-}
-
-function WorkflowDetailPageSkeleton() {
-  return (
-    <div className="flex min-h-full flex-1 flex-col gap-4 p-6">
-      <Skeleton className="h-8 w-40" />
-      <Skeleton className="h-10 w-3/4" />
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-96 w-full" />
-    </div>
   )
 }
 

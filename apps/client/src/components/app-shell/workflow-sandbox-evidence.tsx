@@ -62,7 +62,7 @@ export function WorkflowSandboxEvidence({
                 {m.app_sandbox_command()}
                 <Badge
                   variant={
-                    execution.status === 'failed' ? 'destructive' : 'secondary'
+                    execution.status === 'failed' ? 'destructive' : 'success'
                   }
                 >
                   {execution.status === 'failed'
