@@ -1,4 +1,5 @@
 import { LogOutIcon, ShieldCheckIcon } from 'lucide-react'
+import * as m from '@/paraglide/messages'
 import LocaleSwitcher from '@/components/locale-switcher'
 import { ModeToggle } from '@/components/mode-toggle'
 import {
@@ -7,6 +8,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { localizeAppHref } from './app-language'
 
 export function NavUser({
   displayName,
@@ -26,22 +28,27 @@ export function NavUser({
       <SidebarMenu>
         <SidebarMenuItem>
           {isSignedIn ? (
-            <SidebarMenuButton className="min-h-11 md:min-h-8" tooltip="Sign out" onClick={onSignOut}>
+            <SidebarMenuButton
+              className="min-h-11 md:min-h-8"
+              tooltip={m.app_nav_sign_out()}
+              onClick={onSignOut}
+            >
               <LogOutIcon />
               <span className="truncate">{displayName}</span>
             </SidebarMenuButton>
           ) : (
             <SidebarMenuButton
               className="min-h-11 md:min-h-8"
+              tooltip={m.app_sign_in()}
               render={
                 <a
-                  href="/api/auth/sign-in?returnPathname=/app"
-                  aria-label="Sign in"
+                  href={`/api/auth/sign-in?returnPathname=${encodeURIComponent(localizeAppHref('/app'))}`}
+                  aria-label={m.app_sign_in()}
                 />
               }
             >
               <ShieldCheckIcon />
-              <span>Sign in</span>
+              <span>{m.app_sign_in()}</span>
             </SidebarMenuButton>
           )}
         </SidebarMenuItem>

@@ -29,8 +29,14 @@ import {
   sourceLabel,
   trustStateForList,
 } from './workflow-console-model'
-import { WorkflowRunStatusBadge, WorkflowTrustStateBadge } from './workflow-status-badge'
-import { deriveWorkflowTrustState, workflowTrustStateDetail } from './workflow-trust-state'
+import {
+  WorkflowRunStatusBadge,
+  WorkflowTrustStateBadge,
+} from './workflow-status-badge'
+import {
+  deriveWorkflowTrustState,
+  workflowTrustStateDetail,
+} from './workflow-trust-state'
 
 export function WorkflowInspector({
   detailOverride,
@@ -51,7 +57,9 @@ export function WorkflowInspector({
         <div className="p-6">
           <Empty>
             <EmptyHeader>
-              <EmptyMedia variant="icon"><ShieldCheckIcon /></EmptyMedia>
+              <EmptyMedia variant="icon">
+                <ShieldCheckIcon />
+              </EmptyMedia>
               <EmptyTitle>Select a workflow</EmptyTitle>
               <EmptyDescription>
                 Review trust state, provenance, sandbox status, and logs.
@@ -63,9 +71,10 @@ export function WorkflowInspector({
     )
   }
 
-  const trustState = detail === undefined
-    ? trustStateForList(row)
-    : deriveWorkflowTrustState(detail)
+  const trustState =
+    detail === undefined
+      ? trustStateForList(row)
+      : deriveWorkflowTrustState(detail)
   const externalRef = row.promptRequest.externalRef
 
   return (
@@ -85,7 +94,12 @@ export function WorkflowInspector({
               variant="secondary"
               size="sm"
               nativeButton={false}
-              render={<a aria-label="Open workflow" href={`/app/workflows/${workflowRunId}?returnTo=${encodeURIComponent(returnTo)}`} />}
+              render={
+                <a
+                  aria-label="Open workflow"
+                  href={`/app/workflows/${workflowRunId}?returnTo=${encodeURIComponent(returnTo)}`}
+                />
+              }
             >
               Open
               <ChevronRightIcon data-icon="inline-end" />
@@ -108,7 +122,9 @@ export function WorkflowInspector({
             <InspectorRow
               icon={<GitBranchIcon />}
               label="Repository"
-              value={externalRef?.repositoryFullName ?? row.promptRequest.source}
+              value={
+                externalRef?.repositoryFullName ?? row.promptRequest.source
+              }
             />
             <InspectorRow
               label="Event"
@@ -179,7 +195,8 @@ function CompactTimeline({ detail }: { readonly detail: WorkflowDetail }) {
       time: event.occurredAt,
     })),
     ...detail.sandboxExecutions.slice(-1).map((execution) => ({
-      label: execution.status === 'failed' ? 'Sandbox failed' : 'Sandbox succeeded',
+      label:
+        execution.status === 'failed' ? 'Sandbox failed' : 'Sandbox succeeded',
       detail: execution.command,
       time: execution.completedAt,
     })),
@@ -200,8 +217,12 @@ function CompactTimeline({ detail }: { readonly detail: WorkflowDetail }) {
           </div>
           <div className="min-w-0 pb-3">
             <div className="truncate text-sm font-medium">{item.label}</div>
-            <div className="truncate text-xs text-muted-foreground">{item.detail}</div>
-            <div className="text-xs text-muted-foreground">{formatRelative(item.time)}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {item.detail}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatRelative(item.time)}
+            </div>
           </div>
         </div>
       ))}

@@ -262,7 +262,7 @@ describe('SentryTelemetryPlugin', () => {
         ),
       )
       const failedSpan = sentryMocks.spans.at(-1)
-      assert.ok(failedSpan?.status._tag === 'Ended')
+      assert.ok(failedSpan?.status !== undefined && 'exit' in failedSpan.status)
       assert.ok(Exit.isFailure(failedSpan.status.exit))
       assert.strictEqual(
         Cause.squash(failedSpan.status.exit.cause),
@@ -333,7 +333,7 @@ describe('SentryTelemetryPlugin', () => {
       >
       assert.strictEqual(batches.length, 2)
       assert.deepStrictEqual(
-        batches.map((batch) => batch[0]?.data?.criticalPathStage).sort(),
+        batches.map((batch) => batch[0]?.data?.criticalPathStage).toSorted(),
         ['publication', 'source-pinning'],
       )
       assert.ok(batches.every((batch) => batch.length === 1))

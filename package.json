@@ -14,6 +14,7 @@
     "bundle:size:client": "bun scripts/bundle-size-client.ts",
     "bundle:check:client": "bun scripts/bundle-size-client.ts --check",
     "bench:landing-flicker": "bun scripts/landing-flicker-benchmark.ts",
+    "bench:diff-viewer": "bun apps/client/src/scripts/diff-viewer-benchmark.ts",
     "infra:dev": "bun --bun alchemy dev --env-file .env.local --stage dev",
     "infra:plan": "bun --bun alchemy deploy --dry-run --env-file .env.local --stage dev",
     "infra:deploy": "bun --bun alchemy deploy --env-file .env.local --stage dev",

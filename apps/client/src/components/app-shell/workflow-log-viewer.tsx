@@ -1,20 +1,42 @@
-import { useState } from 'react'
-import { CopyIcon } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import * as m from '@/paraglide/messages'
 import type { RuntimeEventRow, SandboxExecutionRow } from './types'
+import {
+  WorkflowEvidenceTable,
+  type WorkflowEvidenceTableRow,
+} from './workflow-evidence-table'
 
-async function copyText(value: string) {
-  if (typeof navigator === 'undefined' || navigator.clipboard === undefined) {
-    throw new Error('Clipboard access is unavailable')
-  }
-  await navigator.clipboard.writeText(value)
+function runtimeEventRows(
+  runtimeEvents: ReadonlyArray<RuntimeEventRow>,
+): ReadonlyArray<WorkflowEvidenceTableRow> {
+  return runtimeEvents.map((event) => ({
+    key: event.id,
+    title: event.summary ?? event.type,
+    source: event.provider,
+    label: event.type,
+    occurredAt: event.occurredAt,
+    detail: JSON.stringify(event, null, 2),
+  }))
 }
 
-function latestOutput(executions: ReadonlyArray<SandboxExecutionRow>) {
-  return executions.at(-1)
+function executionOutputRows(
+  executions: ReadonlyArray<SandboxExecutionRow>,
+  stream: 'stderr' | 'stdout',
+): ReadonlyArray<WorkflowEvidenceTableRow> {
+  return executions.flatMap((execution) => {
+    const output = execution[stream]
+    if (output === undefined || output.length === 0) return []
+    return [
+      {
+        key: `${execution.id}:${stream}`,
+        title: execution.command,
+        source: `${execution.provider} · ${execution.sandboxId}`,
+        label: execution.status,
+        occurredAt: execution.completedAt,
+        detail: output,
+      },
+    ]
+  })
 }
 
 export function WorkflowLogViewer({
@@ -26,93 +48,62 @@ export function WorkflowLogViewer({
   readonly runtimeEventsTruncated: boolean
   readonly sandboxExecutions: ReadonlyArray<SandboxExecutionRow>
 }) {
-  const latestExecution = latestOutput(sandboxExecutions)
-  const stdout = latestExecution?.stdout ?? ''
-  const stderr = latestExecution?.stderr ?? ''
-  const eventLog = runtimeEvents
-    .map((event) => JSON.stringify(event, null, 2))
-    .join('\n\n')
+  const events = runtimeEventRows(runtimeEvents)
+  const stdout = executionOutputRows(sandboxExecutions, 'stdout')
+  const stderr = executionOutputRows(sandboxExecutions, 'stderr')
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex min-w-0 max-w-full flex-col gap-4 overflow-hidden">
       <div>
-        <h2 className="text-sm font-medium">Logs</h2>
+        <h2 className="text-sm font-medium">{m.app_detail_logs()}</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
-          Raw evidence stays one click away from the workflow summary.
+          {m.app_logs_intro()}
         </p>
       </div>
-      <Tabs defaultValue="runtime">
-        <TabsList variant="line" aria-label="Log streams">
-          <TabsTrigger value="runtime">Runtime events</TabsTrigger>
-          <TabsTrigger value="stdout">Stdout</TabsTrigger>
-          <TabsTrigger value="stderr">Stderr</TabsTrigger>
+      <Tabs defaultValue="runtime" className="min-w-0 max-w-full gap-4">
+        <TabsList
+          variant="line"
+          aria-label={m.app_logs_streams()}
+          className="h-auto max-w-full flex-wrap justify-start overflow-visible group-data-horizontal/tabs:h-auto"
+        >
+          <TabsTrigger value="runtime" className="min-h-10 flex-none px-3">
+            {m.app_logs_runtime()} ({events.length})
+          </TabsTrigger>
+          <TabsTrigger value="stdout" className="min-h-10 flex-none px-3">
+            {m.app_logs_stdout()} ({stdout.length})
+          </TabsTrigger>
+          <TabsTrigger value="stderr" className="min-h-10 flex-none px-3">
+            {m.app_logs_stderr()} ({stderr.length})
+          </TabsTrigger>
         </TabsList>
-        <TabsContent value="runtime">
+        <TabsContent value="runtime" className="min-w-0 max-w-full">
           {runtimeEventsTruncated ? (
             <p className="mb-2 text-xs text-muted-foreground">
-              Showing the latest {runtimeEvents.length} normalized events. Full raw output remains in the evidence artifact.
+              {m.app_logs_showing_latest()} {runtimeEvents.length}{' '}
+              {m.app_logs_truncated_detail()}
             </p>
           ) : null}
-          <LogBlock value={eventLog} emptyTitle="No runtime events" />
+          <WorkflowEvidenceTable
+            caption={m.app_logs_runtime_caption()}
+            emptyTitle={m.app_logs_runtime_empty()}
+            rows={events}
+          />
         </TabsContent>
-        <TabsContent value="stdout">
-          <LogBlock value={stdout} emptyTitle="No stdout captured" />
+        <TabsContent value="stdout" className="min-w-0 max-w-full">
+          <WorkflowEvidenceTable
+            caption={m.app_logs_stdout_caption()}
+            emptyTitle={m.app_logs_stdout_empty()}
+            rows={stdout}
+          />
         </TabsContent>
-        <TabsContent value="stderr">
-          <LogBlock value={stderr} emptyTitle="No stderr captured" />
+        <TabsContent value="stderr" className="min-w-0 max-w-full">
+          <WorkflowEvidenceTable
+            caption={m.app_logs_stderr_caption()}
+            emptyTitle={m.app_logs_stderr_empty()}
+            rows={stderr}
+          />
         </TabsContent>
       </Tabs>
     </section>
-  )
-}
-
-function LogBlock({
-  value,
-  emptyTitle,
-}: {
-  readonly value: string
-  readonly emptyTitle: string
-}) {
-  const [copyStatus, setCopyStatus] = useState<string>()
-
-  if (value.length === 0) {
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon"><CopyIcon /></EmptyMedia>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
-          <EmptyDescription>
-            patchplane will show captured evidence here when the runtime records it.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-muted-foreground" aria-live="polite">{copyStatus}</span>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="min-h-11 md:min-h-8"
-          onClick={() => {
-            void copyText(value).then(
-              () => setCopyStatus('Copied to clipboard'),
-              () => setCopyStatus('Copy failed'),
-            )
-          }}
-        >
-          <CopyIcon data-icon="inline-start" />
-          Copy
-        </Button>
-      </div>
-      <ScrollArea className="h-72 rounded-lg bg-[var(--surface-nested)]">
-        <pre className="break-words p-3 font-mono text-xs text-muted-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {value}
-        </pre>
-      </ScrollArea>
-    </div>
   )
 }

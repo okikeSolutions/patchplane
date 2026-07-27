@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { WorkflowRerunPanel } from './workflow-rerun-panel'
 
@@ -23,7 +29,12 @@ describe('WorkflowRerunPanel', () => {
       sandboxExecutionId: 'execution-child',
     })
     const onCreated = vi.fn()
-    render(<WorkflowRerunPanel parentWorkflowRunId="workflow-parent" onCreated={onCreated} />)
+    render(
+      <WorkflowRerunPanel
+        parentWorkflowRunId="workflow-parent"
+        onCreated={onCreated}
+      />,
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Request another run' }))
     const runAgain = screen.getByRole('button', { name: 'Run again' })
@@ -43,26 +54,38 @@ describe('WorkflowRerunPanel', () => {
       },
     })
     expect(onCreated).toHaveBeenCalledWith('workflow-child')
-    expect(screen.getByRole('link', { name: 'Open child run' }).getAttribute('href')).toBe(
-      '/app/workflows/workflow-child',
-    )
+    expect(
+      screen.getByRole('link', { name: 'Open child run' }).getAttribute('href'),
+    ).toBe('/en/app/workflows/workflow-child')
   })
 
   test('links the durable child and surfaces an unconfirmed dispatch', async () => {
     rerunWorkflow.mockResolvedValue({
       ok: true,
       workflowRunId: 'workflow-child',
-      dispatchError: 'The child attempt was created, but execution dispatch could not be confirmed.',
+      dispatchError:
+        'The child attempt was created, but execution dispatch could not be confirmed.',
     })
     const onCreated = vi.fn()
-    render(<WorkflowRerunPanel parentWorkflowRunId="workflow-parent" onCreated={onCreated} />)
+    render(
+      <WorkflowRerunPanel
+        parentWorkflowRunId="workflow-parent"
+        onCreated={onCreated}
+      />,
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Request another run' }))
-    fireEvent.change(screen.getByLabelText('Required reason'), { target: { value: 'Retry safely.' } })
+    fireEvent.change(screen.getByLabelText('Required reason'), {
+      target: { value: 'Retry safely.' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Run again' }))
 
-    expect(await screen.findByText(/execution dispatch could not be confirmed/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Open child run' }).getAttribute('href')).toBe('/app/workflows/workflow-child')
+    expect(
+      await screen.findByText(/execution dispatch could not be confirmed/),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('link', { name: 'Open child run' }).getAttribute('href'),
+    ).toBe('/en/app/workflows/workflow-child')
     expect(onCreated).not.toHaveBeenCalled()
   })
 
@@ -74,8 +97,12 @@ describe('WorkflowRerunPanel', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Request another run' })).toHaveProperty('disabled', true)
-    expect(screen.getByText(/Wait for this attempt to reach review/)).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Request another run' }),
+    ).toHaveProperty('disabled', true)
+    expect(
+      screen.getByText(/Wait for this attempt to reach review/),
+    ).toBeTruthy()
   })
 
   test('reuses the idempotency key when retrying the same failed request', async () => {

@@ -53,7 +53,7 @@ describe('GitHubRepositoryConnections', () => {
       screen.getByRole('link', { name: 'Manage GitHub repositories' }),
     ).toBeTruthy()
     const runLink = screen.getByRole('link', { name: 'View run' })
-    expect(runLink.getAttribute('href')).toBe('/app/workflows/workflow-123')
+    expect(runLink.getAttribute('href')).toBe('/en/app/workflows/workflow-123')
     expect(runLink.getAttribute('data-latest-verification-status')).toBe(
       'approved',
     )

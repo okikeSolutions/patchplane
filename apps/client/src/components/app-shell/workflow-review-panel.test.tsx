@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { WorkflowDetail } from './types'
+import { WorkflowDetailOverview } from './workflow-detail-overview'
 import { WorkflowReviewPanel } from './workflow-review-panel'
 
 const submitReviewDecision = vi.hoisted(() => vi.fn())
@@ -26,6 +27,7 @@ const detail: WorkflowDetail = {
     workspaceId: 'workos:org-1',
     traceId: 'trace-1',
     status: 'reviewed',
+    modelVersion: 'v1',
     createdAt: 1,
   },
   promptRequest: {
@@ -49,6 +51,7 @@ const detail: WorkflowDetail = {
       provider: 'daytona',
       sandboxId: 'sandbox-1',
       command: 'bun test',
+      runtimeModel: 'gpt-5.5',
       status: 'succeeded',
       exitCode: 0,
       stdout: 'ok',
@@ -140,12 +143,12 @@ describe('WorkflowReviewPanel', () => {
   })
 
   test.each([
-    ['Approve', 'approved'],
-    ['Request changes', 'changes-requested'],
-    ['Reject', 'rejected'],
+    ['Approve', 'Confirm approval', 'approved'],
+    ['Request changes', 'Confirm request', 'changes-requested'],
+    ['Reject', 'Confirm rejection', 'rejected'],
   ] as const)(
     'submits %s with a required comment and idempotency key',
-    async (buttonName, status) => {
+    async (buttonName, confirmationName, status) => {
       submitReviewDecision.mockResolvedValue({
         ok: true,
         decision: { id: 'decision-1', status },
@@ -153,12 +156,19 @@ describe('WorkflowReviewPanel', () => {
       })
       render(<WorkflowReviewPanel detail={detail} />)
 
-      const button = screen.getByRole('button', { name: buttonName })
-      expect((button as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.queryByLabelText('Required comment')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: buttonName }))
+      expect(document.activeElement).toBe(
+        screen.getByLabelText('Required comment'),
+      )
+      const confirmation = screen.getByRole('button', {
+        name: confirmationName,
+      })
+      expect((confirmation as HTMLButtonElement).disabled).toBe(true)
       fireEvent.change(screen.getByLabelText('Required comment'), {
         target: { value: 'Reviewed evidence.' },
       })
-      fireEvent.click(button)
+      fireEvent.click(confirmation)
 
       await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(1))
       expect(await screen.findByText('Decision recorded')).toBeTruthy()
@@ -176,6 +186,77 @@ describe('WorkflowReviewPanel', () => {
       })
     },
   )
+
+  test('summarizes execution identity and discloses the command only on request', () => {
+    const secret = 'runtime-secret-value'
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          sandboxExecutions: detail.sandboxExecutions.map((execution) => ({
+            ...execution,
+            command: 'TOKEN=[redacted] bun test',
+          })),
+        }}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        'Provider daytona · Model gpt-5.5 · Duration 0s · Exit 0',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText('Candidate candidate-1')).toBeTruthy()
+    expect(screen.queryByText(/bun test/)).toBeNull()
+    expect(screen.queryByText(secret)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Technical details' }))
+    expect(screen.getByText('TOKEN=[redacted] bun test')).toBeTruthy()
+    expect(screen.queryByText(secret)).toBeNull()
+  })
+
+  test('does not present unconfigured verification as a clean automated verdict', () => {
+    render(
+      <WorkflowDetailOverview
+        detail={{
+          ...detail,
+          verificationRequirements: [],
+          verificationResults: [],
+          policyDecisions: detail.policyDecisions.map((decision) => ({
+            ...decision,
+            status: 'manual-review',
+            summary:
+              'PatchPlane found no blocking automated findings; human approval is still required.',
+            reason: 'review:clean',
+            verificationResultIds: [],
+            missingRequirementIds: [],
+          })),
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Automated review · Completed')).toBeTruthy()
+    expect(
+      screen.getAllByText('0 blocking review findings.').length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getByText('Required verification · Not configured'),
+    ).toBeTruthy()
+    expect(
+      screen.getAllByText(
+        'No required verification is configured; approval requires an explicit override.',
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getByText(
+        'Human approval is required before this candidate can be trusted.',
+      ),
+    ).toBeTruthy()
+    expect(
+      screen.queryByText(/found no blocking automated findings/i),
+    ).toBeNull()
+    expect(screen.queryByText('review:clean')).toBeNull()
+  })
 
   test('requires an explicit reason when approval overrides incomplete verification', async () => {
     submitReviewDecision.mockResolvedValue({
@@ -197,10 +278,11 @@ describe('WorkflowReviewPanel', () => {
       />,
     )
 
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     fireEvent.change(screen.getByLabelText('Required comment'), {
       target: { value: 'Reviewed evidence.' },
     })
-    const approve = screen.getByRole('button', { name: 'Approve' })
+    const approve = screen.getByRole('button', { name: 'Confirm approval' })
     expect(approve).toHaveProperty('disabled', true)
 
     fireEvent.change(screen.getByLabelText('Verification override reason'), {
@@ -211,7 +293,8 @@ describe('WorkflowReviewPanel', () => {
     await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(1))
     expect(submitReviewDecision.mock.calls[0]?.[0].data).toMatchObject({
       status: 'approved',
-      verificationOverrideReason: 'Urgent mitigation; manual evidence was reviewed.',
+      verificationOverrideReason:
+        'Urgent mitigation; manual evidence was reviewed.',
     })
   })
 
@@ -228,10 +311,30 @@ describe('WorkflowReviewPanel', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Required comment'), {
-      target: { value: 'Reviewed evidence.' },
-    })
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+    expect(screen.queryByLabelText('Required comment')).toBeNull()
+  })
+
+  test('keeps the rail compact until an action is selected and restores focus on cancel', () => {
+    render(<WorkflowReviewPanel detail={detail} />)
+
+    const reject = screen.getByRole('button', { name: 'Reject' })
+    expect(screen.queryByLabelText('Required comment')).toBeNull()
+
+    fireEvent.click(reject)
+    expect(document.activeElement).toBe(
+      screen.getByLabelText('Required comment'),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Confirm rejection' }),
+    ).toHaveProperty('disabled', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Required comment')).toBeNull()
+    expect(document.activeElement).toBe(reject)
   })
 
   test('fails closed when the verification projection is truncated', () => {
@@ -244,12 +347,14 @@ describe('WorkflowReviewPanel', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Required comment'), {
-      target: { value: 'Reviewed evidence.' },
-    })
     expect(screen.queryByLabelText('Verification override reason')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
-    expect(screen.getByText(/Approval is blocked until the complete projection/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+    expect(
+      screen.getByText(/Approval is blocked until the complete projection/),
+    ).toBeTruthy()
   })
 
   test('keeps decisions disabled when the displayed review is not linked to the latest candidate', () => {
@@ -265,9 +370,6 @@ describe('WorkflowReviewPanel', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Required comment'), {
-      target: { value: 'Reviewed evidence.' },
-    })
     expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty(
       'disabled',
       true,
@@ -284,10 +386,11 @@ describe('WorkflowReviewPanel', () => {
       })
     const { rerender } = render(<WorkflowReviewPanel detail={detail} />)
 
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     fireEvent.change(screen.getByLabelText('Required comment'), {
       target: { value: 'Reviewed evidence.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm approval' }))
     await screen.findByText('Publication failed')
     rerender(
       <WorkflowReviewPanel
@@ -342,7 +445,7 @@ describe('WorkflowReviewPanel', () => {
         }}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm approval' }))
     await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(2))
 
     const firstKey = submitReviewDecision.mock.calls[0]?.[0].data.idempotencyKey

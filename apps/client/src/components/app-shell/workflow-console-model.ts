@@ -1,4 +1,4 @@
-import { getLocale } from '@/paraglide/runtime'
+import { getAppLocale } from './app-language'
 import type { WorkflowDetail, WorkflowStartRow } from './types'
 import type { WorkflowTrustState } from './workflow-trust-state'
 import { workflowTrustStateLabel } from './workflow-trust-state'
@@ -23,7 +23,48 @@ export interface WorkflowArtifactReference {
 }
 
 export function sourceLabel(row: WorkflowStartRow) {
-  return row.promptRequest.externalRef?.repositoryFullName ?? row.promptRequest.source
+  return (
+    row.promptRequest.externalRef?.repositoryFullName ??
+    row.promptRequest.source
+  )
+}
+
+export function workflowContextLabel(row: WorkflowStartRow) {
+  const externalRef = row.promptRequest.externalRef
+  const parts = [sourceLabel(row)]
+
+  if (externalRef?.pullRequestNumber !== undefined) {
+    parts.push(`PR #${externalRef.pullRequestNumber}`)
+  } else if (externalRef?.issueNumber !== undefined) {
+    parts.push(`Issue #${externalRef.issueNumber}`)
+  }
+
+  parts.push(`Attempt ${row.workflowRun.attemptNumber ?? 1}`)
+  return parts.join(' · ')
+}
+
+export function workflowUpdatedAt(row: WorkflowStartRow) {
+  return row.workflowRun.updatedAt ?? row.workflowRun.createdAt
+}
+
+export function workflowDisplayTitle(row: WorkflowStartRow) {
+  const externalRef = row.promptRequest.externalRef
+  const sourceTitle = externalRef?.issueTitle?.trim()
+  if (sourceTitle !== undefined && sourceTitle.length > 0) {
+    return sourceTitle
+  }
+
+  if (
+    externalRef?.provider === 'github' &&
+    externalRef.eventKind.startsWith('github.pull_request.')
+  ) {
+    const firstLine = row.promptRequest.prompt.split(/\r?\n/, 1)[0]?.trim()
+    if (firstLine !== undefined && firstLine.length > 0) {
+      return firstLine
+    }
+  }
+
+  return row.promptRequest.prompt.trim()
 }
 
 export function trustStateForList(row: WorkflowStartRow): WorkflowTrustState {
@@ -40,18 +81,6 @@ export function trustStateForList(row: WorkflowStartRow): WorkflowTrustState {
   }
 
   return 'needs-review'
-}
-
-export function lastEventLabel(row: WorkflowStartRow) {
-  if (row.workflowRun.status === 'reviewed') {
-    return 'Awaiting human decision'
-  }
-
-  if (row.workflowRun.status === 'running') {
-    return 'Collecting evidence'
-  }
-
-  return 'Workflow accepted'
 }
 
 export function sandboxSummary(detail: WorkflowDetail) {
@@ -77,21 +106,26 @@ export function logSummary(detail: WorkflowDetail) {
 
   const streams = [
     latest.stdout.length > 0 ? 'stdout' : undefined,
-    latest.stderr !== undefined && latest.stderr.length > 0 ? 'stderr' : undefined,
+    latest.stderr !== undefined && latest.stderr.length > 0
+      ? 'stderr'
+      : undefined,
   ].filter(Boolean)
 
   return streams.length === 0 ? 'No command output' : streams.join(' + ')
 }
 
-export function artifactReferences(detail: WorkflowDetail): ReadonlyArray<WorkflowArtifactReference> {
-  const references: Array<WorkflowArtifactReference> = detail.evidenceArtifacts.map((artifact) => ({
-    id: artifact.id,
-    label: artifact.label ?? artifact.kind,
-    value: `${artifact.storageProvider}:${artifact.storageKey}`,
-    source: `${artifact.contentType} · ${artifact.sizeBytes} bytes`,
-    artifactId: artifact.id,
-    workflowRunId: artifact.workflowRunId,
-  }))
+export function artifactReferences(
+  detail: WorkflowDetail,
+): ReadonlyArray<WorkflowArtifactReference> {
+  const references: Array<WorkflowArtifactReference> =
+    detail.evidenceArtifacts.map((artifact) => ({
+      id: artifact.id,
+      label: artifact.label ?? artifact.kind,
+      value: `${artifact.storageProvider}:${artifact.storageKey}`,
+      source: `${artifact.contentType} · ${artifact.sizeBytes} bytes`,
+      artifactId: artifact.id,
+      workflowRunId: artifact.workflowRunId,
+    }))
 
   for (const event of detail.runtimeEvents) {
     if (event.payloadJson === undefined) {
@@ -151,7 +185,9 @@ export function formatRelative(value: number) {
     ['hour', 3_600],
     ['minute', 60],
   ]
-  const formatter = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' })
+  const formatter = new Intl.RelativeTimeFormat(getAppLocale(), {
+    numeric: 'auto',
+  })
 
   for (const [unit, seconds] of units) {
     if (absolute >= seconds) {
@@ -203,7 +239,8 @@ function valuesFromCandidate(value: unknown): ReadonlyArray<string> {
       return []
     }
 
-    const referenceValue = item.id ?? item.artifactId ?? item.url ?? item.href ?? item.key
+    const referenceValue =
+      item.id ?? item.artifactId ?? item.url ?? item.href ?? item.key
 
     return typeof referenceValue === 'string' ? [referenceValue] : []
   })

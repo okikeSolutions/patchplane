@@ -14,33 +14,32 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-
-const navMain = [
-  {
-    title: 'Workflows',
-    href: '/app',
-    icon: WorkflowIcon,
-    isActive: true,
-  },
-]
-
-const navSecondary = [
-  {
-    title: 'Documentation',
-    href: 'https://github.com/okikeSolutions/patchplane#readme',
-    icon: BookOpenIcon,
-  },
-  {
-    title: 'GitHub',
-    href: 'https://github.com/okikeSolutions/patchplane',
-    icon: GitBranchIcon,
-  },
-]
+import { localizeAppHref } from './app-language'
 
 export function AppSidebar() {
   const { user, signOut } = useAuth()
   const displayName =
     user?.firstName ?? user?.email ?? m.app_operator_fallback()
+  const navMain = [
+    {
+      title: m.app_nav_workflows(),
+      href: localizeAppHref('/app'),
+      icon: WorkflowIcon,
+      isActive: true,
+    },
+  ]
+  const navSecondary = [
+    {
+      title: m.app_nav_documentation(),
+      href: 'https://github.com/okikeSolutions/patchplane#readme',
+      icon: BookOpenIcon,
+    },
+    {
+      title: 'GitHub',
+      href: 'https://github.com/okikeSolutions/patchplane',
+      icon: GitBranchIcon,
+    },
+  ]
 
   return (
     <Sidebar className="border-sidebar-border/60" collapsible="icon">
@@ -49,12 +48,20 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<a href="/app" aria-label="patchplane workflows" />}
+              tooltip={m.app_nav_patchplane_workflows()}
+              render={
+                <a
+                  href={localizeAppHref('/app')}
+                  aria-label={m.app_nav_patchplane_workflows()}
+                />
+              }
             >
               <BrandMark className="size-8 shrink-0" />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">patchplane</span>
-                <span className="truncate text-xs">Patch reports</span>
+                <span className="truncate text-xs">
+                  {m.app_nav_patch_reports()}
+                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

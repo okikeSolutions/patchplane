@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
 import { startWorkflowServerFn } from '@/lib/start-workflow'
+import { localizeAppHref } from './app-language'
 
 const startWorkflowPromptStandardSchema = Schema.toStandardSchemaV1(
   StartWorkflowPromptInput,
@@ -33,7 +34,7 @@ export function StartWorkflowPanel() {
           </p>
         </div>
         <div className="shrink-0">
-          <Badge variant="secondary">Authenticated</Badge>
+          <Badge variant="secondary">{m.app_authenticated()}</Badge>
         </div>
       </div>
       <StartWorkflowForm />
@@ -78,9 +79,7 @@ function StartWorkflowForm() {
         })
       } catch (cause: unknown) {
         setError(
-          cause instanceof Error
-            ? cause.message
-            : m.app_workflow_start_error(),
+          cause instanceof Error ? cause.message : m.app_workflow_start_error(),
         )
       }
     },
@@ -98,7 +97,8 @@ function StartWorkflowForm() {
       <FieldGroup>
         <form.Field name="prompt">
           {(field) => {
-            const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid
+            const isInvalid =
+              field.state.meta.isTouched && !field.state.meta.isValid
             return (
               <Field data-invalid={isInvalid}>
                 <FieldLabel htmlFor={field.name}>
@@ -109,7 +109,9 @@ function StartWorkflowForm() {
                   name={field.name}
                   value={field.state.value}
                   onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.currentTarget.value)}
+                  onChange={(event) =>
+                    field.handleChange(event.currentTarget.value)
+                  }
                   disabled={field.form.state.isSubmitting}
                   rows={5}
                   placeholder={m.app_workflow_prompt_placeholder()}
@@ -119,9 +121,14 @@ function StartWorkflowForm() {
                   aria-invalid={isInvalid}
                 />
                 <FieldDescription id="workflow-prompt-description">
-                  Describe the change and acceptance criteria. Pull-request workflows use the repository and ref supplied by GitHub.
+                  {m.app_prompt_description()}
                 </FieldDescription>
-                {isInvalid ? <FieldError id="workflow-prompt-error" errors={toFieldErrors(field.state.meta.errors)} /> : null}
+                {isInvalid ? (
+                  <FieldError
+                    id="workflow-prompt-error"
+                    errors={toFieldErrors(field.state.meta.errors)}
+                  />
+                ) : null}
               </Field>
             )
           }}
@@ -138,7 +145,9 @@ function StartWorkflowForm() {
             <Button
               type="submit"
               className="min-h-11 w-full sm:w-auto"
-              disabled={!hasAuthenticatedWorkspace || !canSubmit || isSubmitting}
+              disabled={
+                !hasAuthenticatedWorkspace || !canSubmit || isSubmitting
+              }
             >
               {isSubmitting
                 ? m.app_workflow_start_submitting()
@@ -157,10 +166,12 @@ function StartWorkflowForm() {
           </span>
         ) : null}
       </div>
-      <div aria-live="polite">{result ? <WorkflowStartResult result={result} /> : null}</div>
+      <div aria-live="polite">
+        {result ? <WorkflowStartResult result={result} /> : null}
+      </div>
       {error ? (
         <Alert role="alert" variant="destructive">
-          <AlertTitle>Workflow start failed</AlertTitle>
+          <AlertTitle>{m.app_workflow_start_error()}</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -211,9 +222,11 @@ function WorkflowStartResult({
         </span>
         <a
           className="mt-2 inline-flex min-h-11 items-center font-medium underline underline-offset-4"
-          href={`/app/workflows/${encodeURIComponent(result.workflowRunId)}`}
+          href={localizeAppHref(
+            `/app/workflows/${encodeURIComponent(result.workflowRunId)}`,
+          )}
         >
-          Open Patch Report
+          {m.app_open_patch_report()}
         </a>
       </AlertDescription>
     </Alert>

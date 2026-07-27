@@ -1,4 +1,10 @@
+import { Schema } from 'effect'
 import { describe, expect, test, vi } from 'vitest'
+import { EvidenceArtifactStorageRecord } from '@patchplane/domain/evidence-artifact'
+import {
+  makeEvidenceArtifactId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import {
   artifactPreviewLimitBytes,
   createArtifactStorageResponse,
@@ -7,12 +13,14 @@ import {
 } from './artifact-storage-response'
 
 const artifact = {
-  id: 'artifact_123',
-  workflowRunId: 'workflow_123',
+  id: makeEvidenceArtifactId('artifact_123'),
+  workflowRunId: makeWorkflowRunId('workflow_123'),
   storageKey: 'workflows/workflow_123/diff/artifact.patch',
   contentType: 'text/x-patch',
   sizeBytes: 12,
-  sha256: 'sha256:test',
+  sha256: Schema.decodeUnknownSync(EvidenceArtifactStorageRecord.fields.sha256)(
+    'a'.repeat(64),
+  ),
 }
 
 function objectWithBytes(bytes: Uint8Array): ArtifactReadObject {
@@ -42,30 +50,47 @@ describe('artifact storage response', () => {
     const response = await createArtifactStorageResponse({
       artifact: { ...artifact, sizeBytes: previewObject.size },
       bucket,
-      requestUrl: new URL('https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1'),
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
     })
 
     expect(get).toHaveBeenCalledWith(artifact.storageKey, {
       range: { offset: 0, length: artifactPreviewLimitBytes },
     })
     expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+    expect(response.headers.get('content-type')).toBe(
+      'text/plain; charset=utf-8',
+    )
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('x-patchplane-preview-truncated')).toBe('true')
-    expect(await response.text()).toContain('preview truncated')
+    expect(response.headers.get('x-patchplane-artifact-sha256')).toBe(
+      artifact.sha256,
+    )
+    expect(response.headers.get('x-patchplane-artifact-size')).toBe(
+      String(previewObject.size),
+    )
+    expect(response.headers.get('x-patchplane-preview-bytes')).toBe('10')
+    expect(await response.text()).toBe('diff --git')
   })
 
   test('rejects binary inline previews', async () => {
-    const { bucket } = bucketReturning(objectWithBytes(new Uint8Array([1, 0, 2])))
+    const { bucket } = bucketReturning(
+      objectWithBytes(new Uint8Array([1, 0, 2])),
+    )
     const response = await createArtifactStorageResponse({
       artifact: { ...artifact, sizeBytes: 3 },
       bucket,
-      requestUrl: new URL('https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1'),
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
     })
 
     expect(response.status).toBe(415)
     expect(await response.json()).toEqual({
       ok: false,
+      code: 'binary_artifact',
       error: 'Binary artifacts cannot be previewed inline',
     })
   })
@@ -75,7 +100,9 @@ describe('artifact storage response', () => {
     const response = await createArtifactStorageResponse({
       artifact,
       bucket,
-      requestUrl: new URL('https://app.example/api/artifacts/url?artifactId=artifact_123&expiresInSeconds=900'),
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&expiresInSeconds=900',
+      ),
     })
 
     expect(get).not.toHaveBeenCalled()
@@ -87,6 +114,24 @@ describe('artifact storage response', () => {
     })
   })
 
+  test('never reflects the request origin or expiry into artifact URLs', async () => {
+    const { bucket } = bucketReturning(null)
+    const response = await createArtifactStorageResponse({
+      artifact,
+      bucket,
+      requestUrl: new URL(
+        'https://untrusted.example/api/artifacts/url?artifactId=artifact_123&workflowRunId=workflow_123&expiresInSeconds=900',
+      ),
+    })
+
+    const payload = (await response.json()) as { readonly url: string }
+    expect(payload.url).toBe(
+      '/api/artifacts/url?artifactId=artifact_123&workflowRunId=workflow_123&download=1',
+    )
+    expect(payload.url).not.toContain('untrusted.example')
+    expect(payload.url).not.toContain('expiresInSeconds')
+  })
+
   test('rejects an R2 object that does not match durable evidence metadata', async () => {
     const object = objectWithBytes(new TextEncoder().encode('diff --git'))
     const { bucket } = bucketReturning({
@@ -96,13 +141,36 @@ describe('artifact storage response', () => {
     const response = await createArtifactStorageResponse({
       artifact: { ...artifact, sizeBytes: object.size },
       bucket,
-      requestUrl: new URL('https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1'),
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
     })
 
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       ok: false,
+      code: 'artifact_identity_mismatch',
       error: 'Artifact object does not match its evidence metadata',
+    })
+  })
+
+  test('rejects invalid UTF-8 without substituting replacement characters', async () => {
+    const { bucket } = bucketReturning(
+      objectWithBytes(new Uint8Array([0xc3, 0x28])),
+    )
+    const response = await createArtifactStorageResponse({
+      artifact: { ...artifact, sizeBytes: 2 },
+      bucket,
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
+    })
+
+    expect(response.status).toBe(422)
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'invalid_utf8',
+      error: 'Artifact preview is not valid UTF-8 text',
     })
   })
 
@@ -112,12 +180,73 @@ describe('artifact storage response', () => {
     const response = await createArtifactStorageResponse({
       artifact: { ...artifact, sizeBytes: bytes.byteLength },
       bucket,
-      requestUrl: new URL('https://app.example/api/artifacts/url?artifactId=artifact_123&download=1'),
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&download=1',
+      ),
     })
 
     expect(response.status).toBe(200)
-    expect(response.headers.get('content-disposition')).toBe('attachment; filename="artifact-artifact_123"')
+    expect(response.headers.get('content-disposition')).toBe(
+      'attachment; filename="artifact-artifact_123"',
+    )
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(await response.text()).toBe('diff --git')
+  })
+
+  test('adds deterministic statistics to a complete textual diff preview', async () => {
+    const body = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1 +1,2 @@
+-old
++new
++another
+`
+    const object = objectWithBytes(new TextEncoder().encode(body))
+    const response = await createArtifactStorageResponse({
+      artifact: {
+        ...artifact,
+        contentType: 'text/x-diff',
+        sizeBytes: object.size,
+        sha256: artifact.sha256,
+      },
+      bucket: { get: async () => object },
+      requestUrl: new URL(
+        'https://patchplane.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('x-patchplane-diff-stats')).toBe('parsed')
+    expect(response.headers.get('x-patchplane-diff-files')).toBe('1')
+    expect(response.headers.get('x-patchplane-diff-additions')).toBe('2')
+    expect(response.headers.get('x-patchplane-diff-deletions')).toBe('1')
+  })
+
+  test('provides an explicit reason when statistics cannot be parsed', async () => {
+    const body = `diff --git a/file.ts b/file.ts
+GIT binary patch
+literal 1
+KcmZQzU|?Vb0RR91
+`
+    const object = objectWithBytes(new TextEncoder().encode(body))
+    const response = await createArtifactStorageResponse({
+      artifact: {
+        ...artifact,
+        contentType: 'text/x-diff',
+        sizeBytes: object.size,
+        sha256: artifact.sha256,
+      },
+      bucket: { get: async () => object },
+      requestUrl: new URL(
+        'https://patchplane.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('x-patchplane-diff-stats')).toBe('unavailable')
+    expect(response.headers.get('x-patchplane-diff-stats-reason')).toBe(
+      'binary',
+    )
   })
 })

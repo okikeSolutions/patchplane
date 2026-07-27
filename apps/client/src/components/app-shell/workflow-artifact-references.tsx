@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLinkIcon, FileArchiveIcon } from 'lucide-react'
+import { ExternalLinkIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -7,11 +7,14 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
 import type { WorkflowDetail } from './types'
-import { artifactReferences, type WorkflowArtifactReference } from './workflow-console-model'
+import {
+  artifactReferences,
+  type WorkflowArtifactReference,
+} from './workflow-console-model'
+import * as m from '@/paraglide/messages'
 
 export function WorkflowArtifactReferences({
   detail,
@@ -26,17 +29,16 @@ export function WorkflowArtifactReferences({
     return (
       <section className="flex flex-col gap-4">
         <div>
-          <h2 className="text-sm font-medium">Artifacts</h2>
+          <h2 className="text-sm font-medium">{m.app_detail_artifacts()}</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
-            Evidence artifact references linked from runtime events.
+            {m.app_artifacts_intro()}
           </p>
         </div>
         <Empty>
           <EmptyHeader>
-            <EmptyMedia variant="icon"><FileArchiveIcon /></EmptyMedia>
-            <EmptyTitle>No artifact references</EmptyTitle>
+            <EmptyTitle>{m.app_artifacts_empty()}</EmptyTitle>
             <EmptyDescription>
-              Runtime events and command logs are recorded. R2-backed artifact metadata appears here when available.
+              {m.app_artifacts_empty_detail()}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -47,25 +49,40 @@ export function WorkflowArtifactReferences({
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="text-sm font-medium">Artifacts</h2>
+        <h2 className="text-sm font-medium">{m.app_detail_artifacts()}</h2>
         <p className="m-0 mt-1 text-sm text-muted-foreground">
-          Evidence artifact references linked from runtime events.
+          {m.app_artifacts_intro()}
         </p>
         {error === undefined ? null : (
-          <p role="alert" className="m-0 mt-2 text-xs text-[var(--destructive-readable)]">{error}</p>
+          <p
+            role="alert"
+            className="m-0 mt-2 text-xs text-[var(--destructive-readable)]"
+          >
+            {error}
+          </p>
         )}
       </div>
       <div className="flex flex-col gap-2">
         {references.map((reference) => (
-          <Card key={reference.id} id={`artifact-${reference.artifactId ?? reference.id}`} size="sm" className="scroll-mt-32 ring-border">
+          <Card
+            key={reference.id}
+            id={`artifact-${reference.artifactId ?? reference.id}`}
+            size="sm"
+            className="scroll-mt-32 ring-border"
+          >
             <CardContent className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
               <div className="min-w-0">
-                <div className="break-words text-sm font-medium [overflow-wrap:anywhere]">{reference.label}</div>
+                <div className="break-words text-sm font-medium [overflow-wrap:anywhere]">
+                  {reference.label}
+                </div>
                 <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
                   {reference.value}
                 </div>
               </div>
-              <Badge variant="secondary" className="w-fit bg-muted text-muted-foreground">
+              <Badge
+                variant="secondary"
+                className="w-fit bg-muted text-muted-foreground"
+              >
                 {reference.source}
               </Badge>
               {reference.artifactId === undefined ? null : (
@@ -99,13 +116,40 @@ export function WorkflowArtifactReferences({
   )
 }
 
-function decodeArtifactUrlPayload(value: unknown) {
+export function decodeArtifactUrlPayload(
+  value: unknown,
+  expected: {
+    readonly artifactId: string
+    readonly baseUrl: string
+    readonly workflowRunId?: string | undefined
+  },
+) {
   if (typeof value !== 'object' || value === null) return undefined
   const ok = Reflect.get(value, 'ok')
   const url = Reflect.get(value, 'url')
   const error = Reflect.get(value, 'error')
-  if (ok === true && typeof url === 'string' && URL.canParse(url)) {
-    return { ok: true as const, url }
+  if (ok === true && typeof url === 'string') {
+    try {
+      const baseUrl = new URL(expected.baseUrl)
+      const resolvedUrl = new URL(url, baseUrl)
+      const workflowRunMatches =
+        expected.workflowRunId === undefined ||
+        resolvedUrl.searchParams.get('workflowRunId') === expected.workflowRunId
+      if (
+        resolvedUrl.origin === baseUrl.origin &&
+        resolvedUrl.pathname === '/api/artifacts/url' &&
+        resolvedUrl.searchParams.get('artifactId') === expected.artifactId &&
+        resolvedUrl.searchParams.get('download') === '1' &&
+        workflowRunMatches
+      ) {
+        return {
+          ok: true as const,
+          url: `${resolvedUrl.pathname}${resolvedUrl.search}`,
+        }
+      }
+    } catch {
+      return undefined
+    }
   }
   return ok === false && typeof error === 'string'
     ? { ok: false as const, error }
@@ -126,24 +170,27 @@ async function openArtifact(
   try {
     const params = new URLSearchParams({
       artifactId: reference.artifactId,
-      expiresInSeconds: '900',
     })
     if (reference.workflowRunId !== undefined) {
       params.set('workflowRunId', reference.workflowRunId)
     }
     const response = await fetch(`/api/artifacts/url?${params.toString()}`)
-    const payload = decodeArtifactUrlPayload(await response.json())
+    const payload = decodeArtifactUrlPayload(await response.json(), {
+      artifactId: reference.artifactId,
+      baseUrl: window.location.href,
+      workflowRunId: reference.workflowRunId,
+    })
     if (!response.ok || payload?.ok !== true) {
       callbacks.onError(
-        payload?.ok === false
-          ? payload.error
-          : 'Artifact URL could not be created',
+        payload?.ok === false ? payload.error : m.app_artifact_open_failed(),
       )
       return
     }
     window.location.assign(payload.url)
   } catch (cause) {
-    callbacks.onError(cause instanceof Error ? cause.message : 'Artifact URL could not be created')
+    callbacks.onError(
+      cause instanceof Error ? cause.message : m.app_artifact_open_failed(),
+    )
   } finally {
     callbacks.onComplete()
   }

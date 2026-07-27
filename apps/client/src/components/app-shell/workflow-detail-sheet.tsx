@@ -5,7 +5,12 @@ import { AlertCircleIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import {
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { WorkflowDetail } from './types'
@@ -13,7 +18,10 @@ import { WorkflowArtifactReferences } from './workflow-artifact-references'
 import { sourceLabel } from './workflow-console-model'
 import { WorkflowDetailOverview } from './workflow-detail-overview'
 import { WorkflowTimeline } from './workflow-timeline'
-import { deriveWorkflowTrustState, workflowTrustStateLabel } from './workflow-trust-state'
+import {
+  deriveWorkflowTrustState,
+  workflowTrustStateLabel,
+} from './workflow-trust-state'
 
 export function WorkflowDetailSheet({
   detailOverride,
@@ -27,9 +35,7 @@ export function WorkflowDetailSheet({
   const queriedDetail = useQuery(
     api.workflowStarts.getDetail,
     detailOverride === undefined ? { workflowRunId } : 'skip',
-  ) as
-    | WorkflowDetail
-    | undefined
+  ) as WorkflowDetail | undefined
   const detail = detailOverride ?? queriedDetail
 
   return (
@@ -48,28 +54,45 @@ export function WorkflowDetailSheet({
               {detail.promptRequest.prompt}
             </SheetTitle>
             <SheetDescription className="truncate font-mono text-xs">
-              {sourceLabel(detail)} · {workflowTrustStateLabel(deriveWorkflowTrustState(detail))} · {detail.workflowRun.id}
+              {sourceLabel(detail)} ·{' '}
+              {workflowTrustStateLabel(deriveWorkflowTrustState(detail))} ·{' '}
+              {detail.workflowRun.id}
             </SheetDescription>
           </>
         )}
       </SheetHeader>
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-4">
-          {detail === undefined ? <WorkflowDetailSkeleton /> : <WorkflowDetailPreview detail={detail} returnTo={returnTo} />}
+          {detail === undefined ? (
+            <WorkflowDetailSkeleton />
+          ) : (
+            <WorkflowDetailPreview detail={detail} returnTo={returnTo} />
+          )}
         </div>
       </ScrollArea>
     </SheetContent>
   )
 }
 
-function WorkflowDetailPreview({ detail, returnTo }: { readonly detail: WorkflowDetail; readonly returnTo: string }) {
+function WorkflowDetailPreview({
+  detail,
+  returnTo,
+}: {
+  readonly detail: WorkflowDetail
+  readonly returnTo: string
+}) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
         <Button
           size="sm"
           nativeButton={false}
-          render={<a aria-label="Open full workflow" href={`/app/workflows/${detail.workflowRun.id}?returnTo=${encodeURIComponent(returnTo)}`} />}
+          render={
+            <a
+              aria-label="Open full workflow"
+              href={`/app/workflows/${detail.workflowRun.id}?returnTo=${encodeURIComponent(returnTo)}`}
+            />
+          }
         >
           Open full workflow
         </Button>

@@ -22,6 +22,12 @@ import {
 import { Effect } from 'effect'
 
 const sentinel = 'PATCHPLANE_BROWSER_TRANSPORT_SENTINEL_8b1a'
+const rawDiffSentinel = `diff --git a/private.ts b/private.ts
+--- a/private.ts
++++ b/private.ts
+@@ -1 +1 @@
+-const privateValue = 'before'
++const privateValue = '${sentinel}'`
 
 type CollectedEnvelopeItem = readonly [
   Readonly<Record<string, unknown>>,
@@ -88,6 +94,7 @@ describe('browser Sentry transport boundary', () => {
         )
         Sentry.captureEvent({
           message: `browser failure ${sentinel}`,
+          extra: { candidateDiff: rawDiffSentinel },
           exception: {
             values: [
               {
@@ -134,6 +141,7 @@ describe('browser Sentry transport boundary', () => {
         assert.ok(itemTypes.includes('trace_metric'))
         assert.ok(itemTypes.includes('transaction'))
         assert.ok(!JSON.stringify(envelopes).includes(sentinel))
+        assert.ok(!JSON.stringify(envelopes).includes(rawDiffSentinel))
       }).pipe(
         Effect.ensuring(
           Effect.promise(() => Sentry.close(2_000)).pipe(Effect.asVoid),

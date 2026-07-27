@@ -1,4 +1,5 @@
 import type { WorkflowDetail } from './types'
+import * as m from '@/paraglide/messages'
 
 export type WorkflowTrustState =
   | 'queued'
@@ -11,23 +12,40 @@ export type WorkflowTrustState =
   | 'changes-requested'
 
 export function currentWorkflowProjection(detail: WorkflowDetail) {
-  const execution = detail.sandboxExecutions.reduce<(typeof detail.sandboxExecutions)[number] | undefined>(
-    (latest, item) => latest === undefined || item.completedAt > latest.completedAt ? item : latest,
+  const execution = detail.sandboxExecutions.reduce<
+    (typeof detail.sandboxExecutions)[number] | undefined
+  >(
+    (latest, item) =>
+      latest === undefined || item.completedAt > latest.completedAt
+        ? item
+        : latest,
     undefined,
   )
-  const candidate = detail.candidatePatchSets.reduce<(typeof detail.candidatePatchSets)[number] | undefined>(
-    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+  const candidate = detail.candidatePatchSets.reduce<
+    (typeof detail.candidatePatchSets)[number] | undefined
+  >(
+    (latest, item) =>
+      latest === undefined || item.createdAt > latest.createdAt ? item : latest,
     undefined,
   )
-  const review = detail.reviewRuns.reduce<(typeof detail.reviewRuns)[number] | undefined>(
-    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+  const review = detail.reviewRuns.reduce<
+    (typeof detail.reviewRuns)[number] | undefined
+  >(
+    (latest, item) =>
+      latest === undefined || item.createdAt > latest.createdAt ? item : latest,
     undefined,
   )
-  const latestPolicy = detail.policyDecisions.reduce<(typeof detail.policyDecisions)[number] | undefined>(
-    (latest, item) => latest === undefined || item.createdAt > latest.createdAt ? item : latest,
+  const latestPolicy = detail.policyDecisions.reduce<
+    (typeof detail.policyDecisions)[number] | undefined
+  >(
+    (latest, item) =>
+      latest === undefined || item.createdAt > latest.createdAt ? item : latest,
     undefined,
   )
-  const policy = review !== undefined && latestPolicy?.reviewRunId === review.id ? latestPolicy : undefined
+  const policy =
+    review !== undefined && latestPolicy?.reviewRunId === review.id
+      ? latestPolicy
+      : undefined
   const decision = detail.humanDecisions.at(-1)
   const decisionIsCurrent =
     decision !== undefined &&
@@ -57,7 +75,11 @@ export function deriveWorkflowTrustState(
     return 'running'
   }
 
-  const { execution: latestExecution, decision: latestDecision, decisionIsCurrent } = currentWorkflowProjection(detail)
+  const {
+    execution: latestExecution,
+    decision: latestDecision,
+    decisionIsCurrent,
+  } = currentWorkflowProjection(detail)
 
   if (decisionIsCurrent && latestDecision !== undefined) {
     return latestDecision.status
@@ -77,21 +99,21 @@ export function deriveWorkflowTrustState(
 export function workflowTrustStateLabel(state: WorkflowTrustState) {
   switch (state) {
     case 'queued':
-      return 'Queued'
+      return m.app_status_queued()
     case 'running':
-      return 'Running'
+      return m.app_status_running()
     case 'no-sandbox-run':
-      return 'No sandbox run'
+      return m.app_status_no_sandbox()
     case 'sandbox-failed':
-      return 'Sandbox failed'
+      return m.app_status_sandbox_failed()
     case 'needs-review':
-      return 'Needs review'
+      return m.app_status_needs_review()
     case 'approved':
-      return 'Approved'
+      return m.app_status_approved()
     case 'rejected':
-      return 'Rejected'
+      return m.app_status_rejected()
     case 'changes-requested':
-      return 'Changes requested'
+      return m.app_status_changes_requested()
     default:
       return state
   }

@@ -626,6 +626,215 @@ describe('architecture boundaries', () => {
   )
 
   it.effect(
+    'keeps diff rendering behind the authenticated PatchPlane artifact boundary',
+    () =>
+      Effect.gen(function* () {
+        const artifactRoute = yield* fileText(
+          'apps/client/src/routes/api/artifacts/url.tsx',
+        )
+        const workflowChanges = yield* fileText(
+          'apps/client/src/components/app-shell/workflow-changes.tsx',
+        )
+        const diffPreviewHook = yield* fileText(
+          'apps/client/src/components/app-shell/use-candidate-diff-preview.ts',
+        )
+        const diffRuntime = yield* fileText(
+          'apps/client/src/effect/diff-runtime.ts',
+        )
+        const diffBenchmark = yield* fileText(
+          'apps/client/src/scripts/diff-viewer-benchmark.ts',
+        )
+        const diffFixture = yield* fileText(
+          'apps/client/test/performance/diff-viewer/main.tsx',
+        )
+        const rootManifest = yield* packageJson('package.json')
+        const workflowDetailPage = yield* fileText(
+          'apps/client/src/components/app-shell/workflow-detail-page.tsx',
+        )
+        const renderer = yield* fileText(
+          'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
+        )
+        const pierreRenderer = yield* fileText(
+          'apps/client/src/components/app-shell/candidate-unified-diff.tsx',
+        )
+        const clientImports = yield* sourceImportsUnder('apps/client/src')
+        const pierreDiffImports = clientImports.filter(
+          ({ specifier }) =>
+            specifier === '@pierre/diffs' ||
+            specifier.startsWith('@pierre/diffs/'),
+        )
+
+        expect(artifactRoute).toContain("await import('@workos/authkit")
+        expect(artifactRoute).toContain('convex.setAuth(input.accessToken)')
+        expect(artifactRoute).toContain('getEvidenceBucket')
+        expect(artifactRoute).toContain('createArtifactStorageResponse')
+        expect(workflowChanges).toContain('<CandidateDiffRenderer')
+        expect(workflowChanges).toContain('content={diffPreview.content}')
+        expect(workflowChanges).toContain(
+          'projection={diffPreview.changedFiles}',
+        )
+        expect(workflowChanges).toContain('useCandidateDiffPreview({')
+        expect(diffPreviewHook).toContain("credentials: 'same-origin'")
+        expect(diffPreviewHook).toContain("cache: 'no-store'")
+        expect(diffPreviewHook).toContain(
+          "await import('@/effect/diff-runtime')",
+        )
+        expect(diffPreviewHook).toContain('diffProjectionRuntime.runPromise(')
+        expect(diffPreviewHook).not.toContain(
+          "await import('@/effect/runtime')",
+        )
+        expect(diffRuntime).toContain('ManagedRuntime.make(Layer.empty')
+        expect(diffRuntime).not.toContain('app-layer')
+        expect(diffRuntime).not.toContain('@patchplane/plugins')
+        expect(rootManifest.scripts?.['bench:diff-viewer']).toBe(
+          'bun apps/client/src/scripts/diff-viewer-benchmark.ts',
+        )
+        expect(diffBenchmark).toContain("host: '127.0.0.1'")
+        expect(diffBenchmark).toContain('largeInitialRenderMs: 6_000')
+        expect(diffBenchmark).toContain('standardInitialRenderMs: 2_000')
+        expect(diffBenchmark).toContain('fileSwitchMs: 100')
+        expect(diffFixture).toContain('<CandidateDiffRenderer')
+        expect(diffFixture).toContain('ProjectCandidateChangedFiles(content)')
+        expect(diffFixture).not.toContain('fetch(')
+        expect(workflowDetailPage).toContain("import('./workflow-changes')")
+        expect(workflowDetailPage).toContain("activeTab === 'changes'")
+        expect(workflowDetailPage).not.toContain(
+          "import { WorkflowChanges } from './workflow-changes'",
+        )
+
+        expect(renderer).toContain('readonly content: string')
+        expect(pierreRenderer).toContain(
+          "import { PatchDiff } from '@pierre/diffs/react'",
+        )
+        expect(renderer).toContain('import.meta.env.SSR')
+        expect(renderer).toContain("import('./candidate-unified-diff')")
+        expect(pierreRenderer).toContain('<PatchDiff')
+        expect(pierreRenderer).toContain("diffStyle: 'unified'")
+        expect(pierreRenderer).toContain("preferredHighlighter: 'shiki-js'")
+        expect(pierreRenderer).toContain('disableWorkerPool')
+        expect(pierreRenderer).not.toContain('new Worker')
+        expect(pierreRenderer).not.toContain('workerUrl')
+        expect(pierreRenderer).not.toContain("diffStyle: 'split'")
+        for (const forbidden of [
+          'artifactId',
+          'artifactSha256',
+          'artifactSizeBytes',
+          'returnedBytes',
+          'truncated',
+          'workflowRunId',
+          'fetch(',
+          '/api/artifacts',
+          'navigator.sendBeacon',
+          'XMLHttpRequest',
+          'WebSocket',
+        ]) {
+          expect(renderer).not.toContain(forbidden)
+          expect(pierreRenderer).not.toContain(forbidden)
+        }
+
+        expect(
+          pierreDiffImports.filter(
+            ({ file }) =>
+              file !==
+              'apps/client/src/components/app-shell/candidate-unified-diff.tsx',
+          ),
+        ).toEqual([])
+      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect(
+    'keeps changed-file projection candidate-bound and independent of repository trees',
+    () =>
+      Effect.gen(function* () {
+        const projection = yield* fileText(
+          'packages/core/src/diff/project-candidate-changed-files.ts',
+        )
+        const treeAdapter = yield* fileText(
+          'apps/client/src/components/app-shell/candidate-changed-files-navigator.tsx',
+        )
+        const diffRenderer = yield* fileText(
+          'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
+        )
+        const workflowChanges = yield* fileText(
+          'apps/client/src/components/app-shell/workflow-changes.tsx',
+        )
+        const diffPreviewHook = yield* fileText(
+          'apps/client/src/components/app-shell/use-candidate-diff-preview.ts',
+        )
+        const statistics = yield* fileText(
+          'packages/core/src/diff/parse-unified-diff-stats.ts',
+        )
+        const clientFiles = yield* sourceFilesUnder('apps/client/src')
+        const clientImports = yield* importsForFiles(clientFiles)
+        const clientSources = yield* Effect.all(
+          clientFiles.map((file) => fileText(file)),
+        )
+        const repositoryTreeMarkers = [
+          '/git/trees',
+          'git/trees?recursive',
+          'repos.getContent',
+          'getRepositoryTree',
+        ]
+
+        expect(projection).toContain(
+          'export const ProjectCandidateChangedFiles = Effect.fn(',
+        )
+        expect(projection).toContain(
+          "'@patchplane/core/diff/ProjectCandidateChangedFiles'",
+        )
+        expect(projection).toContain("from '@patchplane/domain/candidate-file'")
+        expect(projection).toContain(
+          'Schema.decodeUnknownOption(CandidateFilePath)',
+        )
+        expect(projection).toContain('Match.value(line).pipe(')
+        expect(statistics).toContain(
+          'export const ParseUnifiedDiffStats = Effect.fn(',
+        )
+        expect(statistics).toContain(
+          "'@patchplane/core/diff/ParseUnifiedDiffStats'",
+        )
+        expect(statistics).toContain(
+          'extends Schema.TaggedErrorClass<UnifiedDiffStatsUnavailable>()(',
+        )
+        expect(statistics).toContain(
+          "import { Effect, Match, Schema } from 'effect'",
+        )
+        expect(statistics).toContain('Match.value(line).pipe(')
+        expect(projection).toContain('content: string')
+        expect(projection).not.toContain('fetch(')
+        expect(projection).not.toContain('github')
+
+        for (const source of clientSources) {
+          for (const marker of repositoryTreeMarkers) {
+            expect(source).not.toContain(marker)
+          }
+        }
+
+        expect(treeAdapter).toContain("from '@pierre/trees/react'")
+        expect(treeAdapter).toContain(
+          "model.scrollToPath(path, { focus: true, offset: 'nearest' })",
+        )
+        expect(treeAdapter).not.toContain('.shadowRoot')
+        expect(treeAdapter).not.toContain('MutationObserver')
+        expect(diffRenderer).toContain(
+          "lazy(() =>\n  import('./candidate-changed-files-navigator')",
+        )
+        expect(workflowChanges).toContain('useCandidateDiffPreview({')
+        expect(diffPreviewHook).toContain('diffProjectionRuntime.runPromise(')
+        expect(diffPreviewHook).not.toContain('Effect.runPromise')
+        expect(
+          clientImports.filter(
+            ({ file, specifier }) =>
+              (specifier === '@pierre/trees' ||
+                specifier.startsWith('@pierre/trees/')) &&
+              file !==
+                'apps/client/src/components/app-shell/candidate-changed-files-navigator.tsx',
+          ),
+        ).toEqual([])
+      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+  )
+
+  it.effect(
     'keeps Pi agent runtimes out of the web/control-plane composition',
     () =>
       Effect.gen(function* () {

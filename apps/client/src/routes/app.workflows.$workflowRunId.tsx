@@ -1,24 +1,29 @@
 import { useEffect } from 'react'
 import { Authenticated, AuthLoading, Unauthenticated } from 'convex/react'
 import { createFileRoute } from '@tanstack/react-router'
-import { AppMobileHeader } from '@/components/app-shell/app-mobile-header'
+import { AppShellHeader } from '@/components/app-shell/app-shell-header'
 import { AppSidebar } from '@/components/app-shell/app-sidebar'
 import { LoadingWorkflowConsole } from '@/components/app-shell/loading-workflow-console'
 import { SignedOutWorkflowConsole } from '@/components/app-shell/signed-out-workflow-console'
 import { SkipLink } from '@/components/app-shell/skip-link'
 import { WorkflowDetailPage } from '@/components/app-shell/workflow-detail-page'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import * as m from '@/paraglide/messages'
 
 const detailTabs = ['summary', 'changes', 'evidence', 'activity'] as const
 
 export const Route = createFileRoute('/app/workflows/$workflowRunId')({
   validateSearch: (search: Record<string, unknown>) => ({
-    tab: typeof search.tab === 'string' && detailTabs.includes(search.tab as (typeof detailTabs)[number])
-      ? search.tab as (typeof detailTabs)[number]
-      : 'summary' as const,
-    returnTo: typeof search.returnTo === 'string' && (search.returnTo === '/app' || search.returnTo.startsWith('/app?'))
-      ? search.returnTo
-      : '/app',
+    tab:
+      typeof search.tab === 'string' &&
+      detailTabs.includes(search.tab as (typeof detailTabs)[number])
+        ? (search.tab as (typeof detailTabs)[number])
+        : ('summary' as const),
+    returnTo:
+      typeof search.returnTo === 'string' &&
+      (search.returnTo === '/app' || search.returnTo.startsWith('/app?'))
+        ? search.returnTo
+        : '/app',
   }),
   component: WorkflowDetailRoute,
 })
@@ -29,7 +34,7 @@ function WorkflowDetailRoute() {
   const navigate = Route.useNavigate()
 
   useEffect(() => {
-    document.title = `Patch Report ${workflowRunId} · patchplane`
+    document.title = `${m.app_shell_patch_report()} ${workflowRunId} · patchplane`
     const frame = requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('#main-content')?.focus()
     })
@@ -41,8 +46,13 @@ function WorkflowDetailRoute() {
       <SkipLink />
       <AppSidebar />
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
-        <AppMobileHeader title="Patch report" />
-        <main id="main-content" tabIndex={-1} aria-label="Patch report" className="flex min-h-0 flex-1 flex-col overflow-auto outline-none">
+        <AppShellHeader title={m.app_shell_patch_report()} />
+        <main
+          id="main-content"
+          tabIndex={-1}
+          aria-label={m.app_shell_patch_report()}
+          className="flex min-h-0 flex-1 flex-col overflow-auto outline-none"
+        >
           <Authenticated>
             <WorkflowDetailPage
               workflowRunId={workflowRunId}
@@ -56,7 +66,10 @@ function WorkflowDetailRoute() {
                 })
               }}
               onTabChange={(nextTab) => {
-                void navigate({ search: { tab: nextTab, returnTo }, replace: true })
+                return navigate({
+                  search: { tab: nextTab, returnTo },
+                  replace: true,
+                })
               }}
             />
           </Authenticated>

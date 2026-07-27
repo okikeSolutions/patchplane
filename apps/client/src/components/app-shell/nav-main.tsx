@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import * as m from '@/paraglide/messages'
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -15,28 +16,32 @@ export interface NavMainItem {
   readonly isActive?: boolean
 }
 
-export function NavMain({ items }: { readonly items: ReadonlyArray<NavMainItem> }) {
+export function NavMain({
+  items,
+}: {
+  readonly items: ReadonlyArray<NavMainItem>
+}) {
   return (
-    <nav aria-label="Control plane">
+    <nav aria-label={m.app_nav_control_plane()}>
       <SidebarGroup>
-      <SidebarGroupLabel>Control plane</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton
-                isActive={item.isActive}
-                className="min-h-11 md:min-h-8"
-                tooltip={item.title}
-                render={<a href={item.href} aria-label={item.title} />}
-              >
-                <item.icon />
-                <span>{item.title}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
+        <SidebarGroupLabel>{m.app_nav_control_plane()}</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {items.map((item) => (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  isActive={item.isActive}
+                  className="min-h-11 md:min-h-8"
+                  tooltip={item.title}
+                  render={<a href={item.href} aria-label={item.title} />}
+                >
+                  <item.icon />
+                  <span>{item.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
       </SidebarGroup>
     </nav>
   )

@@ -1,4 +1,5 @@
 import * as m from '@/paraglide/messages'
+import { localizeAppHref } from './app-language'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -7,7 +8,9 @@ export function SignedOutWorkflowConsole() {
   return (
     <section className="mx-auto mt-16 flex max-w-xl flex-col gap-5">
       <div>
-        <h1 className="text-lg font-semibold">{m.app_signed_out_workflows_title()}</h1>
+        <h1 className="text-lg font-semibold">
+          {m.app_signed_out_workflows_title()}
+        </h1>
         <p className="m-0 mt-2 text-sm leading-relaxed text-muted-foreground">
           {m.app_signed_out_workflows_intro()}
         </p>
@@ -27,7 +30,10 @@ export function SignedOutWorkflowConsole() {
         />
       </div>
       <Separator className="bg-border" />
-      <a href="/api/auth/sign-in?returnPathname=/app" className={buttonVariants({ className: 'min-h-11 w-full sm:w-fit' })}>
+      <a
+        href={`/api/auth/sign-in?returnPathname=${encodeURIComponent(localizeAppHref('/app'))}`}
+        className={buttonVariants({ className: 'min-h-11 w-full sm:w-fit' })}
+      >
         {m.app_sign_in()}
       </a>
     </section>

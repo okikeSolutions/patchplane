@@ -7,6 +7,7 @@ import {
 } from './workflow-console-model'
 import { WorkflowConsoleToolbar } from './workflow-console-toolbar'
 import { WorkflowQueue } from './workflow-queue'
+import * as m from '@/paraglide/messages'
 
 function replaceSearch(next: {
   readonly filter: WorkflowFilter
@@ -18,7 +19,8 @@ function replaceSearch(next: {
   else url.searchParams.delete('query')
   if (next.filter !== 'all') url.searchParams.set('filter', next.filter)
   else url.searchParams.delete('filter')
-  if (next.repository !== 'all') url.searchParams.set('repository', next.repository)
+  if (next.repository !== 'all')
+    url.searchParams.set('repository', next.repository)
   else url.searchParams.delete('repository')
   window.history.replaceState(null, '', url)
 }
@@ -65,7 +67,13 @@ export function WorkflowConsole({
   }
 
   const repositories = useMemo(() => {
-    const values = [...new Set(rows.map((row) => sourceLabel(row)).filter((source) => source.includes('/')))]
+    const values = [
+      ...new Set(
+        rows
+          .map((row) => sourceLabel(row))
+          .filter((source) => source.includes('/')),
+      ),
+    ]
     return values.toSorted()
   }, [rows])
   const visibleRows = useMemo(() => {
@@ -82,7 +90,10 @@ export function WorkflowConsole({
         source.includes(normalizedQuery) ||
         id.includes(normalizedQuery)
 
-      if (!matchesQuery || (repository !== 'all' && sourceLabel(row) !== repository)) {
+      if (
+        !matchesQuery ||
+        (repository !== 'all' && sourceLabel(row) !== repository)
+      ) {
         return false
       }
 
@@ -111,7 +122,9 @@ export function WorkflowConsole({
         onRepositoryChange={changeRepository}
       />
       <div className="min-h-0 min-w-0 overflow-hidden">
-        <p className="sr-only" aria-live="polite">{visibleRows.length} workflows match the current filters.</p>
+        <p className="sr-only" aria-live="polite">
+          {visibleRows.length} {m.app_queue_matches_suffix()}
+        </p>
         <WorkflowQueue
           isLoading={workflows === undefined}
           rows={visibleRows}

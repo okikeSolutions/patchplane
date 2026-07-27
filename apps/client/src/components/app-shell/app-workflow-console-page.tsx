@@ -1,11 +1,8 @@
 import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  Authenticated,
-  AuthLoading,
-  Unauthenticated,
-} from 'convex/react'
-import { AppMobileHeader } from './app-mobile-header'
+import { Authenticated, AuthLoading, Unauthenticated } from 'convex/react'
+import * as m from '@/paraglide/messages'
+import { AppShellHeader } from './app-shell-header'
 import { AppSidebar } from './app-sidebar'
 import { LoadingWorkflowConsole } from './loading-workflow-console'
 import { SignedOutWorkflowConsole } from './signed-out-workflow-console'
@@ -26,7 +23,7 @@ export function AppWorkflowConsolePage({
   const navigate = useNavigate()
 
   useEffect(() => {
-    document.title = 'Workflows · patchplane'
+    document.title = `${m.app_nav_workflows()} · patchplane`
   }, [])
 
   return (
@@ -34,8 +31,12 @@ export function AppWorkflowConsolePage({
       <SkipLink />
       <AppSidebar />
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
-        <AppMobileHeader title="Workflows" />
-        <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col overflow-y-auto outline-none md:overflow-hidden">
+        <AppShellHeader title={m.app_nav_workflows()} />
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto outline-none md:overflow-hidden"
+        >
           <Authenticated>
             <WorkflowConsoleContent
               initialSearch={initialSearch}

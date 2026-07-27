@@ -15,10 +15,6 @@ vi.mock('@workos/authkit-tanstack-react-start/client', () => ({
   }),
 }))
 
-vi.mock('@/paraglide/messages', () => ({
-  app_operator_fallback: () => 'Operator',
-}))
-
 vi.mock('./nav-user', () => ({
   NavUser: ({ displayName }: { readonly displayName: string }) => (
     <div data-testid="nav-user">{displayName}</div>
@@ -61,13 +57,23 @@ describe('AppSidebar', () => {
     expect(sidebarContainer?.className).toContain('border-sidebar-border/60')
     expect(screen.getByText('patchplane')).toBeTruthy()
     expect(screen.getByText('Patch reports')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Workflows' }).getAttribute('href')).toBe('/app')
-    expect(screen.getByRole('link', { name: 'patchplane workflows' }).getAttribute('href')).toBe('/app')
+    expect(
+      screen.getByRole('link', { name: 'Workflows' }).getAttribute('href'),
+    ).toBe('/en/app')
+    expect(
+      screen
+        .getByRole('link', { name: 'Patchplane workflows' })
+        .getAttribute('href'),
+    ).toBe('/en/app')
     expect(screen.queryByRole('link', { name: 'Reviews' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Sources' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Sandboxes' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Logs' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Documentation (opens in a new tab)' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'GitHub (opens in a new tab)' })).toBeTruthy()
+    expect(
+      screen.getByRole('link', { name: 'Documentation (opens in a new tab)' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('link', { name: 'GitHub (opens in a new tab)' }),
+    ).toBeTruthy()
   })
 })

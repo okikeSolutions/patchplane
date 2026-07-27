@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import * as m from '@/paraglide/messages'
 import type { WorkflowTrustState } from './workflow-trust-state'
 import { workflowTrustStateLabel } from './workflow-trust-state'
 
@@ -35,16 +36,18 @@ export function WorkflowTrustStateBadge({
   )
 }
 
-export function workflowStatusLabel(status: 'queued' | 'running' | 'reviewed' | 'failed') {
+export function workflowStatusLabel(
+  status: 'queued' | 'running' | 'reviewed' | 'failed',
+) {
   switch (status) {
     case 'queued':
-      return 'Queued'
+      return m.app_status_queued()
     case 'running':
-      return 'Running'
+      return m.app_status_running()
     case 'reviewed':
-      return 'Review ready'
+      return m.app_status_run_complete()
     case 'failed':
-      return 'Execution failed'
+      return m.app_status_execution_failed()
     default:
       return status
   }

@@ -1,10 +1,19 @@
 import { useState } from 'react'
 import { CheckCircle2Icon, CircleAlertIcon, XIcon } from 'lucide-react'
-import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import * as m from '@/paraglide/messages'
 
 export function GitHubConnectionStatus() {
-  const initial = typeof window === 'undefined' ? undefined : new URLSearchParams(window.location.search).get('github')
+  const initial =
+    typeof window === 'undefined'
+      ? undefined
+      : new URLSearchParams(window.location.search).get('github')
   const [status, setStatus] = useState(initial)
   if (status !== 'connected' && status !== 'failed') return null
 
@@ -17,11 +26,34 @@ export function GitHubConnectionStatus() {
   }
 
   return (
-    <Alert role={status === 'failed' ? 'alert' : undefined} aria-live={status === 'connected' ? 'polite' : undefined} variant={status === 'failed' ? 'destructive' : 'default'} className="m-3 w-auto shrink-0">
+    <Alert
+      role={status === 'failed' ? 'alert' : undefined}
+      aria-live={status === 'connected' ? 'polite' : undefined}
+      variant={status === 'failed' ? 'destructive' : 'default'}
+      className="m-3 w-auto shrink-0"
+    >
       {status === 'failed' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
-      <AlertTitle>{status === 'failed' ? 'GitHub connection failed' : 'GitHub connected'}</AlertTitle>
-      <AlertDescription>{status === 'failed' ? 'Repository access could not be synchronized. Retry the connection or check the selected installation.' : 'Selected repositories are now available to this workspace.'}</AlertDescription>
-      <AlertAction><Button variant="ghost" size="icon-sm" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" aria-label="Dismiss GitHub connection status" onClick={dismiss}><XIcon /></Button></AlertAction>
+      <AlertTitle>
+        {status === 'failed'
+          ? m.app_github_connection_failed()
+          : m.app_github_connected_title()}
+      </AlertTitle>
+      <AlertDescription>
+        {status === 'failed'
+          ? m.app_github_connection_failed_detail()
+          : m.app_github_connected_detail()}
+      </AlertDescription>
+      <AlertAction>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8"
+          aria-label={m.app_github_dismiss_status()}
+          onClick={dismiss}
+        >
+          <XIcon />
+        </Button>
+      </AlertAction>
     </Alert>
   )
 }

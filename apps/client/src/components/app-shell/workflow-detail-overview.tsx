@@ -1,79 +1,345 @@
-import { AlertTriangleIcon, CheckCircle2Icon, CircleDotIcon, FileCheckIcon, ShieldCheckIcon } from 'lucide-react'
+import { useState } from 'react'
+import {
+  CheckCircle2Icon,
+  CircleAlertIcon,
+  ShieldCheckIcon,
+} from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import type { WorkflowDetail } from './types'
-import { WorkflowRunStatusBadge, WorkflowTrustStateBadge } from './workflow-status-badge'
-import { currentWorkflowProjection, deriveWorkflowTrustState, workflowTrustStateDetail } from './workflow-trust-state'
+import { currentWorkflowProjection } from './workflow-trust-state'
+import {
+  deriveWorkflowTrustSummary,
+  type WorkflowTrustDimension,
+} from './workflow-trust-summary'
+import { getAppLocale } from './app-language'
+import * as m from '@/paraglide/messages'
 
-export function WorkflowDetailOverview({ detail }: { readonly detail: WorkflowDetail }) {
-  const trustState = deriveWorkflowTrustState(detail)
-  const { execution, candidate, review, policy, decision, decisionIsCurrent } = currentWorkflowProjection(detail)
-  const currentFindings = detail.reviewFindings.filter((finding) => finding.reviewRunId === review?.id)
-  const errorFindings = currentFindings.filter((item) => item.severity === 'error' || item.severity === 'critical')
-  const decisionPublications = decisionIsCurrent && decision !== undefined
-    ? detail.publicationResults.filter((result) => result.idempotencyKey?.startsWith(`${decision.id}:`) === true)
-    : []
-  const publishedResults = decisionPublications.filter((result) => result.status === 'published')
-  const failedPublications = decisionPublications.filter((result) => result.status === 'failed')
+export function WorkflowDetailOverview({
+  detail,
+}: {
+  readonly detail: WorkflowDetail
+}) {
+  const [requestOpen, setRequestOpen] = useState(false)
+  const trustSummary = deriveWorkflowTrustSummary(detail)
+  const { review, policy, decision, decisionIsCurrent } =
+    currentWorkflowProjection(detail)
+  const currentFindings = detail.reviewFindings.filter(
+    (finding) => finding.reviewRunId === review?.id,
+  )
+  const policyDimension = trustSummary.dimensions.find(
+    (dimension) => dimension.key === 'policy',
+  )
+  const reviewDimension = trustSummary.dimensions.find(
+    (dimension) => dimension.key === 'review',
+  )
+  const verificationDimension = trustSummary.dimensions.find(
+    (dimension) => dimension.key === 'verification',
+  )
+  const decisionPublications =
+    decisionIsCurrent && decision !== undefined
+      ? detail.publicationResults.filter(
+          (result) =>
+            result.idempotencyKey?.startsWith(`${decision.id}:`) === true,
+        )
+      : []
+  const publishedResults = decisionPublications.filter(
+    (result) => result.status === 'published',
+  )
+  const failedPublications = decisionPublications.filter(
+    (result) => result.status === 'failed',
+  )
 
   return (
     <div className="flex flex-col gap-5">
-      <Alert variant={trustState === 'approved' ? 'default' : trustState === 'rejected' || trustState === 'sandbox-failed' ? 'destructive' : 'default'}>
-        {trustState === 'approved' ? <CheckCircle2Icon /> : <AlertTriangleIcon />}
-        <AlertTitle>{trustState === 'approved' ? 'This patch was approved' : 'This patch is not trusted yet'}</AlertTitle>
-        <AlertDescription>{workflowTrustStateDetail(trustState)}</AlertDescription>
+      <Alert
+        variant={
+          trustSummary.state === 'rejected' ||
+          trustSummary.state === 'sandbox-failed'
+            ? 'destructive'
+            : 'default'
+        }
+      >
+        {trustSummary.state === 'approved' ? (
+          <CheckCircle2Icon />
+        ) : (
+          <CircleAlertIcon />
+        )}
+        <AlertTitle>{trustSummary.label}</AlertTitle>
+        <AlertDescription>
+          {trustSummary.reasons.length === 0 ? null : (
+            <ol
+              aria-label={m.app_review_reasons()}
+              className="flex list-decimal flex-col gap-1 pl-4"
+            >
+              {trustSummary.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ol>
+          )}
+        </AlertDescription>
       </Alert>
 
       <Card className="ring-border">
-        <CardHeader><CardTitle as="h2">Patch Report</CardTitle><CardDescription>The evidence-backed answer to what changed, what ran, and what happens next.</CardDescription></CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2"><WorkflowRunStatusBadge status={detail.workflowRun.status} /><WorkflowTrustStateBadge state={trustState} />{policy === undefined ? null : <Badge variant="outline">Policy: {policy.status}</Badge>}</div>
-          <Separator />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryMetric label="Changed files" value={candidate?.stats?.filesChanged ?? 'Unknown'} detail={candidate?.status ?? 'No candidate'} />
-            <SummaryMetric label="Sandbox" value={execution === undefined ? 'Not run' : execution.status === 'failed' ? 'Failed' : 'Passed'} detail={execution === undefined ? 'No current execution' : `Exit ${execution.exitCode ?? 'unknown'}`} />
-            <SummaryMetric label="Checks" value={review === undefined ? 'Not run' : review.status === 'running' || review.status === 'queued' ? 'Running' : review.status === 'failed' || errorFindings.length > 0 ? `${errorFindings.length || 1} blocking` : 'No blockers'} detail={`${currentFindings.length} findings on current review`} />
-            <SummaryMetric label="Evidence" value={detail.evidenceArtifacts.length} detail="durable artifacts" />
+        <CardHeader>
+          <CardTitle as="h2">{m.app_overview_dimensions()}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {trustSummary.dimensions.map((dimension) => (
+              <TrustDimensionMetric key={dimension.key} dimension={dimension} />
+            ))}
           </div>
         </CardContent>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
+        <Collapsible open={requestOpen} onOpenChange={setRequestOpen}>
+          <Card className="ring-border">
+            <CardHeader>
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+                <div>
+                  <CardTitle as="h2" className="flex items-center gap-2">
+                    <ShieldCheckIcon />
+                    {m.app_overview_requested()}
+                  </CardTitle>
+                  <CardDescription>
+                    {m.app_overview_requested_detail()}
+                  </CardDescription>
+                </div>
+                <CollapsibleTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 w-full shrink-0 sm:min-h-8 sm:w-auto"
+                    />
+                  }
+                >
+                  {requestOpen
+                    ? m.app_overview_hide_request()
+                    : m.app_overview_show_request()}
+                </CollapsibleTrigger>
+              </div>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent>
+                <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">
+                  {detail.promptRequest.prompt}
+                </p>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
         <Card className="ring-border">
-          <CardHeader><CardTitle as="h2" className="flex items-center gap-2"><FileCheckIcon />Requested change</CardTitle><CardDescription>Original request attached to this report.</CardDescription></CardHeader>
-          <CardContent><p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">{detail.promptRequest.prompt}</p></CardContent>
-        </Card>
-        <Card className="ring-border">
-          <CardHeader><CardTitle as="h2" className="flex items-center gap-2"><ShieldCheckIcon />Automated verdict</CardTitle><CardDescription>Review and policy results before the human decision.</CardDescription></CardHeader>
+          <CardHeader>
+            <CardTitle as="h2" className="flex items-center gap-2">
+              <ShieldCheckIcon />
+              {m.app_overview_verdict()}
+            </CardTitle>
+            <CardDescription>{m.app_overview_verdict_detail()}</CardDescription>
+          </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {policy === undefined ? <p className="m-0 text-sm text-muted-foreground">Policy has not produced a verdict.</p> : <><Badge className="w-fit" variant="outline">{policy.status}</Badge><p className="m-0 text-sm">{policy.summary}</p>{policy.reason === undefined ? null : <p className="m-0 text-xs text-muted-foreground">{policy.reason}</p>}</>}
-            {currentFindings.toSorted((left, right) => findingRank(right.severity) - findingRank(left.severity)).slice(0, 4).map((finding) => <div key={finding.id} className="flex gap-2 rounded-md border border-border p-2 text-sm"><CircleDotIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div><span className="font-medium">{finding.severity} · {finding.category}</span><p className="m-0 text-muted-foreground">{finding.message}</p>{finding.path === undefined ? null : <code className="mt-1 block text-xs">{finding.path}{finding.startLine === undefined ? '' : `:${finding.startLine}`}</code>}</div></div>)}
-            {currentFindings.length > 4 ? <p className="m-0 text-xs text-muted-foreground">+{currentFindings.length - 4} additional findings are retained in the report diagnostics.</p> : null}
+            {policy === undefined ? (
+              <p className="m-0 text-sm text-muted-foreground">
+                {m.app_overview_no_verdict()}
+              </p>
+            ) : (
+              <>
+                <Badge className="w-fit" variant="outline">
+                  {policyDimension?.status ?? m.app_overview_evaluated()}
+                </Badge>
+                {reviewDimension === undefined ? null : (
+                  <div>
+                    <div className="text-sm font-medium">
+                      {reviewDimension.label} · {reviewDimension.status}
+                    </div>
+                    <p className="m-0 mt-1 text-sm text-muted-foreground">
+                      {reviewDimension.detail}
+                    </p>
+                  </div>
+                )}
+                {verificationDimension ===
+                undefined ? null : verificationDimension.tone === 'positive' ? (
+                  <TrustDimensionMetric dimension={verificationDimension} />
+                ) : (
+                  <Alert>
+                    <CircleAlertIcon />
+                    <AlertTitle>
+                      {verificationDimension.label} ·{' '}
+                      {verificationDimension.status}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {verificationDimension.detail}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <p className="m-0 text-sm text-muted-foreground">
+                  {policy.status === 'manual-review'
+                    ? m.app_overview_human_required()
+                    : policy.summary}
+                </p>
+              </>
+            )}
+            {currentFindings
+              .toSorted(
+                (left, right) =>
+                  findingRank(right.severity) - findingRank(left.severity),
+              )
+              .slice(0, 4)
+              .map((finding) => (
+                <div
+                  key={finding.id}
+                  className="flex gap-2 rounded-md border border-border p-2 text-sm"
+                >
+                  <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <div>
+                    <span className="font-medium">
+                      {finding.severity} · {finding.category}
+                    </span>
+                    <p className="m-0 text-muted-foreground">
+                      {finding.message}
+                    </p>
+                    {finding.path === undefined ? null : (
+                      <code className="mt-1 block text-xs">
+                        {finding.path}
+                        {finding.startLine === undefined
+                          ? ''
+                          : `:${finding.startLine}`}
+                      </code>
+                    )}
+                  </div>
+                </div>
+              ))}
+            {currentFindings.length > 4 ? (
+              <p className="m-0 text-xs text-muted-foreground">
+                +{currentFindings.length - 4}{' '}
+                {m.app_overview_additional_findings()}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
 
       <Card className="ring-border">
-        <CardHeader><CardTitle as="h2">Decision and publication</CardTitle><CardDescription>Who decided, why, and what PatchPlane published afterward.</CardDescription></CardHeader>
+        <CardHeader>
+          <CardTitle as="h2">{m.app_overview_decision_publication()}</CardTitle>
+          <CardDescription>
+            {m.app_overview_decision_publication_detail()}
+          </CardDescription>
+        </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
-          <Record label="Human decision" value={decisionIsCurrent ? decision?.status ?? 'Pending' : 'Pending'} detail={decision === undefined ? 'No human decision recorded.' : decisionIsCurrent ? `${decision.actorId} · ${new Date(decision.decidedAt).toLocaleString()}\n${decision.comment}${decision.verificationOverride ? `\n\nVerification override: ${decision.verificationOverrideReason ?? 'Reason unavailable'}` : ''}` : `A previous ${decision.status} decision was superseded by newer evidence.`} />
-          <Record label="GitHub publication" value={failedPublications.length > 0 ? 'Partial failure' : publishedResults.length > 0 ? 'Published' : 'Pending'} detail={`${publishedResults.length} published · ${failedPublications.length} failed · ${decisionPublications.length} attempts for the current decision`} href={publishedResults.find((result) => result.url !== undefined)?.url} />
+          <Record
+            label={m.app_trust_human_decision()}
+            value={
+              decisionIsCurrent
+                ? decision?.status === 'approved'
+                  ? m.app_status_approved()
+                  : decision?.status === 'rejected'
+                    ? m.app_status_rejected()
+                    : m.app_status_changes_requested()
+                : m.app_trust_pending()
+            }
+            detail={
+              decision === undefined
+                ? m.app_trust_no_decision()
+                : decisionIsCurrent
+                  ? `${decision.actorId} · ${new Date(decision.decidedAt).toLocaleString(getAppLocale())}\n${decision.comment}${decision.verificationOverride ? `\n\n${m.app_overview_override()}: ${decision.verificationOverrideReason ?? m.app_overview_reason_unavailable()}` : ''}`
+                  : m.app_overview_previous_decision()
+            }
+          />
+          <Record
+            label={m.app_overview_github_publication()}
+            value={
+              failedPublications.length > 0
+                ? m.app_overview_partial_failure()
+                : publishedResults.length > 0
+                  ? m.app_overview_published()
+                  : m.app_trust_pending()
+            }
+            detail={`${publishedResults.length} ${m.app_overview_published_count()} · ${failedPublications.length} ${m.app_overview_failed_count()} · ${decisionPublications.length} ${m.app_overview_attempts()}`}
+            href={
+              publishedResults.find((result) => result.url !== undefined)?.url
+            }
+          />
         </CardContent>
       </Card>
     </div>
   )
 }
 
-function findingRank(severity: WorkflowDetail['reviewFindings'][number]['severity']) {
-  return severity === 'critical' ? 4 : severity === 'error' ? 3 : severity === 'warning' ? 2 : 1
+function findingRank(
+  severity: WorkflowDetail['reviewFindings'][number]['severity'],
+) {
+  return severity === 'critical'
+    ? 4
+    : severity === 'error'
+      ? 3
+      : severity === 'warning'
+        ? 2
+        : 1
 }
 
-function SummaryMetric({ label, value, detail }: { readonly label: string; readonly value: string | number; readonly detail: string }) {
-  return <div className="rounded-lg bg-[var(--surface-nested)] p-3"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-lg font-semibold">{value}</div><div className="mt-1 text-xs text-muted-foreground">{detail}</div></div>
+function TrustDimensionMetric({
+  dimension,
+}: {
+  readonly dimension: WorkflowTrustDimension
+}) {
+  return (
+    <div className="rounded-lg bg-[var(--surface-nested)] p-3">
+      <div className="text-xs text-muted-foreground">{dimension.label}</div>
+      <div className="mt-1 text-sm font-semibold">{dimension.status}</div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {dimension.detail}
+      </div>
+    </div>
+  )
 }
 
-function Record({ label, value, detail, href }: { readonly label: string; readonly value: string; readonly detail: string; readonly href?: string }) {
-  return <div className="rounded-lg border border-border p-3"><div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{label}</span><Badge variant="outline">{value}</Badge></div><p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{detail}</p>{href === undefined ? null : <a className="text-sm font-medium underline underline-offset-4" href={href} target="_blank" rel="noreferrer">Open publication</a>}</div>
+function Record({
+  label,
+  value,
+  detail,
+  href,
+}: {
+  readonly label: string
+  readonly value: string
+  readonly detail: string
+  readonly href?: string
+}) {
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <Badge variant="outline">{value}</Badge>
+      </div>
+      <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">
+        {detail}
+      </p>
+      {href === undefined ? null : (
+        <a
+          className="text-sm font-medium underline underline-offset-4"
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {m.app_overview_open_publication()}
+        </a>
+      )}
+    </div>
+  )
 }

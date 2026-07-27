@@ -4,9 +4,15 @@ import { usePaginatedQuery } from 'convex/react'
 import { ChevronDownIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import * as m from '@/paraglide/messages'
+import { getAppLocale, localizeAppHref } from './app-language'
 import {
   Card,
   CardContent,
@@ -61,15 +67,18 @@ interface ConnectedRepositoryRow {
   }
 }
 
-const verificationLabels: Readonly<Record<VerificationStatus, string>> = {
-  queued: 'Queued',
-  running: 'Running',
-  reviewed: 'Reviewed',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  'changes-requested': 'Changes requested',
-  'manual-review': 'Manual review',
-  failed: 'Execution failed',
+function verificationLabel(status: VerificationStatus) {
+  const labels: Readonly<Record<VerificationStatus, () => string>> = {
+    queued: m.app_status_queued,
+    running: m.app_status_running,
+    reviewed: m.app_status_reviewed,
+    approved: m.app_status_approved,
+    rejected: m.app_status_rejected,
+    'changes-requested': m.app_status_changes_requested,
+    'manual-review': m.app_status_manual_review,
+    failed: m.app_status_execution_failed,
+  }
+  return labels[status]()
 }
 
 export function GitHubRepositoryConnections({
@@ -103,19 +112,34 @@ export function GitHubRepositoryConnections({
           <div className="min-w-0">
             <CardTitle as="h2" className="flex items-center gap-2 text-sm">
               <GitHubLogo className="size-4" />
-              GitHub repositories
+              {m.app_github_repositories()}
             </CardTitle>
             <CardDescription className="break-words [overflow-wrap:anywhere]">
               {repositories.length === 0
-                ? 'Connect a repository to receive evidence-backed Patch Reports for pull requests.'
-                : `${repositories.length} connected ${repositories.length === 1 ? 'repository' : 'repositories'} · status at a glance`}
+                ? m.app_github_connect_intro()
+                : `${repositories.length} ${m.app_github_connected()} ${repositories.length === 1 ? m.app_github_repository() : m.app_github_repositories_plural()} · ${m.app_github_status_glance()}`}
             </CardDescription>
           </div>
           {workspaceId === undefined ? (
-            <Button type="button" size="sm" className="min-h-11 w-full sm:w-auto md:min-h-8" disabled>Connect GitHub</Button>
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-11 w-full sm:w-auto md:min-h-8"
+              disabled
+            >
+              {m.app_github_connect()}
+            </Button>
           ) : (
-            <a className={buttonVariants({ size: 'sm', className: 'min-h-11 w-full sm:w-auto md:min-h-8' })} href="/api/github/install/start?returnPathname=/app">
-              {repositories.length === 0 ? 'Connect GitHub' : 'Manage GitHub repositories'}
+            <a
+              className={buttonVariants({
+                size: 'sm',
+                className: 'min-h-11 w-full sm:w-auto md:min-h-8',
+              })}
+              href={`/api/github/install/start?returnPathname=${encodeURIComponent(localizeAppHref('/app'))}`}
+            >
+              {repositories.length === 0
+                ? m.app_github_connect()
+                : m.app_github_manage()}
             </a>
           )}
         </div>
@@ -123,112 +147,133 @@ export function GitHubRepositoryConnections({
       <CardContent className="px-4 pb-3 lg:px-6">
         {workspaceId === undefined ? (
           <p className="text-sm text-muted-foreground">
-            Select an active WorkOS organization before connecting GitHub.
+            {m.app_github_requires_org()}
           </p>
         ) : paginationStatus === 'LoadingFirstPage' ? (
-          <output aria-live="polite" className="block text-sm text-muted-foreground">Loading repositories…</output>
+          <output
+            aria-live="polite"
+            className="block text-sm text-muted-foreground"
+          >
+            {m.app_github_loading()}
+          </output>
         ) : repositories.length === 0 ? (
           <output className="block text-sm text-muted-foreground">
-            No repositories connected yet. Connect GitHub to start routing PR
-            verification workflows.
+            {m.app_github_empty()}
           </output>
         ) : (
           <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger
-              render={<Button type="button" variant="ghost" size="sm" className="mb-1 min-h-11 px-2 md:min-h-8" />}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mb-1 min-h-11 px-2 md:min-h-8"
+                />
+              }
             >
-              {open ? 'Hide repositories' : `Show ${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'}`}
-              <ChevronDownIcon className={cn('transition-transform', open && 'rotate-180')} data-icon="inline-end" />
+              {open
+                ? m.app_github_hide()
+                : `${m.app_github_show()} ${repositories.length} ${repositories.length === 1 ? m.app_github_repository() : m.app_github_repositories_plural()}`}
+              <ChevronDownIcon
+                className={cn('transition-transform', open && 'rotate-180')}
+                data-icon="inline-end"
+              />
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-1">
               <ScrollArea className="max-h-64">
-              <div className="grid gap-2 pr-2">
-            {repositories.map(({ repository, latestVerification }) => (
-              <div
-                key={repository.id}
-                className="flex flex-col items-start gap-3 rounded-md border border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-2"
-              >
-                <div className="min-w-0">
-                  <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">
-                    {repository.repositoryFullName}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {repository.private
-                      ? 'Private repository'
-                      : 'Public repository'}
-                  </p>
-                  {latestVerification === undefined ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      No verification run yet
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Latest verification
-                      {latestVerification.pullRequestNumber === undefined
-                        ? ''
-                        : ` · PR #${latestVerification.pullRequestNumber}`}
-                      {' · '}
-                      <time
-                        dateTime={new Date(
-                          latestVerification.updatedAt,
-                        ).toISOString()}
-                      >
-                        {new Date(
-                          latestVerification.updatedAt,
-                        ).toLocaleString()}
-                      </time>
-                      {' · '}
-                      <a
-                        className="font-medium text-foreground underline-offset-4 hover:underline"
-                        data-latest-verification-status={
-                          latestVerification.verificationStatus
-                        }
-                        data-latest-verification-workflow-run-id={
-                          latestVerification.workflowRunId
-                        }
-                        href={`/app/workflows/${encodeURIComponent(latestVerification.workflowRunId)}`}
-                      >
-                        View run
-                      </a>
-                    </p>
-                  )}
+                <div className="grid gap-2 pr-2">
+                  {repositories.map(({ repository, latestVerification }) => (
+                    <div
+                      key={repository.id}
+                      className="flex flex-col items-start gap-3 rounded-md border border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">
+                          {repository.repositoryFullName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {repository.private
+                            ? m.app_github_private()
+                            : m.app_github_public()}
+                        </p>
+                        {latestVerification === undefined ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {m.app_github_no_verification()}
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {m.app_github_latest_verification()}
+                            {latestVerification.pullRequestNumber === undefined
+                              ? ''
+                              : ` · PR #${latestVerification.pullRequestNumber}`}
+                            {' · '}
+                            <time
+                              dateTime={new Date(
+                                latestVerification.updatedAt,
+                              ).toISOString()}
+                            >
+                              {new Date(
+                                latestVerification.updatedAt,
+                              ).toLocaleString(getAppLocale())}
+                            </time>
+                            {' · '}
+                            <a
+                              className="font-medium text-foreground underline-offset-4 hover:underline"
+                              data-latest-verification-status={
+                                latestVerification.verificationStatus
+                              }
+                              data-latest-verification-workflow-run-id={
+                                latestVerification.workflowRunId
+                              }
+                              href={localizeAppHref(
+                                `/app/workflows/${encodeURIComponent(latestVerification.workflowRunId)}`,
+                              )}
+                            >
+                              {m.app_github_view_run()}
+                            </a>
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-row flex-wrap items-start gap-1 sm:flex-col sm:items-end">
+                        <Badge
+                          variant={
+                            repository.status === 'active'
+                              ? 'secondary'
+                              : 'outline'
+                          }
+                        >
+                          {repository.status === 'active'
+                            ? m.app_github_connected()
+                            : m.app_github_reconnect()}
+                        </Badge>
+                        {latestVerification === undefined ? null : (
+                          <Badge variant="outline">
+                            {verificationLabel(
+                              latestVerification.verificationStatus,
+                            )}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {paginationStatus === 'CanLoadMore' ||
+                  paginationStatus === 'LoadingMore' ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 w-full sm:w-fit md:min-h-8"
+                      aria-busy={paginationStatus === 'LoadingMore'}
+                      disabled={paginationStatus === 'LoadingMore'}
+                      onClick={() => loadMore(20)}
+                    >
+                      {paginationStatus === 'LoadingMore'
+                        ? m.app_loading()
+                        : m.app_github_load_more()}
+                    </Button>
+                  ) : null}
                 </div>
-                <div className="flex shrink-0 flex-row flex-wrap items-start gap-1 sm:flex-col sm:items-end">
-                  <Badge
-                    variant={
-                      repository.status === 'active' ? 'secondary' : 'outline'
-                    }
-                  >
-                    {repository.status === 'active'
-                      ? 'Connected'
-                      : 'Reconnect required'}
-                  </Badge>
-                  {latestVerification === undefined ? null : (
-                    <Badge variant="outline">
-                      {
-                        verificationLabels[
-                          latestVerification.verificationStatus
-                        ]
-                      }
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            ))}
-            {paginationStatus === 'CanLoadMore' || paginationStatus === 'LoadingMore' ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="min-h-11 w-full sm:w-fit md:min-h-8"
-                aria-busy={paginationStatus === 'LoadingMore'}
-                disabled={paginationStatus === 'LoadingMore'}
-                onClick={() => loadMore(20)}
-              >
-                {paginationStatus === 'LoadingMore' ? 'Loading…' : 'Load more'}
-              </Button>
-            ) : null}
-              </div>
               </ScrollArea>
             </CollapsibleContent>
           </Collapsible>

@@ -25,6 +25,9 @@ vi.mock('@/lib/start-workflow', () => ({
 }))
 
 vi.mock('@/paraglide/messages', () => ({
+  app_authenticated: () => 'Authenticated',
+  app_open_patch_report: () => 'Open Patch Report',
+  app_prompt_description: () => 'Describe the workflow',
   app_workflow_prompt_label: () => 'Prompt',
   app_workflow_prompt_placeholder: () => 'Describe the workflow',
   app_workflow_run_id: () => 'Workflow run',
@@ -35,7 +38,8 @@ vi.mock('@/paraglide/messages', () => ({
   app_workflow_start_signed_out: () => 'Sign in to start workflow',
   app_workflow_start_submitting: () => 'Starting workflow…',
   app_workflow_start_success: () => 'Workflow started',
-  app_workflow_status_detail: () => 'Start a workflow with TanStack Form validation.',
+  app_workflow_status_detail: () =>
+    'Start a workflow with TanStack Form validation.',
   app_workflow_title: () => 'New workflow',
   app_workflow_prompt_request_id: () => 'Prompt request',
 }))
@@ -93,7 +97,9 @@ describe('StartWorkflowPanel', () => {
 
     render(<StartWorkflowPanel />)
 
-    expect(screen.getByRole('button', { name: 'Start workflow' })).toHaveProperty('disabled', true)
+    expect(
+      screen.getByRole('button', { name: 'Start workflow' }),
+    ).toHaveProperty('disabled', true)
     expect(screen.getByText('Select an organization')).toBeTruthy()
   })
 })

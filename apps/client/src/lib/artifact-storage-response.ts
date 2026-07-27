@@ -1,11 +1,12 @@
-export interface ArtifactStorageRecord {
-  readonly id: string
-  readonly workflowRunId: string
-  readonly storageKey: string
-  readonly contentType: string
-  readonly sizeBytes: number
-  readonly sha256: string
-}
+import { Effect } from 'effect'
+import { ParseUnifiedDiffStats } from '@patchplane/core/diff/parse-unified-diff-stats'
+import type { EvidenceArtifactStorageRecord } from '@patchplane/domain/evidence-artifact'
+import { diffProjectionRuntime } from '@/effect/diff-runtime'
+
+export type ArtifactStorageRecord = Omit<
+  EvidenceArtifactStorageRecord,
+  'storageProvider'
+>
 
 export interface ArtifactReadObject {
   readonly body: ReadableStream<Uint8Array>
@@ -17,7 +18,9 @@ export interface ArtifactReadObject {
 export interface ArtifactReadBucket {
   readonly get: (
     key: string,
-    options?: { readonly range: { readonly offset: number; readonly length: number } },
+    options?: {
+      readonly range: { readonly offset: number; readonly length: number }
+    },
   ) => Promise<ArtifactReadObject | null>
 }
 
@@ -33,13 +36,19 @@ function artifactIdentityMatches(
   artifact: ArtifactStorageRecord,
   object: ArtifactReadObject,
 ) {
-  return object.size === artifact.sizeBytes &&
+  return (
+    object.size === artifact.sizeBytes &&
     object.customMetadata?.sha256 === artifact.sha256
+  )
 }
 
 function identityMismatchResponse() {
   return jsonResponse(
-    { ok: false, error: 'Artifact object does not match its evidence metadata' },
+    {
+      ok: false,
+      code: 'artifact_identity_mismatch',
+      error: 'Artifact object does not match its evidence metadata',
+    },
     { status: 409 },
   )
 }
@@ -59,31 +68,95 @@ export async function createArtifactStorageResponse(input: {
         range: { offset: 0, length: artifactPreviewLimitBytes },
       })
       if (object === null) {
-        return jsonResponse({ ok: false, error: 'Artifact object not found' }, { status: 404 })
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'artifact_object_not_found',
+            error: 'Artifact object not found',
+          },
+          { status: 404 },
+        )
       }
-      if (!artifactIdentityMatches(artifact, object)) return identityMismatchResponse()
+      if (!artifactIdentityMatches(artifact, object))
+        return identityMismatchResponse()
       const unboundedBytes = new Uint8Array(await object.arrayBuffer())
       const bytes = unboundedBytes.slice(0, artifactPreviewLimitBytes)
       if (bytes.includes(0)) {
-        return jsonResponse({ ok: false, error: 'Binary artifacts cannot be previewed inline' }, { status: 415 })
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'binary_artifact',
+            error: 'Binary artifacts cannot be previewed inline',
+          },
+          { status: 415 },
+        )
       }
       const truncated = artifact.sizeBytes > artifactPreviewLimitBytes
-      const body = new TextDecoder().decode(bytes)
-      return new Response(
-        truncated
-          ? `${body}\n\n…preview truncated; open the full evidence artifact to inspect the remainder…`
-          : body,
-        {
-          headers: {
-            'cache-control': 'private, no-store',
-            'content-type': 'text/plain; charset=utf-8',
-            'x-content-type-options': 'nosniff',
-            'x-patchplane-preview-truncated': String(truncated),
+      let body: string
+      try {
+        body = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      } catch {
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'invalid_utf8',
+            error: 'Artifact preview is not valid UTF-8 text',
           },
-        },
-      )
+          { status: 422 },
+        )
+      }
+      const headers = new Headers({
+        'cache-control': 'private, no-store',
+        'content-type': 'text/plain; charset=utf-8',
+        'x-content-type-options': 'nosniff',
+        'x-patchplane-artifact-sha256': artifact.sha256,
+        'x-patchplane-artifact-size': String(artifact.sizeBytes),
+        'x-patchplane-preview-bytes': String(bytes.byteLength),
+        'x-patchplane-preview-truncated': String(truncated),
+      })
+      if (artifact.contentType === 'text/x-diff') {
+        if (truncated) {
+          headers.set('x-patchplane-diff-stats', 'unavailable')
+          headers.set('x-patchplane-diff-stats-reason', 'truncated')
+        } else {
+          const result = await diffProjectionRuntime.runPromise(
+            ParseUnifiedDiffStats(body).pipe(
+              Effect.match({
+                onFailure: ({ reason }) =>
+                  ({ status: 'unavailable', reason }) as const,
+                onSuccess: (stats) => ({ status: 'parsed', stats }) as const,
+              }),
+            ),
+          )
+          headers.set('x-patchplane-diff-stats', result.status)
+          if (result.status === 'parsed') {
+            headers.set(
+              'x-patchplane-diff-files',
+              String(result.stats.filesChanged),
+            )
+            headers.set(
+              'x-patchplane-diff-additions',
+              String(result.stats.additions),
+            )
+            headers.set(
+              'x-patchplane-diff-deletions',
+              String(result.stats.deletions),
+            )
+          } else {
+            headers.set('x-patchplane-diff-stats-reason', result.reason)
+          }
+        }
+      }
+      return new Response(body, { headers })
     } catch {
-      return jsonResponse({ ok: false, error: 'Artifact preview could not be read' }, { status: 502 })
+      return jsonResponse(
+        {
+          ok: false,
+          code: 'artifact_preview_read_failed',
+          error: 'Artifact preview could not be read',
+        },
+        { status: 502 },
+      )
     }
   }
 
@@ -91,9 +164,17 @@ export async function createArtifactStorageResponse(input: {
     try {
       const object = await bucket.get(artifact.storageKey)
       if (object === null) {
-        return jsonResponse({ ok: false, error: 'Artifact object not found' }, { status: 404 })
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'artifact_object_not_found',
+            error: 'Artifact object not found',
+          },
+          { status: 404 },
+        )
       }
-      if (!artifactIdentityMatches(artifact, object)) return identityMismatchResponse()
+      if (!artifactIdentityMatches(artifact, object))
+        return identityMismatchResponse()
       return new Response(object.body, {
         headers: {
           'cache-control': 'private, no-store',
@@ -104,7 +185,14 @@ export async function createArtifactStorageResponse(input: {
         },
       })
     } catch {
-      return jsonResponse({ ok: false, error: 'Artifact could not be read' }, { status: 502 })
+      return jsonResponse(
+        {
+          ok: false,
+          code: 'artifact_read_failed',
+          error: 'Artifact could not be read',
+        },
+        { status: 502 },
+      )
     }
   }
 

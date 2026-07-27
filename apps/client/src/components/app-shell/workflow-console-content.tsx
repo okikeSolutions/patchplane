@@ -8,6 +8,7 @@ import { NoOrganizationAlert } from './no-organization-alert'
 import { WorkflowConsole } from './workflow-console'
 import type { ViewerIdentity, WorkflowStartRow } from './types'
 import type { WorkflowFilter } from './workflow-console-model'
+import * as m from '@/paraglide/messages'
 
 const EMPTY_WORKFLOWS: ReadonlyArray<WorkflowStartRow> = []
 
@@ -36,23 +37,28 @@ export function WorkflowConsoleContent({
     void ensureCurrentUser({})
   }, [ensureCurrentUser])
 
-  const workspaceId = organizationId === undefined || organizationId === null
-    ? undefined
-    : `workos:${organizationId}`
-  const visibleWorkflows = workspaceId === undefined ? EMPTY_WORKFLOWS : workflows
+  const workspaceId =
+    organizationId === undefined || organizationId === null
+      ? undefined
+      : `workos:${organizationId}`
+  const visibleWorkflows =
+    workspaceId === undefined ? EMPTY_WORKFLOWS : workflows
 
   const metrics = useMemo(() => {
     const rows = visibleWorkflows ?? []
     return {
       visibleRequests: rows.length,
-      appRequests: rows.filter((row) => row.promptRequest.source === 'app').length,
-      externalRequests: rows.filter((row) => row.promptRequest.source === 'external').length,
+      appRequests: rows.filter((row) => row.promptRequest.source === 'app')
+        .length,
+      externalRequests: rows.filter(
+        (row) => row.promptRequest.source === 'external',
+      ).length,
     }
   }, [visibleWorkflows])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-visible md:overflow-hidden">
-      <h1 className="sr-only">Workflows</h1>
+      <h1 className="sr-only">{m.app_nav_workflows()}</h1>
       {user && !organizationId ? <NoOrganizationAlert /> : null}
       <GitHubConnectionStatus />
       <GitHubRepositoryConnections workspaceId={workspaceId} />

@@ -62,6 +62,7 @@ export interface WorkflowRunRow {
     | 'approved'
     | 'rejected'
     | 'changes-requested'
+  updatedAt?: number
   createdAt: number
 }
 
@@ -149,6 +150,7 @@ export interface SandboxExecutionRow {
   provider: string
   sandboxId: string
   command: string
+  runtimeModel?: string
   status: 'succeeded' | 'failed'
   exitCode?: number
   stdout: string
@@ -230,7 +232,16 @@ export interface VerificationResultRow {
   platform: 'linux' | 'windows' | 'macos'
   architecture: string
   environmentImage?: string
-  status: 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'blocked' | 'cancelled' | 'skipped' | 'invalidated'
+  status:
+    | 'queued'
+    | 'running'
+    | 'passed'
+    | 'failed'
+    | 'error'
+    | 'blocked'
+    | 'cancelled'
+    | 'skipped'
+    | 'invalidated'
   exitCode?: number
   summary?: string
   passedCount?: number
@@ -324,9 +335,15 @@ export interface WorkflowDetail extends WorkflowStartRow {
   verificationResults: ReadonlyArray<VerificationResultRow>
   verificationResultsTruncated: boolean
   reviewRuns: ReadonlyArray<ReviewRunRow>
+  reviewRunsTruncated?: boolean
   reviewFindings: ReadonlyArray<ReviewFindingRow>
+  reviewFindingsTruncated?: boolean
   policyDecisions: ReadonlyArray<PolicyDecisionRow>
+  policyDecisionsTruncated?: boolean
   humanDecisions: ReadonlyArray<HumanDecisionRow>
+  humanDecisionsTruncated?: boolean
   publicationResults: ReadonlyArray<PublicationResultRow>
+  publicationResultsTruncated?: boolean
   provenanceEvents: ReadonlyArray<ProvenanceEventRow>
+  provenanceEventsTruncated?: boolean
 }
