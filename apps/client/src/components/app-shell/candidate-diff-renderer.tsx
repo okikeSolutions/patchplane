@@ -2,13 +2,20 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
   useId,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react'
-import { ArrowLeftIcon, CircleAlertIcon, ListTreeIcon } from 'lucide-react'
+import {
+  ArrowLeftIcon,
+  CircleAlertIcon,
+  Columns2Icon,
+  ListTreeIcon,
+  Rows3Icon,
+} from 'lucide-react'
 import type { CandidateChangedFilesProjection } from '@patchplane/core/diff/project-candidate-changed-files'
 import type { CandidateFilePath } from '@patchplane/domain/candidate-file'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -24,22 +31,37 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
 import * as m from '@/paraglide/messages'
 import { candidateFileStatus } from './candidate-file-status'
+import {
+  CandidateDiffFailureBoundary,
+  CandidateDiffProcessorUnavailableError,
+  type CandidateDiffRendererFailure,
+} from './candidate-diff-failure-boundary'
+import type { WorkflowDiffView } from './workflow-diff-navigation'
 
 const CandidateChangedFilesNavigator = lazy(() =>
-  import('./candidate-changed-files-navigator').then((module) => ({
-    default: module.CandidateChangedFilesNavigator,
-  })),
+  import('./candidate-changed-files-navigator')
+    .then((module) => ({
+      default: module.CandidateChangedFilesNavigator,
+    }))
+    .catch(() => {
+      throw new CandidateDiffProcessorUnavailableError()
+    }),
 )
 
 const CandidateUnifiedDiff = import.meta.env.SSR
   ? undefined
   : lazy(() =>
-      import('./candidate-unified-diff').then((module) => ({
-        default: module.CandidateUnifiedDiff,
-      })),
+      import('./candidate-unified-diff')
+        .then((module) => ({
+          default: module.CandidateUnifiedDiff,
+        }))
+        .catch(() => {
+          throw new CandidateDiffProcessorUnavailableError()
+        }),
     )
 
 type RenderedChangedFile = {
@@ -55,10 +77,22 @@ type ColorScheme = 'dark' | 'light'
 
 export function CandidateDiffRenderer({
   content,
+  expanded = false,
   projection,
+  selectedFileIndex,
+  view = 'unified',
+  onFailure,
+  onSelectedFileIndexChange,
+  onViewChange,
 }: {
   readonly content: string
+  readonly expanded?: boolean
   readonly projection: CandidateChangedFilesProjection
+  readonly selectedFileIndex?: number | undefined
+  readonly view?: WorkflowDiffView
+  readonly onFailure?: (failure: CandidateDiffRendererFailure) => void
+  readonly onSelectedFileIndexChange?: (index: number) => void
+  readonly onViewChange?: (view: WorkflowDiffView) => void
 }) {
   const colorScheme = usePatchPlaneColorScheme()
   const labelId = useId()
@@ -66,24 +100,53 @@ export function CandidateDiffRenderer({
     () => changedFileSections(content, projection),
     [content, projection],
   )
-  const [selectedPath, setSelectedPath] = useState(
-    () => fileSections[0]?.file.path,
+  const initialFileIndex =
+    selectedFileIndex !== undefined &&
+    selectedFileIndex >= 0 &&
+    selectedFileIndex < fileSections.length
+      ? selectedFileIndex
+      : 0
+  const [uncontrolledSelectedPath, setUncontrolledSelectedPath] = useState(
+    () => fileSections[initialFileIndex]?.file.path,
   )
+  const controlledSelectedPath =
+    selectedFileIndex === undefined
+      ? undefined
+      : fileSections[
+          selectedFileIndex >= 0 && selectedFileIndex < fileSections.length
+            ? selectedFileIndex
+            : 0
+        ]?.file.path
+  const selectedPath = controlledSelectedPath ?? uncontrolledSelectedPath
   const [mobileNavigatorOpen, setMobileNavigatorOpen] = useState(false)
   const sectionRefs = useRef(new Map<string, HTMLElement>())
   const headingRefs = useRef(new Map<string, HTMLHeadingElement>())
   const changedFilesHeadingRef = useRef<HTMLHeadingElement>(null)
   const desktopNavigatorRef = useRef<ChangedFilesNavigatorHandle>(null)
-  const selectPath = useCallback((path: CandidateFilePath) => {
-    setSelectedPath(path)
-    setMobileNavigatorOpen(false)
-    window.setTimeout(() => {
-      const section = sectionRefs.current.get(path)
-      const heading = headingRefs.current.get(path)
-      section?.scrollIntoView?.({ block: 'start' })
-      heading?.focus({ preventScroll: true })
+  useEffect(() => {
+    if (controlledSelectedPath === undefined) return
+    const timer = window.setTimeout(() => {
+      sectionRefs.current
+        .get(controlledSelectedPath)
+        ?.scrollIntoView?.({ block: 'start' })
     }, 0)
-  }, [])
+    return () => window.clearTimeout(timer)
+  }, [controlledSelectedPath])
+  const selectPath = useCallback(
+    (path: CandidateFilePath) => {
+      setUncontrolledSelectedPath(path)
+      setMobileNavigatorOpen(false)
+      const nextIndex = fileSections.findIndex(({ file }) => file.path === path)
+      if (nextIndex >= 0) onSelectedFileIndexChange?.(nextIndex)
+      window.setTimeout(() => {
+        const section = sectionRefs.current.get(path)
+        const heading = headingRefs.current.get(path)
+        section?.scrollIntoView?.({ block: 'start' })
+        heading?.focus({ preventScroll: true })
+      }, 0)
+    },
+    [fileSections, onSelectedFileIndexChange],
+  )
   const returnToChangedFile = useCallback((path: CandidateFilePath) => {
     desktopNavigatorRef.current?.revealPath(path)
     changedFilesHeadingRef.current?.focus()
@@ -97,7 +160,7 @@ export function CandidateDiffRenderer({
           projectedFiles={fileSections.length}
           unavailable
         />
-        <RawCandidateDiff content={content} />
+        <RawCandidateDiff content={content} expanded={expanded} />
       </div>
     )
   }
@@ -115,11 +178,43 @@ export function CandidateDiffRenderer({
           projectedFiles={fileSections.length}
         />
       ) : null}
+      {expanded && onViewChange !== undefined ? (
+        <div className="hidden justify-end lg:flex">
+          <ToggleGroup
+            aria-label={m.app_diff_view_mode()}
+            value={[view]}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            onValueChange={(values) => {
+              const next = values.at(-1)
+              if (next === 'split' || next === 'unified') onViewChange(next)
+            }}
+          >
+            <ToggleGroupItem
+              value="unified"
+              aria-label={m.app_diff_view_unified()}
+            >
+              <Rows3Icon data-icon="inline-start" />
+              {m.app_diff_view_unified()}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="split" aria-label={m.app_diff_view_split()}>
+              <Columns2Icon data-icon="inline-start" />
+              {m.app_diff_view_split()}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded-lg border border-border bg-background">
         <div className="grid lg:grid-cols-[minmax(13rem,17rem)_minmax(0,1fr)]">
           <nav
             aria-labelledby={labelId}
-            className="hidden h-[clamp(24rem,48svh,34rem)] min-w-0 border-r border-border bg-muted/30 lg:block"
+            className={cn(
+              'hidden min-w-0 border-r border-border bg-muted/30 lg:block',
+              expanded
+                ? 'h-[calc(100svh-13rem)] min-h-[28rem]'
+                : 'h-[clamp(24rem,48svh,34rem)]',
+            )}
           >
             <div className="border-b border-border bg-muted/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
@@ -144,29 +239,34 @@ export function CandidateDiffRenderer({
                 {m.app_diff_candidate_only()}
               </p>
             </div>
-            <Suspense
-              fallback={
-                <div
-                  aria-label={m.app_diff_loading_files()}
-                  className="flex flex-col gap-2 p-3"
-                >
-                  <Skeleton className="h-7 w-full" />
-                  <Skeleton className="h-7 w-4/5" />
-                  <Skeleton className="h-7 w-3/5" />
-                </div>
-              }
+            <CandidateDiffFailureBoundary
+              fallbackKind="processor-unavailable"
+              onFailure={onFailure}
             >
-              <CandidateChangedFilesNavigator
-                files={fileSections.map(({ file }) => file)}
-                selectedPath={selectedPath}
-                onSelectPath={selectPath}
-                partial={
-                  projection.artifactTruncated || !projection.parseComplete
+              <Suspense
+                fallback={
+                  <div
+                    aria-label={m.app_diff_loading_files()}
+                    className="flex flex-col gap-2 p-3"
+                  >
+                    <Skeleton className="h-7 w-full" />
+                    <Skeleton className="h-7 w-4/5" />
+                    <Skeleton className="h-7 w-3/5" />
+                  </div>
                 }
-                colorScheme={colorScheme}
-                ref={desktopNavigatorRef}
-              />
-            </Suspense>
+              >
+                <CandidateChangedFilesNavigator
+                  files={fileSections.map(({ file }) => file)}
+                  selectedPath={selectedPath}
+                  onSelectPath={selectPath}
+                  partial={
+                    projection.artifactTruncated || !projection.parseComplete
+                  }
+                  colorScheme={colorScheme}
+                  ref={desktopNavigatorRef}
+                />
+              </Suspense>
+            </CandidateDiffFailureBoundary>
           </nav>
           <section
             aria-label={`${m.app_diff_for()} ${selectedPath}`}
@@ -210,29 +310,34 @@ export function CandidateDiffRenderer({
                     aria-label={m.app_diff_changed_files()}
                     className="min-h-0 flex-1 bg-muted/30"
                   >
-                    <Suspense
-                      fallback={
-                        <div
-                          aria-label={m.app_diff_loading_files()}
-                          className="flex flex-col gap-2 p-3"
-                        >
-                          <Skeleton className="h-7 w-full" />
-                          <Skeleton className="h-7 w-4/5" />
-                          <Skeleton className="h-7 w-3/5" />
-                        </div>
-                      }
+                    <CandidateDiffFailureBoundary
+                      fallbackKind="processor-unavailable"
+                      onFailure={onFailure}
                     >
-                      <CandidateChangedFilesNavigator
-                        files={fileSections.map(({ file }) => file)}
-                        selectedPath={selectedPath}
-                        onSelectPath={selectPath}
-                        partial={
-                          projection.artifactTruncated ||
-                          !projection.parseComplete
+                      <Suspense
+                        fallback={
+                          <div
+                            aria-label={m.app_diff_loading_files()}
+                            className="flex flex-col gap-2 p-3"
+                          >
+                            <Skeleton className="h-7 w-full" />
+                            <Skeleton className="h-7 w-4/5" />
+                            <Skeleton className="h-7 w-3/5" />
+                          </div>
                         }
-                        colorScheme={colorScheme}
-                      />
-                    </Suspense>
+                      >
+                        <CandidateChangedFilesNavigator
+                          files={fileSections.map(({ file }) => file)}
+                          selectedPath={selectedPath}
+                          onSelectPath={selectPath}
+                          partial={
+                            projection.artifactTruncated ||
+                            !projection.parseComplete
+                          }
+                          colorScheme={colorScheme}
+                        />
+                      </Suspense>
+                    </CandidateDiffFailureBoundary>
                   </nav>
                 </SheetContent>
               </Sheet>
@@ -248,7 +353,13 @@ export function CandidateDiffRenderer({
                 </Badge>
               )}
             </div>
-            <ScrollArea className="h-[clamp(24rem,48svh,34rem)]">
+            <ScrollArea
+              className={cn(
+                expanded
+                  ? 'h-[calc(100svh-13rem)] min-h-[28rem]'
+                  : 'h-[clamp(24rem,48svh,34rem)]',
+              )}
+            >
               <div>
                 {fileSections.map((file, index) => {
                   const selected = file.file.path === selectedPath
@@ -317,6 +428,8 @@ export function CandidateDiffRenderer({
                         <UnifiedDiff
                           patch={file.content}
                           colorScheme={colorScheme}
+                          view={expanded ? view : 'unified'}
+                          onFailure={onFailure}
                         />
                       ) : (
                         <NonTextualFileState file={file} />
@@ -356,7 +469,7 @@ function ChangedFilesProjectionNotice({
       : []),
   ]
   return (
-    <Alert role="alert">
+    <Alert role="alert" variant="warning">
       <CircleAlertIcon />
       <AlertTitle>
         {unavailable
@@ -392,7 +505,7 @@ function NonTextualFileState({ file }: { readonly file: RenderedChangedFile }) {
         ? m.app_diff_submodule()
         : m.app_diff_metadata()
   return (
-    <Alert className="m-3">
+    <Alert className="m-3" variant="warning">
       <CircleAlertIcon />
       <AlertTitle>{m.app_diff_no_hunk()}</AlertTitle>
       <AlertDescription>
@@ -405,9 +518,13 @@ function NonTextualFileState({ file }: { readonly file: RenderedChangedFile }) {
 function UnifiedDiff({
   patch,
   colorScheme,
+  view,
+  onFailure,
 }: {
   readonly patch: string
   readonly colorScheme: ColorScheme
+  readonly view: WorkflowDiffView
+  readonly onFailure?: (failure: CandidateDiffRendererFailure) => void
 }) {
   const fallback = (
     <div
@@ -421,9 +538,18 @@ function UnifiedDiff({
   )
   if (CandidateUnifiedDiff === undefined) return fallback
   return (
-    <Suspense fallback={fallback}>
-      <CandidateUnifiedDiff patch={patch} colorScheme={colorScheme} />
-    </Suspense>
+    <CandidateDiffFailureBoundary
+      fallbackKind="malformed"
+      onFailure={onFailure}
+    >
+      <Suspense fallback={fallback}>
+        <CandidateUnifiedDiff
+          patch={patch}
+          colorScheme={colorScheme}
+          view={view}
+        />
+      </Suspense>
+    </CandidateDiffFailureBoundary>
   )
 }
 
@@ -459,9 +585,22 @@ function usePatchPlaneColorScheme(): ColorScheme {
   )
 }
 
-function RawCandidateDiff({ content }: { readonly content: string }) {
+function RawCandidateDiff({
+  content,
+  expanded = false,
+}: {
+  readonly content: string
+  readonly expanded?: boolean
+}) {
   return (
-    <ScrollArea className="h-[clamp(24rem,48svh,34rem)] rounded-lg border border-border bg-background">
+    <ScrollArea
+      className={cn(
+        'rounded-lg border border-border bg-background',
+        expanded
+          ? 'h-[calc(100svh-13rem)] min-h-[28rem]'
+          : 'h-[clamp(24rem,48svh,34rem)]',
+      )}
+    >
       <pre className="break-words p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
         {content}
       </pre>

@@ -41,8 +41,10 @@ type LoadDiffPreviewResult =
 
 export type DiffEvidenceProblemKind =
   | 'authentication'
+  | 'authorization'
   | 'binary'
   | 'empty'
+  | 'expired'
   | 'integrity'
   | 'invalid-text'
   | 'malformed'
@@ -56,9 +58,7 @@ export type DiffEvidenceProblemKind =
 
 export type DiffEvidenceProblem = {
   readonly kind: DiffEvidenceProblemKind
-  readonly title: string
-  readonly reason: string
-  readonly consequence: string
+  readonly recovery: 'none' | 'reload' | 'retry'
   readonly retryable: boolean
 }
 
@@ -89,118 +89,77 @@ const diffEvidenceProblems: Readonly<
 > = {
   authentication: {
     kind: 'authentication',
-    title: 'Authentication required',
-    reason:
-      'The candidate-bound diff could not be authorized for this session.',
-    consequence:
-      'Decision: Treat review as blocked until authentication is restored and the same artifact loads.',
+    recovery: 'reload',
+    retryable: false,
+  },
+  authorization: {
+    kind: 'authorization',
+    recovery: 'none',
     retryable: false,
   },
   binary: {
     kind: 'binary',
-    title: 'Binary diff cannot be rendered inline',
-    reason:
-      'The artifact is identity-checked evidence, but it has no trustworthy textual line view.',
-    consequence:
-      'Decision: Inspect the complete artifact and proceed only with an explicit evidence-gap rationale.',
+    recovery: 'none',
     retryable: false,
   },
   empty: {
     kind: 'empty',
-    title: 'Diff contains no textual changes',
-    reason:
-      'The candidate artifact does not contain a reviewable unified diff.',
-    consequence:
-      'Decision: Treat review as blocked until the candidate is recaptured or the empty change is explained.',
+    recovery: 'none',
+    retryable: false,
+  },
+  expired: {
+    kind: 'expired',
+    recovery: 'none',
     retryable: false,
   },
   integrity: {
     kind: 'integrity',
-    title: 'Diff evidence identity mismatch',
-    reason:
-      'The returned artifact metadata does not match the evidence record attached to this candidate.',
-    consequence:
-      'Decision: Approval is blocked. Do not use content from a mismatched artifact.',
+    recovery: 'none',
     retryable: false,
   },
   'invalid-text': {
     kind: 'invalid-text',
-    title: 'Diff is not valid UTF-8 text',
-    reason:
-      'The artifact cannot be decoded without changing its recorded bytes.',
-    consequence:
-      'Decision: Treat review as blocked until the artifact is recaptured in a supported format.',
+    recovery: 'none',
     retryable: false,
   },
   malformed: {
     kind: 'malformed',
-    title: 'Diff format is malformed or unsupported',
-    reason:
-      'PatchPlane cannot establish trustworthy file and hunk boundaries for this artifact.',
-    consequence:
-      'Decision: Treat review as blocked until the complete artifact is inspected or the diff is recaptured.',
+    recovery: 'none',
     retryable: false,
   },
   'metadata-missing': {
     kind: 'metadata-missing',
-    title: 'Diff evidence metadata is missing',
-    reason:
-      'The candidate references an artifact that is absent from this Patch Report projection.',
-    consequence:
-      'Decision: Approval is blocked until the candidate and evidence projection are coherent.',
+    recovery: 'none',
     retryable: false,
   },
   missing: {
     kind: 'missing',
-    title: 'Diff evidence is unavailable',
-    reason:
-      'The candidate-bound artifact or its stored object could not be found.',
-    consequence:
-      'Decision: Treat review as blocked until the exact evidence is restored or the candidate is recaptured.',
+    recovery: 'none',
     retryable: false,
   },
   'missing-reference': {
     kind: 'missing-reference',
-    title: 'Candidate has no diff evidence',
-    reason: 'This candidate does not reference a durable diff artifact.',
-    consequence:
-      'Decision: Approval is blocked because the patch contents cannot be verified.',
+    recovery: 'none',
     retryable: false,
   },
   oversized: {
     kind: 'oversized',
-    title: 'Diff exceeds the supported inline limit',
-    reason:
-      'The complete artifact exists, but its structure cannot be safely represented in this viewer.',
-    consequence:
-      'Decision: Inspect the complete artifact and proceed only with an explicit evidence-gap rationale.',
+    recovery: 'none',
     retryable: false,
   },
   'processor-unavailable': {
     kind: 'processor-unavailable',
-    title: 'Diff processor could not be loaded',
-    reason:
-      'The artifact was retrieved and identity-checked, but its browser processing module is temporarily unavailable.',
-    consequence:
-      'Decision: Retry the same candidate-bound artifact and do not decide until its contents can be processed.',
+    recovery: 'retry',
     retryable: true,
   },
   'projection-failed': {
     kind: 'projection-failed',
-    title: 'Diff could not be processed',
-    reason:
-      'The artifact was retrieved and identity-checked, but changed-file projection failed.',
-    consequence:
-      'Decision: Treat review as blocked until the processing failure is repaired or the complete artifact is inspected.',
+    recovery: 'none',
     retryable: false,
   },
   unavailable: {
     kind: 'unavailable',
-    title: 'Diff could not be retrieved',
-    reason:
-      'The authenticated artifact request or bounded preview is temporarily unavailable.',
-    consequence:
-      'Decision: Retry the same candidate-bound artifact and do not decide while its contents are unavailable.',
+    recovery: 'retry',
     retryable: true,
   },
 }
@@ -262,6 +221,9 @@ function artifactPreviewProblem(value: unknown, status: number) {
   const code = Option.getOrUndefined(decodeArtifactPreviewProblem(value))?.code
   if (code === 'authentication_required')
     return diffEvidenceProblem('authentication')
+  if (code === 'artifact_authorization_required')
+    return diffEvidenceProblem('authorization')
+  if (code === 'artifact_expired') return diffEvidenceProblem('expired')
   if (code === 'binary_artifact') return diffEvidenceProblem('binary')
   if (code === 'invalid_utf8') return diffEvidenceProblem('invalid-text')
   if (code === 'artifact_identity_mismatch')
@@ -279,9 +241,13 @@ function artifactPreviewProblem(value: unknown, status: number) {
     return diffEvidenceProblem('unavailable')
   return status === 401
     ? diffEvidenceProblem('authentication')
-    : status === 404
-      ? diffEvidenceProblem('missing')
-      : diffEvidenceProblem('unavailable')
+    : status === 403
+      ? diffEvidenceProblem('authorization')
+      : status === 410
+        ? diffEvidenceProblem('expired')
+        : status === 404
+          ? diffEvidenceProblem('missing')
+          : diffEvidenceProblem('unavailable')
 }
 
 async function loadDiffPreview(

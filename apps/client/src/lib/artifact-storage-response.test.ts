@@ -17,6 +17,8 @@ const artifact = {
   workflowRunId: makeWorkflowRunId('workflow_123'),
   storageKey: 'workflows/workflow_123/diff/artifact.patch',
   contentType: 'text/x-patch',
+  createdAt: Date.UTC(2026, 6, 1),
+  retentionPolicy: 'alpha-14d',
   sizeBytes: 12,
   sha256: Schema.decodeUnknownSync(EvidenceArtifactStorageRecord.fields.sha256)(
     'a'.repeat(64),
@@ -92,6 +94,44 @@ describe('artifact storage response', () => {
       ok: false,
       code: 'binary_artifact',
       error: 'Binary artifacts cannot be previewed inline',
+    })
+  })
+
+  test('distinguishes a retained object that is unexpectedly missing', async () => {
+    const { bucket } = bucketReturning(null)
+    const response = await createArtifactStorageResponse({
+      artifact,
+      bucket,
+      now: artifact.createdAt + 7 * 24 * 60 * 60 * 1_000,
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'artifact_object_not_found',
+      error: 'Artifact object not found',
+    })
+  })
+
+  test('reports an object removed after its recorded retention window as expired', async () => {
+    const { bucket } = bucketReturning(null)
+    const response = await createArtifactStorageResponse({
+      artifact,
+      bucket,
+      now: artifact.createdAt + 15 * 24 * 60 * 60 * 1_000,
+      requestUrl: new URL(
+        'https://app.example/api/artifacts/url?artifactId=artifact_123&preview=1',
+      ),
+    })
+
+    expect(response.status).toBe(410)
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'artifact_expired',
+      error: 'Artifact object expired under its retention policy',
     })
   })
 

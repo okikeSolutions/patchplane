@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
+import { useState } from 'react'
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -14,13 +16,34 @@ import { diffProjectionRuntime } from '@/effect/diff-runtime'
 import type { WorkflowDetail } from './types'
 import { WorkflowChanges } from './workflow-changes'
 
+const candidateDiffRendererMock = vi.hoisted(
+  (): {
+    onFailure:
+      | ((failure: 'malformed' | 'processor-unavailable') => void)
+      | undefined
+  } => ({ onFailure: undefined }),
+)
+
 vi.mock('./candidate-diff-renderer', () => ({
-  CandidateDiffRenderer: ({ content }: { readonly content: string }) => (
-    <>
-      <nav aria-label="Changed files" />
-      <pre data-testid="candidate-diff-content">{content}</pre>
-    </>
-  ),
+  CandidateDiffRenderer: ({
+    content,
+    expanded,
+    onFailure,
+  }: {
+    readonly content: string
+    readonly expanded?: boolean
+    readonly onFailure?: (
+      failure: 'malformed' | 'processor-unavailable',
+    ) => void
+  }) => {
+    candidateDiffRendererMock.onFailure = onFailure
+    return (
+      <div data-expanded={expanded ? 'true' : 'false'}>
+        <nav aria-label="Changed files" />
+        <pre data-testid="candidate-diff-content">{content}</pre>
+      </div>
+    )
+  },
 }))
 
 function detail(
@@ -158,9 +181,35 @@ function renderChanges(workflowDetail: WorkflowDetail) {
   }
 }
 
+function renderExpandableChanges(workflowDetail: WorkflowDetail) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  })
+  function Harness() {
+    const [expanded, setExpanded] = useState(false)
+    return (
+      <WorkflowChanges
+        detail={workflowDetail}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+      />
+    )
+  }
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Harness />
+    </QueryClientProvider>,
+  )
+}
+
 describe('WorkflowChanges candidate statistics', () => {
   afterEach(() => {
     cleanup()
+    candidateDiffRendererMock.onFailure = undefined
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -170,13 +219,25 @@ describe('WorkflowChanges candidate statistics', () => {
       'fetch',
       vi.fn(() => new Promise<Response>(() => {})),
     )
-    renderChanges(detail({ filesChanged: 3, additions: 24, deletions: 7 }))
+    const { container } = renderChanges(
+      detail({ filesChanged: 3, additions: 24, deletions: 7 }),
+    )
 
     expect(screen.getByText('3')).toBeTruthy()
     expect(screen.getByText('+24')).toBeTruthy()
     expect(screen.getByText('-7')).toBeTruthy()
     expect(screen.getByText('Captured with this candidate.')).toBeTruthy()
     expect(screen.queryByText('Unknown')).toBeNull()
+    expect(screen.getByRole('region', { name: 'Change summary' })).toBeTruthy()
+    expect(
+      screen.getByRole('region', { name: 'Candidate identity' }),
+    ).toBeTruthy()
+    expect(container.querySelectorAll('[data-slot="card"]')).toHaveLength(1)
+    expect(
+      screen
+        .getByRole('heading', { name: 'Unified diff' })
+        .closest('[data-slot="card"]'),
+    ).not.toBeNull()
   })
 
   test('calculates historical candidate statistics from the loaded diff', async () => {
@@ -274,6 +335,54 @@ describe('WorkflowChanges candidate statistics', () => {
     expect(
       (await screen.findByTestId('candidate-diff-content')).textContent,
     ).toBe(body)
+    expect(fetchPreview).toHaveBeenCalledTimes(1)
+  })
+
+  test('expands the cached diff into focus mode and returns with focus restored', async () => {
+    const body = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1 +1 @@
+-old
++new
+`
+    const fetchPreview = vi.fn(async () =>
+      previewResponse({ body, sha256: 'a'.repeat(64) }),
+    )
+    vi.stubGlobal('fetch', fetchPreview)
+    renderExpandableChanges(
+      detail(undefined, new TextEncoder().encode(body).byteLength),
+    )
+
+    const expand = await screen.findByRole('button', {
+      name: 'Expand diff',
+    })
+    expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull()
+    expect(
+      screen.getByTestId('candidate-diff-content').parentElement?.dataset
+        .expanded,
+    ).toBe('false')
+
+    fireEvent.click(expand)
+
+    const back = screen.getByRole('button', {
+      name: 'Back to Patch Report',
+    })
+    expect(document.activeElement).toBe(back)
+    expect(screen.queryByText('Change summary')).toBeNull()
+    expect(
+      screen.getByTestId('candidate-diff-content').parentElement?.dataset
+        .expanded,
+    ).toBe('true')
+    expect(fetchPreview).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(back)
+
+    const restoredExpand = screen.getByRole('button', {
+      name: 'Expand diff',
+    })
+    expect(document.activeElement).toBe(restoredExpand)
+    expect(screen.getByText('Change summary')).toBeTruthy()
     expect(fetchPreview).toHaveBeenCalledTimes(1)
   })
 
@@ -428,6 +537,66 @@ describe('WorkflowChanges candidate statistics', () => {
     expect(screen.queryByText(body.trim())).toBeNull()
   })
 
+  test.each([
+    {
+      code: 'artifact_authorization_required',
+      status: 403,
+      title: 'Artifact access denied',
+      recovery:
+        'Ask a workspace administrator for evidence access. Approval remains blocked.',
+    },
+    {
+      code: 'artifact_expired',
+      status: 410,
+      title: 'Diff evidence has expired',
+      recovery:
+        'Request a new run or restore the exact evidence object. Do not approve from an expired artifact.',
+    },
+    {
+      code: 'artifact_object_not_found',
+      status: 404,
+      title: 'Diff evidence object is missing',
+      recovery:
+        'Restore the exact object or request a new run. Retrying cannot prove missing evidence.',
+    },
+  ])(
+    'renders $code as a distinct non-retryable recovery state',
+    async ({ code, recovery, status, title }) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          Response.json({ ok: false, code, error: title }, { status }),
+        ),
+      )
+      renderChanges(detail())
+
+      expect(await screen.findByText(title)).toBeTruthy()
+      expect(screen.getByText(recovery)).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Retry diff' })).toBeNull()
+    },
+  )
+
+  test('offers a session recovery action only for authentication failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            ok: false,
+            code: 'authentication_required',
+            error: 'Authentication required',
+          },
+          { status: 401 },
+        ),
+      ),
+    )
+    renderChanges(detail())
+
+    expect(await screen.findByText('Authentication required')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reload sign-in' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Retry diff' })).toBeNull()
+  })
+
   test('offers an exact-artifact retry for temporary storage failures', async () => {
     vi.stubGlobal(
       'fetch',
@@ -475,6 +644,32 @@ describe('WorkflowChanges candidate statistics', () => {
     expect(
       screen.queryByText(/metadata, storage, or the bounded preview/),
     ).toBeNull()
+  })
+
+  test('promotes a renderer parser failure to candidate-bound malformed evidence', async () => {
+    const body = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1 +1 @@
+-old
++new
+`
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => previewResponse({ body, sha256: 'a'.repeat(64) })),
+    )
+    renderChanges(detail(undefined, new TextEncoder().encode(body).byteLength))
+    expect(await screen.findByTestId('candidate-diff-content')).toBeTruthy()
+
+    act(() => candidateDiffRendererMock.onFailure?.('malformed'))
+
+    expect(
+      screen.getByText('Diff format is malformed or unsupported'),
+    ).toBeTruthy()
+    expect(screen.getByText('Candidate candidate-1')).toBeTruthy()
+    expect(screen.getByText('Artifact artifact-1')).toBeTruthy()
+    expect(screen.queryByTestId('candidate-diff-content')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry diff' })).toBeNull()
   })
 
   test('discards an old preview when the selected candidate changes', async () => {

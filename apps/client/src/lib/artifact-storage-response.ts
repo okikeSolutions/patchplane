@@ -1,11 +1,18 @@
 import { Effect } from 'effect'
 import { ParseUnifiedDiffStats } from '@patchplane/core/diff/parse-unified-diff-stats'
-import type { EvidenceArtifactStorageRecord } from '@patchplane/domain/evidence-artifact'
+import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { diffProjectionRuntime } from '@/effect/diff-runtime'
 
-export type ArtifactStorageRecord = Omit<
-  EvidenceArtifactStorageRecord,
-  'storageProvider'
+export type ArtifactStorageRecord = Pick<
+  EvidenceArtifact,
+  | 'contentType'
+  | 'createdAt'
+  | 'id'
+  | 'retentionPolicy'
+  | 'sha256'
+  | 'sizeBytes'
+  | 'storageKey'
+  | 'workflowRunId'
 >
 
 export interface ArtifactReadObject {
@@ -25,6 +32,8 @@ export interface ArtifactReadBucket {
 }
 
 export const artifactPreviewLimitBytes = 200_000
+const dayMilliseconds = 24 * 60 * 60 * 1_000
+const alphaRetentionPattern = /^alpha-(\d+)(?:d|-days)$/
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
@@ -53,12 +62,47 @@ function identityMismatchResponse() {
   )
 }
 
+function artifactObjectMissingResponse(
+  artifact: ArtifactStorageRecord,
+  now: number,
+) {
+  const retentionMatch =
+    artifact.retentionPolicy === undefined
+      ? undefined
+      : alphaRetentionPattern.exec(artifact.retentionPolicy)
+  const retentionDays =
+    retentionMatch === undefined || retentionMatch === null
+      ? undefined
+      : Number(retentionMatch[1])
+  const expired =
+    retentionDays !== undefined &&
+    Number.isSafeInteger(retentionDays) &&
+    retentionDays > 0 &&
+    now >= artifact.createdAt + retentionDays * dayMilliseconds
+  return jsonResponse(
+    expired
+      ? {
+          ok: false,
+          code: 'artifact_expired',
+          error: 'Artifact object expired under its retention policy',
+        }
+      : {
+          ok: false,
+          code: 'artifact_object_not_found',
+          error: 'Artifact object not found',
+        },
+    { status: expired ? 410 : 404 },
+  )
+}
+
 export async function createArtifactStorageResponse(input: {
   readonly artifact: ArtifactStorageRecord
   readonly bucket: ArtifactReadBucket
+  readonly now?: number | undefined
   readonly requestUrl: URL
 }) {
   const { artifact, bucket, requestUrl } = input
+  const now = input.now ?? Date.now()
   const preview = requestUrl.searchParams.get('preview') === '1'
   const download = requestUrl.searchParams.get('download') === '1'
 
@@ -68,14 +112,7 @@ export async function createArtifactStorageResponse(input: {
         range: { offset: 0, length: artifactPreviewLimitBytes },
       })
       if (object === null) {
-        return jsonResponse(
-          {
-            ok: false,
-            code: 'artifact_object_not_found',
-            error: 'Artifact object not found',
-          },
-          { status: 404 },
-        )
+        return artifactObjectMissingResponse(artifact, now)
       }
       if (!artifactIdentityMatches(artifact, object))
         return identityMismatchResponse()
@@ -164,14 +201,7 @@ export async function createArtifactStorageResponse(input: {
     try {
       const object = await bucket.get(artifact.storageKey)
       if (object === null) {
-        return jsonResponse(
-          {
-            ok: false,
-            code: 'artifact_object_not_found',
-            error: 'Artifact object not found',
-          },
-          { status: 404 },
-        )
+        return artifactObjectMissingResponse(artifact, now)
       }
       if (!artifactIdentityMatches(artifact, object))
         return identityMismatchResponse()

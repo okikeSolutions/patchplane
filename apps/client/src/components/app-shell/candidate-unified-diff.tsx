@@ -2,10 +2,11 @@ import { type CSSProperties, useId, useMemo } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
 import { projectAccessibleDiffHunks } from './candidate-diff-accessibility'
 import * as m from '@/paraglide/messages'
+import { getLocale } from '@/paraglide/runtime'
+import type { WorkflowDiffView } from './workflow-diff-navigation'
 
-const unifiedDiffOptions = {
+const diffOptions = {
   diffIndicators: 'classic',
-  diffStyle: 'unified',
   disableFileHeader: true,
   hunkSeparators: 'metadata',
   overflow: 'scroll',
@@ -26,24 +27,31 @@ const diffStyle = {
 export function CandidateUnifiedDiff({
   patch,
   colorScheme,
+  view,
 }: {
   readonly patch: string
   readonly colorScheme: 'dark' | 'light'
+  readonly view: WorkflowDiffView
 }) {
   const transcriptId = useId()
+  const locale = getLocale()
   const options = useMemo(
-    () => ({ ...unifiedDiffOptions, themeType: colorScheme }),
-    [colorScheme],
+    () => ({ ...diffOptions, diffStyle: view, themeType: colorScheme }),
+    [colorScheme, view],
   )
   const accessibleHunks = useMemo(
-    () => projectAccessibleDiffHunks(patch),
-    [patch],
+    () => projectAccessibleDiffHunks(patch, locale),
+    [locale, patch],
   )
   return (
     <>
       {accessibleHunks.length === 0 ? null : (
         <div
-          aria-label={m.app_diff_accessible()}
+          aria-label={
+            view === 'split'
+              ? m.app_diff_accessible_split()
+              : m.app_diff_accessible()
+          }
           className="sr-only"
           data-slot="accessible-unified-diff"
           role="document"

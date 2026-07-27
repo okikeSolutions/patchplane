@@ -1,9 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { ConvexHttpClient } from 'convex/browser'
 import { makeFunctionReference } from 'convex/server'
-import { Effect, Exit, Schema } from 'effect'
-import { EvidenceArtifactStorageRecord } from '@patchplane/domain/evidence-artifact'
+import { Effect, Schema } from 'effect'
+import { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { getEvidenceBucket } from '@/env'
+import {
+  artifactMetadataFailureCode,
+  type ArtifactMetadataFailureCode,
+} from '@/lib/artifact-metadata-failure'
 import { createArtifactStorageResponse } from '@/lib/artifact-storage-response'
 import { loadConfiguredConvexUrl } from '@/lib/convex-url'
 
@@ -19,12 +23,17 @@ const getEvidenceArtifact = makeFunctionReference<
 class ArtifactRouteError extends Schema.TaggedErrorClass<ArtifactRouteError>()(
   'ArtifactRouteError',
   {
+    code: Schema.Literals([
+      'artifact_authorization_required',
+      'artifact_metadata_unavailable',
+      'authentication_required',
+    ]),
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-const EvidenceArtifactRouteResult = Schema.NullOr(EvidenceArtifactStorageRecord)
+const EvidenceArtifactRouteResult = Schema.NullOr(EvidenceArtifact)
 function jsonResponse(body: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
   headers.set('content-type', 'application/json')
@@ -37,7 +46,7 @@ const loadArtifactMetadata = Effect.fnUntraced(function* (input: {
   readonly workflowRunId?: string | undefined
 }) {
   const convexUrl = yield* loadConfiguredConvexUrl()
-  const artifact = yield* Effect.tryPromise({
+  const value = yield* Effect.tryPromise({
     try: () => {
       const convex = new ConvexHttpClient(
         convexUrl.toString().replace(/\/$/, ''),
@@ -52,14 +61,56 @@ const loadArtifactMetadata = Effect.fnUntraced(function* (input: {
     },
     catch: (cause) =>
       new ArtifactRouteError({
+        code: artifactMetadataFailureCode(cause),
         message: 'Artifact metadata query failed',
         cause,
       }),
-  }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(EvidenceArtifactRouteResult)),
+  })
+  return yield* Schema.decodeUnknownEffect(EvidenceArtifactRouteResult)(
+    value,
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ArtifactRouteError({
+          code: 'artifact_metadata_unavailable',
+          message: 'Artifact metadata response was invalid',
+          cause,
+        }),
+    ),
   )
-  return artifact
 })
+
+function metadataFailureResponse(code: ArtifactMetadataFailureCode) {
+  switch (code) {
+    case 'authentication_required':
+      return jsonResponse(
+        {
+          ok: false,
+          code,
+          error: 'Authentication required',
+        },
+        { status: 401 },
+      )
+    case 'artifact_authorization_required':
+      return jsonResponse(
+        {
+          ok: false,
+          code,
+          error: 'Artifact access denied',
+        },
+        { status: 403 },
+      )
+    case 'artifact_metadata_unavailable':
+      return jsonResponse(
+        {
+          ok: false,
+          code,
+          error: 'Artifact metadata could not be loaded',
+        },
+        { status: 502 },
+      )
+  }
+}
 
 export const Route = createFileRoute('/api/artifacts/url')({
   server: {
@@ -106,24 +157,30 @@ export const Route = createFileRoute('/api/artifacts/url')({
         }
 
         const { diffProjectionRuntime } = await import('@/effect/diff-runtime')
-        const resultExit = await diffProjectionRuntime.runPromiseExit(
+        const result = await diffProjectionRuntime.runPromise(
           loadArtifactMetadata({
             accessToken,
             artifactId,
             workflowRunId,
-          }),
+          }).pipe(
+            Effect.match({
+              onFailure: (error) =>
+                ({
+                  status: 'failure',
+                  code:
+                    error instanceof ArtifactRouteError
+                      ? error.code
+                      : 'artifact_metadata_unavailable',
+                }) as const,
+              onSuccess: (artifact) =>
+                ({ status: 'success', artifact }) as const,
+            }),
+          ),
         )
-        if (Exit.isFailure(resultExit)) {
-          return jsonResponse(
-            {
-              ok: false,
-              code: 'artifact_metadata_unavailable',
-              error: 'Artifact metadata could not be loaded',
-            },
-            { status: 502 },
-          )
+        if (result.status === 'failure') {
+          return metadataFailureResponse(result.code)
         }
-        const artifact = resultExit.value
+        const { artifact } = result
         if (artifact === null) {
           return jsonResponse(
             {

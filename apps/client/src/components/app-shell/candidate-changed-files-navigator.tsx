@@ -5,6 +5,7 @@ import {
   useId,
   useImperativeHandle,
   useMemo,
+  useRef,
 } from 'react'
 import type { CSSProperties } from 'react'
 import {
@@ -135,6 +136,27 @@ export const CandidateChangedFilesNavigator = forwardRef<
   })
   const selectedPaths = useFileTreeSelection(model)
   const search = useFileTreeSearch(model)
+  const activationBoundaryRef = useRef<HTMLDivElement>(null)
+  const activateFocusedSelectedPath = useCallback(() => {
+    const focusedPath = model.getFocusedPath()
+    if (focusedPath === selectedPath && filePaths.has(focusedPath)) {
+      onSelectPath(selectedPath)
+    }
+  }, [filePaths, model, onSelectPath, selectedPath])
+
+  useEffect(() => {
+    const boundary = activationBoundaryRef.current
+    if (boundary === null) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Enter') activateFocusedSelectedPath()
+    }
+    boundary.addEventListener('click', activateFocusedSelectedPath)
+    boundary.addEventListener('keydown', handleKeyDown)
+    return () => {
+      boundary.removeEventListener('click', activateFocusedSelectedPath)
+      boundary.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [activateFocusedSelectedPath])
 
   useEffect(() => {
     const item = model.getItem(selectedPath)
@@ -169,29 +191,31 @@ export const CandidateChangedFilesNavigator = forwardRef<
             } ${m.app_diff_for_search()} ${search.value.length === 0 ? m.app_diff_empty_search() : search.value}.`
           : `${selectedPaths.at(-1) ?? selectedPath} ${m.app_diff_selected()}.`}
       </output>
-      <FileTree
-        aria-describedby={`${descriptionId} ${statusId}`}
-        aria-label={m.app_diff_candidate_files()}
-        model={model}
-        style={
-          {
-            height: '100%',
-            width: '100%',
-            colorScheme,
-            '--trees-bg-override': 'var(--background)',
-            '--trees-bg-muted-override': 'var(--muted)',
-            '--trees-border-color-override': 'var(--border)',
-            '--trees-fg-override': 'var(--foreground)',
-            '--trees-fg-muted-override': 'var(--muted-foreground)',
-            '--trees-font-family-override': 'var(--font-sans)',
-            '--trees-focus-ring-color-override': 'var(--ring)',
-            '--trees-focus-ring-width-override': '2px',
-            '--trees-scrollbar-thumb-override': 'var(--border)',
-            '--trees-selected-bg-override': 'var(--accent)',
-            '--trees-selected-fg-override': 'var(--accent-foreground)',
-          } as CSSProperties
-        }
-      />
+      <div className="h-full" ref={activationBoundaryRef}>
+        <FileTree
+          aria-describedby={`${descriptionId} ${statusId}`}
+          aria-label={m.app_diff_candidate_files()}
+          model={model}
+          style={
+            {
+              height: '100%',
+              width: '100%',
+              colorScheme,
+              '--trees-bg-override': 'var(--background)',
+              '--trees-bg-muted-override': 'var(--muted)',
+              '--trees-border-color-override': 'var(--border)',
+              '--trees-fg-override': 'var(--foreground)',
+              '--trees-fg-muted-override': 'var(--muted-foreground)',
+              '--trees-font-family-override': 'var(--font-sans)',
+              '--trees-focus-ring-color-override': 'var(--ring)',
+              '--trees-focus-ring-width-override': '2px',
+              '--trees-scrollbar-thumb-override': 'var(--border)',
+              '--trees-selected-bg-override': 'var(--accent)',
+              '--trees-selected-fg-override': 'var(--accent-foreground)',
+            } as CSSProperties
+          }
+        />
+      </div>
     </>
   )
 })

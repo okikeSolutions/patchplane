@@ -208,6 +208,63 @@ describe('CandidateDiffRenderer changed-file navigation', () => {
     })
   })
 
+  test('restores a bounded file index and persists expanded view-mode changes', async () => {
+    const onSelectedFileIndexChange = vi.fn()
+    const onViewChange = vi.fn()
+    const view = render(
+      <CandidateDiffRenderer
+        content={content}
+        expanded
+        projection={projection}
+        selectedFileIndex={1}
+        view="split"
+        onSelectedFileIndexChange={onSelectedFileIndexChange}
+        onViewChange={onViewChange}
+      />,
+    )
+
+    expect(
+      screen.getByRole('region', { name: 'Diff for src/second.ts' }),
+    ).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Diff view' })).toBeTruthy()
+    expect(
+      screen
+        .getByRole('button', { name: 'Split' })
+        .getAttribute('data-pressed'),
+    ).not.toBeNull()
+
+    const diffHosts = await waitFor(() => {
+      const hosts = view.container.querySelectorAll('diffs-container')
+      expect(hosts).toHaveLength(2)
+      return hosts
+    })
+    await waitFor(() => {
+      for (const host of diffHosts) {
+        expect(
+          host.shadowRoot?.querySelector('pre')?.getAttribute('data-diff-type'),
+        ).toBe('split')
+      }
+    })
+    expect(
+      screen.getAllByRole('document', { name: 'Accessible split diff' }),
+    ).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unified' }))
+    expect(onViewChange).toHaveBeenCalledWith('unified')
+
+    const treeHost = await waitFor(() => {
+      const host = view.container.querySelector('file-tree-container')
+      expect(host?.shadowRoot).toBeTruthy()
+      return host!
+    })
+    const firstTreeItem = treeHost.shadowRoot?.querySelector<HTMLElement>(
+      '[data-item-path="src/first.ts"]',
+    )
+    expect(firstTreeItem).toBeTruthy()
+    fireEvent.click(firstTreeItem!)
+    expect(onSelectedFileIndexChange).toHaveBeenCalledWith(0)
+  })
+
   test('keeps the tree and diff renderer aligned with the app color scheme', async () => {
     document.documentElement.classList.add('dark')
     const { container } = render(
@@ -289,6 +346,34 @@ describe('CandidateDiffRenderer changed-file navigation', () => {
       )
     })
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+
+    fireEvent.click(filesButton)
+    expect(
+      await screen.findByRole('dialog', { name: 'Changed files' }),
+    ).toBeTruthy()
+    const reopenedTreeHosts = await waitFor(() => {
+      const hosts = container.ownerDocument.querySelectorAll(
+        'file-tree-container',
+      )
+      expect(hosts).toHaveLength(2)
+      return hosts
+    })
+    const selectedSecondTreeItem = await waitFor(() => {
+      const item = reopenedTreeHosts[1]?.shadowRoot?.querySelector<HTMLElement>(
+        '[data-item-path="src/second.ts"]',
+      )
+      expect(item).toBeTruthy()
+      return item!
+    })
+
+    fireEvent.click(selectedSecondTreeItem)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Changed files' })).toBeNull()
+      expect(screen.getByRole('heading', { name: 'src/second.ts' })).toBe(
+        document.activeElement,
+      )
+    })
   })
 
   test('supports the complete tree key map and announces expansion and file context', async () => {
@@ -739,6 +824,24 @@ index 1111111,2222222..3333333
           'Added. Old line not applicable. New line 21. const added = true',
           'Added. Old line not applicable. New line 22. const another = true',
           'Note. No newline at end of file.',
+        ],
+      },
+    ])
+
+    expect(
+      projectAccessibleDiffHunks(
+        `@@ -1 +1 @@
+-const removed = true
++const added = true
+`,
+        'de',
+      ),
+    ).toEqual([
+      {
+        heading: 'Änderungsblock. Alte Zeile 1. Neue Zeile 1.',
+        lines: [
+          'Gelöscht. Alte Zeile 1. Neue Zeile nicht zutreffend. const removed = true',
+          'Hinzugefügt. Alte Zeile nicht zutreffend. Neue Zeile 1. const added = true',
         ],
       },
     ])
