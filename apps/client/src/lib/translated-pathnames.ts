@@ -1,5 +1,7 @@
 import type { FileRoutesByTo } from '../routeTree.gen'
-import { locales, type Locale } from '../paraglide/runtime'
+
+export const translatedPathnameLocales = ['en', 'de'] as const
+export type TranslatedPathnameLocale = (typeof translatedPathnameLocales)[number]
 
 type RoutePath = keyof FileRoutesByTo
 
@@ -12,12 +14,12 @@ type PublicRoutePath = Exclude<
 
 type TranslatedPathname = {
   pattern: string
-  localized: Array<[Locale, string]>
+  localized: Array<[TranslatedPathnameLocale, string]>
 }
 
-const localeSet: ReadonlySet<string> = new Set(locales)
+const localeSet: ReadonlySet<string> = new Set(translatedPathnameLocales)
 
-function isLocale(value: string): value is Locale {
+function isLocale(value: string): value is TranslatedPathnameLocale {
   return localeSet.has(value)
 }
 
@@ -36,7 +38,7 @@ function toUrlPattern(path: string) {
 }
 
 function createTranslatedPathnames(
-  input: Record<PublicRoutePath, Record<Locale, string>>,
+  input: Record<PublicRoutePath, Record<TranslatedPathnameLocale, string>>,
 ): TranslatedPathname[] {
   return Object.entries(input).map(([pattern, localizedPaths]) => ({
     pattern: toUrlPattern(pattern),
