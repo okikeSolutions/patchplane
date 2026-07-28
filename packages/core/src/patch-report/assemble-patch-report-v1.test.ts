@@ -1,5 +1,10 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
+import {
+  makePullRequestExternalId,
+  makePullRequestNumber,
+  makeRepositoryExternalId,
+} from '@patchplane/domain/candidate-subject'
 import type {
   CandidatePatchSet,
   HumanDecision,
@@ -16,6 +21,8 @@ import {
   makeSandboxExecutionId,
   makeSystemActorId,
   makeSystemWorkspaceId,
+  makeVerificationExecutionGroupId,
+  makeVerificationPlanId,
   makeVerificationRequirementId,
   makeVerificationResultId,
   makeWorkflowRunId,
@@ -225,6 +232,61 @@ describe('AssemblePatchReportV1', () => {
           decision: { status: 'approved' },
         })
       }),
+  )
+
+  it.effect('projects a frozen incoming candidate without a producer execution', () =>
+    Effect.gen(function* () {
+      const incomingCandidate: CandidatePatchSet = {
+        ...candidate,
+        sandboxExecutionId: undefined,
+        subject: {
+          kind: 'incoming-pull-request',
+          repositoryProvider: 'github',
+          repositoryExternalId: makeRepositoryExternalId('1'),
+          repositoryOwner: 'patchplane',
+          repositoryName: 'demo',
+          repositoryFullName: 'patchplane/demo',
+          pullRequestExternalId: makePullRequestExternalId('2'),
+          pullRequestNumber: makePullRequestNumber(2),
+          baseSha: makeGitCommitSha('a'.repeat(40)),
+          headSha: makeGitCommitSha('f'.repeat(40)),
+          sourceEventProvider: 'github',
+          sourceEventDeliveryId: 'delivery-1',
+          sourceEventKind: 'github.pull_request.opened',
+        },
+        headSha: makeGitCommitSha('f'.repeat(40)),
+      }
+      const incomingResult = { ...result, candidatePatchSetId: incomingCandidate.id }
+      const report = yield* assemble({
+        candidatePatchSets: [incomingCandidate],
+        verificationResults: [incomingResult],
+      })
+      expect(report.candidate.candidatePatchSetId).toBe(incomingCandidate.id)
+      expect(report.verification.checks[0]?.resultId).toBe(incomingResult.id)
+    }),
+  )
+
+  it.effect('projects trusted execution envelope identity and command logs', () =>
+    Effect.gen(function* () {
+      const envelopeResult: VerificationResult = {
+        ...result,
+        verificationPlanId: makeVerificationPlanId('plan-1'),
+        executionGroupId: makeVerificationExecutionGroupId('group-1'),
+        commandDigest: `sha256:${'e'.repeat(64)}`,
+        stdoutArtifactId: makeEvidenceArtifactId('stdout-1'),
+        stderrArtifactId: makeEvidenceArtifactId('stderr-1'),
+        cleanupStatus: 'deleted',
+      }
+      const report = yield* assemble({ verificationResults: [envelopeResult] })
+      expect(report.verification.checks[0]).toMatchObject({
+        verificationPlanId: envelopeResult.verificationPlanId,
+        executionGroupId: envelopeResult.executionGroupId,
+        commandDigest: envelopeResult.commandDigest,
+        stdoutArtifactId: envelopeResult.stdoutArtifactId,
+        stderrArtifactId: envelopeResult.stderrArtifactId,
+        cleanupStatus: 'deleted',
+      })
+    }),
   )
 
   it.effect('does not apply a decision or result from another candidate', () =>

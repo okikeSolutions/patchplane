@@ -242,6 +242,11 @@ describe('PublishDecisionToSource', () => {
             recordVerificationPlan: () =>
               Effect.die('unused verification plan'),
             recordVerificationRequirement: () => Effect.die('unused'),
+            startIncomingVerificationPlan: () => Effect.die('unused'),
+            claimVerificationExecutionGroup: () => Effect.die('unused'),
+            startVerificationExecutionGroup: () => Effect.die('unused'),
+            failVerificationExecutionGroup: () => Effect.die('unused'),
+            getVerificationExecutionState: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
             getCandidatePatchSetForWorkflow: () =>
               Effect.succeed(Option.none()),
@@ -486,6 +491,11 @@ describe('PublishDecisionToSource', () => {
           markWorkflowExecutionFailed: () => Effect.succeed(true),
           recordVerificationPlan: () => Effect.die('unused verification plan'),
           recordVerificationRequirement: () => Effect.die('unused'),
+          startIncomingVerificationPlan: () => Effect.die('unused'),
+          claimVerificationExecutionGroup: () => Effect.die('unused'),
+          startVerificationExecutionGroup: () => Effect.die('unused'),
+          failVerificationExecutionGroup: () => Effect.die('unused'),
+          getVerificationExecutionState: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
           claimCandidateFreeze: () => Effect.succeed(false),
@@ -759,6 +769,11 @@ describe('PublishDecisionToSource', () => {
             recordVerificationPlan: () =>
               Effect.die('unused verification plan'),
             recordVerificationRequirement: () => Effect.die('unused'),
+            startIncomingVerificationPlan: () => Effect.die('unused'),
+            claimVerificationExecutionGroup: () => Effect.die('unused'),
+            startVerificationExecutionGroup: () => Effect.die('unused'),
+            failVerificationExecutionGroup: () => Effect.die('unused'),
+            getVerificationExecutionState: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
             getCandidatePatchSetForWorkflow: () =>
               Effect.succeed(Option.none()),

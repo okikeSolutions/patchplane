@@ -387,6 +387,81 @@ describe('Daytona sandbox boundary adapters', () => {
     },
   )
 
+  it.effect(
+    'runs one trusted verification invocation in a fresh force-deleted sandbox',
+    () => {
+      const candidateDigest = `sha256:${'d'.repeat(64)}`
+      const executeSessionCommand = vi.fn(
+        async (_sessionId: string, request: { readonly command: string }) => {
+          if (request.command.includes('git rev-parse HEAD')) {
+            return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+          }
+          if (request.command.includes('sha256sum')) {
+            return { exitCode: 0, stdout: `${'d'.repeat(64)}  -`, stderr: '' }
+          }
+          if (request.command === 'uname -m') {
+            return { exitCode: 0, stdout: 'x86_64', stderr: '' }
+          }
+          if (request.command.includes('bun test --reporter=junit')) {
+            return { exitCode: 0, stdout: 'tests passed', stderr: '' }
+          }
+          return { exitCode: 0, stdout: '', stderr: '' }
+        },
+      )
+      const sandbox = fakeSandbox({
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand,
+          deleteSession: vi.fn(async () => undefined),
+        },
+      })
+      const client = fakeClient(sandbox)
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        const result = yield* service.runRepositoryCommand({
+          ...commandInput,
+          candidateBaseSha: 'b'.repeat(40),
+          verificationInvocation: {
+            requirementKey: 'trusted:test',
+            kind: 'test',
+            command: 'bun test --reporter=junit',
+            platform: 'linux',
+            architecture: 'x86_64',
+            timeoutSeconds: 60,
+            requiredArtifactKinds: [],
+          },
+          forceDeleteAfterUse: true,
+        })
+
+        expect(result).toMatchObject({
+          command: 'bun test --reporter=junit',
+          exitCode: 0,
+          stdout: 'tests passed',
+          cleanupStatus: 'deleted',
+          initialCandidateStateDigest: candidateDigest,
+          candidateStateDigest: candidateDigest,
+          verificationResults: [
+            {
+              requirementKey: 'trusted:test',
+              command: 'bun test --reporter=junit',
+              status: 'succeeded',
+              candidateDigestBefore: candidateDigest,
+              candidateDigestAfter: candidateDigest,
+            },
+          ],
+        })
+        expect(
+          executeSessionCommand.mock.calls.filter(([, request]) =>
+            request.command.includes('bun test --reporter=junit'),
+          ),
+        ).toHaveLength(1)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      }).pipe(
+        Effect.provide(testLayer(client, { DAYTONA_RETAIN_SANDBOXES: 'true' })),
+      )
+    },
+  )
+
   it.effect('records non-zero command exits and still deletes sandbox', () => {
     const sandbox = fakeSandbox({
       process: {
@@ -795,6 +870,37 @@ describe('Daytona sandbox boundary adapters', () => {
         expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
         expect(result).toEqual({ exitCode: 1, stdout: 'out', stderr: 'err' })
       }),
+  )
+
+  it.effect('bounds trusted command output inside the sandbox shell', () =>
+    Effect.gen(function* () {
+      const executeSessionCommand = vi.fn(
+        async (_sessionId: string, _request: { readonly command: string }) => ({
+          exitCode: 0,
+          stdout: 'ok',
+          stderr: '',
+        }),
+      )
+      const sandbox = {
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand,
+          deleteSession: vi.fn(async () => undefined),
+        },
+      }
+
+      yield* executeSandboxCommand(sandbox, {
+        command: 'bun test',
+        timeoutSeconds: 7,
+        traceId: 'trace-bounded',
+        maxOutputBytes: 1_024,
+      })
+
+      const executed = executeSessionCommand.mock.calls[0]?.[1].command
+      expect(executed).toContain('child_process')
+      expect(executed).toContain('SIGKILL')
+      expect(executed).toContain("'bun test' 1024")
+    }),
   )
 
   it.effect('rejects unsafe Daytona command environment variable names', () =>

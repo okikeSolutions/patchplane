@@ -80,3 +80,24 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after remediation.
 - Herdr documentation/tracker audit — no actionable findings after remediation.
 - Herdr code/security review — no actionable findings after remediation.
+
+## Task 5 — EXEC-003/EXEC-004/EXEC-005/EXEC-007 execution envelopes
+
+Status: Complete
+
+- Added branded stable per-requirement execution groups bound to the persisted plan, exact incoming candidate, and durable incoming-dispatch token.
+- Claims, provider+sandbox identities, sandbox execution writes, and result writes are fenced, idempotent, replayable after ambiguous commits, and protected by scheduled group/plan recovery.
+- Supported Linux requirements execute once in separate fresh Daytona sandboxes; non-Linux or commandless requirements persist explicit blocked envelopes without receiving agent-sandbox credit.
+- Added PatchPlane-owned command envelopes with independently recomputed command digest, bounded planned/effective timeout, platform/architecture, timing/exit, candidate mutation digests, artifact identity, log capture state, and cleanup outcome.
+- Attempts deterministic bounded stdout and stderr R2 capture for every trusted invocation, persists artifacts when capture succeeds, and records explicit failure/truncation that prevents `passed`.
+- Bounds and validates provider result cardinality, output bytes, artifact count/bytes, identifiers, and timestamps before persistence.
+- Reloads complete durable group/result state before policy evaluation so crash replay, blocked-only plans, provider failures, and zero-requirement plans cannot finalize from a partial invocation snapshot.
+- Projects the coherent frozen incoming candidate plus per-check plan/group/command/log/cleanup identity in Patch Report V1.
+- Effective Daytona image/isolation readback, cleanup polling to not-found, credentialed incoming-PR execution, Windows/Computer Use, and canonical publication remain later acceptance tasks.
+
+Validation:
+
+- `bun run verify` — passed (types, lint, all automated tests, CLI eval, roadmap acceptance, production build, and bundle budgets).
+- Herdr Effect/branded-types audit — no actionable findings after remediation.
+- Herdr documentation/tracker audit — no actionable findings after remediation.
+- Herdr code/security review — no actionable findings after remediation.

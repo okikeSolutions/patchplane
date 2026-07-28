@@ -43,6 +43,7 @@ import {
   FreezeIncomingPullRequestCandidate,
   type IncomingPullRequestDispatch,
 } from '@patchplane/core/workflows/freeze-incoming-pull-request-candidate'
+import { RunIncomingVerificationPlan } from '@patchplane/core/workflows/run-incoming-verification-plan'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
 import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-sandbox-command-for-workflow'
 import { PersistConfiguredVerificationRequirements } from '@patchplane/core/workflows/persist-sandbox-verification-evidence'
@@ -789,6 +790,7 @@ export async function executeWorkflowRerun(
   }
 
   const workflowStart = workflowExit.value
+  let activeIncomingDispatchToken: string | undefined
   const executionExit = await runtime.runPromiseExit(
     Effect.gen(function* () {
       const trustedPolicyLayers = yield* loadConfiguredVerificationPolicyLayers(
@@ -823,12 +825,24 @@ export async function executeWorkflowRerun(
               ),
             )
           : undefined
+      activeIncomingDispatchToken = incomingDispatch?.dispatchToken
       if (
         workflowStart.workflowRun.candidateIdentityVersion ===
           'incoming-pr-v1' &&
         incomingDispatch === undefined
       ) {
         return undefined
+      }
+      if (
+        incomingDispatch !== undefined &&
+        persistedVerification !== undefined
+      ) {
+        const execution = yield* RunIncomingVerificationPlan({
+          workflowStart,
+          incomingDispatch,
+          verificationPlan: persistedVerification,
+        })
+        return execution.sandboxExecutions.at(-1)
       }
       return yield* routeConfig.execution.mode === 'daytona-pi'
         ? RunSandboxAgentForWorkflow({
@@ -906,6 +920,11 @@ export async function executeWorkflowRerun(
             {
               systemSecret: secret,
               workflowRunId: workflowStart.workflowRun.id,
+              ...(activeIncomingDispatchToken === undefined
+                ? {}
+                : {
+                    incomingDispatchToken: activeIncomingDispatchToken,
+                  }),
               summary: 'Rerun execution failed after dispatch.',
             },
           ),
@@ -1345,38 +1364,46 @@ export async function handleGitHubWebhook(
       workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
       incomingDispatch === undefined
         ? undefined
-        : routeConfig.execution.mode === 'daytona-pi'
-          ? yield* RunSandboxAgentForWorkflow({
+        : incomingDispatch !== undefined && persistedVerification !== undefined
+          ? (yield* RunIncomingVerificationPlan({
               workflowStart,
-              ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
-              ...(persistedVerification === undefined
-                ? {}
-                : { verificationPlan: persistedVerification }),
-              provider: routeConfig.execution.provider,
-              model: routeConfig.execution.model,
-              thinking: routeConfig.execution.thinking,
-              mode: routeConfig.execution.piMode,
-              timeoutSeconds: routeConfig.execution.timeoutSeconds,
-              evidenceTestReportCommand:
-                routeConfig.execution.evidenceTestReportCommand,
-              evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-              evidenceBrowserScreenshotCommand:
-                routeConfig.execution.evidenceBrowserScreenshotCommand,
-            })
-          : yield* RunSandboxCommandForWorkflow({
-              workflowStart,
-              ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
-              ...(persistedVerification === undefined
-                ? {}
-                : { verificationPlan: persistedVerification }),
-              command: routeConfig.execution.command,
-              timeoutSeconds: routeConfig.execution.timeoutSeconds,
-              evidenceTestReportCommand:
-                routeConfig.execution.evidenceTestReportCommand,
-              evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-              evidenceBrowserScreenshotCommand:
-                routeConfig.execution.evidenceBrowserScreenshotCommand,
-            })
+              incomingDispatch,
+              verificationPlan: persistedVerification,
+            })).sandboxExecutions.at(-1)
+          : routeConfig.execution.mode === 'daytona-pi'
+            ? yield* RunSandboxAgentForWorkflow({
+                workflowStart,
+                ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+                ...(persistedVerification === undefined
+                  ? {}
+                  : { verificationPlan: persistedVerification }),
+                provider: routeConfig.execution.provider,
+                model: routeConfig.execution.model,
+                thinking: routeConfig.execution.thinking,
+                mode: routeConfig.execution.piMode,
+                timeoutSeconds: routeConfig.execution.timeoutSeconds,
+                evidenceTestReportCommand:
+                  routeConfig.execution.evidenceTestReportCommand,
+                evidenceTestPlatform:
+                  routeConfig.execution.evidenceTestPlatform,
+                evidenceBrowserScreenshotCommand:
+                  routeConfig.execution.evidenceBrowserScreenshotCommand,
+              })
+            : yield* RunSandboxCommandForWorkflow({
+                workflowStart,
+                ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+                ...(persistedVerification === undefined
+                  ? {}
+                  : { verificationPlan: persistedVerification }),
+                command: routeConfig.execution.command,
+                timeoutSeconds: routeConfig.execution.timeoutSeconds,
+                evidenceTestReportCommand:
+                  routeConfig.execution.evidenceTestReportCommand,
+                evidenceTestPlatform:
+                  routeConfig.execution.evidenceTestPlatform,
+                evidenceBrowserScreenshotCommand:
+                  routeConfig.execution.evidenceBrowserScreenshotCommand,
+              })
 
     const publication =
       sandboxExecution === undefined

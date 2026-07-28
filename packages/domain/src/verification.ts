@@ -4,6 +4,7 @@ import {
   CandidatePatchSetId,
   EvidenceArtifactId,
   SandboxExecutionId,
+  VerificationExecutionGroupId,
   VerificationPlanId,
   VerificationRequirementId,
   VerificationResultId,
@@ -146,14 +147,73 @@ export type VerificationResultStatus = Schema.Schema.Type<
   typeof VerificationResultStatus
 >
 
+export const VerificationExecutionGroupStatus = Schema.Literals([
+  'claimed',
+  'running',
+  'completed',
+  'failed',
+  'blocked',
+  'cancelled',
+])
+export type VerificationExecutionGroupStatus = Schema.Schema.Type<
+  typeof VerificationExecutionGroupStatus
+>
+
+/** One fresh, explicitly isolated provider environment for one planned requirement. */
+export const VerificationExecutionGroup = Schema.Struct({
+  id: VerificationExecutionGroupId,
+  workflowRunId: WorkflowRunId,
+  verificationPlanId: VerificationPlanId,
+  requirementId: VerificationRequirementId,
+  candidatePatchSetId: CandidatePatchSetId,
+  stableKey: Schema.NonEmptyString,
+  provider: Schema.NonEmptyString,
+  platform: VerificationPlatform,
+  architecture: Schema.NonEmptyString,
+  commandDigest: Schema.optional(Sha256Digest),
+  timeoutSeconds: Schema.optional(NonNegativeInt),
+  sharedState: Schema.Literal(false),
+  status: VerificationExecutionGroupStatus,
+  sandboxId: Schema.optional(Schema.NonEmptyString),
+  sandboxExecutionId: Schema.optional(SandboxExecutionId),
+  claimedAt: EpochMillis,
+  startedAt: Schema.optional(EpochMillis),
+  completedAt: Schema.optional(EpochMillis),
+})
+export type VerificationExecutionGroup = Schema.Schema.Type<
+  typeof VerificationExecutionGroup
+>
+
+export const VerificationLogCaptureStatus = Schema.Literals([
+  'captured',
+  'truncated',
+  'failed',
+])
+export type VerificationLogCaptureStatus = Schema.Schema.Type<
+  typeof VerificationLogCaptureStatus
+>
+
+export const SandboxCleanupStatus = Schema.Literals([
+  'deleted',
+  'failed',
+  'retained',
+  'not-started',
+])
+export type SandboxCleanupStatus = Schema.Schema.Type<
+  typeof SandboxCleanupStatus
+>
+
 export const VerificationResult = Schema.Struct({
   id: VerificationResultId,
   workflowRunId: WorkflowRunId,
+  verificationPlanId: Schema.optional(VerificationPlanId),
+  executionGroupId: Schema.optional(VerificationExecutionGroupId),
   requirementId: VerificationRequirementId,
   candidatePatchSetId: CandidatePatchSetId,
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
   provider: Schema.NonEmptyString,
   command: Schema.optional(Schema.String),
+  commandDigest: Schema.optional(Sha256Digest),
   platform: VerificationPlatform,
   architecture: Schema.NonEmptyString,
   environmentImage: Schema.optional(Schema.NonEmptyString),
@@ -165,6 +225,11 @@ export const VerificationResult = Schema.Struct({
   skippedCount: Schema.optional(NonNegativeInt),
   artifactIds: Schema.Array(EvidenceArtifactId),
   producedArtifactKinds: Schema.Array(EvidenceArtifactKind),
+  stdoutArtifactId: Schema.optional(EvidenceArtifactId),
+  stderrArtifactId: Schema.optional(EvidenceArtifactId),
+  stdoutCaptureStatus: Schema.optional(VerificationLogCaptureStatus),
+  stderrCaptureStatus: Schema.optional(VerificationLogCaptureStatus),
+  cleanupStatus: Schema.optional(SandboxCleanupStatus),
   candidateDigestBefore: Schema.optional(Sha256Digest),
   candidateDigestAfter: Schema.optional(Sha256Digest),
   startedAt: EpochMillis,
@@ -187,6 +252,9 @@ export const decodeVerificationPlanV1 =
   Schema.decodeUnknownEffect(VerificationPlanV1)
 export const decodeVerificationRequirement = Schema.decodeUnknownEffect(
   VerificationRequirement,
+)
+export const decodeVerificationExecutionGroup = Schema.decodeUnknownEffect(
+  VerificationExecutionGroup,
 )
 export const decodeVerificationResult =
   Schema.decodeUnknownEffect(VerificationResult)

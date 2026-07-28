@@ -66,6 +66,28 @@ const verificationPlatform = v.union(
   v.literal('macos'),
 )
 
+const verificationExecutionGroupStatus = v.union(
+  v.literal('claimed'),
+  v.literal('running'),
+  v.literal('completed'),
+  v.literal('failed'),
+  v.literal('blocked'),
+  v.literal('cancelled'),
+)
+
+const verificationLogCaptureStatus = v.union(
+  v.literal('captured'),
+  v.literal('truncated'),
+  v.literal('failed'),
+)
+
+const sandboxCleanupStatus = v.union(
+  v.literal('deleted'),
+  v.literal('failed'),
+  v.literal('retained'),
+  v.literal('not-started'),
+)
+
 const verificationResultStatus = v.union(
   v.literal('queued'),
   v.literal('running'),
@@ -338,8 +360,35 @@ export default defineSchema({
     .index('by_status', ['status'])
     .index('by_sandbox_session', ['sandboxId', 'sessionId']),
 
+  verificationExecutionGroups: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    verificationPlanId: v.id('verificationPlans'),
+    requirementId: v.id('verificationRequirements'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    stableKey: v.string(),
+    claimToken: v.string(),
+    provider: v.string(),
+    platform: verificationPlatform,
+    architecture: v.string(),
+    commandDigest: v.optional(v.string()),
+    timeoutSeconds: v.optional(v.number()),
+    sharedState: v.literal(false),
+    status: verificationExecutionGroupStatus,
+    sandboxId: v.optional(v.string()),
+    sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    claimedAt: v.number(),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+  })
+    .index('by_workflow_stable_key', ['workflowRunId', 'stableKey'])
+    .index('by_provider_sandbox', ['provider', 'sandboxId'])
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_status', ['status']),
+
   sandboxExecutions: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    executionGroupId: v.optional(v.id('verificationExecutionGroups')),
+    idempotencyKey: v.optional(v.string()),
     provider: v.string(),
     sandboxId: v.string(),
     command: v.string(),
@@ -351,7 +400,10 @@ export default defineSchema({
     startedAt: v.number(),
     completedAt: v.number(),
     createdAt: v.number(),
-  }).index('by_workflow_run', ['workflowRunId']),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_idempotency_key', ['workflowRunId', 'idempotencyKey'])
+    .index('by_provider_sandbox', ['provider', 'sandboxId']),
 
   evidenceArtifacts: defineTable({
     workflowRunId: v.id('workflowRuns'),
@@ -450,11 +502,14 @@ export default defineSchema({
 
   verificationResults: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    verificationPlanId: v.optional(v.id('verificationPlans')),
+    executionGroupId: v.optional(v.id('verificationExecutionGroups')),
     requirementId: v.id('verificationRequirements'),
     candidatePatchSetId: v.id('candidatePatchSets'),
     sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
     provider: v.string(),
     command: v.optional(v.string()),
+    commandDigest: v.optional(v.string()),
     platform: verificationPlatform,
     architecture: v.string(),
     environmentImage: v.optional(v.string()),
@@ -466,6 +521,11 @@ export default defineSchema({
     skippedCount: v.optional(v.number()),
     artifactIds: v.array(v.id('evidenceArtifacts')),
     producedArtifactKinds: v.array(evidenceArtifactKind),
+    stdoutArtifactId: v.optional(v.id('evidenceArtifacts')),
+    stderrArtifactId: v.optional(v.id('evidenceArtifacts')),
+    stdoutCaptureStatus: v.optional(verificationLogCaptureStatus),
+    stderrCaptureStatus: v.optional(verificationLogCaptureStatus),
+    cleanupStatus: v.optional(sandboxCleanupStatus),
     candidateDigestBefore: v.optional(v.string()),
     candidateDigestAfter: v.optional(v.string()),
     startedAt: v.number(),
@@ -691,6 +751,12 @@ export default defineSchema({
     incomingDispatchSandboxId: v.optional(v.string()),
     incomingDispatchToken: v.optional(v.string()),
     incomingDispatchCandidatePatchSetId: v.optional(v.id('candidatePatchSets')),
+    incomingVerificationPlanId: v.optional(v.id('verificationPlans')),
+    incomingVerificationDispatchToken: v.optional(v.string()),
+    incomingVerificationCandidatePatchSetId: v.optional(
+      v.id('candidatePatchSets'),
+    ),
+    incomingVerificationStartedAt: v.optional(v.number()),
     sourceBaseSha: v.optional(v.string()),
     sourceCommitSha: v.optional(v.string()),
     status: v.union(

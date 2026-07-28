@@ -1,12 +1,13 @@
 import { Schema } from 'effect'
-import { SandboxExecutionId, WorkflowRunId } from './ids'
+import {
+  SandboxExecutionId,
+  VerificationExecutionGroupId,
+  WorkflowRunId,
+} from './ids'
 import { EpochMillis } from './refinements'
 import { SandboxPolicy } from './sandbox-policy'
 
-export const SandboxExecutionStatus = Schema.Literals([
-  'succeeded',
-  'failed',
-])
+export const SandboxExecutionStatus = Schema.Literals(['succeeded', 'failed'])
 export type SandboxExecutionStatus = Schema.Schema.Type<
   typeof SandboxExecutionStatus
 >
@@ -21,6 +22,8 @@ export type SandboxExecutionStatus = Schema.Schema.Type<
 export const SandboxExecution = Schema.Struct({
   id: SandboxExecutionId,
   workflowRunId: WorkflowRunId,
+  executionGroupId: Schema.optional(VerificationExecutionGroupId),
+  idempotencyKey: Schema.optional(Schema.NonEmptyString),
   provider: Schema.NonEmptyString,
   sandboxId: Schema.NonEmptyString,
   command: Schema.NonEmptyString,
@@ -34,4 +37,5 @@ export const SandboxExecution = Schema.Struct({
 })
 export type SandboxExecution = Schema.Schema.Type<typeof SandboxExecution>
 
-export const decodeSandboxExecution = Schema.decodeUnknownEffect(SandboxExecution)
+export const decodeSandboxExecution =
+  Schema.decodeUnknownEffect(SandboxExecution)

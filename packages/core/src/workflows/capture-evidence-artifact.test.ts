@@ -142,6 +142,11 @@ function storageLayer(options: { readonly failRecord?: boolean } = {}) {
             cause: undefined,
           }),
         ),
+      startIncomingVerificationPlan: () => Effect.die('unused'),
+      claimVerificationExecutionGroup: () => Effect.die('unused'),
+      startVerificationExecutionGroup: () => Effect.die('unused'),
+      failVerificationExecutionGroup: () => Effect.die('unused'),
+      getVerificationExecutionState: () => Effect.die('unused'),
       recordVerificationResult: () =>
         Effect.fail(
           new StorageError({

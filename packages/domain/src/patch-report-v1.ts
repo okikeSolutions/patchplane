@@ -10,6 +10,8 @@ import {
   ReviewFindingId,
   ReviewRunId,
   SandboxExecutionId,
+  VerificationExecutionGroupId,
+  VerificationPlanId,
   VerificationRequirementId,
   VerificationResultId,
   WorkflowRunId,
@@ -46,11 +48,19 @@ export const PatchReportV1Check = Schema.Struct({
   label: Schema.NonEmptyString,
   required: Schema.Boolean,
   resultId: Schema.optional(VerificationResultId),
+  verificationPlanId: Schema.optional(VerificationPlanId),
+  executionGroupId: Schema.optional(VerificationExecutionGroupId),
   status: Schema.optional(VerificationResultStatus),
   command: Schema.optional(Schema.String),
+  commandDigest: Schema.optional(Sha256Digest),
   platform: Schema.optional(VerificationPlatform),
   architecture: Schema.optional(Schema.String),
   artifactIds: Schema.Array(EvidenceArtifactId),
+  stdoutArtifactId: Schema.optional(EvidenceArtifactId),
+  stderrArtifactId: Schema.optional(EvidenceArtifactId),
+  cleanupStatus: Schema.optional(
+    Schema.Literals(['deleted', 'failed', 'retained', 'not-started']),
+  ),
   summary: Schema.optional(Schema.String),
 })
 export type PatchReportV1Check = Schema.Schema.Type<typeof PatchReportV1Check>

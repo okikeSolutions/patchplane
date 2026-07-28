@@ -13,9 +13,15 @@ import { StorageError } from '@patchplane/domain/errors'
 import { decodeEvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
 import { decodeRuntimeSession } from '@patchplane/domain/runtime-session'
-import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
+  decodeSandboxExecution,
+  SandboxExecution,
+} from '@patchplane/domain/sandbox-execution'
+import {
+  decodeVerificationExecutionGroup,
   decodeVerificationPlanV1,
+  VerificationExecutionGroup,
+  VerificationResult,
   decodeVerificationRequirement,
   decodeVerificationResult,
 } from '@patchplane/domain/verification'
@@ -26,16 +32,21 @@ import {
 import {
   StorageService,
   type CandidateFreezeInput,
+  type ClaimVerificationExecutionGroupInput,
   type FailCandidateFreezeInput,
+  type FailVerificationExecutionGroupInput,
   type ClaimWorkflowExecutionInput,
   type GetCandidatePatchSetForWorkflowInput,
   type IncomingDispatchClaimInput,
   type StartIncomingDispatchInput,
+  type StartIncomingVerificationPlanInput,
+  type StartVerificationExecutionGroupInput,
   type MarkWorkflowExecutionFailedInput,
   type CreateWorkflowFromPromptInput,
   type GetActiveRuntimeSessionInput,
   type MarkRuntimeSessionStatusInput,
   type GetEvidenceArtifactInput,
+  type GetVerificationExecutionStateInput,
   type RecordEvidenceArtifactInput,
   type RecordCandidatePatchSetInput,
   type RecordPolicyDecisionInput,
@@ -189,6 +200,9 @@ const recordSandboxExecutionMutation = makeFunctionReference<
     systemSecret: string
     workflowRunId: string
     incomingDispatchToken?: string
+    executionGroupId?: string
+    executionGroupClaimToken?: string
+    idempotencyKey?: string
     provider: string
     sandboxId: string
     command: string
@@ -359,16 +373,89 @@ const recordVerificationRequirementMutation = makeFunctionReference<
   unknown
 >('workflowStarts:recordVerificationRequirement')
 
+const startIncomingVerificationPlanMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    verificationPlanId: string
+    candidatePatchSetId: string
+    incomingDispatchToken: string
+  },
+  boolean
+>('workflowStarts:startIncomingVerificationPlan')
+
+const claimVerificationExecutionGroupMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    verificationPlanId: string
+    requirementId: string
+    candidatePatchSetId: string
+    stableKey: string
+    claimToken: string
+    incomingDispatchToken: string
+    provider: string
+    platform: ClaimVerificationExecutionGroupInput['platform']
+    architecture: string
+    commandDigest?: string
+    timeoutSeconds?: number
+    claimedAt: number
+  },
+  unknown
+>('workflowStarts:claimVerificationExecutionGroup')
+
+const startVerificationExecutionGroupMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    executionGroupId: string
+    claimToken: string
+    sandboxId: string
+  },
+  boolean
+>('workflowStarts:startVerificationExecutionGroup')
+
+const failVerificationExecutionGroupMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    executionGroupId: string
+    claimToken: string
+    status: FailVerificationExecutionGroupInput['status']
+    completedAt: number
+  },
+  boolean
+>('workflowStarts:failVerificationExecutionGroup')
+
+const getVerificationExecutionStateQuery = makeFunctionReference<
+  'query',
+  {
+    systemSecret: string
+    workflowRunId: string
+    verificationPlanId: string
+    candidatePatchSetId: string
+  },
+  unknown
+>('workflowStarts:getVerificationExecutionState')
+
 const recordVerificationResultMutation = makeFunctionReference<
   'mutation',
   {
     systemSecret: string
     workflowRunId: string
+    verificationPlanId?: string
+    executionGroupId?: string
+    executionGroupClaimToken?: string
     requirementId: string
     candidatePatchSetId: string
     sandboxExecutionId?: string
     provider: string
     command?: string
+    commandDigest?: string
     platform: RecordVerificationResultInput['platform']
     architecture: string
     environmentImage?: string
@@ -379,6 +466,11 @@ const recordVerificationResultMutation = makeFunctionReference<
     failedCount?: number
     skippedCount?: number
     artifactIds: RecordVerificationResultInput['artifactIds']
+    stdoutArtifactId?: string
+    stderrArtifactId?: string
+    stdoutCaptureStatus?: RecordVerificationResultInput['stdoutCaptureStatus']
+    stderrCaptureStatus?: RecordVerificationResultInput['stderrCaptureStatus']
+    cleanupStatus?: RecordVerificationResultInput['cleanupStatus']
     candidateDigestBefore?: string
     candidateDigestAfter?: string
     startedAt: number
@@ -758,6 +850,17 @@ export const ConvexStoragePlugin = {
               ...(input.incomingDispatchToken === undefined
                 ? {}
                 : { incomingDispatchToken: input.incomingDispatchToken }),
+              ...(input.executionGroupId === undefined
+                ? {}
+                : { executionGroupId: input.executionGroupId }),
+              ...(input.executionGroupClaimToken === undefined
+                ? {}
+                : {
+                    executionGroupClaimToken: input.executionGroupClaimToken,
+                  }),
+              ...(input.idempotencyKey === undefined
+                ? {}
+                : { idempotencyKey: input.idempotencyKey }),
               provider: input.provider,
               sandboxId: input.sandboxId,
               command: input.command,
@@ -1508,6 +1611,238 @@ export const ConvexStoragePlugin = {
         )
       })
 
+      const startIncomingVerificationPlan = Effect.fn(
+        '@patchplane/plugins/convex/startIncomingVerificationPlan',
+      )(function* (input: StartIncomingVerificationPlanInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'startIncomingVerificationPlan.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to start incoming verification plans',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              startIncomingVerificationPlanMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                verificationPlanId: input.verificationPlanId,
+                candidatePatchSetId: input.candidatePatchSetId,
+                incomingDispatchToken: input.incomingDispatchToken,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'startIncomingVerificationPlan',
+              message: 'Convex failed to start incoming verification plan',
+              cause,
+            }),
+        })
+        return yield* Schema.decodeUnknownEffect(Schema.Boolean)(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'startIncomingVerificationPlan.decode',
+                message:
+                  'Convex returned invalid verification-plan start result',
+                cause,
+              }),
+          ),
+        )
+      })
+
+      const claimVerificationExecutionGroup = Effect.fn(
+        '@patchplane/plugins/convex/claimVerificationExecutionGroup',
+      )(function* (input: ClaimVerificationExecutionGroupInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'claimVerificationExecutionGroup.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to claim verification execution groups',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              claimVerificationExecutionGroupMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                verificationPlanId: input.verificationPlanId,
+                requirementId: input.requirementId,
+                candidatePatchSetId: input.candidatePatchSetId,
+                stableKey: input.stableKey,
+                claimToken: input.claimToken,
+                incomingDispatchToken: input.incomingDispatchToken,
+                provider: input.provider,
+                platform: input.platform,
+                architecture: input.architecture,
+                ...(input.commandDigest === undefined
+                  ? {}
+                  : { commandDigest: input.commandDigest }),
+                ...(input.timeoutSeconds === undefined
+                  ? {}
+                  : { timeoutSeconds: input.timeoutSeconds }),
+                claimedAt: input.claimedAt,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'claimVerificationExecutionGroup',
+              message: 'Convex failed to claim verification execution group',
+              cause,
+            }),
+        })
+        if (value === null) return undefined
+        return yield* decodeVerificationExecutionGroup(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'claimVerificationExecutionGroup.decode',
+                message: 'Convex returned invalid verification execution group',
+                cause,
+              }),
+          ),
+        )
+      })
+
+      const startVerificationExecutionGroup = Effect.fn(
+        '@patchplane/plugins/convex/startVerificationExecutionGroup',
+      )(function* (input: StartVerificationExecutionGroupInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'startVerificationExecutionGroup.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to start verification execution groups',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              startVerificationExecutionGroupMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                executionGroupId: input.executionGroupId,
+                claimToken: input.claimToken,
+                sandboxId: input.sandboxId,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'startVerificationExecutionGroup',
+              message: 'Convex failed to start verification execution group',
+              cause,
+            }),
+        })
+        return yield* Schema.decodeUnknownEffect(Schema.Boolean)(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'startVerificationExecutionGroup.decode',
+                message: 'Convex returned invalid execution-group start result',
+                cause,
+              }),
+          ),
+        )
+      })
+
+      const failVerificationExecutionGroup = Effect.fn(
+        '@patchplane/plugins/convex/failVerificationExecutionGroup',
+      )(function* (input: FailVerificationExecutionGroupInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'failVerificationExecutionGroup.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to fail verification execution groups',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              failVerificationExecutionGroupMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                executionGroupId: input.executionGroupId,
+                claimToken: input.claimToken,
+                status: input.status,
+                completedAt: input.completedAt,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'failVerificationExecutionGroup',
+              message: 'Convex failed to fail verification execution group',
+              cause,
+            }),
+        })
+        return yield* Schema.decodeUnknownEffect(Schema.Boolean)(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'failVerificationExecutionGroup.decode',
+                message:
+                  'Convex returned invalid execution-group failure result',
+                cause,
+              }),
+          ),
+        )
+      })
+
+      const getVerificationExecutionState = Effect.fn(
+        '@patchplane/plugins/convex/getVerificationExecutionState',
+      )(function* (input: GetVerificationExecutionStateInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'getVerificationExecutionState.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to read verification execution state',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).query(
+              getVerificationExecutionStateQuery,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                verificationPlanId: input.verificationPlanId,
+                candidatePatchSetId: input.candidatePatchSetId,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'getVerificationExecutionState',
+              message: 'Convex failed to read verification execution state',
+              cause,
+            }),
+        })
+        return yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            groups: Schema.Array(VerificationExecutionGroup),
+            results: Schema.Array(VerificationResult),
+            sandboxExecutions: Schema.Array(SandboxExecution),
+          }),
+        )(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'getVerificationExecutionState.decode',
+                message: 'Convex returned invalid verification execution state',
+                cause,
+              }),
+          ),
+        )
+      })
+
       const recordVerificationResult = Effect.fn(
         '@patchplane/plugins/convex/recordVerificationResult',
       )(function* (input: RecordVerificationResultInput) {
@@ -1526,6 +1861,17 @@ export const ConvexStoragePlugin = {
               {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.verificationPlanId === undefined
+                  ? {}
+                  : { verificationPlanId: input.verificationPlanId }),
+                ...(input.executionGroupId === undefined
+                  ? {}
+                  : { executionGroupId: input.executionGroupId }),
+                ...(input.executionGroupClaimToken === undefined
+                  ? {}
+                  : {
+                      executionGroupClaimToken: input.executionGroupClaimToken,
+                    }),
                 requirementId: input.requirementId,
                 candidatePatchSetId: input.candidatePatchSetId,
                 ...(input.sandboxExecutionId === undefined
@@ -1535,6 +1881,9 @@ export const ConvexStoragePlugin = {
                 ...(input.command === undefined
                   ? {}
                   : { command: input.command }),
+                ...(input.commandDigest === undefined
+                  ? {}
+                  : { commandDigest: input.commandDigest }),
                 platform: input.platform,
                 architecture: input.architecture,
                 ...(input.environmentImage === undefined
@@ -1557,6 +1906,21 @@ export const ConvexStoragePlugin = {
                   ? {}
                   : { skippedCount: input.skippedCount }),
                 artifactIds: input.artifactIds,
+                ...(input.stdoutArtifactId === undefined
+                  ? {}
+                  : { stdoutArtifactId: input.stdoutArtifactId }),
+                ...(input.stderrArtifactId === undefined
+                  ? {}
+                  : { stderrArtifactId: input.stderrArtifactId }),
+                ...(input.stdoutCaptureStatus === undefined
+                  ? {}
+                  : { stdoutCaptureStatus: input.stdoutCaptureStatus }),
+                ...(input.stderrCaptureStatus === undefined
+                  ? {}
+                  : { stderrCaptureStatus: input.stderrCaptureStatus }),
+                ...(input.cleanupStatus === undefined
+                  ? {}
+                  : { cleanupStatus: input.cleanupStatus }),
                 ...(input.candidateDigestBefore === undefined
                   ? {}
                   : { candidateDigestBefore: input.candidateDigestBefore }),
@@ -1923,6 +2287,11 @@ export const ConvexStoragePlugin = {
         recordCandidatePatchSet,
         recordVerificationPlan,
         recordVerificationRequirement,
+        startIncomingVerificationPlan,
+        claimVerificationExecutionGroup,
+        startVerificationExecutionGroup,
+        failVerificationExecutionGroup,
+        getVerificationExecutionState,
         recordVerificationResult,
         recordReviewRun,
         recordReviewFinding,

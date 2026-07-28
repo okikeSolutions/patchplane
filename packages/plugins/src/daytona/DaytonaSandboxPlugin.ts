@@ -58,6 +58,7 @@ import { makePiRpcCommandSender } from '../sandbox-runtime/pi/transport'
 
 const evidenceCaptureTimeoutSeconds = 30
 const maxEvidenceArtifactBytes = 5_000_000
+const maxVerificationCommandOutputBytes = 2 * 1024 * 1024
 const maxCandidateDiffBytes = 10_000_000
 const textArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY---\n'
 const binaryArtifactMarker = '\n---PATCHPLANE_ARTIFACT_BODY_BASE64---\n'
@@ -370,6 +371,19 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   input: {
     readonly traceId: string
     readonly baseSha: string
+    readonly verificationInvocation?:
+      | {
+          readonly requirementKey: string
+          readonly kind: SandboxVerificationResult['kind']
+          readonly command: string
+          readonly platform: 'linux' | 'windows' | 'macos'
+          readonly architecture?: string | undefined
+          readonly timeoutSeconds: number
+          readonly requiredArtifactKinds: ReadonlyArray<
+            SandboxEvidenceArtifact['kind']
+          >
+        }
+      | undefined
     readonly evidenceTestReportCommand?: string | undefined
     readonly evidenceTestTimeoutSeconds?: number | undefined
     readonly evidenceBrowserScreenshotCommand?: string | undefined
@@ -383,12 +397,14 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     operation: string,
     command: string,
     timeoutSeconds = evidenceCaptureTimeoutSeconds,
+    maxOutputBytes?: number,
   ) {
     const startedAt = yield* Clock.currentTimeMillis
     const result = yield* executeSandboxCommand(sandbox, {
       command,
       timeoutSeconds,
       traceId: `${input.traceId}-${operation}`,
+      ...(maxOutputBytes === undefined ? {} : { maxOutputBytes }),
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning('Evidence artifact probe failed', {
@@ -422,8 +438,84 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
       ),
     )
 
-  let shouldProbeTestReport = false
-  if (nonEmpty(input.evidenceTestReportCommand)) {
+  const invocation = input.verificationInvocation
+  let invocationCommandResult:
+    | {
+        readonly exitCode: number | undefined
+        readonly stdout: string
+        readonly stderr?: string | undefined
+        readonly startedAt: number
+        readonly completedAt: number
+      }
+    | undefined
+  if (invocation !== undefined) {
+    const cleanupCommands = [
+      ...(invocation.requiredArtifactKinds.includes('test-report')
+        ? [
+            'rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json',
+          ]
+        : []),
+      ...(invocation.requiredArtifactKinds.includes('screenshot')
+        ? [
+            'rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png',
+          ]
+        : []),
+    ]
+    const cleanup =
+      cleanupCommands.length === 0
+        ? { exitCode: 0 }
+        : yield* runCaptureCommand(
+            'verification-clean',
+            cleanupCommands.join('; '),
+          )
+    const candidateDigestBefore = yield* captureCandidateState(
+      'verification-candidate-before',
+    )
+    invocationCommandResult =
+      cleanup?.exitCode === 0
+        ? yield* runCaptureCommand(
+            'verification-command',
+            invocation.command,
+            invocation.timeoutSeconds,
+            maxVerificationCommandOutputBytes,
+          )
+        : undefined
+    const candidateDigestAfter = yield* captureCandidateState(
+      'verification-candidate-after',
+    )
+    verificationResults.push({
+      requirementKey: invocation.requirementKey,
+      kind: invocation.kind,
+      command: invocation.command,
+      status: invocationCommandResult?.exitCode === 0 ? 'succeeded' : 'failed',
+      ...(invocationCommandResult?.exitCode === undefined
+        ? {}
+        : { exitCode: invocationCommandResult.exitCode }),
+      message:
+        cleanup?.exitCode !== 0
+          ? 'Verification setup failed while removing stale artifacts.'
+          : invocationCommandResult === undefined
+            ? 'Verification command could not be executed.'
+            : invocationCommandResult.exitCode === 0
+              ? undefined
+              : `Verification command failed with exit ${invocationCommandResult.exitCode ?? 'unknown'}.`,
+      provider: 'daytona',
+      platform: invocation.platform,
+      architecture,
+      ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
+      ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
+      ...(invocationCommandResult === undefined
+        ? {}
+        : {
+            startedAt: invocationCommandResult.startedAt,
+            completedAt: invocationCommandResult.completedAt,
+          }),
+    })
+  }
+
+  let shouldProbeTestReport =
+    invocation?.requiredArtifactKinds.includes('test-report') ?? false
+  if (invocation === undefined && nonEmpty(input.evidenceTestReportCommand)) {
     const cleanup = yield* runCaptureCommand(
       'test-report-clean',
       'rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json',
@@ -512,7 +604,8 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     }
   }
   if (
-    nonEmpty(input.evidenceTestReportCommand) &&
+    (invocation?.requiredArtifactKinds.includes('test-report') === true ||
+      nonEmpty(input.evidenceTestReportCommand)) &&
     !artifacts.some((artifact) => artifact.kind === 'test-report')
   ) {
     const result = verificationResults.find(
@@ -528,8 +621,12 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     }
   }
 
-  let shouldProbeScreenshot = false
-  if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
+  let shouldProbeScreenshot =
+    invocation?.requiredArtifactKinds.includes('screenshot') ?? false
+  if (
+    invocation === undefined &&
+    nonEmpty(input.evidenceBrowserScreenshotCommand)
+  ) {
     const cleanup = yield* runCaptureCommand(
       'browser-screenshot-clean',
       'rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png',
@@ -621,7 +718,8 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     }
   }
   if (
-    nonEmpty(input.evidenceBrowserScreenshotCommand) &&
+    (invocation?.requiredArtifactKinds.includes('screenshot') === true ||
+      nonEmpty(input.evidenceBrowserScreenshotCommand)) &&
     !artifacts.some((artifact) => artifact.kind === 'screenshot')
   ) {
     const result = verificationResults.find(
@@ -656,7 +754,12 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   }
   const candidateStateDigest = yield* captureCandidateState('candidate-final')
 
-  return { artifacts, verificationResults, candidateStateDigest }
+  return {
+    artifacts,
+    verificationResults,
+    candidateStateDigest,
+    invocationCommandResult,
+  }
 })
 
 export function makeDaytonaSandboxLayer(
@@ -691,6 +794,10 @@ export function makeDaytonaSandboxLayer(
           readonly repositoryFullName: string
           readonly envVars?: Record<string, string> | undefined
           readonly retainAfterUse?: boolean | undefined
+          readonly forceDeleteAfterUse?: boolean | undefined
+          readonly onSandboxCleanup?:
+            | ((status: 'deleted' | 'failed' | 'retained') => void)
+            | undefined
           readonly onSandboxStarted?:
             | ((sandboxId: string) => Effect.Effect<void, unknown>)
             | undefined
@@ -746,9 +853,11 @@ export function makeDaytonaSandboxLayer(
             (sandbox, exit) =>
               Effect.gen(function* () {
                 const shouldRetain =
-                  retainSandboxes ||
-                  (input.retainAfterUse === true && Exit.isSuccess(exit))
+                  input.forceDeleteAfterUse !== true &&
+                  (retainSandboxes ||
+                    (input.retainAfterUse === true && Exit.isSuccess(exit)))
                 if (shouldRetain) {
+                  input.onSandboxCleanup?.('retained')
                   yield* Effect.logInfo(
                     'Retaining Daytona sandbox for inspection',
                     {
@@ -774,11 +883,13 @@ export function makeDaytonaSandboxLayer(
                   )
 
                   if (Exit.isSuccess(deleteExit)) {
+                    input.onSandboxCleanup?.('deleted')
                     yield* Effect.logInfo('Deleted Daytona sandbox', {
                       traceId: input.traceId,
                       sandboxId: sandbox.id,
                     })
                   } else {
+                    input.onSandboxCleanup?.('failed')
                     yield* Effect.logWarning(
                       'Failed to delete Daytona sandbox after retries',
                       {
@@ -1293,10 +1404,19 @@ export function makeDaytonaSandboxLayer(
         runRepositoryCommand: (input) =>
           Effect.gen(function* () {
             const startedAt = yield* Clock.currentTimeMillis
-            return yield* runWithSandbox(
+            let cleanupStatus:
+              | 'not-started'
+              | 'deleted'
+              | 'failed'
+              | 'retained' = 'not-started'
+            const result = yield* runWithSandbox(
               {
                 ...input,
                 envVars: input.env === undefined ? undefined : { ...input.env },
+                forceDeleteAfterUse: input.forceDeleteAfterUse,
+                onSandboxCleanup: (status) => {
+                  cleanupStatus = status
+                },
               },
               (sandbox) =>
                 Effect.gen(function* () {
@@ -1319,27 +1439,34 @@ export function makeDaytonaSandboxLayer(
                   const timeoutSeconds =
                     input.timeoutSeconds ??
                     DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
-                  const response = yield* executeSandboxCommand(sandbox, {
-                    command,
-                    timeoutSeconds,
-                    traceId: input.traceId,
-                  })
+                  const response =
+                    input.verificationInvocation === undefined
+                      ? yield* executeSandboxCommand(sandbox, {
+                          command,
+                          timeoutSeconds,
+                          traceId: input.traceId,
+                        })
+                      : undefined
                   const {
                     artifacts: evidenceArtifacts,
                     verificationResults,
                     candidateStateDigest,
+                    invocationCommandResult,
                   } = yield* collectSandboxEvidenceArtifacts(sandbox, {
                     ...input,
                     baseSha,
                   })
+                  const executed = invocationCommandResult ?? response
+                  const executedCommand =
+                    input.verificationInvocation?.command ?? command
 
                   return {
                     provider: 'daytona',
                     sandboxId: sandbox.id,
-                    command,
-                    exitCode: response.exitCode,
-                    stdout: response.stdout,
-                    stderr: response.stderr,
+                    command: executedCommand,
+                    exitCode: executed?.exitCode,
+                    stdout: executed?.stdout ?? '',
+                    stderr: executed?.stderr,
                     policy: toSandboxPolicy(config, { timeoutSeconds }),
                     evidenceArtifacts,
                     verificationResults,
@@ -1353,6 +1480,7 @@ export function makeDaytonaSandboxLayer(
                   }
                 }),
             )
+            return { ...result, cleanupStatus }
           }).pipe(
             Effect.mapError(
               (cause) =>

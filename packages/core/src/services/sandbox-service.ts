@@ -1,7 +1,11 @@
 import { Context, Effect } from 'effect'
 import type { SandboxError, StorageError } from '@patchplane/domain/errors'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
-import type { VerificationRequirementKind } from '@patchplane/domain/verification'
+import type {
+  SandboxCleanupStatus,
+  VerificationPlatform,
+  VerificationRequirementKind,
+} from '@patchplane/domain/verification'
 import type { ArtifactBody, EvidenceArtifactKind } from './artifacts-service'
 import type { TelemetryContextFields } from './telemetry-service'
 
@@ -14,6 +18,19 @@ export interface SandboxCommandInput extends TelemetryContextFields {
   readonly command: string
   readonly timeoutSeconds?: number | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
+  /** Trusted control-plane invocation. The provider must execute this once in a fresh sandbox. */
+  readonly verificationInvocation?:
+    | {
+        readonly requirementKey: string
+        readonly kind: VerificationRequirementKind
+        readonly command: string
+        readonly platform: VerificationPlatform
+        readonly architecture?: string | undefined
+        readonly timeoutSeconds: number
+        readonly requiredArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
+      }
+    | undefined
+  readonly forceDeleteAfterUse?: boolean | undefined
   readonly evidenceTestReportCommand?: string | undefined
   readonly evidenceTestTimeoutSeconds?: number | undefined
   readonly evidenceBrowserScreenshotCommand?: string | undefined
@@ -124,6 +141,7 @@ export interface SandboxCommandResult {
   readonly initialCandidateStateDigest?: string | undefined
   readonly startedAt: number
   readonly completedAt: number
+  readonly cleanupStatus?: SandboxCleanupStatus | undefined
 }
 
 export interface SandboxRuntimeControlInput extends TelemetryContextFields {

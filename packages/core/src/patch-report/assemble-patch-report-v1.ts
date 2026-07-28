@@ -49,14 +49,14 @@ export const AssemblePatchReportV1 = Effect.fn(
     input.sandboxExecutions.filter((item) => item.workflowRunId === run.id),
     (item) => item.completedAt,
   )
-  const candidate = execution === undefined
-    ? undefined
-    : latest(
-      input.candidatePatchSets.filter((item) =>
-        item.workflowRunId === run.id && item.sandboxExecutionId === execution.id
-      ),
-      (item) => item.createdAt,
-    )
+  const candidate = latest(
+    input.candidatePatchSets.filter((item) =>
+      item.workflowRunId === run.id &&
+      (item.subject?.kind === 'incoming-pull-request' ||
+        (execution !== undefined && item.sandboxExecutionId === execution.id))
+    ),
+    (item) => item.createdAt,
+  )
   const requirements = input.verificationRequirements.filter((item) => item.workflowRunId === run.id)
   const allCandidateResults = candidate === undefined
     ? []
@@ -176,9 +176,12 @@ export const AssemblePatchReportV1 = Effect.fn(
           label: requirement.label,
           required: requirement.required,
           ...(result === undefined ? {} : { resultId: result.id, status: result.status }),
+          ...(result?.verificationPlanId === undefined ? {} : { verificationPlanId: result.verificationPlanId }),
+          ...(result?.executionGroupId === undefined ? {} : { executionGroupId: result.executionGroupId }),
           ...((result?.command ?? requirement.command) === undefined
             ? {}
             : { command: result?.command ?? requirement.command }),
+          ...(result?.commandDigest === undefined ? {} : { commandDigest: result.commandDigest }),
           ...((result?.platform ?? requirement.platform) === undefined
             ? {}
             : { platform: result?.platform ?? requirement.platform }),
@@ -186,6 +189,9 @@ export const AssemblePatchReportV1 = Effect.fn(
             ? {}
             : { architecture: result?.architecture ?? requirement.architecture }),
           artifactIds: result?.artifactIds ?? [],
+          ...(result?.stdoutArtifactId === undefined ? {} : { stdoutArtifactId: result.stdoutArtifactId }),
+          ...(result?.stderrArtifactId === undefined ? {} : { stderrArtifactId: result.stderrArtifactId }),
+          ...(result?.cleanupStatus === undefined ? {} : { cleanupStatus: result.cleanupStatus }),
           ...(result?.summary === undefined ? {} : { summary: result.summary }),
         }
       }),

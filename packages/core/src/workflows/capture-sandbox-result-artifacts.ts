@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import type { WorkflowRunId } from '@patchplane/domain/ids'
+import type { VerificationRequirementKind } from '@patchplane/domain/verification'
 import type { SandboxCommandResult } from '../services/sandbox-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 
@@ -12,6 +13,8 @@ export const CaptureSandboxResultArtifacts = Effect.fn(
   readonly result: SandboxCommandResult
   readonly subjectDigest?: string | undefined
   readonly initialCandidateStateDigest?: string | undefined
+  readonly verificationRequirementKey?: string | undefined
+  readonly verificationRequirementKind?: VerificationRequirementKind | undefined
 }) {
   const captured: Array<EvidenceArtifact> = []
   for (const artifact of input.result.evidenceArtifacts ?? []) {
@@ -24,11 +27,14 @@ export const CaptureSandboxResultArtifacts = Effect.fn(
     const verification =
       verificationKind === undefined
         ? undefined
-        : input.result.verificationResults?.find(
-            (result) => result.kind === verificationKind,
+        : input.result.verificationResults?.find((result) =>
+            input.verificationRequirementKey === undefined
+              ? result.kind === verificationKind
+              : result.requirementKey === input.verificationRequirementKey,
           )
     const producerKind =
-      verificationKind === undefined ? 'candidate' : verificationKind
+      input.verificationRequirementKind ??
+      (verificationKind === undefined ? 'candidate' : verificationKind)
     const producer = `sandbox:${producerKind}:${input.result.provider}:${input.result.sandboxId}:${input.result.startedAt}`
     const verifiedFrozenSubject =
       input.subjectDigest !== undefined &&

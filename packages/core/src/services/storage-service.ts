@@ -37,6 +37,7 @@ import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type { GitCommitSha } from '@patchplane/domain/refinements'
 import type {
+  VerificationExecutionGroup,
   VerificationPlanV1,
   VerificationPlanRequirementV1,
   VerificationPlanSource,
@@ -81,6 +82,9 @@ export interface MarkWorkflowExecutionFailedInput extends TelemetryContextFields
 export interface RecordSandboxExecutionInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
   readonly incomingDispatchToken?: string | undefined
+  readonly executionGroupId?: VerificationExecutionGroup['id'] | undefined
+  readonly executionGroupClaimToken?: string | undefined
+  readonly idempotencyKey?: string | undefined
   readonly provider: string
   readonly sandboxId: string
   readonly command: string
@@ -221,15 +225,73 @@ export interface RecordVerificationRequirementInput extends TelemetryContextFiel
   readonly createdAt: number
 }
 
+export interface StartIncomingVerificationPlanInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly verificationPlanId: VerificationPlanV1['id']
+  readonly candidatePatchSetId: CandidatePatchSet['id']
+  readonly incomingDispatchToken: string
+}
+
+export interface ClaimVerificationExecutionGroupInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly verificationPlanId: VerificationPlanV1['id']
+  readonly requirementId: VerificationRequirement['id']
+  readonly candidatePatchSetId: CandidatePatchSet['id']
+  readonly stableKey: string
+  readonly claimToken: string
+  readonly incomingDispatchToken: string
+  readonly provider: string
+  readonly platform: VerificationPlatform
+  readonly architecture: VerificationExecutionGroup['architecture']
+  readonly commandDigest?:
+    | VerificationExecutionGroup['commandDigest']
+    | undefined
+  readonly timeoutSeconds?:
+    | VerificationExecutionGroup['timeoutSeconds']
+    | undefined
+  readonly claimedAt: VerificationExecutionGroup['claimedAt']
+}
+
+export interface StartVerificationExecutionGroupInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly executionGroupId: VerificationExecutionGroup['id']
+  readonly claimToken: string
+  readonly sandboxId: string
+}
+
+export interface FailVerificationExecutionGroupInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly executionGroupId: VerificationExecutionGroup['id']
+  readonly claimToken: string
+  readonly status: 'failed' | 'blocked' | 'cancelled'
+  readonly completedAt: NonNullable<VerificationExecutionGroup['completedAt']>
+}
+
+export interface GetVerificationExecutionStateInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly verificationPlanId: VerificationPlanV1['id']
+  readonly candidatePatchSetId: CandidatePatchSet['id']
+}
+
+export interface VerificationExecutionState {
+  readonly groups: ReadonlyArray<VerificationExecutionGroup>
+  readonly results: ReadonlyArray<VerificationResult>
+  readonly sandboxExecutions: ReadonlyArray<SandboxExecution>
+}
+
 export interface RecordVerificationResultInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
+  readonly verificationPlanId?: VerificationPlanV1['id'] | undefined
+  readonly executionGroupId?: VerificationExecutionGroup['id'] | undefined
+  readonly executionGroupClaimToken?: string | undefined
   readonly requirementId: VerificationRequirement['id']
   readonly candidatePatchSetId: CandidatePatchSet['id']
   readonly sandboxExecutionId?: SandboxExecution['id'] | undefined
   readonly provider: string
   readonly command?: string | undefined
+  readonly commandDigest?: VerificationResult['commandDigest'] | undefined
   readonly platform: VerificationPlatform
-  readonly architecture: string
+  readonly architecture: VerificationResult['architecture']
   readonly environmentImage?: string | undefined
   readonly status: VerificationResultStatus
   readonly exitCode?: number | undefined
@@ -239,10 +301,24 @@ export interface RecordVerificationResultInput extends TelemetryContextFields {
   readonly skippedCount?: number | undefined
   readonly artifactIds: ReadonlyArray<EvidenceArtifact['id']>
   readonly producedArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
-  readonly candidateDigestBefore?: string | undefined
-  readonly candidateDigestAfter?: string | undefined
-  readonly startedAt: number
-  readonly completedAt?: number | undefined
+  readonly stdoutArtifactId?: EvidenceArtifact['id'] | undefined
+  readonly stderrArtifactId?: EvidenceArtifact['id'] | undefined
+  readonly stdoutCaptureStatus?: 'captured' | 'truncated' | 'failed' | undefined
+  readonly stderrCaptureStatus?: 'captured' | 'truncated' | 'failed' | undefined
+  readonly cleanupStatus?:
+    | 'deleted'
+    | 'failed'
+    | 'retained'
+    | 'not-started'
+    | undefined
+  readonly candidateDigestBefore?:
+    | VerificationResult['candidateDigestBefore']
+    | undefined
+  readonly candidateDigestAfter?:
+    | VerificationResult['candidateDigestAfter']
+    | undefined
+  readonly startedAt: VerificationResult['startedAt']
+  readonly completedAt?: VerificationResult['completedAt'] | undefined
   readonly idempotencyKey: string
 }
 
@@ -396,6 +472,21 @@ export class StorageService extends Context.Service<
     readonly recordVerificationRequirement: (
       input: RecordVerificationRequirementInput,
     ) => Effect.Effect<VerificationRequirement, StorageError>
+    readonly startIncomingVerificationPlan: (
+      input: StartIncomingVerificationPlanInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly claimVerificationExecutionGroup: (
+      input: ClaimVerificationExecutionGroupInput,
+    ) => Effect.Effect<VerificationExecutionGroup | undefined, StorageError>
+    readonly startVerificationExecutionGroup: (
+      input: StartVerificationExecutionGroupInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly failVerificationExecutionGroup: (
+      input: FailVerificationExecutionGroupInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly getVerificationExecutionState: (
+      input: GetVerificationExecutionStateInput,
+    ) => Effect.Effect<VerificationExecutionState, StorageError>
     readonly recordVerificationResult: (
       input: RecordVerificationResultInput,
     ) => Effect.Effect<VerificationResult, StorageError>

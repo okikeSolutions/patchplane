@@ -87,6 +87,13 @@ export type VerificationResultId = Schema.Schema.Type<
   typeof VerificationResultId
 >
 
+export const VerificationExecutionGroupId = Schema.NonEmptyString.pipe(
+  Schema.brand('VerificationExecutionGroupId'),
+)
+export type VerificationExecutionGroupId = Schema.Schema.Type<
+  typeof VerificationExecutionGroupId
+>
+
 export const ReviewRunId = Schema.NonEmptyString.pipe(
   Schema.brand('ReviewRunId'),
 )
@@ -150,6 +157,9 @@ export const makeVerificationRequirementId = Schema.decodeUnknownSync(
 )
 export const makeVerificationResultId =
   Schema.decodeUnknownSync(VerificationResultId)
+export const makeVerificationExecutionGroupId = Schema.decodeUnknownSync(
+  VerificationExecutionGroupId,
+)
 export const makeReviewRunId = Schema.decodeUnknownSync(ReviewRunId)
 export const makeReviewFindingId = Schema.decodeUnknownSync(ReviewFindingId)
 export const makePolicyDecisionId = Schema.decodeUnknownSync(PolicyDecisionId)
