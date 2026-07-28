@@ -60,3 +60,23 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after remediation.
 - Herdr documentation/tracker audit — no actionable findings after remediation.
 - Herdr code/security review — no actionable findings after remediation.
+
+## Task 4 — PLAN-002/PLAN-003/PLAN-005 trusted bounded plan
+
+Status: Complete
+
+- Added branded `VerificationPlanV1` identity with version, workflow, trusted source revisions, ordered requirements, canonical SHA-256 digest, and creation time.
+- Resolves non-negotiable deployment policy before optional authorized workspace policy and optional repository-scoped policy bound to the webhook-authenticated base SHA.
+- Bounds policy JSON and canonical plans by UTF-8 bytes, source count/order/identity, 16 unique requirements, command/key/label/architecture sizes, per-command timeout, and artifact budget.
+- Convex independently recomputes the canonical digest, validates the PatchPlane-owned contract, provides exact replay after freeze, and rejects conflicting or incomplete plan/requirement persistence.
+- Candidate freeze now requires the complete persisted plan requirement set; retries reuse original plan and requirement timestamps.
+- Passes a deep-frozen, WeakSet-issued plan capability across the freeze/dispatch boundary and validates exact requirement semantics at runtime.
+- Preserves historical planless execution while rejecting all incoming-PR verifier output from the untrusted agent sandbox. Fresh candidate-bound execution groups remain Task 5, so missing incoming results stay explicitly incomplete.
+- Added resolver precedence/bounds, source-control config, Convex ordering/replay, and plan-before-freeze coverage.
+
+Validation:
+
+- `bun run verify` — passed (types, lint, all automated tests, CLI eval, roadmap acceptance, production build, and bundle budgets).
+- Herdr Effect/branded-types audit — no actionable findings after remediation.
+- Herdr documentation/tracker audit — no actionable findings after remediation.
+- Herdr code/security review — no actionable findings after remediation.

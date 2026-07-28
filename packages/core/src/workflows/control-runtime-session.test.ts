@@ -49,6 +49,7 @@ function storageLayer(
       startIncomingDispatch: () => Effect.succeed(true),
       validateIncomingDispatch: () => Effect.succeed(false),
       recordCandidatePatchSet: () => Effect.die('unused'),
+      recordVerificationPlan: () => Effect.die('unused verification plan'),
       recordVerificationRequirement: () => Effect.die('unused'),
       recordVerificationResult: () => Effect.die('unused'),
       recordReviewRun: () => Effect.die('unused'),

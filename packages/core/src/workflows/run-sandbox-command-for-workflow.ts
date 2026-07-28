@@ -19,7 +19,10 @@ import { CandidatePatchStatsFromSandboxResult } from './candidate-patch-stats'
 import type { IncomingPullRequestDispatch } from './freeze-incoming-pull-request-candidate'
 import {
   PersistConfiguredVerificationRequirements,
+  PersistLegacyConfiguredVerificationRequirements,
   PersistSandboxVerificationEvidence,
+  isPersistedVerificationPlanV1,
+  type PersistedVerificationPlanV1,
 } from './persist-sandbox-verification-evidence'
 import { ProposeMergeDecision } from './propose-merge-decision'
 
@@ -44,6 +47,7 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   readonly evidenceTestReportCommand?: string | undefined
   readonly evidenceTestPlatform?: VerificationPlatform | undefined
   readonly evidenceBrowserScreenshotCommand?: string | undefined
+  readonly verificationPlan?: PersistedVerificationPlanV1 | undefined
 }) {
   const storage = yield* StorageService
   const transitionContext = {
@@ -52,6 +56,40 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   } as const
   const frozenCandidate = input.incomingDispatch?.candidatePatchSet
   const workflowRun = input.workflowStart.workflowRun
+  const suppliedPlan = input.verificationPlan
+  if (
+    (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+      suppliedPlan === undefined) ||
+    (suppliedPlan !== undefined &&
+      (!isPersistedVerificationPlanV1(suppliedPlan) ||
+        suppliedPlan.plan.workflowRunId !== workflowRun.id ||
+        suppliedPlan.requirements.length !==
+          suppliedPlan.plan.requirements.length ||
+        suppliedPlan.plan.requirements.some(
+          (planned) =>
+            !suppliedPlan.requirements.some(
+              (persisted) =>
+                persisted.verificationPlanId === suppliedPlan.plan.id &&
+                persisted.key === planned.key &&
+                persisted.label === planned.label &&
+                persisted.kind === planned.kind &&
+                persisted.required === planned.required &&
+                persisted.command === planned.command &&
+                persisted.platform === planned.platform &&
+                persisted.architecture === planned.architecture &&
+                persisted.timeoutSeconds === planned.timeoutSeconds &&
+                JSON.stringify(persisted.requiredArtifactKinds) ===
+                  JSON.stringify(planned.requiredArtifactKinds),
+            ),
+        )))
+  ) {
+    return yield* new SandboxError({
+      operation: 'runSandboxCommandForWorkflow.validateVerificationPlan',
+      message:
+        'Persisted verification plan capability is incomplete or mismatched',
+      cause: undefined,
+    })
+  }
   if (
     workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
     (frozenCandidate?.subject?.kind !== 'incoming-pull-request' ||
@@ -115,23 +153,38 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
-    const verificationRequirements = yield* withRequirementsPersistedTransition(
-      {
-        ...transitionContext,
-        operation:
-          'runSandboxCommandForWorkflow.persistVerificationRequirements',
-      },
-      PersistConfiguredVerificationRequirements({
-        workflowRunId: input.workflowStart.workflowRun.id,
-        testCommand: input.evidenceTestReportCommand,
-        testPlatform: input.evidenceTestPlatform,
-        browserCommand: input.evidenceBrowserScreenshotCommand,
-        createdAt: yield* Clock.currentTimeMillis,
-        traceId: input.workflowStart.workflowRun.traceId,
-        operation:
-          'runSandboxCommandForWorkflow.persistVerificationRequirements',
-      }),
-    )
+    const verificationRequirements =
+      input.verificationPlan?.requirements ??
+      (yield* withRequirementsPersistedTransition(
+        {
+          ...transitionContext,
+          operation:
+            'runSandboxCommandForWorkflow.persistVerificationRequirements',
+        },
+        workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+          ? PersistConfiguredVerificationRequirements({
+              workflowRunId: input.workflowStart.workflowRun.id,
+              testCommand: input.evidenceTestReportCommand,
+              testPlatform: input.evidenceTestPlatform,
+              browserCommand: input.evidenceBrowserScreenshotCommand,
+              timeoutSeconds: input.timeoutSeconds,
+              createdAt: yield* Clock.currentTimeMillis,
+              traceId: input.workflowStart.workflowRun.traceId,
+              operation:
+                'runSandboxCommandForWorkflow.persistVerificationRequirements',
+            }).pipe(Effect.map((persisted) => persisted.requirements))
+          : PersistLegacyConfiguredVerificationRequirements({
+              workflowRunId: input.workflowStart.workflowRun.id,
+              testCommand: input.evidenceTestReportCommand,
+              testPlatform: input.evidenceTestPlatform,
+              browserCommand: input.evidenceBrowserScreenshotCommand,
+              timeoutSeconds: input.timeoutSeconds,
+              createdAt: yield* Clock.currentTimeMillis,
+              traceId: input.workflowStart.workflowRun.traceId,
+              operation:
+                'runSandboxCommandForWorkflow.persistLegacyVerificationRequirements',
+            }),
+      ))
 
     const clone = yield* PrepareRepositoryClone(input.workflowStart)
     if (clone === undefined) {
@@ -149,9 +202,14 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
 
     const sandbox = yield* SandboxService
     const runnableTestCommand =
-      input.evidenceTestPlatform === undefined ||
-      input.evidenceTestPlatform === 'linux'
+      input.verificationPlan === undefined &&
+      (input.evidenceTestPlatform === undefined ||
+        input.evidenceTestPlatform === 'linux')
         ? input.evidenceTestReportCommand
+        : undefined
+    const runnableBrowserCommand =
+      input.verificationPlan === undefined
+        ? input.evidenceBrowserScreenshotCommand
         : undefined
     const result = yield* withSandboxExecutionTransition(
       {
@@ -160,11 +218,13 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
       },
       sandbox.runRepositoryCommand({
         ...clone,
+        ...(frozenCandidate?.baseSha === undefined
+          ? {}
+          : { candidateBaseSha: frozenCandidate.baseSha }),
         command: input.command,
         timeoutSeconds: input.timeoutSeconds,
         evidenceTestReportCommand: runnableTestCommand,
-        evidenceBrowserScreenshotCommand:
-          input.evidenceBrowserScreenshotCommand,
+        evidenceBrowserScreenshotCommand: runnableBrowserCommand,
         traceId: input.workflowStart.workflowRun.traceId,
         ...(input.incomingDispatch === undefined
           ? {}
@@ -246,6 +306,12 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
       workflowRunId: input.workflowStart.workflowRun.id,
       traceId: input.workflowStart.workflowRun.traceId,
       result,
+      ...(frozenCandidate?.candidateDigest === undefined
+        ? {}
+        : { subjectDigest: frozenCandidate.candidateDigest }),
+      ...(result.initialCandidateStateDigest === undefined
+        ? {}
+        : { initialCandidateStateDigest: result.initialCandidateStateDigest }),
     })
 
     const candidatePatchSet =

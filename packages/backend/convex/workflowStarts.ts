@@ -375,9 +375,19 @@ const verificationResultStatusArg = v.union(
   v.literal('invalidated'),
 )
 
-const verificationRequirementReturn = v.object({
-  id: v.id('verificationRequirements'),
-  workflowRunId: v.id('workflowRuns'),
+const verificationPlanSourceArg = v.object({
+  kind: v.union(
+    v.literal('deployment-system'),
+    v.literal('workspace-policy'),
+    v.literal('base-repository-policy'),
+  ),
+  revision: v.string(),
+  workspaceId: v.optional(v.string()),
+  repositoryFullName: v.optional(v.string()),
+  baseSha: v.optional(v.string()),
+})
+
+const verificationPlanRequirementArg = v.object({
   key: v.string(),
   label: v.string(),
   kind: verificationRequirementKindArg,
@@ -385,6 +395,32 @@ const verificationRequirementReturn = v.object({
   command: v.optional(v.string()),
   platform: v.optional(verificationPlatformArg),
   architecture: v.optional(v.string()),
+  timeoutSeconds: v.optional(v.number()),
+  requiredArtifactKinds: v.array(evidenceArtifactKindArg),
+})
+
+const verificationPlanReturn = v.object({
+  id: v.id('verificationPlans'),
+  workflowRunId: v.id('workflowRuns'),
+  version: v.literal('verification-plan-v1'),
+  sources: v.array(verificationPlanSourceArg),
+  requirements: v.array(verificationPlanRequirementArg),
+  digest: v.string(),
+  createdAt: v.number(),
+})
+
+const verificationRequirementReturn = v.object({
+  id: v.id('verificationRequirements'),
+  workflowRunId: v.id('workflowRuns'),
+  verificationPlanId: v.optional(v.id('verificationPlans')),
+  key: v.string(),
+  label: v.string(),
+  kind: verificationRequirementKindArg,
+  required: v.boolean(),
+  command: v.optional(v.string()),
+  platform: v.optional(verificationPlatformArg),
+  architecture: v.optional(v.string()),
+  timeoutSeconds: v.optional(v.number()),
   requiredArtifactKinds: v.array(evidenceArtifactKindArg),
   source: verificationRequirementSourceArg,
   createdAt: v.number(),
@@ -2392,6 +2428,32 @@ export const claimCandidateFreeze = mutation({
     ) {
       return false
     }
+    const plan = await ctx.db
+      .query('verificationPlans')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', args.workflowRunId),
+      )
+      .first()
+    if (plan === null) return false
+    const persistedRequirements = await ctx.db
+      .query('verificationRequirements')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', args.workflowRunId),
+      )
+      .take(17)
+    if (
+      persistedRequirements.length !== plan.requirements.length ||
+      plan.requirements.some(
+        (planned) =>
+          !persistedRequirements.some(
+            (persisted) =>
+              persisted.verificationPlanId === plan._id &&
+              persisted.key === planned.key,
+          ),
+      )
+    ) {
+      return false
+    }
     const existing = await ctx.db
       .query('candidatePatchSets')
       .withIndex('by_workflow_run', (q) =>
@@ -2925,10 +2987,215 @@ export const recordCandidatePatchSet = mutation({
   },
 })
 
+function normalizeCanonicalJson(candidate: unknown): unknown {
+  if (Array.isArray(candidate)) return candidate.map(normalizeCanonicalJson)
+  if (candidate !== null && typeof candidate === 'object') {
+    const entries = Object.entries(candidate).filter(
+      ([, entry]) => entry !== undefined,
+    )
+    for (let index = 1; index < entries.length; index += 1) {
+      const current = entries[index]
+      if (current === undefined) continue
+      let position = index - 1
+      while (position >= 0) {
+        const previous = entries[position]
+        if (previous === undefined || previous[0] <= current[0]) break
+        entries[position + 1] = previous
+        position -= 1
+      }
+      entries[position + 1] = current
+    }
+    return Object.fromEntries(
+      entries.map(([key, entry]) => [key, normalizeCanonicalJson(entry)]),
+    )
+  }
+  return candidate
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(normalizeCanonicalJson(value))
+}
+
+async function verificationPlanDigest(input: {
+  readonly version: 'verification-plan-v1'
+  readonly sources: ReadonlyArray<unknown>
+  readonly requirements: ReadonlyArray<unknown>
+}) {
+  const bytes = new TextEncoder().encode(
+    canonicalJson({
+      version: input.version,
+      sources: input.sources,
+      requirements: input.requirements,
+    }),
+  )
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return `sha256:${Array.from(digest, (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')}`
+}
+
+export const recordVerificationPlan = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    version: v.literal('verification-plan-v1'),
+    sources: v.array(verificationPlanSourceArg),
+    requirements: v.array(verificationPlanRequirementArg),
+    digest: v.string(),
+    createdAt: v.number(),
+  },
+  returns: verificationPlanReturn,
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    const promptRequest = await ctx.db.get(
+      'promptRequests',
+      workflowRun.promptRequestId,
+    )
+    const sourceKinds = new Set(args.sources.map((source) => source.kind))
+    const requirementKeys = new Set(
+      args.requirements.map((requirement) => requirement.key),
+    )
+    const computedDigest = await verificationPlanDigest(args)
+    if (
+      workflowRun.modelVersion !== 'v1' ||
+      args.sources.length === 0 ||
+      args.sources.length > 3 ||
+      sourceKinds.size !== args.sources.length ||
+      args.sources[0]?.kind !== 'deployment-system' ||
+      args.sources.some((source, index) => {
+        const expectedOrder = [
+          'deployment-system',
+          'workspace-policy',
+          'base-repository-policy',
+        ] as const
+        return (
+          expectedOrder.indexOf(source.kind) < index ||
+          source.revision.trim().length === 0 ||
+          source.revision !== source.revision.trim() ||
+          source.revision.length > 256 ||
+          (source.workspaceId?.length ?? 0) > 256 ||
+          (source.repositoryFullName?.length ?? 0) > 253 ||
+          (source.kind === 'deployment-system' &&
+            (source.workspaceId !== undefined ||
+              source.repositoryFullName !== undefined ||
+              source.baseSha !== undefined)) ||
+          (source.kind === 'workspace-policy' &&
+            (source.workspaceId !== workflowRun.workspaceId ||
+              source.repositoryFullName !== undefined ||
+              source.baseSha !== undefined)) ||
+          (source.kind === 'base-repository-policy' &&
+            (source.workspaceId !== undefined ||
+              source.repositoryFullName === undefined ||
+              source.repositoryFullName !==
+                promptRequest?.externalRef?.repositoryFullName ||
+              source.baseSha === undefined ||
+              !/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(source.baseSha) ||
+              source.baseSha !== workflowRun.sourceBaseSha))
+        )
+      }) ||
+      new TextEncoder().encode(
+        canonicalJson({
+          version: args.version,
+          sources: args.sources,
+          requirements: args.requirements,
+        }),
+      ).byteLength > 65_536 ||
+      !Number.isSafeInteger(args.createdAt) ||
+      args.createdAt < 0 ||
+      args.requirements.length > 16 ||
+      requirementKeys.size !== args.requirements.length ||
+      args.requirements.some(
+        (requirement) =>
+          requirement.key.trim().length === 0 ||
+          requirement.key !== requirement.key.trim() ||
+          requirement.key.length > 128 ||
+          requirement.label.trim().length === 0 ||
+          requirement.label !== requirement.label.trim() ||
+          requirement.label.length > 256 ||
+          (requirement.command !== undefined &&
+            requirement.command.length === 0) ||
+          (requirement.command?.length ?? 0) > 2_000 ||
+          (requirement.timeoutSeconds !== undefined &&
+            (!Number.isSafeInteger(requirement.timeoutSeconds) ||
+              requirement.timeoutSeconds < 0)) ||
+          (requirement.timeoutSeconds ?? 0) > 1_800 ||
+          (requirement.architecture !== undefined &&
+            requirement.architecture.length === 0) ||
+          (requirement.architecture?.length ?? 0) > 128 ||
+          new Set(requirement.requiredArtifactKinds).size !==
+            requirement.requiredArtifactKinds.length ||
+          requirement.requiredArtifactKinds.length > 8,
+      ) ||
+      args.digest !== computedDigest
+    ) {
+      throw new ConvexError(
+        'V1 verification plan must be bounded, trusted, and persisted before candidate freeze',
+      )
+    }
+    const existing = await ctx.db
+      .query('verificationPlans')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', args.workflowRunId),
+      )
+      .first()
+    if (existing !== null) {
+      if (
+        existing.digest !== args.digest ||
+        canonicalJson(existing.sources) !== canonicalJson(args.sources) ||
+        canonicalJson(existing.requirements) !==
+          canonicalJson(args.requirements)
+      ) {
+        throw new ConvexError('Verification plan conflict for workflow attempt')
+      }
+      return {
+        id: existing._id,
+        workflowRunId: existing.workflowRunId,
+        version: existing.version,
+        sources: existing.sources,
+        requirements: existing.requirements,
+        digest: existing.digest,
+        createdAt: existing.createdAt,
+      }
+    }
+    if (
+      !(await isLatestWorkflowAttempt(ctx, workflowRun)) ||
+      (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+        (workflowRun.status !== 'queued' ||
+          workflowRun.candidateFreezeClaimedAt !== undefined)) ||
+      (workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' &&
+        workflowRun.status !== 'queued' &&
+        workflowRun.status !== 'running')
+    ) {
+      throw new ConvexError(
+        'Verification plan first write is not allowed in the current attempt state',
+      )
+    }
+    const id = await ctx.db.insert('verificationPlans', {
+      workflowRunId: args.workflowRunId,
+      version: args.version,
+      sources: args.sources,
+      requirements: args.requirements,
+      digest: args.digest,
+      createdAt: args.createdAt,
+    })
+    return {
+      id,
+      workflowRunId: args.workflowRunId,
+      version: args.version,
+      sources: args.sources,
+      requirements: args.requirements,
+      digest: args.digest,
+      createdAt: args.createdAt,
+    }
+  },
+})
+
 export const recordVerificationRequirement = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    verificationPlanId: v.optional(v.id('verificationPlans')),
     key: v.string(),
     label: v.string(),
     kind: verificationRequirementKindArg,
@@ -2936,6 +3203,7 @@ export const recordVerificationRequirement = mutation({
     command: v.optional(v.string()),
     platform: v.optional(verificationPlatformArg),
     architecture: v.optional(v.string()),
+    timeoutSeconds: v.optional(v.number()),
     requiredArtifactKinds: v.array(evidenceArtifactKindArg),
     source: verificationRequirementSourceArg,
     createdAt: v.number(),
@@ -2943,13 +3211,40 @@ export const recordVerificationRequirement = mutation({
   returns: verificationRequirementReturn,
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
-    await requireWorkflowRun(ctx, args.workflowRunId)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
     const key = args.key.trim()
     const label = args.label.trim()
     if (key.length === 0 || label.length === 0) {
       throw new ConvexError(
         'Verification requirement key and label are required',
       )
+    }
+    if (workflowRun.candidateIdentityVersion === 'incoming-pr-v1') {
+      const plan =
+        args.verificationPlanId === undefined
+          ? null
+          : await ctx.db.get('verificationPlans', args.verificationPlanId)
+      const planned = plan?.requirements.find(
+        (requirement) => requirement.key === key,
+      )
+      if (
+        plan === null ||
+        plan.workflowRunId !== args.workflowRunId ||
+        planned === undefined ||
+        planned.label !== label ||
+        planned.kind !== args.kind ||
+        planned.required !== args.required ||
+        planned.command !== args.command ||
+        planned.platform !== args.platform ||
+        planned.architecture !== args.architecture ||
+        planned.timeoutSeconds !== args.timeoutSeconds ||
+        JSON.stringify(planned.requiredArtifactKinds) !==
+          JSON.stringify(args.requiredArtifactKinds)
+      ) {
+        throw new ConvexError(
+          'Incoming PR requirement must exactly match its trusted verification plan',
+        )
+      }
     }
     if (args.requiredArtifactKinds.length > 16) {
       throw new ConvexError(
@@ -2965,14 +3260,15 @@ export const recordVerificationRequirement = mutation({
       .unique()
     if (existing !== null) {
       if (
+        existing.verificationPlanId !== args.verificationPlanId ||
         existing.label !== label ||
         existing.kind !== args.kind ||
         existing.required !== args.required ||
         existing.command !== args.command ||
         existing.platform !== args.platform ||
         existing.architecture !== args.architecture ||
+        existing.timeoutSeconds !== args.timeoutSeconds ||
         existing.source !== args.source ||
-        existing.createdAt !== args.createdAt ||
         JSON.stringify(existing.requiredArtifactKinds) !==
           JSON.stringify(args.requiredArtifactKinds)
       ) {
@@ -2981,6 +3277,9 @@ export const recordVerificationRequirement = mutation({
       return {
         id: existing._id,
         workflowRunId: existing.workflowRunId,
+        ...(existing.verificationPlanId === undefined
+          ? {}
+          : { verificationPlanId: existing.verificationPlanId }),
         key: existing.key,
         label: existing.label,
         kind: existing.kind,
@@ -2994,6 +3293,9 @@ export const recordVerificationRequirement = mutation({
         ...(existing.architecture === undefined
           ? {}
           : { architecture: existing.architecture }),
+        ...(existing.timeoutSeconds === undefined
+          ? {}
+          : { timeoutSeconds: existing.timeoutSeconds }),
         requiredArtifactKinds: existing.requiredArtifactKinds,
         source: existing.source,
         createdAt: existing.createdAt,
@@ -3002,6 +3304,9 @@ export const recordVerificationRequirement = mutation({
 
     const requirement = {
       workflowRunId: args.workflowRunId,
+      ...(args.verificationPlanId === undefined
+        ? {}
+        : { verificationPlanId: args.verificationPlanId }),
       key,
       label,
       kind: args.kind,
@@ -3011,6 +3316,9 @@ export const recordVerificationRequirement = mutation({
       ...(args.architecture === undefined
         ? {}
         : { architecture: args.architecture }),
+      ...(args.timeoutSeconds === undefined
+        ? {}
+        : { timeoutSeconds: args.timeoutSeconds }),
       requiredArtifactKinds: args.requiredArtifactKinds,
       source: args.source,
       createdAt: args.createdAt,
@@ -3120,10 +3428,19 @@ export const recordVerificationResult = mutation({
         requirement.architecture === args.architecture)
     if (
       args.status === 'passed' &&
+      candidate.subject?.kind === 'incoming-pull-request'
+    ) {
+      throw new ConvexError(
+        'Passed incoming PR verification requires a trusted execution group',
+      )
+    }
+    if (
+      args.status === 'passed' &&
       (candidate.status !== 'captured' ||
         candidate.candidateDigest === undefined ||
         args.sandboxExecutionId === undefined ||
-        candidate.sandboxExecutionId !== args.sandboxExecutionId ||
+        (candidate.subject?.kind !== 'incoming-pull-request' &&
+          candidate.sandboxExecutionId !== args.sandboxExecutionId) ||
         sandboxExecution === null ||
         sandboxExecution.status !== 'succeeded' ||
         sandboxExecution.exitCode !== 0 ||

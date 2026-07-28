@@ -7,6 +7,35 @@ import schema from './schema'
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts'])
 
+function normalizeCanonicalJson(candidate: unknown): unknown {
+  if (Array.isArray(candidate)) return candidate.map(normalizeCanonicalJson)
+  if (candidate !== null && typeof candidate === 'object') {
+    const entries = Object.entries(candidate).filter(
+      ([, entry]) => entry !== undefined,
+    )
+    for (let index = 1; index < entries.length; index += 1) {
+      const current = entries[index]
+      if (current === undefined) continue
+      let position = index - 1
+      while (position >= 0) {
+        const previous = entries[position]
+        if (previous === undefined || previous[0] <= current[0]) break
+        entries[position + 1] = previous
+        position -= 1
+      }
+      entries[position + 1] = current
+    }
+    return Object.fromEntries(
+      entries.map(([key, entry]) => [key, normalizeCanonicalJson(entry)]),
+    )
+  }
+  return candidate
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(normalizeCanonicalJson(value))
+}
+
 type CreateWorkflowStartArgs = Record<string, unknown> & {
   workspaceId: string
   actorId: string
@@ -228,6 +257,12 @@ const recordCandidatePatchSet = makeFunctionReference<
   Record<string, unknown>,
   Record<string, unknown>
 >('workflowStarts:recordCandidatePatchSet')
+
+const recordVerificationPlan = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  Record<string, unknown> & { id: Id<'verificationPlans'> }
+>('workflowStarts:recordVerificationPlan')
 
 const recordVerificationRequirement = makeFunctionReference<
   'mutation',
@@ -1642,6 +1677,70 @@ describe('workflowStarts trusted boundary and authz', () => {
         workflowRunId: started.workflowRun.id,
         leaseToken: firstLeaseToken,
       }),
+    ).toBe(false)
+    const planSources = [
+      { kind: 'deployment-system' as const, revision: 'system-v1' },
+    ]
+    const planRequirements = [
+      {
+        key: 'sandbox:test',
+        label: 'Configured test verification',
+        kind: 'test' as const,
+        required: true,
+        command: 'bun test',
+        platform: 'linux' as const,
+        timeoutSeconds: 300,
+        requiredArtifactKinds: ['test-report' as const],
+      },
+    ]
+    const planDigestBytes = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(
+        canonicalJson({
+          requirements: planRequirements,
+          sources: planSources,
+          version: 'verification-plan-v1',
+        }),
+      ),
+    )
+    const planDigest = `sha256:${Array.from(
+      new Uint8Array(planDigestBytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join('')}`
+    const plan = await t.mutation(recordVerificationPlan, {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      version: 'verification-plan-v1',
+      sources: planSources,
+      requirements: planRequirements,
+      digest: planDigest,
+      createdAt: 1,
+    })
+    expect(plan.workflowRunId).toBe(started.workflowRun.id)
+    const requirementArgs = {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      verificationPlanId: plan.id,
+      ...planRequirements[0],
+      source: 'policy' as const,
+      createdAt: 1,
+    }
+    const requirement = await t.mutation(
+      recordVerificationRequirement,
+      requirementArgs,
+    )
+    const requirementReplay = await t.mutation(recordVerificationRequirement, {
+      ...requirementArgs,
+      createdAt: 99,
+    })
+    expect(requirementReplay.id).toBe(requirement.id)
+    expect(requirementReplay.createdAt).toBe(1)
+    expect(
+      await t.mutation(claimCandidateFreeze, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        leaseToken: firstLeaseToken,
+      }),
     ).toBe(true)
     expect(
       await t.mutation(claimCandidateFreeze, {
@@ -1728,6 +1827,17 @@ describe('workflowStarts trusted boundary and authz', () => {
       'Current incoming-PR attempt requires its subject and active freeze lease',
     )
     const candidate = await t.mutation(recordCandidatePatchSet, candidateArgs)
+    const replayedPlan = await t.mutation(recordVerificationPlan, {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      version: 'verification-plan-v1',
+      sources: planSources,
+      requirements: planRequirements,
+      digest: planDigest,
+      createdAt: 99,
+    })
+    expect(replayedPlan.id).toBe(plan.id)
+    expect(replayedPlan.createdAt).toBe(1)
 
     expect(candidate).toMatchObject({
       workflowRunId: started.workflowRun.id,

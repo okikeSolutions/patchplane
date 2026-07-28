@@ -117,6 +117,19 @@ PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND
 PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND
 ```
 
+Optional trusted control-plane policy documents can add workspace-scoped or
+base-repository-scoped requirements. They are validated, bounded to 65,536
+UTF-8 bytes, and never read from the candidate revision:
+
+```text
+PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON={"workspaceId":"workos:org_123","revision":"workspace-v1","requirements":[]}
+PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON={"repositoryFullName":"owner/repo","revision":"base-policy-v1","requirements":[]}
+```
+
+The base-repository policy is bound at intake to the authenticated PR base SHA.
+Deployment requirements remain non-negotiable, and workspace policy precedes
+base-repository policy for keys not owned by deployment policy.
+
 The Daytona plugin uploads `git diff --binary` when the agent changes the
 worktree. It also probes conventional files such as
 `.patchplane/test-report.json`, `.patchplane/test-report.xml`, and

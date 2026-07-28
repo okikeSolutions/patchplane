@@ -6,24 +6,42 @@ import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 
 export const CaptureSandboxResultArtifacts = Effect.fn(
   '@patchplane/core/workflows/CaptureSandboxResultArtifacts',
-)(function*(input: {
+)(function* (input: {
   readonly workflowRunId: WorkflowRunId
   readonly traceId: string
   readonly result: SandboxCommandResult
+  readonly subjectDigest?: string | undefined
+  readonly initialCandidateStateDigest?: string | undefined
 }) {
   const captured: Array<EvidenceArtifact> = []
   for (const artifact of input.result.evidenceArtifacts ?? []) {
-    const verificationKind = artifact.kind === 'test-report'
-      ? 'test'
-      : artifact.kind === 'screenshot' || artifact.kind === 'video'
-      ? 'browser'
-      : undefined
-    const verification = verificationKind === undefined
-      ? undefined
-      : input.result.verificationResults?.find((result) => result.kind === verificationKind)
-    const producerKind = verificationKind === undefined ? 'candidate' : verificationKind
+    const verificationKind =
+      artifact.kind === 'test-report'
+        ? 'test'
+        : artifact.kind === 'screenshot' || artifact.kind === 'video'
+          ? 'browser'
+          : undefined
+    const verification =
+      verificationKind === undefined
+        ? undefined
+        : input.result.verificationResults?.find(
+            (result) => result.kind === verificationKind,
+          )
+    const producerKind =
+      verificationKind === undefined ? 'candidate' : verificationKind
     const producer = `sandbox:${producerKind}:${input.result.provider}:${input.result.sandboxId}:${input.result.startedAt}`
-    const subjectDigest = verification?.candidateDigestAfter ?? input.result.candidateStateDigest
+    const verifiedFrozenSubject =
+      input.subjectDigest !== undefined &&
+      input.initialCandidateStateDigest !== undefined &&
+      verification?.candidateDigestBefore ===
+        input.initialCandidateStateDigest &&
+      verification.candidateDigestBefore === verification.candidateDigestAfter
+        ? input.subjectDigest
+        : undefined
+    const subjectDigest =
+      verifiedFrozenSubject ??
+      verification?.candidateDigestAfter ??
+      input.result.candidateStateDigest
     const evidenceArtifact = yield* CaptureEvidenceArtifact({
       workflowRunId: input.workflowRunId,
       traceId: input.traceId,
@@ -33,7 +51,9 @@ export const CaptureSandboxResultArtifacts = Effect.fn(
       ...(artifact.label === undefined ? {} : { label: artifact.label }),
       contentType: artifact.contentType,
       body: artifact.body,
-      ...(artifact.retentionPolicy === undefined ? {} : { retentionPolicy: artifact.retentionPolicy }),
+      ...(artifact.retentionPolicy === undefined
+        ? {}
+        : { retentionPolicy: artifact.retentionPolicy }),
     })
     captured.push(evidenceArtifact)
   }

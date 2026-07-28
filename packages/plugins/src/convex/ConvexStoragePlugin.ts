@@ -15,6 +15,7 @@ import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
 import { decodeRuntimeSession } from '@patchplane/domain/runtime-session'
 import { decodeSandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
+  decodeVerificationPlanV1,
   decodeVerificationRequirement,
   decodeVerificationResult,
 } from '@patchplane/domain/verification'
@@ -42,6 +43,7 @@ import {
   type RecordPublicationResultInput,
   type RecordReviewFindingInput,
   type RecordReviewRunInput,
+  type RecordVerificationPlanInput,
   type RecordVerificationRequirementInput,
   type RecordVerificationResultInput,
   type RecordRuntimeEventInput,
@@ -322,11 +324,26 @@ const recordCandidatePatchSetMutation = makeFunctionReference<
   unknown
 >('workflowStarts:recordCandidatePatchSet')
 
+const recordVerificationPlanMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    version: 'verification-plan-v1'
+    sources: RecordVerificationPlanInput['sources']
+    requirements: RecordVerificationPlanInput['requirements']
+    digest: string
+    createdAt: number
+  },
+  unknown
+>('workflowStarts:recordVerificationPlan')
+
 const recordVerificationRequirementMutation = makeFunctionReference<
   'mutation',
   {
     systemSecret: string
     workflowRunId: string
+    verificationPlanId?: string
     key: string
     label: string
     kind: RecordVerificationRequirementInput['kind']
@@ -334,6 +351,7 @@ const recordVerificationRequirementMutation = makeFunctionReference<
     command?: string
     platform?: RecordVerificationRequirementInput['platform']
     architecture?: string
+    timeoutSeconds?: number
     requiredArtifactKinds: RecordVerificationRequirementInput['requiredArtifactKinds']
     source: RecordVerificationRequirementInput['source']
     createdAt: number
@@ -1385,6 +1403,50 @@ export const ConvexStoragePlugin = {
         )
       })
 
+      const recordVerificationPlan = Effect.fn(
+        '@patchplane/plugins/convex/recordVerificationPlan',
+      )(function* (input: RecordVerificationPlanInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'recordVerificationPlan.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record verification plans',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              recordVerificationPlanMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                version: input.version,
+                sources: input.sources,
+                requirements: input.requirements,
+                digest: input.digest,
+                createdAt: input.createdAt,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'recordVerificationPlan',
+              message: 'Convex failed to record verification plan',
+              cause,
+            }),
+        })
+        return yield* decodeVerificationPlanV1(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'recordVerificationPlan.decode',
+                message: 'Convex returned an invalid verification plan',
+                cause,
+              }),
+          ),
+        )
+      })
+
       const recordVerificationRequirement = Effect.fn(
         '@patchplane/plugins/convex/recordVerificationRequirement',
       )(function* (input: RecordVerificationRequirementInput) {
@@ -1403,6 +1465,9 @@ export const ConvexStoragePlugin = {
               {
                 systemSecret: Redacted.value(systemIngestionSecret),
                 workflowRunId: input.workflowRunId,
+                ...(input.verificationPlanId === undefined
+                  ? {}
+                  : { verificationPlanId: input.verificationPlanId }),
                 key: input.key,
                 label: input.label,
                 kind: input.kind,
@@ -1416,6 +1481,9 @@ export const ConvexStoragePlugin = {
                 ...(input.architecture === undefined
                   ? {}
                   : { architecture: input.architecture }),
+                ...(input.timeoutSeconds === undefined
+                  ? {}
+                  : { timeoutSeconds: input.timeoutSeconds }),
                 requiredArtifactKinds: input.requiredArtifactKinds,
                 source: input.source,
                 createdAt: input.createdAt,
@@ -1853,6 +1921,7 @@ export const ConvexStoragePlugin = {
         startIncomingDispatch,
         validateIncomingDispatch,
         recordCandidatePatchSet,
+        recordVerificationPlan,
         recordVerificationRequirement,
         recordVerificationResult,
         recordReviewRun,

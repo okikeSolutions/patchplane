@@ -239,6 +239,8 @@ describe('PublishDecisionToSource', () => {
               ),
             claimWorkflowExecution: () => Effect.succeed(true),
             markWorkflowExecutionFailed: () => Effect.succeed(true),
+            recordVerificationPlan: () =>
+              Effect.die('unused verification plan'),
             recordVerificationRequirement: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
             getCandidatePatchSetForWorkflow: () =>
@@ -482,6 +484,7 @@ describe('PublishDecisionToSource', () => {
             ),
           claimWorkflowExecution: () => Effect.succeed(true),
           markWorkflowExecutionFailed: () => Effect.succeed(true),
+          recordVerificationPlan: () => Effect.die('unused verification plan'),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
@@ -753,6 +756,8 @@ describe('PublishDecisionToSource', () => {
               ),
             claimWorkflowExecution: () => Effect.succeed(true),
             markWorkflowExecutionFailed: () => Effect.succeed(true),
+            recordVerificationPlan: () =>
+              Effect.die('unused verification plan'),
             recordVerificationRequirement: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
             getCandidatePatchSetForWorkflow: () =>

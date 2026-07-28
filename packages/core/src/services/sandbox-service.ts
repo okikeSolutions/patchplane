@@ -1,6 +1,7 @@
 import { Context, Effect } from 'effect'
 import type { SandboxError, StorageError } from '@patchplane/domain/errors'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import type { VerificationRequirementKind } from '@patchplane/domain/verification'
 import type { ArtifactBody, EvidenceArtifactKind } from './artifacts-service'
 import type { TelemetryContextFields } from './telemetry-service'
 
@@ -9,11 +10,14 @@ export interface SandboxCommandInput extends TelemetryContextFields {
   readonly repositoryFullName: string
   readonly branch?: string | undefined
   readonly commitId?: string | undefined
+  readonly candidateBaseSha?: string | undefined
   readonly command: string
   readonly timeoutSeconds?: number | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
   readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceTestTimeoutSeconds?: number | undefined
   readonly evidenceBrowserScreenshotCommand?: string | undefined
+  readonly evidenceBrowserTimeoutSeconds?: number | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
   readonly traceId: string
@@ -40,9 +44,12 @@ export interface SandboxAgentInput extends TelemetryContextFields {
   readonly mode?: 'json' | 'rpc' | undefined
   readonly branch?: string | undefined
   readonly commitId?: string | undefined
+  readonly candidateBaseSha?: string | undefined
   readonly timeoutSeconds?: number | undefined
   readonly evidenceTestReportCommand?: string | undefined
+  readonly evidenceTestTimeoutSeconds?: number | undefined
   readonly evidenceBrowserScreenshotCommand?: string | undefined
+  readonly evidenceBrowserTimeoutSeconds?: number | undefined
   readonly gitUsername?: string | undefined
   readonly gitPassword?: string | undefined
   readonly traceId: string
@@ -80,7 +87,8 @@ export interface SandboxEvidenceArtifact {
 }
 
 export interface SandboxVerificationResult {
-  readonly kind: 'test' | 'browser'
+  readonly requirementKey?: string | undefined
+  readonly kind: VerificationRequirementKind
   readonly command: string
   readonly status: 'succeeded' | 'failed'
   readonly exitCode?: number | undefined
@@ -113,6 +121,7 @@ export interface SandboxCommandResult {
     | undefined
   readonly baseSha?: string | undefined
   readonly candidateStateDigest?: string | undefined
+  readonly initialCandidateStateDigest?: string | undefined
   readonly startedAt: number
   readonly completedAt: number
 }

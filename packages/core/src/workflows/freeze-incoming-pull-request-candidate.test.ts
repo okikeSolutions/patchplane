@@ -191,6 +191,8 @@ describe('FreezeIncomingPullRequestCandidate', () => {
                 }
                 return persistedCandidate
               }),
+            recordVerificationPlan: () =>
+              Effect.die('unused verification plan'),
             recordVerificationRequirement: unusedStorageError,
             recordVerificationResult: unusedStorageError,
             recordReviewRun: unusedStorageError,

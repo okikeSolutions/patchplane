@@ -395,8 +395,44 @@ export default defineSchema({
     createdAt: v.number(),
   }).index('by_workflow_run', ['workflowRunId']),
 
+  verificationPlans: defineTable({
+    workflowRunId: v.id('workflowRuns'),
+    version: v.literal('verification-plan-v1'),
+    sources: v.array(
+      v.object({
+        kind: v.union(
+          v.literal('deployment-system'),
+          v.literal('workspace-policy'),
+          v.literal('base-repository-policy'),
+        ),
+        revision: v.string(),
+        workspaceId: v.optional(v.string()),
+        repositoryFullName: v.optional(v.string()),
+        baseSha: v.optional(v.string()),
+      }),
+    ),
+    requirements: v.array(
+      v.object({
+        key: v.string(),
+        label: v.string(),
+        kind: verificationRequirementKind,
+        required: v.boolean(),
+        command: v.optional(v.string()),
+        platform: v.optional(verificationPlatform),
+        architecture: v.optional(v.string()),
+        timeoutSeconds: v.optional(v.number()),
+        requiredArtifactKinds: v.array(evidenceArtifactKind),
+      }),
+    ),
+    digest: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_digest', ['workflowRunId', 'digest']),
+
   verificationRequirements: defineTable({
     workflowRunId: v.id('workflowRuns'),
+    verificationPlanId: v.optional(v.id('verificationPlans')),
     key: v.string(),
     label: v.string(),
     kind: verificationRequirementKind,
@@ -404,6 +440,7 @@ export default defineSchema({
     command: v.optional(v.string()),
     platform: v.optional(verificationPlatform),
     architecture: v.optional(v.string()),
+    timeoutSeconds: v.optional(v.number()),
     requiredArtifactKinds: v.array(evidenceArtifactKind),
     source: verificationRequirementSource,
     createdAt: v.number(),

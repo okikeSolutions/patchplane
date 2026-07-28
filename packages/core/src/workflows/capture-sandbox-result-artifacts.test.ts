@@ -144,6 +144,7 @@ describe('CaptureSandboxResultArtifacts', () => {
                 cause: undefined,
               }),
             ),
+          recordVerificationPlan: () => Effect.die('unused verification plan'),
           recordVerificationRequirement: () =>
             Effect.fail(
               new StorageError({

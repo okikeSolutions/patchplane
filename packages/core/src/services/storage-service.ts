@@ -37,6 +37,9 @@ import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type { GitCommitSha } from '@patchplane/domain/refinements'
 import type {
+  VerificationPlanV1,
+  VerificationPlanRequirementV1,
+  VerificationPlanSource,
   VerificationRequirement,
   VerificationRequirementKind,
   VerificationRequirementSource,
@@ -193,8 +196,18 @@ export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
   readonly createdAt: number
 }
 
+export interface RecordVerificationPlanInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly version: 'verification-plan-v1'
+  readonly sources: ReadonlyArray<VerificationPlanSource>
+  readonly requirements: ReadonlyArray<VerificationPlanRequirementV1>
+  readonly digest: VerificationPlanV1['digest']
+  readonly createdAt: number
+}
+
 export interface RecordVerificationRequirementInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
+  readonly verificationPlanId?: VerificationPlanV1['id'] | undefined
   readonly key: string
   readonly label: string
   readonly kind: VerificationRequirementKind
@@ -202,6 +215,7 @@ export interface RecordVerificationRequirementInput extends TelemetryContextFiel
   readonly command?: string | undefined
   readonly platform?: VerificationPlatform | undefined
   readonly architecture?: string | undefined
+  readonly timeoutSeconds?: number | undefined
   readonly requiredArtifactKinds: ReadonlyArray<EvidenceArtifactKind>
   readonly source: VerificationRequirementSource
   readonly createdAt: number
@@ -376,6 +390,9 @@ export class StorageService extends Context.Service<
     readonly recordCandidatePatchSet: (
       input: RecordCandidatePatchSetInput,
     ) => Effect.Effect<CandidatePatchSet, StorageError>
+    readonly recordVerificationPlan: (
+      input: RecordVerificationPlanInput,
+    ) => Effect.Effect<VerificationPlanV1, StorageError>
     readonly recordVerificationRequirement: (
       input: RecordVerificationRequirementInput,
     ) => Effect.Effect<VerificationRequirement, StorageError>

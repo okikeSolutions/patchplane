@@ -182,6 +182,7 @@ describe('ProposeMergeDecision', () => {
               ...input,
               createdAt: input.createdAt ?? 1,
             }),
+          recordVerificationPlan: () => Effect.die('unused verification plan'),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
           recordReviewRun: (input) =>

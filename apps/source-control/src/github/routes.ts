@@ -45,6 +45,7 @@ import {
 } from '@patchplane/core/workflows/freeze-incoming-pull-request-candidate'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
 import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-sandbox-command-for-workflow'
+import { PersistConfiguredVerificationRequirements } from '@patchplane/core/workflows/persist-sandbox-verification-evidence'
 import { StartWorkflowFromIntake } from '@patchplane/core/workflows/start-workflow-from-intake'
 import { SourceControlService } from '@patchplane/core/services/source-control-service'
 import {
@@ -76,9 +77,11 @@ import {
 } from '@patchplane/domain/ids'
 import { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
+  VerificationPlanRequirementV1,
   VerificationRequirement,
   VerificationResult,
 } from '@patchplane/domain/verification'
+import { GitCommitSha } from '@patchplane/domain/refinements'
 import { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { withCapturedCriticalPathScope } from '../critical-path-telemetry'
 
@@ -87,6 +90,108 @@ type SandboxExecutionValue = Schema.Schema.Type<typeof SandboxExecution>
 const noIncomingDispatch: Effect.Effect<
   IncomingPullRequestDispatch | undefined
 > = Effect.void.pipe(Effect.as(undefined))
+
+const ConfiguredWorkspaceVerificationPolicy = Schema.Struct({
+  workspaceId: WorkspaceId,
+  revision: Schema.NonEmptyString,
+  requirements: Schema.Array(VerificationPlanRequirementV1),
+})
+const ConfiguredBaseRepositoryVerificationPolicy = Schema.Struct({
+  repositoryFullName: Schema.NonEmptyString,
+  revision: Schema.NonEmptyString,
+  requirements: Schema.Array(VerificationPlanRequirementV1),
+})
+
+const loadConfiguredVerificationPolicyLayers = Effect.fnUntraced(function* (
+  config: {
+    readonly workspaceVerificationPolicyJson: string
+    readonly baseRepositoryVerificationPolicyJson: string
+  },
+  workflowStart: Schema.Schema.Type<typeof WorkflowStart>,
+) {
+  const decodeJson = <A>(
+    value: string,
+    decode: (input: unknown) => Effect.Effect<A, unknown>,
+    label: string,
+  ) =>
+    value.trim().length === 0
+      ? Effect.void
+      : new TextEncoder().encode(value).byteLength > 65_536
+        ? Effect.fail(
+            new SourceControlWorkerRequestError({
+              message: `${label} exceeds the 65536-byte policy limit`,
+            }),
+          )
+        : Effect.try({
+            try: () => JSON.parse(value) as unknown,
+            catch: (cause) =>
+              new SourceControlWorkerRequestError({
+                message: `${label} is not valid JSON: ${String(cause)}`,
+              }),
+          }).pipe(
+            Effect.flatMap(decode),
+            Effect.mapError(
+              () =>
+                new SourceControlWorkerRequestError({
+                  message: `${label} failed trusted policy validation`,
+                }),
+            ),
+          )
+
+  const workspace = yield* decodeJson(
+    config.workspaceVerificationPolicyJson,
+    Schema.decodeUnknownEffect(ConfiguredWorkspaceVerificationPolicy),
+    'PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON',
+  )
+  const baseRepository = yield* decodeJson(
+    config.baseRepositoryVerificationPolicyJson,
+    Schema.decodeUnknownEffect(ConfiguredBaseRepositoryVerificationPolicy),
+    'PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON',
+  )
+  const externalRef = workflowStart.promptRequest.externalRef
+  const baseSha =
+    workflowStart.workflowRun.sourceBaseSha === undefined
+      ? undefined
+      : yield* Schema.decodeUnknownEffect(GitCommitSha)(
+          workflowStart.workflowRun.sourceBaseSha,
+        ).pipe(
+          Effect.mapError(
+            () =>
+              new SourceControlWorkerRequestError({
+                message: 'Workflow base SHA is invalid for trusted policy',
+              }),
+          ),
+        )
+  return {
+    ...(workspace?.workspaceId !== workflowStart.workflowRun.workspaceId
+      ? {}
+      : {
+          workspacePolicy: {
+            source: {
+              kind: 'workspace-policy' as const,
+              workspaceId: workspace.workspaceId,
+              revision: workspace.revision,
+            },
+            requirements: workspace.requirements,
+          },
+        }),
+    ...(baseRepository === undefined ||
+    externalRef?.repositoryFullName !== baseRepository.repositoryFullName ||
+    baseSha === undefined
+      ? {}
+      : {
+          baseRepositoryPolicy: {
+            source: {
+              kind: 'base-repository-policy' as const,
+              repositoryFullName: baseRepository.repositoryFullName,
+              baseSha,
+              revision: baseRepository.revision,
+            },
+            requirements: baseRepository.requirements,
+          },
+        }),
+  }
+})
 
 const lookupGitHubWebhookRoute = makeFunctionReference<
   'query',
@@ -389,6 +494,10 @@ const loadGitHubWebhookRouteConfig = Effect.fnUntraced(function* (
         return {
           workspaceId,
           repositoryAllowlist,
+          workspaceVerificationPolicyJson:
+            config.workspaceVerificationPolicyJson,
+          baseRepositoryVerificationPolicyJson:
+            config.baseRepositoryVerificationPolicyJson,
           execution: {
             mode: config.webhookExecution,
             ...resolvePiExecutionConfig(config),
@@ -400,6 +509,9 @@ const loadGitHubWebhookRouteConfig = Effect.fnUntraced(function* (
       return {
         workspaceId,
         repositoryAllowlist,
+        workspaceVerificationPolicyJson: config.workspaceVerificationPolicyJson,
+        baseRepositoryVerificationPolicyJson:
+          config.baseRepositoryVerificationPolicyJson,
         execution: {
           mode: config.webhookExecution,
           command: DAYTONA_DEFAULT_COMMAND,
@@ -679,6 +791,25 @@ export async function executeWorkflowRerun(
   const workflowStart = workflowExit.value
   const executionExit = await runtime.runPromiseExit(
     Effect.gen(function* () {
+      const trustedPolicyLayers = yield* loadConfiguredVerificationPolicyLayers(
+        routeConfig,
+        workflowStart,
+      )
+      const persistedVerification =
+        workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+          ? yield* PersistConfiguredVerificationRequirements({
+              ...trustedPolicyLayers,
+              workflowRunId: workflowStart.workflowRun.id,
+              testCommand: routeConfig.execution.evidenceTestReportCommand,
+              testPlatform: routeConfig.execution.evidenceTestPlatform,
+              browserCommand:
+                routeConfig.execution.evidenceBrowserScreenshotCommand,
+              timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              createdAt: Date.now(),
+              traceId: workflowStart.workflowRun.traceId,
+              operation: 'github.rerun.persistVerificationPlan',
+            })
+          : undefined
       const incomingDispatch =
         workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
           ? yield* FreezeIncomingPullRequestCandidate({ workflowStart }).pipe(
@@ -703,6 +834,9 @@ export async function executeWorkflowRerun(
         ? RunSandboxAgentForWorkflow({
             workflowStart,
             ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+            ...(persistedVerification === undefined
+              ? {}
+              : { verificationPlan: persistedVerification }),
             provider: routeConfig.execution.provider,
             model: routeConfig.execution.model,
             thinking: routeConfig.execution.thinking,
@@ -717,6 +851,9 @@ export async function executeWorkflowRerun(
         : RunSandboxCommandForWorkflow({
             workflowStart,
             ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+            ...(persistedVerification === undefined
+              ? {}
+              : { verificationPlan: persistedVerification }),
             command: routeConfig.execution.command,
             timeoutSeconds: routeConfig.execution.timeoutSeconds,
             evidenceTestReportCommand:
@@ -1172,6 +1309,25 @@ export async function handleGitHubWebhook(
     }
 
     const workflowStart = yield* StartWorkflowFromIntake(intake)
+    const trustedPolicyLayers = yield* loadConfiguredVerificationPolicyLayers(
+      routeConfig,
+      workflowStart,
+    )
+    const persistedVerification =
+      workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+        ? yield* PersistConfiguredVerificationRequirements({
+            ...trustedPolicyLayers,
+            workflowRunId: workflowStart.workflowRun.id,
+            testCommand: routeConfig.execution.evidenceTestReportCommand,
+            testPlatform: routeConfig.execution.evidenceTestPlatform,
+            browserCommand:
+              routeConfig.execution.evidenceBrowserScreenshotCommand,
+            timeoutSeconds: routeConfig.execution.timeoutSeconds,
+            createdAt: Date.now(),
+            traceId: workflowStart.workflowRun.traceId,
+            operation: 'github.webhook.persistVerificationPlan',
+          })
+        : undefined
     const incomingDispatch =
       workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
         ? yield* FreezeIncomingPullRequestCandidate({ workflowStart }).pipe(
@@ -1193,6 +1349,9 @@ export async function handleGitHubWebhook(
           ? yield* RunSandboxAgentForWorkflow({
               workflowStart,
               ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+              ...(persistedVerification === undefined
+                ? {}
+                : { verificationPlan: persistedVerification }),
               provider: routeConfig.execution.provider,
               model: routeConfig.execution.model,
               thinking: routeConfig.execution.thinking,
@@ -1207,6 +1366,9 @@ export async function handleGitHubWebhook(
           : yield* RunSandboxCommandForWorkflow({
               workflowStart,
               ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+              ...(persistedVerification === undefined
+                ? {}
+                : { verificationPlan: persistedVerification }),
               command: routeConfig.execution.command,
               timeoutSeconds: routeConfig.execution.timeoutSeconds,
               evidenceTestReportCommand:

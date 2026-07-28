@@ -348,13 +348,33 @@ const evidenceOutputPathspecExclusions = [
   .map(shellQuote)
   .join(' ')
 
+const captureCandidateStateDigest = Effect.fnUntraced(function* (
+  sandbox: DaytonaSandboxLike,
+  input: { readonly baseSha: string; readonly traceId: string },
+) {
+  const result = yield* executeSandboxCommand(sandbox, {
+    command: `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
+    timeoutSeconds: evidenceCaptureTimeoutSeconds,
+    traceId: input.traceId,
+  })
+  const digest = result.stdout.trim().split(/\s+/, 1)[0]
+  return result.exitCode === 0 &&
+    digest !== undefined &&
+    /^[0-9a-f]{64}$/i.test(digest)
+    ? `sha256:${digest.toLowerCase()}`
+    : undefined
+})
+
 const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   sandbox: DaytonaSandboxLike,
   input: {
     readonly traceId: string
     readonly baseSha: string
     readonly evidenceTestReportCommand?: string | undefined
+    readonly evidenceTestTimeoutSeconds?: number | undefined
     readonly evidenceBrowserScreenshotCommand?: string | undefined
+    readonly evidenceBrowserTimeoutSeconds?: number | undefined
+    readonly timeoutSeconds?: number | undefined
   },
 ) {
   const artifacts: Array<SandboxEvidenceArtifact> = []
@@ -362,11 +382,12 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   const runCaptureCommand = Effect.fnUntraced(function* (
     operation: string,
     command: string,
+    timeoutSeconds = evidenceCaptureTimeoutSeconds,
   ) {
     const startedAt = yield* Clock.currentTimeMillis
     const result = yield* executeSandboxCommand(sandbox, {
       command,
-      timeoutSeconds: evidenceCaptureTimeoutSeconds,
+      timeoutSeconds,
       traceId: `${input.traceId}-${operation}`,
     }).pipe(
       Effect.catch((error) =>
@@ -388,18 +409,17 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
       ? architectureProbe.stdout.trim()
       : 'unknown'
   const captureCandidateState = (operation: string) =>
-    runCaptureCommand(
-      operation,
-      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
-    ).pipe(
-      Effect.map((result) => {
-        const digest = result?.stdout.trim().split(/\s+/, 1)[0]
-        return result?.exitCode === 0 &&
-          digest !== undefined &&
-          /^[0-9a-f]{64}$/i.test(digest)
-          ? `sha256:${digest.toLowerCase()}`
-          : undefined
-      }),
+    captureCandidateStateDigest(sandbox, {
+      baseSha: input.baseSha,
+      traceId: `${input.traceId}-${operation}`,
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('Candidate state capture failed', {
+          traceId: input.traceId,
+          operation,
+          error: error.message,
+        }).pipe(Effect.as(undefined)),
+      ),
     )
 
   let shouldProbeTestReport = false
@@ -427,6 +447,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
       const result = yield* runCaptureCommand(
         'test-report-command',
         input.evidenceTestReportCommand,
+        input.evidenceTestTimeoutSeconds ?? evidenceCaptureTimeoutSeconds,
       )
       const candidateDigestAfter = yield* captureCandidateState(
         'test-candidate-after',
@@ -532,6 +553,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
       const result = yield* runCaptureCommand(
         'browser-screenshot-command',
         input.evidenceBrowserScreenshotCommand,
+        input.evidenceBrowserTimeoutSeconds ?? evidenceCaptureTimeoutSeconds,
       )
       const candidateDigestAfter = yield* captureCandidateState(
         'browser-candidate-after',
@@ -821,6 +843,13 @@ export function makeDaytonaSandboxLayer(
                       sandbox,
                       input.traceId,
                     )
+                    const initialCandidateStateDigest =
+                      input.candidateBaseSha === undefined
+                        ? undefined
+                        : yield* captureCandidateStateDigest(sandbox, {
+                            baseSha: input.candidateBaseSha,
+                            traceId: `${input.traceId}-candidate-initial`,
+                          })
                     const timeoutSeconds =
                       input.timeoutSeconds ??
                       DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
@@ -984,6 +1013,9 @@ export function makeDaytonaSandboxLayer(
                         evidenceArtifacts,
                         verificationResults,
                         candidateStateDigest,
+                        ...(initialCandidateStateDigest === undefined
+                          ? {}
+                          : { initialCandidateStateDigest }),
                         baseSha,
                         startedAt,
                         completedAt: yield* Clock.currentTimeMillis,
@@ -1047,6 +1079,9 @@ export function makeDaytonaSandboxLayer(
                       evidenceArtifacts,
                       verificationResults,
                       candidateStateDigest,
+                      ...(initialCandidateStateDigest === undefined
+                        ? {}
+                        : { initialCandidateStateDigest }),
                       baseSha,
                       startedAt,
                       completedAt: yield* Clock.currentTimeMillis,
@@ -1270,6 +1305,13 @@ export function makeDaytonaSandboxLayer(
                     sandbox,
                     input.traceId,
                   )
+                  const initialCandidateStateDigest =
+                    input.candidateBaseSha === undefined
+                      ? undefined
+                      : yield* captureCandidateStateDigest(sandbox, {
+                          baseSha: input.candidateBaseSha,
+                          traceId: `${input.traceId}-candidate-initial`,
+                        })
                   const command =
                     input.command.trim().length === 0
                       ? DAYTONA_DEFAULT_COMMAND
@@ -1302,6 +1344,9 @@ export function makeDaytonaSandboxLayer(
                     evidenceArtifacts,
                     verificationResults,
                     candidateStateDigest,
+                    ...(initialCandidateStateDigest === undefined
+                      ? {}
+                      : { initialCandidateStateDigest }),
                     baseSha,
                     startedAt,
                     completedAt: yield* Clock.currentTimeMillis,

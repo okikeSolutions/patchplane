@@ -34,6 +34,12 @@ export const sourceControlRuntimeEnv = {
   PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND: Config.string(
     'PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND',
   ).pipe(Config.withDefault('')),
+  PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON: Config.string(
+    'PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON',
+  ).pipe(Config.withDefault('')),
+  PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON: Config.string(
+    'PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON',
+  ).pipe(Config.withDefault('')),
 } as const
 
 export const clientRuntimeEnv = {

@@ -41,6 +41,23 @@ describe('source-control route config', () => {
     }),
   )
 
+  it.effect(
+    'loads trusted workspace and base-repository policy documents',
+    () =>
+      Effect.gen(function* () {
+        const workspacePolicy = '{"workspaceId":"workos:org_123"}'
+        const basePolicy = '{"repositoryFullName":"octo/demo"}'
+        const config = yield* loadSourceControlRouteConfig({
+          ...requiredEnv,
+          PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON: workspacePolicy,
+          PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON: basePolicy,
+        })
+
+        expect(config.workspaceVerificationPolicyJson).toBe(workspacePolicy)
+        expect(config.baseRepositoryVerificationPolicyJson).toBe(basePolicy)
+      }),
+  )
+
   it.effect('keeps the optional Cloudflare API key redacted', () =>
     Effect.gen(function* () {
       const config = yield* loadSourceControlRouteConfig({
@@ -50,8 +67,12 @@ describe('source-control route config', () => {
 
       expect(Option.isSome(config.cloudflareApiKey)).toBe(true)
       if (Option.isSome(config.cloudflareApiKey)) {
-        expect(Redacted.value(config.cloudflareApiKey.value)).toBe('secret-value')
-        expect(String(config.cloudflareApiKey.value)).not.toContain('secret-value')
+        expect(Redacted.value(config.cloudflareApiKey.value)).toBe(
+          'secret-value',
+        )
+        expect(String(config.cloudflareApiKey.value)).not.toContain(
+          'secret-value',
+        )
       }
     }),
   )

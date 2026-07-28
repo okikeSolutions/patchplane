@@ -358,7 +358,7 @@ export function makeR2ArtifactsService(
           const metadataDiffers =
             Object.keys(actualMetadata).length !== expectedMetadata.length ||
             expectedMetadata.some(
-              ([key, value]) => actualMetadata[key] !== value,
+              ([metadataKey, value]) => actualMetadata[metadataKey] !== value,
             )
           if (
             object.size !== bytes.byteLength ||
