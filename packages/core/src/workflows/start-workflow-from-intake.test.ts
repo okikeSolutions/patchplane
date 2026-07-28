@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import {
   makePullRequestExternalId,
   makePullRequestNumber,
@@ -33,6 +33,13 @@ const TestStorageLayer = Layer.succeed(
     getActiveRuntimeSession: () => Effect.die('unused'),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
+    getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+    claimCandidateFreeze: () => Effect.succeed(false),
+    releaseCandidateFreeze: () => Effect.succeed(false),
+    failCandidateFreeze: () => Effect.succeed(true),
+    claimIncomingDispatch: () => Effect.succeed(false),
+    startIncomingDispatch: () => Effect.succeed(true),
+    validateIncomingDispatch: () => Effect.succeed(false),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),
@@ -104,6 +111,7 @@ const TestSourceControlLayer = Layer.succeed(
     createIssueComment: () => Effect.die('unused'),
     createCheckRun: () => Effect.die('unused'),
     createDraftPullRequest: () => Effect.die('unused'),
+    fetchImmutableComparison: () => Effect.die('unused'),
     createRepositoryCloneCredentials: () => Effect.die('unused'),
   }),
 )

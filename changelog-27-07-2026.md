@@ -39,3 +39,24 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after remediation.
 - Herdr documentation/tracker audit — no actionable findings after remediation.
 - Herdr code/security review — no actionable findings after remediation.
+
+## Task 3 — CAND-005/CAND-007 exact incoming candidate freeze
+
+Status: Complete
+
+- Fetches the GitHub comparison explicitly by the webhook-authenticated base and head SHAs, never from a mutable current-PR diff or the truncated changed-files JSON list.
+- Streams at most 10 MiB with a deadline and fails closed on unavailable or unacceptable responses, unexpected content types, truncation, invalid UTF-8, binary patches, missing commits, and ambiguous comparison output.
+- Hashes the exact accepted bytes with SHA-256, writes them to a deterministic conflict-safe R2 key, and persists matching producer/subject/artifact/candidate identity in Convex before any Daytona or Pi dispatch.
+- Uses latest-lineage, owner-token freeze leases to fence stale capture workers; permanent rejections durably fail with provenance while transient failures remain resumable.
+- Requires a durable incoming candidate before issuing an opaque candidate-bound dispatch token. Daytona start, failure, and result persistence are fenced by token, latest attempt, and the durably recorded sandbox ID.
+- Adds scheduled token-and-sandbox-fenced recovery for crashes before or after sandbox-result persistence, without treating telemetry or provider success as provenance.
+- Preserves historical V1 and sandbox-generated candidate behavior without representing either as incoming-PR verification.
+- Retains immutable R2 objects after ambiguous metadata-write failures for reconciliation instead of destructively deleting potentially committed evidence.
+- Marked sequence item 3 complete, `CAND-003` Verified, and `CAND-005`/`CAND-007` Implemented. Credentialed exact-diff dogfood and downstream trusted-plan/execution work remain open.
+
+Validation:
+
+- `bun run verify` — passed (types, lint, all automated tests, CLI eval, roadmap acceptance, production build, and bundle budgets).
+- Herdr Effect/branded-types audit — no actionable findings after remediation.
+- Herdr documentation/tracker audit — no actionable findings after remediation.
+- Herdr code/security review — no actionable findings after remediation.

@@ -5,7 +5,7 @@ import {
   makeSystemWorkspaceId,
   makeWorkflowRunId,
 } from '@patchplane/domain/ids'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { StorageService } from '../services/storage-service'
 import { ListRecentWorkflowStarts } from './list-recent-workflow-starts'
 
@@ -15,7 +15,7 @@ const TestStorageLayer = Layer.succeed(
     createWorkflowFromIntake: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     claimWorkflowExecution: () => Effect.succeed(true),
-          markWorkflowExecutionFailed: () => Effect.succeed(true),
+    markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
@@ -23,6 +23,13 @@ const TestStorageLayer = Layer.succeed(
     getActiveRuntimeSession: () => Effect.die('unused'),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
+    getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+    claimCandidateFreeze: () => Effect.succeed(false),
+    releaseCandidateFreeze: () => Effect.succeed(false),
+    failCandidateFreeze: () => Effect.succeed(true),
+    claimIncomingDispatch: () => Effect.succeed(false),
+    startIncomingDispatch: () => Effect.succeed(true),
+    validateIncomingDispatch: () => Effect.succeed(false),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),

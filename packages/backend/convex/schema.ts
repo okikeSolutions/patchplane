@@ -13,6 +13,31 @@ const evidenceArtifactKind = v.union(
   v.literal('trust-report'),
 )
 
+const candidateSubject = v.union(
+  v.object({
+    kind: v.literal('incoming-pull-request'),
+    repositoryProvider: v.literal('github'),
+    repositoryExternalId: v.string(),
+    repositoryOwner: v.string(),
+    repositoryName: v.string(),
+    repositoryFullName: v.string(),
+    pullRequestExternalId: v.string(),
+    pullRequestNumber: v.number(),
+    baseSha: v.string(),
+    headSha: v.string(),
+    sourceEventProvider: v.literal('github'),
+    sourceEventDeliveryId: v.string(),
+    sourceEventKind: v.union(
+      v.literal('github.pull_request.opened'),
+      v.literal('github.pull_request.synchronize'),
+    ),
+  }),
+  v.object({
+    kind: v.literal('sandbox-generated'),
+    sandboxExecutionId: v.id('sandboxExecutions'),
+  }),
+)
+
 const candidatePatchSetStatus = v.union(
   v.literal('captured'),
   v.literal('empty'),
@@ -350,6 +375,7 @@ export default defineSchema({
   candidatePatchSets: defineTable({
     workflowRunId: v.id('workflowRuns'),
     sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    subject: v.optional(candidateSubject),
     status: candidatePatchSetStatus,
     candidateDigest: v.optional(v.string()),
     baseRef: v.optional(v.string()),
@@ -621,6 +647,13 @@ export default defineSchema({
     attemptNumber: v.optional(v.number()),
     trigger: v.optional(v.union(v.literal('intake'), v.literal('rerun'))),
     candidateIdentityVersion: v.optional(v.literal('incoming-pr-v1')),
+    candidateFreezeClaimedAt: v.optional(v.number()),
+    candidateFreezeLeaseToken: v.optional(v.string()),
+    incomingDispatchClaimedAt: v.optional(v.number()),
+    incomingDispatchStartedAt: v.optional(v.number()),
+    incomingDispatchSandboxId: v.optional(v.string()),
+    incomingDispatchToken: v.optional(v.string()),
+    incomingDispatchCandidatePatchSetId: v.optional(v.id('candidatePatchSets')),
     sourceBaseSha: v.optional(v.string()),
     sourceCommitSha: v.optional(v.string()),
     status: v.union(

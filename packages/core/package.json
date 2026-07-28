@@ -21,6 +21,7 @@
     "./services/telemetry-service": "./src/services/telemetry-service.ts",
     "./workflows/capture-evidence-artifact": "./src/workflows/capture-evidence-artifact.ts",
     "./workflows/control-runtime-session": "./src/workflows/control-runtime-session.ts",
+    "./workflows/freeze-incoming-pull-request-candidate": "./src/workflows/freeze-incoming-pull-request-candidate.ts",
     "./workflows/github-event-to-intake": "./src/workflows/github-event-to-intake.ts",
     "./workflows/ingest-github-webhook": "./src/workflows/ingest-github-webhook.ts",
     "./workflows/list-recent-workflow-starts": "./src/workflows/list-recent-workflow-starts.ts",

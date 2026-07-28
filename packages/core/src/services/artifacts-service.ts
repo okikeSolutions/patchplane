@@ -24,6 +24,8 @@ export interface StoredArtifactObjectMetadata {
   readonly sizeBytes: number
   readonly sha256: string
   readonly createdAt: number
+  /** False when a deterministic idempotency key reused an existing object. */
+  readonly createdByRequest?: boolean | undefined
 }
 
 export interface PutArtifactInput extends TelemetryContextFields {
@@ -33,6 +35,7 @@ export interface PutArtifactInput extends TelemetryContextFields {
   readonly contentType: string
   readonly body: ArtifactBody
   readonly storageKeyHint?: string | undefined
+  readonly idempotencyKey?: string | undefined
   readonly retentionPolicy?: string | undefined
   readonly metadata?: Readonly<Record<string, string>> | undefined
 }
@@ -62,21 +65,24 @@ export interface ApplyArtifactRetentionPolicyInput extends TelemetryContextField
 }
 
 /** Evidence artifact storage boundary. Raw artifact bytes belong outside Convex/provenance stores. */
-export class ArtifactsService extends Context.Service<ArtifactsService, {
-  readonly putArtifact: (
-    input: PutArtifactInput,
-  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
-  readonly getArtifactMetadata: (
-    input: GetArtifactMetadataInput,
-  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
-  readonly createSignedReadUrl: (
-    input: CreateSignedReadUrlInput,
-  ) => Effect.Effect<SignedArtifactReadUrl, ArtifactsError>
-  readonly deleteArtifact: (
-    input: DeleteArtifactInput,
-  ) => Effect.Effect<void, ArtifactsError>
-  /** Applies PatchPlane retention intent for an artifact. R2 lifecycle enforcement is configured by bucket/prefix. */
-  readonly applyRetentionPolicy: (
-    input: ApplyArtifactRetentionPolicyInput,
-  ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
-}>()('@patchplane/core/services/ArtifactsService') {}
+export class ArtifactsService extends Context.Service<
+  ArtifactsService,
+  {
+    readonly putArtifact: (
+      input: PutArtifactInput,
+    ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
+    readonly getArtifactMetadata: (
+      input: GetArtifactMetadataInput,
+    ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
+    readonly createSignedReadUrl: (
+      input: CreateSignedReadUrlInput,
+    ) => Effect.Effect<SignedArtifactReadUrl, ArtifactsError>
+    readonly deleteArtifact: (
+      input: DeleteArtifactInput,
+    ) => Effect.Effect<void, ArtifactsError>
+    /** Applies PatchPlane retention intent for an artifact. R2 lifecycle enforcement is configured by bucket/prefix. */
+    readonly applyRetentionPolicy: (
+      input: ApplyArtifactRetentionPolicyInput,
+    ) => Effect.Effect<StoredArtifactObjectMetadata, ArtifactsError>
+  }
+>()('@patchplane/core/services/ArtifactsService') {}

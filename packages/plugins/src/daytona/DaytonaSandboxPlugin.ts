@@ -1,4 +1,14 @@
-import { Clock, Config, Effect, Exit, Layer, Option, Schedule, Schema, Stream } from 'effect'
+import {
+  Clock,
+  Config,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+} from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { XMLValidator } from 'fast-xml-parser'
 import { PNG } from 'pngjs'
@@ -24,13 +34,25 @@ import {
   toDaytonaCreateSandboxParams,
   toSandboxPolicy,
 } from './daytona-adapter'
-import { executeSandboxCommand, startSandboxSessionCommand, streamSandboxSessionCommandLogs } from './daytona-process'
+import {
+  executeSandboxCommand,
+  startSandboxSessionCommand,
+  streamSandboxSessionCommandLogs,
+} from './daytona-process'
 import { sanitizeDaytonaCause } from './daytona-redaction'
 import { shellQuote } from './daytona-shell'
-import { buildPiCommandSpec, buildPiRpcCommandSpec, buildRedactedPiCommandSpec, renderShellCommand } from '../sandbox-runtime/pi/command'
+import {
+  buildPiCommandSpec,
+  buildPiRpcCommandSpec,
+  buildRedactedPiCommandSpec,
+  renderShellCommand,
+} from '../sandbox-runtime/pi/command'
 import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
 import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
-import { decodePiRpcRuntimeEvents, type PiRpcRuntimeEvent } from '../sandbox-runtime/pi/ingestion'
+import {
+  decodePiRpcRuntimeEvents,
+  type PiRpcRuntimeEvent,
+} from '../sandbox-runtime/pi/ingestion'
 import { makePiRuntimeSession } from '../sandbox-runtime/pi/runtime-session'
 import { makePiRpcCommandSender } from '../sandbox-runtime/pi/transport'
 
@@ -45,7 +67,10 @@ export interface DaytonaClientLike {
     params: ReturnType<typeof toDaytonaCreateSandboxParams>,
     options?: { readonly timeout?: number },
   ) => Promise<DaytonaSandboxLike>
-  readonly delete: (sandbox: DaytonaSandboxLike, timeout?: number) => Promise<void>
+  readonly delete: (
+    sandbox: DaytonaSandboxLike,
+    timeout?: number,
+  ) => Promise<void>
   readonly get?: (sandboxIdOrName: string) => Promise<DaytonaSandboxLike>
   readonly [Symbol.asyncDispose]?: () => Promise<void>
 }
@@ -82,13 +107,19 @@ export interface DaytonaSandboxLike {
       readonly stdout?: string | undefined
       readonly stderr?: string | undefined
     }>
-    readonly getSessionCommand?: (sessionId: string, commandId: string) => Promise<{
+    readonly getSessionCommand?: (
+      sessionId: string,
+      commandId: string,
+    ) => Promise<{
       readonly id?: string | undefined
       readonly command?: string | undefined
       readonly exitCode?: number | undefined
     }>
     readonly getSessionCommandLogs?: {
-      (sessionId: string, commandId: string): Promise<{
+      (
+        sessionId: string,
+        commandId: string,
+      ): Promise<{
         readonly output?: string | undefined
         readonly stdout?: string | undefined
         readonly stderr?: string | undefined
@@ -100,7 +131,11 @@ export interface DaytonaSandboxLike {
         onStderr: (chunk: string) => void,
       ): Promise<void>
     }
-    readonly sendSessionCommandInput?: (sessionId: string, commandId: string, data: string) => Promise<void>
+    readonly sendSessionCommandInput?: (
+      sessionId: string,
+      commandId: string,
+      data: string,
+    ) => Promise<void>
     readonly deleteSession: (sessionId: string) => Promise<void>
   }
   readonly waitUntilStarted: (timeout?: number) => Promise<void>
@@ -113,11 +148,12 @@ function isDaytonaNotFoundCause(cause: unknown): boolean {
 }
 
 function sandboxBoundaryError(operation: string, message: string) {
-  return (cause: unknown) => new SandboxError({
-    operation,
-    message,
-    cause: sanitizeDaytonaCause(cause),
-  })
+  return (cause: unknown) =>
+    new SandboxError({
+      operation,
+      message,
+      cause: sanitizeDaytonaCause(cause),
+    })
 }
 
 function deleteSandboxWithRetries(input: {
@@ -141,7 +177,7 @@ function deleteSandboxWithRetries(input: {
         attempt: loggedAttempt,
         totalAttempts: totalRetries + 1,
         cause: sanitizeDaytonaCause(cause),
-      })
+      }),
     ),
     Effect.mapError(({ cause }) => cause),
     Effect.retry(Schedule.recurs(totalRetries)),
@@ -154,7 +190,8 @@ function makeDefaultDaytonaClient(config: DaytonaConfig): DaytonaClientLike {
     create: (params, options) => daytona.create(params, options),
     delete: (sandbox, timeout) => sandbox.delete(timeout),
     get: (sandboxIdOrName) => daytona.get(sandboxIdOrName),
-    [Symbol.asyncDispose]: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
+    [Symbol.asyncDispose]: () =>
+      daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
   }
 }
 
@@ -174,7 +211,9 @@ function parseBinaryArtifactProbe(stdout: string) {
   const markerIndex = stdout.indexOf(binaryArtifactMarker)
   if (markerIndex < 0) return undefined
   const path = stdout.slice(0, markerIndex).trim()
-  const encoded = stdout.slice(markerIndex + binaryArtifactMarker.length).replace(/\s+/g, '')
+  const encoded = stdout
+    .slice(markerIndex + binaryArtifactMarker.length)
+    .replace(/\s+/g, '')
   if (path.length === 0 || encoded.length === 0) return undefined
   const binary = atob(encoded)
   const body = new Uint8Array(binary.length)
@@ -188,17 +227,19 @@ function testReportContentType(path: string) {
   return path.endsWith('.xml') ? 'application/xml' : 'application/json'
 }
 
-const TestReportJson = Schema.fromJsonString(Schema.Union([
-  Schema.Struct({ ok: Schema.Boolean }),
-  Schema.Struct({
-    numTotalTests: Schema.Finite.check(Schema.isGreaterThan(0)),
-    numFailedTests: Schema.Literal(0),
-  }),
-  Schema.Struct({
-    failed: Schema.Literal(0),
-    passed: Schema.Finite.check(Schema.isGreaterThan(0)),
-  }),
-]))
+const TestReportJson = Schema.fromJsonString(
+  Schema.Union([
+    Schema.Struct({ ok: Schema.Boolean }),
+    Schema.Struct({
+      numTotalTests: Schema.Finite.check(Schema.isGreaterThan(0)),
+      numFailedTests: Schema.Literal(0),
+    }),
+    Schema.Struct({
+      failed: Schema.Literal(0),
+      passed: Schema.Finite.check(Schema.isGreaterThan(0)),
+    }),
+  ]),
+)
 const decodeTestReportJson = Schema.decodeUnknownOption(TestReportJson)
 
 function isValidTestReport(path: string, body: string) {
@@ -208,7 +249,12 @@ function isValidTestReport(path: string, body: string) {
     const tests = root?.[1]?.match(/\btests=["'](\d+)["']/i)?.[1]
     const failures = root?.[1]?.match(/\bfailures=["'](\d+)["']/i)?.[1] ?? '0'
     const errors = root?.[1]?.match(/\berrors=["'](\d+)["']/i)?.[1] ?? '0'
-    return root !== null && Number(tests) > 0 && Number(failures) === 0 && Number(errors) === 0
+    return (
+      root !== null &&
+      Number(tests) > 0 &&
+      Number(failures) === 0 &&
+      Number(errors) === 0
+    )
   }
   const decoded = decodeTestReportJson(body)
   if (Option.isNone(decoded)) return false
@@ -267,22 +313,26 @@ function screenshotProbeCommand() {
   return `node -e '${script}'`
 }
 
-const captureRepositoryBaseSha = Effect.fnUntraced(function*(sandbox: DaytonaSandboxLike, traceId: string) {
-    const result = yield* executeSandboxCommand(sandbox, {
-      command: 'git rev-parse HEAD',
-      timeoutSeconds: evidenceCaptureTimeoutSeconds,
-      traceId: `${traceId}-base-sha`,
-    })
-    const baseSha = result.stdout.trim()
-    if (result.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
-      return yield* new SandboxError({
-        operation: 'daytona.captureRepositoryBaseSha',
-        message: 'Daytona could not determine the repository base commit for evidence capture',
-        cause: { exitCode: result.exitCode, stderr: result.stderr },
-      })
-    }
-    return baseSha
+const captureRepositoryBaseSha = Effect.fnUntraced(function* (
+  sandbox: DaytonaSandboxLike,
+  traceId: string,
+) {
+  const result = yield* executeSandboxCommand(sandbox, {
+    command: 'git rev-parse HEAD',
+    timeoutSeconds: evidenceCaptureTimeoutSeconds,
+    traceId: `${traceId}-base-sha`,
   })
+  const baseSha = result.stdout.trim()
+  if (result.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+    return yield* new SandboxError({
+      operation: 'daytona.captureRepositoryBaseSha',
+      message:
+        'Daytona could not determine the repository base commit for evidence capture',
+      cause: { exitCode: result.exitCode, stderr: result.stderr },
+    })
+  }
+  return baseSha
+})
 
 const evidenceOutputPathspecExclusions = [
   ':(exclude).patchplane/**',
@@ -294,9 +344,11 @@ const evidenceOutputPathspecExclusions = [
   ':(exclude)patchplane-browser-screenshot.png',
   ':(exclude)test-results/browser-screenshot.png',
   ':(exclude)playwright-report/browser-screenshot.png',
-].map(shellQuote).join(' ')
+]
+  .map(shellQuote)
+  .join(' ')
 
-const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function*(
+const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   sandbox: DaytonaSandboxLike,
   input: {
     readonly traceId: string
@@ -305,212 +357,290 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function*(
     readonly evidenceBrowserScreenshotCommand?: string | undefined
   },
 ) {
-    const artifacts: Array<SandboxEvidenceArtifact> = []
-    const verificationResults: Array<SandboxVerificationResult> = []
-    const runCaptureCommand = Effect.fnUntraced(function*(operation: string, command: string) {
-      const startedAt = yield* Clock.currentTimeMillis
-      const result = yield* executeSandboxCommand(sandbox, {
-        command,
-        timeoutSeconds: evidenceCaptureTimeoutSeconds,
-        traceId: `${input.traceId}-${operation}`,
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning('Evidence artifact probe failed', {
-            traceId: input.traceId,
-            operation,
-            error: error.message,
-          }).pipe(Effect.as(undefined))
-        ),
-      )
-      if (result === undefined) return undefined
-      return { ...result, startedAt, completedAt: yield* Clock.currentTimeMillis }
-    })
+  const artifacts: Array<SandboxEvidenceArtifact> = []
+  const verificationResults: Array<SandboxVerificationResult> = []
+  const runCaptureCommand = Effect.fnUntraced(function* (
+    operation: string,
+    command: string,
+  ) {
+    const startedAt = yield* Clock.currentTimeMillis
+    const result = yield* executeSandboxCommand(sandbox, {
+      command,
+      timeoutSeconds: evidenceCaptureTimeoutSeconds,
+      traceId: `${input.traceId}-${operation}`,
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('Evidence artifact probe failed', {
+          traceId: input.traceId,
+          operation,
+          error: error.message,
+        }).pipe(Effect.as(undefined)),
+      ),
+    )
+    if (result === undefined) return undefined
+    return { ...result, startedAt, completedAt: yield* Clock.currentTimeMillis }
+  })
 
-    const architectureProbe = yield* runCaptureCommand('architecture', 'uname -m')
-    const architecture = architectureProbe?.exitCode === 0 && architectureProbe.stdout.trim().length > 0
+  const architectureProbe = yield* runCaptureCommand('architecture', 'uname -m')
+  const architecture =
+    architectureProbe?.exitCode === 0 &&
+    architectureProbe.stdout.trim().length > 0
       ? architectureProbe.stdout.trim()
       : 'unknown'
-    const captureCandidateState = (operation: string) =>
-      runCaptureCommand(
-        operation,
-        `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
-      ).pipe(Effect.map((result) => {
+  const captureCandidateState = (operation: string) =>
+    runCaptureCommand(
+      operation,
+      `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
+    ).pipe(
+      Effect.map((result) => {
         const digest = result?.stdout.trim().split(/\s+/, 1)[0]
-        return result?.exitCode === 0 && digest !== undefined && /^[0-9a-f]{64}$/i.test(digest)
+        return result?.exitCode === 0 &&
+          digest !== undefined &&
+          /^[0-9a-f]{64}$/i.test(digest)
           ? `sha256:${digest.toLowerCase()}`
           : undefined
-      }))
-
-    let shouldProbeTestReport = false
-    if (nonEmpty(input.evidenceTestReportCommand)) {
-      const cleanup = yield* runCaptureCommand(
-        'test-report-clean',
-        "rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json",
-      )
-      if (cleanup === undefined || cleanup.exitCode !== 0) {
-        verificationResults.push({
-          kind: 'test',
-          command: input.evidenceTestReportCommand,
-          status: 'failed',
-          message: 'Test verification setup failed while removing stale report artifacts.',
-          provider: 'daytona',
-          platform: 'linux',
-          architecture,
-        })
-      } else {
-        shouldProbeTestReport = true
-      const candidateDigestBefore = yield* captureCandidateState('test-candidate-before')
-      const result = yield* runCaptureCommand('test-report-command', input.evidenceTestReportCommand)
-      const candidateDigestAfter = yield* captureCandidateState('test-candidate-after')
-      verificationResults.push(result === undefined
-        ? {
-            kind: 'test',
-            command: input.evidenceTestReportCommand,
-            status: 'failed',
-            message: 'Test verification command could not be executed.',
-            provider: 'daytona',
-            platform: 'linux',
-            architecture,
-            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
-            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
-          }
-        : {
-            kind: 'test',
-            command: input.evidenceTestReportCommand,
-            status: result.exitCode === 0 ? 'succeeded' : 'failed',
-            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-            provider: 'daytona',
-            platform: 'linux',
-            architecture,
-            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
-            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
-            startedAt: result.startedAt,
-            completedAt: result.completedAt,
-            ...(result.exitCode === 0 ? {} : { message: `Test verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
-          })
-      }
-    }
-    const testReport = shouldProbeTestReport
-      ? yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
-      : undefined
-    if (testReport !== undefined && testReport.exitCode === 0) {
-      const probed = parseTextArtifactProbe(testReport.stdout)
-      if (probed !== undefined && isValidTestReport(probed.path, probed.body)) {
-        artifacts.push({
-          kind: 'test-report',
-          label: 'Test report',
-          contentType: testReportContentType(probed.path),
-          body: probed.body,
-          retentionPolicy: 'alpha-14d',
-        })
-      }
-    }
-    if (nonEmpty(input.evidenceTestReportCommand) && !artifacts.some((artifact) => artifact.kind === 'test-report')) {
-      const result = verificationResults.find((verification) => verification.kind === 'test')
-      if (result?.status === 'succeeded') {
-        verificationResults[verificationResults.indexOf(result)] = {
-          ...result,
-          status: 'failed',
-          message: 'Test verification command did not produce a supported test report artifact.',
-        }
-      }
-    }
-
-    let shouldProbeScreenshot = false
-    if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
-      const cleanup = yield* runCaptureCommand(
-        'browser-screenshot-clean',
-        "rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png",
-      )
-      if (cleanup === undefined || cleanup.exitCode !== 0) {
-        verificationResults.push({
-          kind: 'browser',
-          command: input.evidenceBrowserScreenshotCommand,
-          status: 'failed',
-          message: 'Browser verification setup failed while removing stale screenshot artifacts.',
-          provider: 'daytona',
-          platform: 'linux',
-          architecture,
-        })
-      } else {
-        shouldProbeScreenshot = true
-      const candidateDigestBefore = yield* captureCandidateState('browser-candidate-before')
-      const result = yield* runCaptureCommand('browser-screenshot-command', input.evidenceBrowserScreenshotCommand)
-      const candidateDigestAfter = yield* captureCandidateState('browser-candidate-after')
-      verificationResults.push(result === undefined
-        ? {
-            kind: 'browser',
-            command: input.evidenceBrowserScreenshotCommand,
-            status: 'failed',
-            message: 'Browser verification command could not be executed.',
-            provider: 'daytona',
-            platform: 'linux',
-            architecture,
-            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
-            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
-          }
-        : {
-            kind: 'browser',
-            command: input.evidenceBrowserScreenshotCommand,
-            status: result.exitCode === 0 ? 'succeeded' : 'failed',
-            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-            provider: 'daytona',
-            platform: 'linux',
-            architecture,
-            ...(candidateDigestBefore === undefined ? {} : { candidateDigestBefore }),
-            ...(candidateDigestAfter === undefined ? {} : { candidateDigestAfter }),
-            startedAt: result.startedAt,
-            completedAt: result.completedAt,
-            ...(result.exitCode === 0 ? {} : { message: `Browser verification command failed with exit ${result.exitCode ?? 'unknown'}.` }),
-          })
-      }
-    }
-    const screenshot = shouldProbeScreenshot
-      ? yield* runCaptureCommand('browser-screenshot-probe', screenshotProbeCommand())
-      : undefined
-    if (screenshot !== undefined && screenshot.exitCode === 0) {
-      const probed = parseBinaryArtifactProbe(screenshot.stdout)
-      if (probed !== undefined && isValidPng(probed.body)) {
-        artifacts.push({
-          kind: 'screenshot',
-          label: 'Browser verification screenshot',
-          contentType: 'image/png',
-          body: probed.body,
-          retentionPolicy: 'alpha-14d',
-        })
-      }
-    }
-    if (nonEmpty(input.evidenceBrowserScreenshotCommand) && !artifacts.some((artifact) => artifact.kind === 'screenshot')) {
-      const result = verificationResults.find((verification) => verification.kind === 'browser')
-      if (result?.status === 'succeeded') {
-        verificationResults[verificationResults.indexOf(result)] = {
-          ...result,
-          status: 'failed',
-          message: 'Browser verification command did not produce a supported screenshot artifact.',
-        }
-      }
-    }
-
-    const diff = yield* runCaptureCommand(
-      'diff',
-      `git add -N . >/dev/null 2>&1 || true; tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} > "$tmp" || exit $?; node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"r");try{const body=Buffer.alloc(${maxCandidateDiffBytes + 1});const read=fs.readSync(fd,body,0,body.length,0);if(read>${maxCandidateDiffBytes})process.exit(65);process.stdout.write(body.subarray(0,read));}finally{fs.closeSync(fd);}' "$tmp"`,
+      }),
     )
-    if (diff !== undefined && diff.exitCode === 0 && diff.stdout.trim().length > 0) {
+
+  let shouldProbeTestReport = false
+  if (nonEmpty(input.evidenceTestReportCommand)) {
+    const cleanup = yield* runCaptureCommand(
+      'test-report-clean',
+      'rm -f .patchplane/test-report.json .patchplane/test-report.xml patchplane-test-report.json patchplane-test-report.xml test-results/junit.xml junit.xml coverage/coverage-final.json',
+    )
+    if (cleanup === undefined || cleanup.exitCode !== 0) {
+      verificationResults.push({
+        kind: 'test',
+        command: input.evidenceTestReportCommand,
+        status: 'failed',
+        message:
+          'Test verification setup failed while removing stale report artifacts.',
+        provider: 'daytona',
+        platform: 'linux',
+        architecture,
+      })
+    } else {
+      shouldProbeTestReport = true
+      const candidateDigestBefore = yield* captureCandidateState(
+        'test-candidate-before',
+      )
+      const result = yield* runCaptureCommand(
+        'test-report-command',
+        input.evidenceTestReportCommand,
+      )
+      const candidateDigestAfter = yield* captureCandidateState(
+        'test-candidate-after',
+      )
+      verificationResults.push(
+        result === undefined
+          ? {
+              kind: 'test',
+              command: input.evidenceTestReportCommand,
+              status: 'failed',
+              message: 'Test verification command could not be executed.',
+              provider: 'daytona',
+              platform: 'linux',
+              architecture,
+              ...(candidateDigestBefore === undefined
+                ? {}
+                : { candidateDigestBefore }),
+              ...(candidateDigestAfter === undefined
+                ? {}
+                : { candidateDigestAfter }),
+            }
+          : {
+              kind: 'test',
+              command: input.evidenceTestReportCommand,
+              status: result.exitCode === 0 ? 'succeeded' : 'failed',
+              ...(result.exitCode === undefined
+                ? {}
+                : { exitCode: result.exitCode }),
+              provider: 'daytona',
+              platform: 'linux',
+              architecture,
+              ...(candidateDigestBefore === undefined
+                ? {}
+                : { candidateDigestBefore }),
+              ...(candidateDigestAfter === undefined
+                ? {}
+                : { candidateDigestAfter }),
+              startedAt: result.startedAt,
+              completedAt: result.completedAt,
+              ...(result.exitCode === 0
+                ? {}
+                : {
+                    message: `Test verification command failed with exit ${result.exitCode ?? 'unknown'}.`,
+                  }),
+            },
+      )
+    }
+  }
+  const testReport = shouldProbeTestReport
+    ? yield* runCaptureCommand('test-report-probe', testReportProbeCommand())
+    : undefined
+  if (testReport !== undefined && testReport.exitCode === 0) {
+    const probed = parseTextArtifactProbe(testReport.stdout)
+    if (probed !== undefined && isValidTestReport(probed.path, probed.body)) {
       artifacts.push({
-        kind: 'diff',
-        label: 'Candidate patch diff',
-        contentType: 'text/x-diff',
-        body: diff.stdout,
+        kind: 'test-report',
+        label: 'Test report',
+        contentType: testReportContentType(probed.path),
+        body: probed.body,
         retentionPolicy: 'alpha-14d',
       })
     }
-    const candidateStateDigest = yield* captureCandidateState('candidate-final')
+  }
+  if (
+    nonEmpty(input.evidenceTestReportCommand) &&
+    !artifacts.some((artifact) => artifact.kind === 'test-report')
+  ) {
+    const result = verificationResults.find(
+      (verification) => verification.kind === 'test',
+    )
+    if (result?.status === 'succeeded') {
+      verificationResults[verificationResults.indexOf(result)] = {
+        ...result,
+        status: 'failed',
+        message:
+          'Test verification command did not produce a supported test report artifact.',
+      }
+    }
+  }
 
-    return { artifacts, verificationResults, candidateStateDigest }
-  })
+  let shouldProbeScreenshot = false
+  if (nonEmpty(input.evidenceBrowserScreenshotCommand)) {
+    const cleanup = yield* runCaptureCommand(
+      'browser-screenshot-clean',
+      'rm -f .patchplane/browser-screenshot.png patchplane-browser-screenshot.png test-results/browser-screenshot.png playwright-report/browser-screenshot.png',
+    )
+    if (cleanup === undefined || cleanup.exitCode !== 0) {
+      verificationResults.push({
+        kind: 'browser',
+        command: input.evidenceBrowserScreenshotCommand,
+        status: 'failed',
+        message:
+          'Browser verification setup failed while removing stale screenshot artifacts.',
+        provider: 'daytona',
+        platform: 'linux',
+        architecture,
+      })
+    } else {
+      shouldProbeScreenshot = true
+      const candidateDigestBefore = yield* captureCandidateState(
+        'browser-candidate-before',
+      )
+      const result = yield* runCaptureCommand(
+        'browser-screenshot-command',
+        input.evidenceBrowserScreenshotCommand,
+      )
+      const candidateDigestAfter = yield* captureCandidateState(
+        'browser-candidate-after',
+      )
+      verificationResults.push(
+        result === undefined
+          ? {
+              kind: 'browser',
+              command: input.evidenceBrowserScreenshotCommand,
+              status: 'failed',
+              message: 'Browser verification command could not be executed.',
+              provider: 'daytona',
+              platform: 'linux',
+              architecture,
+              ...(candidateDigestBefore === undefined
+                ? {}
+                : { candidateDigestBefore }),
+              ...(candidateDigestAfter === undefined
+                ? {}
+                : { candidateDigestAfter }),
+            }
+          : {
+              kind: 'browser',
+              command: input.evidenceBrowserScreenshotCommand,
+              status: result.exitCode === 0 ? 'succeeded' : 'failed',
+              ...(result.exitCode === undefined
+                ? {}
+                : { exitCode: result.exitCode }),
+              provider: 'daytona',
+              platform: 'linux',
+              architecture,
+              ...(candidateDigestBefore === undefined
+                ? {}
+                : { candidateDigestBefore }),
+              ...(candidateDigestAfter === undefined
+                ? {}
+                : { candidateDigestAfter }),
+              startedAt: result.startedAt,
+              completedAt: result.completedAt,
+              ...(result.exitCode === 0
+                ? {}
+                : {
+                    message: `Browser verification command failed with exit ${result.exitCode ?? 'unknown'}.`,
+                  }),
+            },
+      )
+    }
+  }
+  const screenshot = shouldProbeScreenshot
+    ? yield* runCaptureCommand(
+        'browser-screenshot-probe',
+        screenshotProbeCommand(),
+      )
+    : undefined
+  if (screenshot !== undefined && screenshot.exitCode === 0) {
+    const probed = parseBinaryArtifactProbe(screenshot.stdout)
+    if (probed !== undefined && isValidPng(probed.body)) {
+      artifacts.push({
+        kind: 'screenshot',
+        label: 'Browser verification screenshot',
+        contentType: 'image/png',
+        body: probed.body,
+        retentionPolicy: 'alpha-14d',
+      })
+    }
+  }
+  if (
+    nonEmpty(input.evidenceBrowserScreenshotCommand) &&
+    !artifacts.some((artifact) => artifact.kind === 'screenshot')
+  ) {
+    const result = verificationResults.find(
+      (verification) => verification.kind === 'browser',
+    )
+    if (result?.status === 'succeeded') {
+      verificationResults[verificationResults.indexOf(result)] = {
+        ...result,
+        status: 'failed',
+        message:
+          'Browser verification command did not produce a supported screenshot artifact.',
+      }
+    }
+  }
+
+  const diff = yield* runCaptureCommand(
+    'diff',
+    `git add -N . >/dev/null 2>&1 || true; tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} > "$tmp" || exit $?; node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"r");try{const body=Buffer.alloc(${maxCandidateDiffBytes + 1});const read=fs.readSync(fd,body,0,body.length,0);if(read>${maxCandidateDiffBytes})process.exit(65);process.stdout.write(body.subarray(0,read));}finally{fs.closeSync(fd);}' "$tmp"`,
+  )
+  if (
+    diff !== undefined &&
+    diff.exitCode === 0 &&
+    diff.stdout.trim().length > 0
+  ) {
+    artifacts.push({
+      kind: 'diff',
+      label: 'Candidate patch diff',
+      contentType: 'text/x-diff',
+      body: diff.stdout,
+      retentionPolicy: 'alpha-14d',
+    })
+  }
+  const candidateStateDigest = yield* captureCandidateState('candidate-final')
+
+  return { artifacts, verificationResults, candidateStateDigest }
+})
 
 export function makeDaytonaSandboxLayer(
-  makeClient: (config: DaytonaConfig) => DaytonaClientLike = makeDefaultDaytonaClient,
+  makeClient: (
+    config: DaytonaConfig,
+  ) => DaytonaClientLike = makeDefaultDaytonaClient,
 ) {
   return Layer.effect(
     SandboxService,
@@ -523,27 +653,40 @@ export function makeDaytonaSandboxLayer(
         Effect.acquireUseRelease(
           Effect.sync(() => makeClient(config)),
           use,
-          (daytona) => Effect.tryPromise({
-            try: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
-            catch: sandboxBoundaryError('daytona.disposeClient', 'Daytona client disposal failed'),
-          }).pipe(Effect.ignore),
+          (daytona) =>
+            Effect.tryPromise({
+              try: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
+              catch: sandboxBoundaryError(
+                'daytona.disposeClient',
+                'Daytona client disposal failed',
+              ),
+            }).pipe(Effect.ignore),
         )
 
-      const runWithSandbox = <A>(input: {
-        readonly traceId: string
-        readonly repositoryFullName: string
-        readonly envVars?: Record<string, string> | undefined
-        readonly retainAfterUse?: boolean | undefined
-      }, use: (sandbox: DaytonaSandboxLike) => Effect.Effect<A, unknown>) =>
+      const runWithSandbox = <A>(
+        input: {
+          readonly traceId: string
+          readonly repositoryFullName: string
+          readonly envVars?: Record<string, string> | undefined
+          readonly retainAfterUse?: boolean | undefined
+          readonly onSandboxStarted?:
+            | ((sandboxId: string) => Effect.Effect<void, unknown>)
+            | undefined
+        },
+        use: (sandbox: DaytonaSandboxLike) => Effect.Effect<A, unknown>,
+      ) =>
         withDaytonaClient((daytona) => {
           const retainSandboxes = shouldRetainDaytonaSandboxes(config)
           return Effect.acquireUseRelease(
             Effect.tryPromise({
-              try: () => daytona.create(
-                toDaytonaCreateSandboxParams(config, input),
-                { timeout: DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS },
+              try: () =>
+                daytona.create(toDaytonaCreateSandboxParams(config, input), {
+                  timeout: DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS,
+                }),
+              catch: sandboxBoundaryError(
+                'daytona.createSandbox',
+                'Daytona failed to create sandbox',
               ),
-              catch: sandboxBoundaryError('daytona.createSandbox', 'Daytona failed to create sandbox'),
             }),
             (sandbox) =>
               Effect.gen(function* () {
@@ -552,12 +695,19 @@ export function makeDaytonaSandboxLayer(
                   sandboxId: sandbox.id,
                   sandboxName: sandbox.name,
                   target: sandbox.target,
-                  retainSandboxes: retainSandboxes || input.retainAfterUse === true,
+                  retainSandboxes:
+                    retainSandboxes || input.retainAfterUse === true,
                 })
 
                 yield* Effect.tryPromise({
-                  try: () => sandbox.waitUntilStarted(DAYTONA_DEFAULT_START_TIMEOUT_SECONDS),
-                  catch: sandboxBoundaryError('daytona.waitUntilStarted', 'Daytona sandbox failed to start'),
+                  try: () =>
+                    sandbox.waitUntilStarted(
+                      DAYTONA_DEFAULT_START_TIMEOUT_SECONDS,
+                    ),
+                  catch: sandboxBoundaryError(
+                    'daytona.waitUntilStarted',
+                    'Daytona sandbox failed to start',
+                  ),
                 })
 
                 yield* Effect.logInfo('Started Daytona sandbox', {
@@ -565,18 +715,25 @@ export function makeDaytonaSandboxLayer(
                   sandboxId: sandbox.id,
                   state: sandbox.state,
                 })
+                if (input.onSandboxStarted !== undefined) {
+                  yield* input.onSandboxStarted(sandbox.id)
+                }
 
                 return yield* use(sandbox)
               }),
             (sandbox, exit) =>
               Effect.gen(function* () {
-                const shouldRetain = retainSandboxes ||
+                const shouldRetain =
+                  retainSandboxes ||
                   (input.retainAfterUse === true && Exit.isSuccess(exit))
                 if (shouldRetain) {
-                  yield* Effect.logInfo('Retaining Daytona sandbox for inspection', {
-                    traceId: input.traceId,
-                    sandboxId: sandbox.id,
-                  })
+                  yield* Effect.logInfo(
+                    'Retaining Daytona sandbox for inspection',
+                    {
+                      traceId: input.traceId,
+                      sandboxId: sandbox.id,
+                    },
+                  )
                 } else {
                   const deleteExit = yield* deleteSandboxWithRetries({
                     daytona,
@@ -585,7 +742,12 @@ export function makeDaytonaSandboxLayer(
                     timeoutSeconds: DAYTONA_DEFAULT_DELETE_TIMEOUT_SECONDS,
                     retryAttempts: DAYTONA_DEFAULT_DELETE_RETRY_ATTEMPTS,
                   }).pipe(
-                    Effect.mapError(sandboxBoundaryError('daytona.deleteSandbox', 'Daytona failed to delete sandbox')),
+                    Effect.mapError(
+                      sandboxBoundaryError(
+                        'daytona.deleteSandbox',
+                        'Daytona failed to delete sandbox',
+                      ),
+                    ),
                     Effect.exit,
                   )
 
@@ -595,33 +757,43 @@ export function makeDaytonaSandboxLayer(
                       sandboxId: sandbox.id,
                     })
                   } else {
-                    yield* Effect.logWarning('Failed to delete Daytona sandbox after retries', {
-                      traceId: input.traceId,
-                      sandboxId: sandbox.id,
-                    })
+                    yield* Effect.logWarning(
+                      'Failed to delete Daytona sandbox after retries',
+                      {
+                        traceId: input.traceId,
+                        sandboxId: sandbox.id,
+                      },
+                    )
                   }
                 }
               }),
           )
         })
 
-      const cloneRepository = (sandbox: DaytonaSandboxLike, input: {
-        readonly repositoryUrl: string
-        readonly branch?: string | undefined
-        readonly commitId?: string | undefined
-        readonly gitUsername?: string | undefined
-        readonly gitPassword?: string | undefined
-      }) =>
+      const cloneRepository = (
+        sandbox: DaytonaSandboxLike,
+        input: {
+          readonly repositoryUrl: string
+          readonly branch?: string | undefined
+          readonly commitId?: string | undefined
+          readonly gitUsername?: string | undefined
+          readonly gitPassword?: string | undefined
+        },
+      ) =>
         Effect.tryPromise({
-          try: () => sandbox.git.clone(
-            input.repositoryUrl,
-            'workspace/repo',
-            input.branch,
-            input.commitId,
-            input.gitUsername,
-            input.gitPassword,
+          try: () =>
+            sandbox.git.clone(
+              input.repositoryUrl,
+              'workspace/repo',
+              input.branch,
+              input.commitId,
+              input.gitUsername,
+              input.gitPassword,
+            ),
+          catch: sandboxBoundaryError(
+            'daytona.git.clone',
+            'Daytona failed to clone repository',
           ),
-          catch: sandboxBoundaryError('daytona.git.clone', 'Daytona failed to clone repository'),
         })
 
       return SandboxService.of({
@@ -629,69 +801,150 @@ export function makeDaytonaSandboxLayer(
           Effect.gen(function* () {
             const clock = yield* Clock.Clock
             const startedAt = clock.currentTimeMillisUnsafe()
-            const envVars = yield* piRuntimeEnvironment({ provider: input.provider }).pipe(
-              Effect.mapError(sandboxBoundaryError('pi.config', 'Pi runtime provider configuration is invalid')),
+            const envVars = yield* piRuntimeEnvironment({
+              provider: input.provider,
+            }).pipe(
+              Effect.mapError(
+                sandboxBoundaryError(
+                  'pi.config',
+                  'Pi runtime provider configuration is invalid',
+                ),
+              ),
             )
             return yield* runWithSandbox(
               { ...input, envVars, retainAfterUse: input.mode === 'rpc' },
-              (sandbox) => Effect.scoped(Effect.gen(function* () {
-                yield* cloneRepository(sandbox, input)
-                const baseSha = yield* captureRepositoryBaseSha(sandbox, input.traceId)
-                const timeoutSeconds = input.timeoutSeconds ?? DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
-                if (input.mode === 'rpc') {
-                  const command = renderShellCommand(buildPiRpcCommandSpec({
-                    provider: input.provider,
-                    model: input.model,
-                    version: DAYTONA_DEFAULT_PI_CLI_VERSION,
-                    thinking: input.thinking,
-                  }))
-                  const handle = yield* startSandboxSessionCommand(sandbox, {
-                    command,
-                    timeoutSeconds,
-                    traceId: input.traceId,
-                  })
-                  if (input.onRuntimeSessionStarted !== undefined) {
-                    yield* input.onRuntimeSessionStarted({
-                      provider: 'daytona:pi-rpc',
-                      sandboxId: sandbox.id,
-                      sessionId: handle.sessionId,
-                      commandId: handle.commandId,
-                      startedAt,
-                    })
-                  }
-                  const persistRuntimeEvents = (events: ReadonlyArray<PiRpcRuntimeEvent>) =>
-                    events.length === 0 || input.onRuntimeEvents === undefined
-                      ? Effect.void
-                      : input.onRuntimeEvents(events).pipe(
-                        Effect.catch((error) => Effect.logWarning('Failed to persist incremental Pi RPC runtime events', {
+              (sandbox) =>
+                Effect.scoped(
+                  Effect.gen(function* () {
+                    yield* cloneRepository(sandbox, input)
+                    const baseSha = yield* captureRepositoryBaseSha(
+                      sandbox,
+                      input.traceId,
+                    )
+                    const timeoutSeconds =
+                      input.timeoutSeconds ??
+                      DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
+                    if (input.mode === 'rpc') {
+                      const command = renderShellCommand(
+                        buildPiRpcCommandSpec({
+                          provider: input.provider,
+                          model: input.model,
+                          version: DAYTONA_DEFAULT_PI_CLI_VERSION,
+                          thinking: input.thinking,
+                        }),
+                      )
+                      const handle = yield* startSandboxSessionCommand(
+                        sandbox,
+                        {
+                          command,
+                          timeoutSeconds,
                           traceId: input.traceId,
-                          error: String(error),
-                        })),
+                        },
+                      )
+                      if (input.onRuntimeSessionStarted !== undefined) {
+                        yield* input.onRuntimeSessionStarted({
+                          provider: 'daytona:pi-rpc',
+                          sandboxId: sandbox.id,
+                          sessionId: handle.sessionId,
+                          commandId: handle.commandId,
+                          startedAt,
+                        })
+                      }
+                      const persistRuntimeEvents = (
+                        events: ReadonlyArray<PiRpcRuntimeEvent>,
+                      ) =>
+                        events.length === 0 ||
+                        input.onRuntimeEvents === undefined
+                          ? Effect.void
+                          : input.onRuntimeEvents(events).pipe(
+                              Effect.catch((error) =>
+                                Effect.logWarning(
+                                  'Failed to persist incremental Pi RPC runtime events',
+                                  {
+                                    traceId: input.traceId,
+                                    error: String(error),
+                                  },
+                                ),
+                              ),
+                            )
+
+                      const pi = makePiRuntimeSession({
+                        sessionId: handle.sessionId,
+                        commandId: handle.commandId,
+                        sendInput: handle.sendInput,
+                        now: () => clock.currentTimeMillisUnsafe(),
+                        stdout: streamSandboxSessionCommandLogs(
+                          sandbox,
+                          handle.sessionId,
+                          handle.commandId,
+                        ).pipe(
+                          Stream.filter((chunk) => chunk.stream === 'stdout'),
+                          Stream.map((chunk) => chunk.chunk),
+                        ),
+                      })
+
+                      yield* pi.events.pipe(
+                        Stream.runForEach((event) =>
+                          persistRuntimeEvents([event]),
+                        ),
+                        Effect.tapError((error) =>
+                          Effect.logWarning(
+                            'Pi RPC log stream ended with error; reconciling from buffered logs',
+                            {
+                              traceId: input.traceId,
+                              error: error.message,
+                            },
+                          ),
+                        ),
+                        Effect.ignore,
+                        Effect.andThen(
+                          Effect.gen(function* () {
+                            const reconcileLogs = yield* handle.getLogs.pipe(
+                              Effect.orElseSucceed(() => ({ stdout: '' })),
+                            )
+                            const reconciledEvents = yield* Stream.make(
+                              reconcileLogs.stdout,
+                            ).pipe(
+                              decodePiRpcRuntimeEvents({
+                                sessionId: handle.sessionId,
+                                commandId: handle.commandId,
+                                stream: 'stdout',
+                                now: () => clock.currentTimeMillisUnsafe(),
+                              }),
+                              Stream.runCollect,
+                              Effect.map((events) => Array.from(events)),
+                            )
+                            yield* persistRuntimeEvents(reconciledEvents)
+                          }),
+                        ),
+                        Effect.forkScoped,
                       )
 
-                  const pi = makePiRuntimeSession({
-                    sessionId: handle.sessionId,
-                    commandId: handle.commandId,
-                    sendInput: handle.sendInput,
-                    now: () => clock.currentTimeMillisUnsafe(),
-                    stdout: streamSandboxSessionCommandLogs(sandbox, handle.sessionId, handle.commandId).pipe(
-                      Stream.filter((chunk) => chunk.stream === 'stdout'),
-                      Stream.map((chunk) => chunk.chunk),
-                    ),
-                  })
-
-                  yield* pi.events.pipe(
-                    Stream.runForEach((event) => persistRuntimeEvents([event])),
-                    Effect.tapError((error) => Effect.logWarning('Pi RPC log stream ended with error; reconciling from buffered logs', {
-                      traceId: input.traceId,
-                      error: error.message,
-                    })),
-                    Effect.ignore,
-                    Effect.andThen(Effect.gen(function* () {
-                      const reconcileLogs = yield* handle.getLogs.pipe(
-                        Effect.orElseSucceed(() => ({ stdout: '' })),
+                      const sendPiCommand = <A, E, R>(
+                        effect: Effect.Effect<A, E, R>,
+                      ) =>
+                        effect.pipe(
+                          Effect.mapError(
+                            sandboxBoundaryError(
+                              'daytona.pi.rpc.send',
+                              'Daytona failed to deliver a Pi RPC command',
+                            ),
+                          ),
+                        )
+                      yield* sendPiCommand(
+                        pi.getState({ id: `${input.traceId}:get-state` }),
                       )
-                      const reconciledEvents = yield* Stream.make(reconcileLogs.stdout).pipe(
+                      yield* sendPiCommand(
+                        pi.prompt({
+                          id: `${input.traceId}:prompt`,
+                          message: input.prompt,
+                        }),
+                      )
+                      const logs = yield* handle.getLogs
+                      const commandStatus = yield* handle.getCommand
+                      const parsedRuntimeEvents = yield* Stream.make(
+                        logs.stdout,
+                      ).pipe(
                         decodePiRpcRuntimeEvents({
                           sessionId: handle.sessionId,
                           commandId: handle.commandId,
@@ -701,117 +954,113 @@ export function makeDaytonaSandboxLayer(
                         Stream.runCollect,
                         Effect.map((events) => Array.from(events)),
                       )
-                      yield* persistRuntimeEvents(reconciledEvents)
-                    })),
-                    Effect.forkScoped,
-                  )
+                      const {
+                        artifacts: evidenceArtifacts,
+                        verificationResults,
+                        candidateStateDigest,
+                      } = yield* collectSandboxEvidenceArtifacts(sandbox, {
+                        ...input,
+                        baseSha,
+                      })
 
-                  const sendPiCommand = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-                    effect.pipe(Effect.mapError(sandboxBoundaryError(
-                      'daytona.pi.rpc.send',
-                      'Daytona failed to deliver a Pi RPC command',
-                    )))
-                  yield* sendPiCommand(pi.getState({ id: `${input.traceId}:get-state` }))
-                  yield* sendPiCommand(pi.prompt({ id: `${input.traceId}:prompt`, message: input.prompt }))
-                  const logs = yield* handle.getLogs
-                  const commandStatus = yield* handle.getCommand
-                  const parsedRuntimeEvents = yield* Stream.make(logs.stdout).pipe(
-                    decodePiRpcRuntimeEvents({
-                      sessionId: handle.sessionId,
-                      commandId: handle.commandId,
-                      stream: 'stdout',
-                      now: () => clock.currentTimeMillisUnsafe(),
-                    }),
-                    Stream.runCollect,
-                    Effect.map((events) => Array.from(events)),
-                  )
-                  const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
-                    sandbox,
-                    { ...input, baseSha },
-                  )
+                      return {
+                        provider: 'daytona:pi-rpc',
+                        sandboxId: sandbox.id,
+                        sessionId: handle.sessionId,
+                        commandId: handle.commandId,
+                        command: renderShellCommand(
+                          buildPiRpcCommandSpec({
+                            provider: input.provider,
+                            model: input.model,
+                            version: DAYTONA_DEFAULT_PI_CLI_VERSION,
+                            thinking: input.thinking,
+                          }),
+                        ),
+                        exitCode: commandStatus.exitCode,
+                        stdout: logs.stdout,
+                        stderr: logs.stderr,
+                        policy: toSandboxPolicy(config, { timeoutSeconds }),
+                        runtimeEvents: parsedRuntimeEvents,
+                        evidenceArtifacts,
+                        verificationResults,
+                        candidateStateDigest,
+                        baseSha,
+                        startedAt,
+                        completedAt: yield* Clock.currentTimeMillis,
+                      }
+                    }
 
-                  return {
-                    provider: 'daytona:pi-rpc',
-                    sandboxId: sandbox.id,
-                    sessionId: handle.sessionId,
-                    commandId: handle.commandId,
-                    command: renderShellCommand(buildPiRpcCommandSpec({
-                      provider: input.provider,
-                      model: input.model,
-                      version: DAYTONA_DEFAULT_PI_CLI_VERSION,
-                      thinking: input.thinking,
-                    })),
-                    exitCode: commandStatus.exitCode,
-                    stdout: logs.stdout,
-                    stderr: logs.stderr,
-                    policy: toSandboxPolicy(config, { timeoutSeconds }),
-                    runtimeEvents: parsedRuntimeEvents,
-                    evidenceArtifacts,
-                    verificationResults,
-                    candidateStateDigest,
-                    baseSha,
-                    startedAt,
-                    completedAt: yield* Clock.currentTimeMillis,
-                  }
-                }
+                    const command = renderShellCommand(
+                      buildPiCommandSpec({
+                        provider: input.provider,
+                        model: input.model,
+                        prompt: input.prompt,
+                        version: DAYTONA_DEFAULT_PI_CLI_VERSION,
+                        thinking: input.thinking,
+                      }),
+                    )
+                    const response = yield* executeSandboxCommand(sandbox, {
+                      command,
+                      timeoutSeconds,
+                      traceId: input.traceId,
+                    })
+                    const parsedRuntimeEvents =
+                      yield* parsePiJsonRuntimeEventsEffect(response.stdout, {
+                        now: () => clock.currentTimeMillisUnsafe(),
+                      })
 
-                const command = renderShellCommand(buildPiCommandSpec({
-                  provider: input.provider,
-                  model: input.model,
-                  prompt: input.prompt,
-                  version: DAYTONA_DEFAULT_PI_CLI_VERSION,
-                  thinking: input.thinking,
-                }))
-                const response = yield* executeSandboxCommand(sandbox, {
-                  command,
-                  timeoutSeconds,
-                  traceId: input.traceId,
-                })
-                const parsedRuntimeEvents = yield* parsePiJsonRuntimeEventsEffect(
-                  response.stdout,
-                  { now: () => clock.currentTimeMillisUnsafe() },
-                )
+                    if (parsedRuntimeEvents.parseErrors.length > 0) {
+                      yield* Effect.logWarning(
+                        'Pi JSON event parsing skipped malformed output lines',
+                        {
+                          traceId: input.traceId,
+                          sandboxId: sandbox.id,
+                          parseErrors: parsedRuntimeEvents.parseErrors,
+                        },
+                      )
+                    }
+                    const {
+                      artifacts: evidenceArtifacts,
+                      verificationResults,
+                      candidateStateDigest,
+                    } = yield* collectSandboxEvidenceArtifacts(sandbox, {
+                      ...input,
+                      baseSha,
+                    })
 
-                if (parsedRuntimeEvents.parseErrors.length > 0) {
-                  yield* Effect.logWarning('Pi JSON event parsing skipped malformed output lines', {
-                    traceId: input.traceId,
-                    sandboxId: sandbox.id,
-                    parseErrors: parsedRuntimeEvents.parseErrors,
-                  })
-                }
-                const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
-                  sandbox,
-                  { ...input, baseSha },
-                )
-
-                return {
-                  provider: 'daytona:pi',
-                  sandboxId: sandbox.id,
-                  command: renderShellCommand(buildRedactedPiCommandSpec({
-                    provider: input.provider,
-                    model: input.model,
-                    version: DAYTONA_DEFAULT_PI_CLI_VERSION,
-                    thinking: input.thinking,
-                  })),
-                  exitCode: response.exitCode,
-                  stdout: response.stdout,
-                  stderr: response.stderr,
-                  policy: toSandboxPolicy(config, { timeoutSeconds }),
-                  runtimeEvents: parsedRuntimeEvents.events,
-                  evidenceArtifacts,
-                  verificationResults,
-                  candidateStateDigest,
-                  baseSha,
-                  startedAt,
-                  completedAt: yield* Clock.currentTimeMillis,
-                }
-              })))
+                    return {
+                      provider: 'daytona:pi',
+                      sandboxId: sandbox.id,
+                      command: renderShellCommand(
+                        buildRedactedPiCommandSpec({
+                          provider: input.provider,
+                          model: input.model,
+                          version: DAYTONA_DEFAULT_PI_CLI_VERSION,
+                          thinking: input.thinking,
+                        }),
+                      ),
+                      exitCode: response.exitCode,
+                      stdout: response.stdout,
+                      stderr: response.stderr,
+                      policy: toSandboxPolicy(config, { timeoutSeconds }),
+                      runtimeEvents: parsedRuntimeEvents.events,
+                      evidenceArtifacts,
+                      verificationResults,
+                      candidateStateDigest,
+                      baseSha,
+                      startedAt,
+                      completedAt: yield* Clock.currentTimeMillis,
+                    }
+                  }),
+                ),
+            )
           }).pipe(
             Effect.mapError(
               (cause) =>
                 new SandboxError({
                   operation: 'daytona.runRepositoryAgent',
-                  message: 'Daytona failed to run Pi agent in repository sandbox',
+                  message:
+                    'Daytona failed to run Pi agent in repository sandbox',
                   cause,
                 }),
             ),
@@ -820,74 +1069,169 @@ export function makeDaytonaSandboxLayer(
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
-                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime abort'),
+                try: () =>
+                  daytona.get?.(input.sandboxId) ??
+                  Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError(
+                  'daytona.getSandbox',
+                  'Daytona failed to get sandbox for runtime abort',
+                ),
               })
               const pi = makePiRpcCommandSender({
-                sendInput: (data) => Effect.tryPromise({
-                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send abort to runtime session'),
-                }),
+                sendInput: (data) =>
+                  Effect.tryPromise({
+                    try: () =>
+                      sandbox.process.sendSessionCommandInput?.(
+                        input.sessionId,
+                        input.commandId,
+                        data,
+                      ) ??
+                      Promise.reject(
+                        new Error(
+                          'Daytona sendSessionCommandInput is unavailable',
+                        ),
+                      ),
+                    catch: sandboxBoundaryError(
+                      'daytona.sendSessionCommandInput',
+                      'Daytona failed to send abort to runtime session',
+                    ),
+                  }),
               })
-              yield* pi.abort({ id: `${input.traceId}:abort` }).pipe(
-                Effect.mapError(sandboxBoundaryError(
-                  'daytona.pi.rpc.abort',
-                  'Daytona failed to send abort to runtime session',
-                )),
-              )
-              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-            })
+              yield* pi
+                .abort({ id: `${input.traceId}:abort` })
+                .pipe(
+                  Effect.mapError(
+                    sandboxBoundaryError(
+                      'daytona.pi.rpc.abort',
+                      'Daytona failed to send abort to runtime session',
+                    ),
+                  ),
+                )
+              return {
+                provider: 'daytona:pi-rpc',
+                sandboxId: input.sandboxId,
+                sessionId: input.sessionId,
+                commandId: input.commandId,
+                status: 'sent' as const,
+              }
+            }),
           ),
         steerRuntimeSession: (input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
-                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime steering'),
+                try: () =>
+                  daytona.get?.(input.sandboxId) ??
+                  Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError(
+                  'daytona.getSandbox',
+                  'Daytona failed to get sandbox for runtime steering',
+                ),
               })
               const pi = makePiRpcCommandSender({
-                sendInput: (data) => Effect.tryPromise({
-                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send steering to runtime session'),
-                }),
+                sendInput: (data) =>
+                  Effect.tryPromise({
+                    try: () =>
+                      sandbox.process.sendSessionCommandInput?.(
+                        input.sessionId,
+                        input.commandId,
+                        data,
+                      ) ??
+                      Promise.reject(
+                        new Error(
+                          'Daytona sendSessionCommandInput is unavailable',
+                        ),
+                      ),
+                    catch: sandboxBoundaryError(
+                      'daytona.sendSessionCommandInput',
+                      'Daytona failed to send steering to runtime session',
+                    ),
+                  }),
               })
-              yield* pi.steer({ id: `${input.traceId}:steer`, message: input.message }).pipe(
-                Effect.mapError(sandboxBoundaryError(
-                  'daytona.pi.rpc.steer',
-                  'Daytona failed to send steering to runtime session',
-                )),
-              )
-              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-            })
+              yield* pi
+                .steer({ id: `${input.traceId}:steer`, message: input.message })
+                .pipe(
+                  Effect.mapError(
+                    sandboxBoundaryError(
+                      'daytona.pi.rpc.steer',
+                      'Daytona failed to send steering to runtime session',
+                    ),
+                  ),
+                )
+              return {
+                provider: 'daytona:pi-rpc',
+                sandboxId: input.sandboxId,
+                sessionId: input.sessionId,
+                commandId: input.commandId,
+                status: 'sent' as const,
+              }
+            }),
           ),
         followUpRuntimeSession: (input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
-                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime follow-up'),
+                try: () =>
+                  daytona.get?.(input.sandboxId) ??
+                  Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError(
+                  'daytona.getSandbox',
+                  'Daytona failed to get sandbox for runtime follow-up',
+                ),
               })
               const pi = makePiRpcCommandSender({
-                sendInput: (data) => Effect.tryPromise({
-                  try: () => sandbox.process.sendSessionCommandInput?.(input.sessionId, input.commandId, data) ?? Promise.reject(new Error('Daytona sendSessionCommandInput is unavailable')),
-                  catch: sandboxBoundaryError('daytona.sendSessionCommandInput', 'Daytona failed to send follow-up to runtime session'),
-                }),
+                sendInput: (data) =>
+                  Effect.tryPromise({
+                    try: () =>
+                      sandbox.process.sendSessionCommandInput?.(
+                        input.sessionId,
+                        input.commandId,
+                        data,
+                      ) ??
+                      Promise.reject(
+                        new Error(
+                          'Daytona sendSessionCommandInput is unavailable',
+                        ),
+                      ),
+                    catch: sandboxBoundaryError(
+                      'daytona.sendSessionCommandInput',
+                      'Daytona failed to send follow-up to runtime session',
+                    ),
+                  }),
               })
-              yield* pi.followUp({ id: `${input.traceId}:follow-up`, message: input.message }).pipe(
-                Effect.mapError(sandboxBoundaryError(
-                  'daytona.pi.rpc.followUp',
-                  'Daytona failed to send follow-up to runtime session',
-                )),
-              )
-              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-            })
+              yield* pi
+                .followUp({
+                  id: `${input.traceId}:follow-up`,
+                  message: input.message,
+                })
+                .pipe(
+                  Effect.mapError(
+                    sandboxBoundaryError(
+                      'daytona.pi.rpc.followUp',
+                      'Daytona failed to send follow-up to runtime session',
+                    ),
+                  ),
+                )
+              return {
+                provider: 'daytona:pi-rpc',
+                sandboxId: input.sandboxId,
+                sessionId: input.sessionId,
+                commandId: input.commandId,
+                status: 'sent' as const,
+              }
+            }),
           ),
         terminateRuntimeSession: (input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
-                try: () => daytona.get?.(input.sandboxId) ?? Promise.reject(new Error('Daytona get is unavailable')),
-                catch: sandboxBoundaryError('daytona.getSandbox', 'Daytona failed to get sandbox for runtime termination'),
+                try: () =>
+                  daytona.get?.(input.sandboxId) ??
+                  Promise.reject(new Error('Daytona get is unavailable')),
+                catch: sandboxBoundaryError(
+                  'daytona.getSandbox',
+                  'Daytona failed to get sandbox for runtime termination',
+                ),
               })
               yield* Effect.tryPromise({
                 try: async () => {
@@ -897,49 +1241,73 @@ export function makeDaytonaSandboxLayer(
                     if (!isDaytonaNotFoundCause(cause)) throw cause
                   }
                 },
-                catch: sandboxBoundaryError('daytona.deleteSession', 'Daytona failed to terminate runtime session'),
+                catch: sandboxBoundaryError(
+                  'daytona.deleteSession',
+                  'Daytona failed to terminate runtime session',
+                ),
               })
-              return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'terminated' as const }
-            })
+              return {
+                provider: 'daytona:pi-rpc',
+                sandboxId: input.sandboxId,
+                sessionId: input.sessionId,
+                commandId: input.commandId,
+                status: 'terminated' as const,
+              }
+            }),
           ),
         runRepositoryCommand: (input) =>
           Effect.gen(function* () {
             const startedAt = yield* Clock.currentTimeMillis
             return yield* runWithSandbox(
-              { ...input, envVars: input.env === undefined ? undefined : { ...input.env } },
-              (sandbox) => Effect.gen(function* () {
-                yield* cloneRepository(sandbox, input)
-                const baseSha = yield* captureRepositoryBaseSha(sandbox, input.traceId)
-                const command = input.command.trim().length === 0
-                  ? DAYTONA_DEFAULT_COMMAND
-                  : input.command
-                const timeoutSeconds = input.timeoutSeconds ?? DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
-                const response = yield* executeSandboxCommand(sandbox, {
-                  command,
-                  timeoutSeconds,
-                  traceId: input.traceId,
-                })
-                const { artifacts: evidenceArtifacts, verificationResults, candidateStateDigest } = yield* collectSandboxEvidenceArtifacts(
-                  sandbox,
-                  { ...input, baseSha },
-                )
+              {
+                ...input,
+                envVars: input.env === undefined ? undefined : { ...input.env },
+              },
+              (sandbox) =>
+                Effect.gen(function* () {
+                  yield* cloneRepository(sandbox, input)
+                  const baseSha = yield* captureRepositoryBaseSha(
+                    sandbox,
+                    input.traceId,
+                  )
+                  const command =
+                    input.command.trim().length === 0
+                      ? DAYTONA_DEFAULT_COMMAND
+                      : input.command
+                  const timeoutSeconds =
+                    input.timeoutSeconds ??
+                    DAYTONA_DEFAULT_COMMAND_TIMEOUT_SECONDS
+                  const response = yield* executeSandboxCommand(sandbox, {
+                    command,
+                    timeoutSeconds,
+                    traceId: input.traceId,
+                  })
+                  const {
+                    artifacts: evidenceArtifacts,
+                    verificationResults,
+                    candidateStateDigest,
+                  } = yield* collectSandboxEvidenceArtifacts(sandbox, {
+                    ...input,
+                    baseSha,
+                  })
 
-                return {
-                  provider: 'daytona',
-                  sandboxId: sandbox.id,
-                  command,
-                  exitCode: response.exitCode,
-                  stdout: response.stdout,
-                  stderr: response.stderr,
-                  policy: toSandboxPolicy(config, { timeoutSeconds }),
-                  evidenceArtifacts,
-                  verificationResults,
-                  candidateStateDigest,
-                  baseSha,
-                  startedAt,
-                  completedAt: yield* Clock.currentTimeMillis,
-                }
-              }))
+                  return {
+                    provider: 'daytona',
+                    sandboxId: sandbox.id,
+                    command,
+                    exitCode: response.exitCode,
+                    stdout: response.stdout,
+                    stderr: response.stderr,
+                    policy: toSandboxPolicy(config, { timeoutSeconds }),
+                    evidenceArtifacts,
+                    verificationResults,
+                    candidateStateDigest,
+                    baseSha,
+                    startedAt,
+                    completedAt: yield* Clock.currentTimeMillis,
+                  }
+                }),
+            )
           }).pipe(
             Effect.mapError(
               (cause) =>

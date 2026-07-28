@@ -1,12 +1,9 @@
 import { describe, expect, it } from '@effect/vitest'
 import { afterEach, beforeEach, vi } from 'vitest'
 import type { User } from '@workos-inc/node'
-import { ConfigProvider, Effect, Layer } from 'effect'
+import { ConfigProvider, Effect, Layer, Option } from 'effect'
 import type { AuthError } from '@patchplane/domain/errors'
-import {
-  makePromptRequestId,
-  makeWorkflowRunId,
-} from '@patchplane/domain/ids'
+import { makePromptRequestId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { AuthRequestContext } from '@patchplane/core/services/auth-request-context'
 import { AuthService } from '@patchplane/core/services/auth-service'
 import { StorageService } from '@patchplane/core/services/storage-service'
@@ -39,7 +36,7 @@ const TestStorageLayer = Layer.succeed(
   StorageService.of({
     listRecentWorkflowStarts: () => Effect.succeed([]),
     claimWorkflowExecution: () => Effect.succeed(true),
-          markWorkflowExecutionFailed: () => Effect.succeed(true),
+    markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.die('unused'),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
@@ -47,6 +44,13 @@ const TestStorageLayer = Layer.succeed(
     getActiveRuntimeSession: () => Effect.die('unused'),
     recordEvidenceArtifact: () => Effect.die('unused'),
     getEvidenceArtifact: () => Effect.die('unused'),
+    getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+    claimCandidateFreeze: () => Effect.succeed(false),
+    releaseCandidateFreeze: () => Effect.succeed(false),
+    failCandidateFreeze: () => Effect.succeed(true),
+    claimIncomingDispatch: () => Effect.succeed(false),
+    startIncomingDispatch: () => Effect.succeed(true),
+    validateIncomingDispatch: () => Effect.succeed(false),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),
@@ -223,7 +227,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function expectAuthError(error: unknown, operation: string): asserts error is AuthError {
+function expectAuthError(
+  error: unknown,
+  operation: string,
+): asserts error is AuthError {
   expect(error).toMatchObject({ _tag: 'AuthError', operation })
 }
 
@@ -244,35 +251,39 @@ describe('WorkOSAuthPlugin authenticated workflow integration', () => {
   it.effect('does not grant workspace:view to an anonymous request', () =>
     Effect.gen(function* () {
       const auth = yield* AuthService
-      const error = yield* auth.requirePermission('workspace:view').pipe(
-        Effect.provideService(
-          AuthRequestContext,
-          mapWorkOSSessionToAuthRequest({ user: null }),
-        ),
-        Effect.flip,
-      )
+      const error = yield* auth
+        .requirePermission('workspace:view')
+        .pipe(
+          Effect.provideService(
+            AuthRequestContext,
+            mapWorkOSSessionToAuthRequest({ user: null }),
+          ),
+          Effect.flip,
+        )
 
       expectAuthError(error, 'requirePermission')
     }).pipe(Effect.provide(TestLayer)),
   )
 
-  it.effect('does not grant workspace:view without an active organization', () =>
-    Effect.gen(function* () {
-      const auth = yield* AuthService
-      const error = yield* auth.requirePermission('workspace:view').pipe(
-        Effect.provideService(
-          AuthRequestContext,
-          mapWorkOSSessionToAuthRequest({
-            user: workOSUser,
-            sessionId: 'session_123',
-            role: 'viewer',
-          }),
-        ),
-        Effect.flip,
-      )
+  it.effect(
+    'does not grant workspace:view without an active organization',
+    () =>
+      Effect.gen(function* () {
+        const auth = yield* AuthService
+        const error = yield* auth.requirePermission('workspace:view').pipe(
+          Effect.provideService(
+            AuthRequestContext,
+            mapWorkOSSessionToAuthRequest({
+              user: workOSUser,
+              sessionId: 'session_123',
+              role: 'viewer',
+            }),
+          ),
+          Effect.flip,
+        )
 
-      expectAuthError(error, 'requirePermission')
-    }).pipe(Effect.provide(TestLayer)),
+        expectAuthError(error, 'requirePermission')
+      }).pipe(Effect.provide(TestLayer)),
   )
 
   it.effect('starts a workflow from a WorkOS-authenticated request', () =>
@@ -352,38 +363,42 @@ describe('WorkOSAuthPlugin authenticated workflow integration', () => {
     }),
   )
 
-  it.effect('allows canonical WorkOS permission claims with an active custom-role membership', () =>
-    Effect.gen(function* () {
-      testMembershipRole = 'custom-role'
+  it.effect(
+    'allows canonical WorkOS permission claims with an active custom-role membership',
+    () =>
+      Effect.gen(function* () {
+        testMembershipRole = 'custom-role'
 
-      const result = yield* runWithSession({
-        user: workOSUser,
-        sessionId: 'session_123',
-        organizationId: 'org_123',
-        role: 'custom-role',
-        permissions: ['prompt:create'],
-      })
+        const result = yield* runWithSession({
+          user: workOSUser,
+          sessionId: 'session_123',
+          organizationId: 'org_123',
+          role: 'custom-role',
+          permissions: ['prompt:create'],
+        })
 
-      expect(result.promptRequest.actorId).toBe('workos:user_123')
-      expect(result.promptRequest.workspaceId).toBe('workos:org_123')
-    }),
+        expect(result.promptRequest.actorId).toBe('workos:user_123')
+        expect(result.promptRequest.workspaceId).toBe('workos:org_123')
+      }),
   )
 
-  it.effect('does not grant canonical permission claims without an active WorkOS membership', () =>
-    Effect.gen(function* () {
-      testMembershipRole = 'custom-role'
-      testMembershipStatus = 'pending'
+  it.effect(
+    'does not grant canonical permission claims without an active WorkOS membership',
+    () =>
+      Effect.gen(function* () {
+        testMembershipRole = 'custom-role'
+        testMembershipStatus = 'pending'
 
-      const error = yield* runWithSession({
-        user: workOSUser,
-        sessionId: 'session_123',
-        organizationId: 'org_123',
-        role: 'custom-role',
-        permissions: ['prompt:create'],
-      }).pipe(Effect.flip)
+        const error = yield* runWithSession({
+          user: workOSUser,
+          sessionId: 'session_123',
+          organizationId: 'org_123',
+          role: 'custom-role',
+          permissions: ['prompt:create'],
+        }).pipe(Effect.flip)
 
-      expectAuthError(error, 'requirePermission')
-    }),
+        expectAuthError(error, 'requirePermission')
+      }),
   )
 
   it.effect('fails when the WorkOS session lacks prompt:create', () =>

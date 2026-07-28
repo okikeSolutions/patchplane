@@ -2,7 +2,7 @@
 import { makeFunctionReference } from 'convex/server'
 import type { Id } from './_generated/dataModel'
 import { convexTest } from 'convex-test'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import schema from './schema'
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts'])
@@ -130,7 +130,12 @@ const claimWorkflowExecution = makeFunctionReference<
 
 const markWorkflowExecutionFailed = makeFunctionReference<
   'mutation',
-  { systemSecret: string; workflowRunId: string; summary: string },
+  {
+    systemSecret: string
+    workflowRunId: string
+    incomingDispatchToken?: string
+    summary: string
+  },
   boolean
 >('workflowStarts:markWorkflowExecutionFailed')
 
@@ -181,6 +186,42 @@ const getActiveRuntimeSession = makeFunctionReference<
   Record<string, unknown>,
   unknown
 >('workflowStarts:getActiveRuntimeSession')
+
+const getCandidatePatchSetForWorkflow = makeFunctionReference<
+  'query',
+  Record<string, unknown>,
+  unknown
+>('workflowStarts:getCandidatePatchSetForWorkflow')
+
+const claimCandidateFreeze = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:claimCandidateFreeze')
+
+const releaseCandidateFreeze = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:releaseCandidateFreeze')
+
+const claimIncomingDispatch = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:claimIncomingDispatch')
+
+const startIncomingDispatch = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:startIncomingDispatch')
+
+const validateIncomingDispatch = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:validateIncomingDispatch')
 
 const recordCandidatePatchSet = makeFunctionReference<
   'mutation',
@@ -590,7 +631,7 @@ describe('workflowStarts V1 execution claim', () => {
     })
   })
 
-  test('deduplicates webhook delivery and permits exactly one sandbox execution', async () => {
+  test('deduplicates webhook delivery and blocks direct pre-freeze execution', async () => {
     const t = authenticatedTest()
     const intake = {
       systemSecret: 'system_test',
@@ -637,50 +678,7 @@ describe('workflowStarts V1 execution claim', () => {
         systemSecret: 'system_test',
         workflowRunId: first.workflowRun.id,
       }),
-    ).toBe(true)
-    expect(
-      await t.mutation(claimWorkflowExecution, {
-        systemSecret: 'system_test',
-        workflowRunId: replay.workflowRun.id,
-      }),
     ).toBe(false)
-
-    await t.mutation(recordSandboxExecution, {
-      systemSecret: 'system_test',
-      workflowRunId: first.workflowRun.id,
-      provider: 'daytona',
-      sandboxId: 'sandbox-delivery-1',
-      command: 'pi --mode json',
-      status: 'succeeded',
-      exitCode: 0,
-      stdout: 'done',
-      startedAt: 1,
-      completedAt: 2,
-    })
-    await expect(
-      t.mutation(recordSandboxExecution, {
-        systemSecret: 'system_test',
-        workflowRunId: first.workflowRun.id,
-        provider: 'daytona',
-        sandboxId: 'sandbox-delivery-duplicate',
-        command: 'pi --mode json',
-        status: 'succeeded',
-        exitCode: 0,
-        stdout: 'duplicate',
-        startedAt: 1,
-        completedAt: 2,
-      }),
-    ).rejects.toThrow('V1 workflow attempt already has a sandbox execution')
-
-    const executions = await t.run((ctx) =>
-      ctx.db
-        .query('sandboxExecutions')
-        .withIndex('by_workflow_run', (q) =>
-          q.eq('workflowRunId', first.workflowRun.id),
-        )
-        .take(2),
-    )
-    expect(executions).toHaveLength(1)
   })
 })
 
@@ -841,6 +839,26 @@ describe('workflowStarts candidate-bound verification evidence', () => {
         systemSecret: 'system_test',
         workflowRunId,
         sandboxExecutionId: sandbox.id,
+        subject: {
+          kind: 'sandbox-generated',
+          sandboxExecutionId: '00000000000000000002sandboxExecutions',
+        },
+        status: 'captured',
+        candidateDigest: 'sha256:abc123',
+        baseSha: '0123456789012345678901234567890123456789',
+        diffArtifactId: diff.id,
+        idempotencyKey: 'sandbox-1:mismatched-subject',
+        createdAt: 2,
+      }),
+    ).rejects.toThrow(
+      'Generated candidate subject must match its producing sandbox execution',
+    )
+
+    await expect(
+      t.mutation(recordCandidatePatchSet, {
+        systemSecret: 'system_test',
+        workflowRunId,
+        sandboxExecutionId: sandbox.id,
         status: 'captured',
         candidateDigest: 'sha256:abc123',
         baseSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -849,7 +867,7 @@ describe('workflowStarts candidate-bound verification evidence', () => {
         createdAt: 2,
       }),
     ).rejects.toThrow(
-      'Candidate base commit does not match the pinned workflow source revision',
+      'Generated candidate base does not match the pinned workflow source revision',
     )
 
     const candidate = (await t.mutation(recordCandidatePatchSet, {
@@ -1456,7 +1474,7 @@ describe('workflowStarts trusted boundary and authz', () => {
         systemSecret: 'system_test',
         workflowRunId: rebased.workflowRun.id,
       }),
-    ).toBe(true)
+    ).toBe(false)
 
     expect(rebased.workflowRun).toMatchObject({
       sourceBaseSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -1578,6 +1596,281 @@ describe('workflowStarts trusted boundary and authz', () => {
       workflowRunId: updated.workflowRun.id,
     })
     expect(updatedDetail.candidatePatchSets).toEqual([])
+  })
+
+  test('persists a frozen incoming PR candidate without a sandbox producer', async () => {
+    vi.useFakeTimers()
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const baseSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    const headSha = '0123456789012345678901234567890123456789'
+    const externalRef = {
+      provider: 'github',
+      deliveryId: 'delivery-freeze-1',
+      eventKind: 'github.pull_request.opened',
+      repositoryProvider: 'github',
+      repositoryInstallationId: '123',
+      repositoryExternalId: '456',
+      repositoryOwner: 'patchplane',
+      repositoryName: 'demo',
+      repositoryFullName: 'patchplane/demo',
+      issueExternalId: '789',
+      pullRequestExternalId: '789',
+      pullRequestNumber: 7,
+      pullRequestUpdatedAt: 1_000,
+      pullRequestBaseSha: baseSha,
+      pullRequestHeadSha: headSha,
+    }
+    const started = await t.mutation(createWorkflowStartFromExternalIntake, {
+      systemSecret: 'system_test',
+      workspaceId: 'workos:org_123',
+      actorId: 'github-app:123',
+      actorDisplayName: 'GitHub App installation 123',
+      source: 'external',
+      traceId: 'trace-freeze-1',
+      prompt: 'Verify pull request 7',
+      externalRef,
+    })
+    if (!isWorkflowStartResult(started)) {
+      throw new Error('Expected workflow start result')
+    }
+    const firstLeaseToken = 'freeze-lease-token-00000001'
+    const activeLeaseToken = 'freeze-lease-token-00000002'
+    expect(
+      await t.mutation(claimCandidateFreeze, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        leaseToken: firstLeaseToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(claimCandidateFreeze, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        leaseToken: activeLeaseToken,
+      }),
+    ).toBe(false)
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', started.workflowRun.id, {
+        candidateFreezeClaimedAt: Date.now() - 300_001,
+      }),
+    )
+    expect(
+      await t.mutation(claimCandidateFreeze, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        leaseToken: activeLeaseToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(releaseCandidateFreeze, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        leaseToken: firstLeaseToken,
+      }),
+    ).toBe(false)
+
+    const digest = `sha256:${'d'.repeat(64)}`
+    const producer = `source-control:github:compare:456:${baseSha}...${headSha}`
+    const artifactArgs = {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      producer,
+      subjectDigest: digest,
+      kind: 'diff' as const,
+      storageProvider: 'cloudflare-r2' as const,
+      storageKey: 'workflows/freeze/incoming.diff',
+      contentType: 'application/vnd.github.v3.diff',
+      sizeBytes: 10,
+      sha256: 'd'.repeat(64),
+      createdAt: 2,
+    }
+    const artifact = await t.mutation(recordEvidenceArtifact, artifactArgs)
+    const artifactReplay = await t.mutation(recordEvidenceArtifact, {
+      ...artifactArgs,
+      createdAt: 99,
+    })
+    expect(artifactReplay.id).toBe(artifact.id)
+    const candidateArgs = {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      candidateFreezeLeaseToken: activeLeaseToken,
+      subject: {
+        kind: 'incoming-pull-request' as const,
+        repositoryProvider: 'github' as const,
+        repositoryExternalId: '456',
+        repositoryOwner: 'patchplane',
+        repositoryName: 'demo',
+        repositoryFullName: 'patchplane/demo',
+        pullRequestExternalId: '789',
+        pullRequestNumber: 7,
+        baseSha,
+        headSha,
+        sourceEventProvider: 'github' as const,
+        sourceEventDeliveryId: 'delivery-freeze-1',
+        sourceEventKind: 'github.pull_request.opened' as const,
+      },
+      status: 'captured' as const,
+      candidateDigest: digest,
+      baseSha,
+      headSha,
+      diffArtifactId: artifact.id,
+      summary: 'Frozen exact incoming PR candidate.',
+      idempotencyKey: `${started.workflowRun.id}:incoming-pr:${baseSha}:${headSha}`,
+      createdAt: 3,
+    }
+    await expect(
+      t.mutation(recordCandidatePatchSet, {
+        ...candidateArgs,
+        candidateFreezeLeaseToken: firstLeaseToken,
+      }),
+    ).rejects.toThrow(
+      'Current incoming-PR attempt requires its subject and active freeze lease',
+    )
+    const candidate = await t.mutation(recordCandidatePatchSet, candidateArgs)
+
+    expect(candidate).toMatchObject({
+      workflowRunId: started.workflowRun.id,
+      status: 'captured',
+      candidateDigest: digest,
+      baseSha,
+      headSha,
+      subject: { kind: 'incoming-pull-request' },
+    })
+    expect(candidate.sandboxExecutionId).toBeUndefined()
+    expect(
+      await t.query(getCandidatePatchSetForWorkflow, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+      }),
+    ).toMatchObject({ id: candidate.id, candidateDigest: digest })
+    const dispatchToken = 'dispatch-token-0000000000001'
+    expect(
+      await t.mutation(claimIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(validateIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken,
+      }),
+    ).toBe(true)
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', started.workflowRun.id, {
+        incomingDispatchClaimedAt: Date.now() - 300_001,
+      }),
+    )
+    const resumedDispatchToken = 'dispatch-token-0000000000002'
+    expect(
+      await t.mutation(claimIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken: resumedDispatchToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(validateIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken,
+      }),
+    ).toBe(false)
+    expect(
+      await t.mutation(validateIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken: resumedDispatchToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(startIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken: resumedDispatchToken,
+        sandboxId: 'sandbox-dispatch-started',
+      }),
+    ).toBe(true)
+    await expect(
+      t.mutation(recordSandboxExecution, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        incomingDispatchToken: resumedDispatchToken,
+        provider: 'daytona',
+        sandboxId: 'sandbox-different-from-started-dispatch',
+        command: 'verify',
+        status: 'succeeded',
+        exitCode: 0,
+        stdout: 'must be rejected',
+        startedAt: 10,
+        completedAt: 11,
+      }),
+    ).rejects.toThrow(
+      'Incoming PR sandbox execution requires its active started dispatch',
+    )
+    expect(
+      await t.mutation(markWorkflowExecutionFailed, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        incomingDispatchToken: dispatchToken,
+        summary: 'Stale worker must not fail the replacement dispatch.',
+      }),
+    ).toBe(false)
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', started.workflowRun.id, {
+        incomingDispatchClaimedAt: Date.now() - 300_001,
+      }),
+    )
+    expect(
+      await t.mutation(claimIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken: 'dispatch-token-third-generation-123456',
+      }),
+    ).toBe(false)
+    expect(
+      await t.mutation(validateIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+        candidatePatchSetId: candidate.id,
+        dispatchToken: resumedDispatchToken,
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(claimWorkflowExecution, {
+        systemSecret: 'system_test',
+        workflowRunId: started.workflowRun.id,
+      }),
+    ).toBe(false)
+    await t.mutation(recordSandboxExecution, {
+      systemSecret: 'system_test',
+      workflowRunId: started.workflowRun.id,
+      incomingDispatchToken: resumedDispatchToken,
+      provider: 'daytona',
+      sandboxId: 'sandbox-dispatch-started',
+      command: 'verify',
+      status: 'succeeded',
+      exitCode: 0,
+      stdout: 'durable execution before simulated continuation crash',
+      startedAt: 12,
+      completedAt: 13,
+    })
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+    const recovered = await t.run((ctx) =>
+      ctx.db.get('workflowRuns', started.workflowRun.id),
+    )
+    expect(recovered?.status).toBe('failed')
+    vi.useRealTimers()
   })
 
   test('public workflow start requires authentication', async () => {
@@ -2116,6 +2409,21 @@ describe('workflowStarts trusted boundary and authz', () => {
         idempotencyKey: 'decision-attempt-stale',
       }),
     ).rejects.toThrow('Displayed review projection is stale')
+
+    await t.run((ctx) =>
+      ctx.db.patch('workflowRuns', workflowStart.workflowRun.id, {
+        status: 'failed',
+      }),
+    )
+    await expect(
+      t.mutation(recordPolicyDecision, {
+        systemSecret: 'system_test',
+        workflowRunId: workflowStart.workflowRun.id,
+        status: 'changes-requested',
+        summary: 'A timed-out continuation must stay failed.',
+        idempotencyKey: 'late-policy-after-timeout',
+      }),
+    ).rejects.toThrow('Failed workflow attempts cannot record policy decisions')
 
     await expect(
       t.query(getTrustLoopAcceptanceSnapshot, {

@@ -5,7 +5,10 @@ import {
   decodeGitHubWebhookVerification,
 } from '@patchplane/domain/github'
 import { GitHubWebhookService } from '@patchplane/core/services/github-webhook-service'
-import { SourceControlService } from '@patchplane/core/services/source-control-service'
+import {
+  type FetchImmutableComparisonInput,
+  SourceControlService,
+} from '@patchplane/core/services/source-control-service'
 import { GitHubConfig } from './GitHubConfig'
 import { makeGitHubApp } from './github-app'
 import { parseGitHubInstallationId } from './github-installation'
@@ -32,6 +35,16 @@ function toGitHubRepositoryTokenScope(input: {
   return Effect.succeed({ repository_ids: [repositoryId] })
 }
 
+class ImmutableComparisonResponseError extends Error {
+  constructor(
+    readonly operation: string,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message)
+  }
+}
+
 function publicationMarker(idempotencyKey: string) {
   return `<!-- patchplane-publication:${encodeURIComponent(idempotencyKey)} -->`
 }
@@ -49,7 +62,7 @@ const sourceControlLayer = Layer.effect(
 
     const verifyRepositoryAccess = Effect.fn(
       'GitHubProviderPlugin.verifyRepositoryAccess',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
       readonly owner: string
@@ -105,7 +118,7 @@ const sourceControlLayer = Layer.effect(
 
     const getInstallationAccount = Effect.fn(
       'GitHubProviderPlugin.getInstallationAccount',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
     }) {
@@ -146,7 +159,7 @@ const sourceControlLayer = Layer.effect(
 
     const listInstallationRepositories = Effect.fn(
       'GitHubProviderPlugin.listInstallationRepositories',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
     }) {
@@ -168,12 +181,13 @@ const sourceControlLayer = Layer.effect(
       })
 
       return yield* Effect.forEach(repositories, (repository) => {
-        const ownerLogin = typeof repository.owner === 'object' &&
+        const ownerLogin =
+          typeof repository.owner === 'object' &&
           repository.owner !== null &&
           'login' in repository.owner &&
           typeof repository.owner.login === 'string'
-          ? repository.owner.login
-          : undefined
+            ? repository.owner.login
+            : undefined
 
         return decodeGitHubRepositoryRef({
           provider: 'github',
@@ -197,7 +211,8 @@ const sourceControlLayer = Layer.effect(
             (cause) =>
               new SourceControlError({
                 operation: 'listInstallationRepositories.decode',
-                message: 'GitHub returned an invalid installation repository reference',
+                message:
+                  'GitHub returned an invalid installation repository reference',
                 cause,
               }),
           ),
@@ -207,7 +222,7 @@ const sourceControlLayer = Layer.effect(
 
     const createIssueComment = Effect.fn(
       'GitHubProviderPlugin.createIssueComment',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
       readonly owner: string
@@ -222,13 +237,18 @@ const sourceControlLayer = Layer.effect(
           const octokit = await app.getInstallationOctokit(installationId)
           if (input.idempotencyKey !== undefined) {
             const marker = publicationMarker(input.idempotencyKey)
-            const comments = await octokit.paginate(octokit.rest.issues.listComments, {
-              owner: input.owner,
-              repo: input.name,
-              issue_number: input.issueNumber,
-              per_page: 100,
-            })
-            const existing = comments.find((comment) => comment.body?.includes(marker))
+            const comments = await octokit.paginate(
+              octokit.rest.issues.listComments,
+              {
+                owner: input.owner,
+                repo: input.name,
+                issue_number: input.issueNumber,
+                per_page: 100,
+              },
+            )
+            const existing = comments.find((comment) =>
+              comment.body?.includes(marker),
+            )
             if (existing !== undefined) {
               const updated = await octokit.rest.issues.updateComment({
                 owner: input.owner,
@@ -242,12 +262,16 @@ const sourceControlLayer = Layer.effect(
               }
             }
           }
-          const marker = input.idempotencyKey === undefined ? undefined : publicationMarker(input.idempotencyKey)
+          const marker =
+            input.idempotencyKey === undefined
+              ? undefined
+              : publicationMarker(input.idempotencyKey)
           const result = await octokit.rest.issues.createComment({
             owner: input.owner,
             repo: input.name,
             issue_number: input.issueNumber,
-            body: marker === undefined ? input.body : `${input.body}\n\n${marker}`,
+            body:
+              marker === undefined ? input.body : `${input.body}\n\n${marker}`,
           })
           return {
             externalId: String(result.data.id),
@@ -263,94 +287,114 @@ const sourceControlLayer = Layer.effect(
       })
     })
 
-    const createCheckRun = Effect.fn(
-      'GitHubProviderPlugin.createCheckRun',
-    )(function*(input: {
-      readonly provider: string
-      readonly installationId?: string
-      readonly owner: string
-      readonly name: string
-      readonly headSha: string
-      readonly checkName: string
-      readonly status: 'completed'
-      readonly conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required'
-      readonly title: string
-      readonly summary: string
-      readonly text?: string | undefined
-      readonly detailsUrl?: string | undefined
-      readonly idempotencyKey?: string | undefined
-    }) {
-      const installationId = yield* parseGitHubInstallationId(input)
-      return yield* Effect.tryPromise({
-        try: async () => {
-          const octokit = await app.getInstallationOctokit(installationId)
-          if (input.idempotencyKey !== undefined) {
-            const checkPages = octokit.paginate.iterator(octokit.rest.checks.listForRef, {
-              owner: input.owner,
-              repo: input.name,
-              ref: input.headSha,
-              check_name: input.checkName,
-              filter: 'all',
-              per_page: 100,
-            })
-            let existing: { readonly id: number; readonly html_url: string | null } | undefined
-            for await (const page of checkPages) {
-              existing = page.data.find((check) => check.external_id === input.idempotencyKey)
-              if (existing !== undefined) break
-            }
-            if (existing !== undefined) {
-              const updated = await octokit.rest.checks.update({
-                owner: input.owner,
-                repo: input.name,
-                check_run_id: existing.id,
-                name: input.checkName,
-                status: input.status,
-                conclusion: input.conclusion,
-                ...(input.detailsUrl === undefined ? {} : { details_url: input.detailsUrl }),
-                output: {
-                  title: input.title,
-                  summary: input.summary,
-                  ...(input.text === undefined ? {} : { text: input.text }),
+    const createCheckRun = Effect.fn('GitHubProviderPlugin.createCheckRun')(
+      function* (input: {
+        readonly provider: string
+        readonly installationId?: string
+        readonly owner: string
+        readonly name: string
+        readonly headSha: string
+        readonly checkName: string
+        readonly status: 'completed'
+        readonly conclusion:
+          | 'success'
+          | 'failure'
+          | 'neutral'
+          | 'cancelled'
+          | 'skipped'
+          | 'timed_out'
+          | 'action_required'
+        readonly title: string
+        readonly summary: string
+        readonly text?: string | undefined
+        readonly detailsUrl?: string | undefined
+        readonly idempotencyKey?: string | undefined
+      }) {
+        const installationId = yield* parseGitHubInstallationId(input)
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const octokit = await app.getInstallationOctokit(installationId)
+            if (input.idempotencyKey !== undefined) {
+              const checkPages = octokit.paginate.iterator(
+                octokit.rest.checks.listForRef,
+                {
+                  owner: input.owner,
+                  repo: input.name,
+                  ref: input.headSha,
+                  check_name: input.checkName,
+                  filter: 'all',
+                  per_page: 100,
                 },
-              })
-              return {
-                externalId: String(updated.data.id),
-                url: updated.data.html_url ?? undefined,
+              )
+              let existing:
+                | { readonly id: number; readonly html_url: string | null }
+                | undefined
+              for await (const page of checkPages) {
+                existing = page.data.find(
+                  (check) => check.external_id === input.idempotencyKey,
+                )
+                if (existing !== undefined) break
+              }
+              if (existing !== undefined) {
+                const updated = await octokit.rest.checks.update({
+                  owner: input.owner,
+                  repo: input.name,
+                  check_run_id: existing.id,
+                  name: input.checkName,
+                  status: input.status,
+                  conclusion: input.conclusion,
+                  ...(input.detailsUrl === undefined
+                    ? {}
+                    : { details_url: input.detailsUrl }),
+                  output: {
+                    title: input.title,
+                    summary: input.summary,
+                    ...(input.text === undefined ? {} : { text: input.text }),
+                  },
+                })
+                return {
+                  externalId: String(updated.data.id),
+                  url: updated.data.html_url ?? undefined,
+                }
               }
             }
-          }
-          const result = await octokit.rest.checks.create({
-            owner: input.owner,
-            repo: input.name,
-            name: input.checkName,
-            head_sha: input.headSha,
-            status: input.status,
-            conclusion: input.conclusion,
-            ...(input.idempotencyKey === undefined ? {} : { external_id: input.idempotencyKey }),
-            ...(input.detailsUrl === undefined ? {} : { details_url: input.detailsUrl }),
-            output: {
-              title: input.title,
-              summary: input.summary,
-              ...(input.text === undefined ? {} : { text: input.text }),
-            },
-          })
-          return {
-            externalId: String(result.data.id),
-            url: result.data.html_url ?? undefined,
-          }
-        },
-        catch: (cause) =>
-          new SourceControlError({
-            operation: 'createCheckRun.github',
-            message: 'GitHub failed to create a check run',
-            cause,
-          }),
-      })
-    })
+            const result = await octokit.rest.checks.create({
+              owner: input.owner,
+              repo: input.name,
+              name: input.checkName,
+              head_sha: input.headSha,
+              status: input.status,
+              conclusion: input.conclusion,
+              ...(input.idempotencyKey === undefined
+                ? {}
+                : { external_id: input.idempotencyKey }),
+              ...(input.detailsUrl === undefined
+                ? {}
+                : { details_url: input.detailsUrl }),
+              output: {
+                title: input.title,
+                summary: input.summary,
+                ...(input.text === undefined ? {} : { text: input.text }),
+              },
+            })
+            return {
+              externalId: String(result.data.id),
+              url: result.data.html_url ?? undefined,
+            }
+          },
+          catch: (cause) =>
+            new SourceControlError({
+              operation: 'createCheckRun.github',
+              message: 'GitHub failed to create a check run',
+              cause,
+            }),
+        })
+      },
+    )
 
     const createDraftPullRequest = Effect.fn(
       'GitHubProviderPlugin.createDraftPullRequest',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
       readonly owner: string
@@ -389,7 +433,7 @@ const sourceControlLayer = Layer.effect(
 
     const createRepositoryCloneCredentials = Effect.fn(
       'GitHubProviderPlugin.createRepositoryCloneCredentials',
-    )(function*(input: {
+    )(function* (input: {
       readonly provider: string
       readonly installationId?: string
       readonly owner: string
@@ -424,6 +468,203 @@ const sourceControlLayer = Layer.effect(
       }
     })
 
+    const fetchImmutableComparison = Effect.fn(
+      'GitHubProviderPlugin.fetchImmutableComparison',
+    )(function* (input: FetchImmutableComparisonInput) {
+      if (
+        !Number.isSafeInteger(input.maxBytes) ||
+        input.maxBytes <= 0 ||
+        (input.timeoutMilliseconds !== undefined &&
+          (!Number.isSafeInteger(input.timeoutMilliseconds) ||
+            input.timeoutMilliseconds <= 0))
+      ) {
+        return yield* new SourceControlError({
+          operation: 'fetchImmutableComparison.validateLimit',
+          message:
+            'Immutable comparison requires positive byte and timeout limits',
+          cause: {
+            maxBytes: input.maxBytes,
+            timeoutMilliseconds: input.timeoutMilliseconds,
+          },
+        })
+      }
+      const installationId = yield* parseGitHubInstallationId(input)
+      const bytes = yield* Effect.tryPromise({
+        try: async () => {
+          const authentication: unknown = await app.octokit.auth({
+            type: 'installation',
+            installationId,
+          })
+          if (
+            typeof authentication !== 'object' ||
+            authentication === null ||
+            !('token' in authentication) ||
+            typeof authentication.token !== 'string'
+          ) {
+            throw new ImmutableComparisonResponseError(
+              'fetchImmutableComparison.authentication',
+              'GitHub did not return installation authentication',
+            )
+          }
+          const apiBaseUrl = (baseUrl ?? 'https://api.github.com').replace(
+            /\/$/,
+            '',
+          )
+          const comparisonUrl = `${apiBaseUrl}/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.name)}/compare/${input.baseSha}...${input.headSha}`
+          const controller = new AbortController()
+          const timeout = setTimeout(
+            () => controller.abort(),
+            input.timeoutMilliseconds ?? 30_000,
+          )
+          const response = await fetch(comparisonUrl, {
+            method: 'GET',
+            headers: {
+              accept: 'application/vnd.github.v3.diff',
+              authorization: `Bearer ${authentication.token}`,
+              'user-agent': 'patchplane',
+              'x-github-api-version': '2022-11-28',
+            },
+            redirect: 'error',
+            signal: controller.signal,
+          })
+          try {
+            if (response.status === 406) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.github',
+                'GitHub comparison diff is unavailable or truncated',
+                { status: response.status },
+              )
+            }
+            if (response.status === 404) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.github',
+                'GitHub comparison references a missing commit or repository',
+                { status: response.status },
+              )
+            }
+            if (!response.ok) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.github',
+                'GitHub failed to fetch the immutable comparison diff',
+                { status: response.status },
+              )
+            }
+            const rawContentType = response.headers.get('content-type')
+            const contentType = rawContentType
+              ?.split(';', 1)[0]
+              ?.trim()
+              .toLowerCase()
+            if (
+              contentType !== 'application/vnd.github.v3.diff' &&
+              contentType !== 'text/plain'
+            ) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.validateContentType',
+                'GitHub comparison returned an unexpected content type',
+                { contentType: rawContentType },
+              )
+            }
+            const contentLength = response.headers.get('content-length')
+            if (
+              contentLength !== null &&
+              response.headers.get('content-encoding') === null &&
+              Number(contentLength) > input.maxBytes
+            ) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.size',
+                'GitHub comparison exceeds the configured byte limit',
+                { contentLength, maxBytes: input.maxBytes },
+              )
+            }
+            if (response.body === null) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.decode',
+                'GitHub comparison response body is unavailable',
+              )
+            }
+            const reader = response.body.getReader()
+            const chunks: Array<Uint8Array> = []
+            let sizeBytes = 0
+            while (true) {
+              const next = await reader.read()
+              if (next.done) break
+              sizeBytes += next.value.byteLength
+              if (sizeBytes > input.maxBytes) {
+                await reader.cancel()
+                throw new ImmutableComparisonResponseError(
+                  'fetchImmutableComparison.size',
+                  'GitHub comparison exceeds the configured byte limit',
+                  { sizeBytes, maxBytes: input.maxBytes },
+                )
+              }
+              chunks.push(next.value)
+            }
+            if (
+              contentLength !== null &&
+              response.headers.get('content-encoding') === null &&
+              Number(contentLength) !== sizeBytes
+            ) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.truncated',
+                'GitHub comparison byte length does not match the response',
+                { contentLength, sizeBytes },
+              )
+            }
+            const body = new Uint8Array(sizeBytes)
+            let offset = 0
+            for (const chunk of chunks) {
+              body.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            let diffText: string
+            try {
+              diffText = new TextDecoder('utf-8', { fatal: true }).decode(body)
+            } catch (cause) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.decode',
+                'GitHub comparison is not valid UTF-8 diff text',
+                cause,
+              )
+            }
+            if (
+              /^Binary files .+ differ$/m.test(diffText) ||
+              /^GIT binary patch$/m.test(diffText)
+            ) {
+              throw new ImmutableComparisonResponseError(
+                'fetchImmutableComparison.binary',
+                'GitHub comparison contains binary changes that the alpha cannot reproduce exactly',
+              )
+            }
+            return body
+          } finally {
+            clearTimeout(timeout)
+          }
+        },
+        catch: (cause) =>
+          new SourceControlError({
+            operation:
+              cause instanceof ImmutableComparisonResponseError
+                ? cause.operation
+                : 'fetchImmutableComparison.github',
+            message:
+              cause instanceof ImmutableComparisonResponseError
+                ? cause.message
+                : 'GitHub failed to fetch the immutable comparison diff',
+            cause:
+              cause instanceof ImmutableComparisonResponseError
+                ? cause.details
+                : cause,
+          }),
+      })
+      return {
+        provider: 'github' as const,
+        baseSha: input.baseSha,
+        headSha: input.headSha,
+        contentType: 'application/vnd.github.v3.diff' as const,
+        bytes,
+      }
+    })
+
     return SourceControlService.of({
       verifyRepositoryAccess,
       getInstallationAccount,
@@ -432,6 +673,7 @@ const sourceControlLayer = Layer.effect(
       createCheckRun,
       createDraftPullRequest,
       createRepositoryCloneCredentials,
+      fetchImmutableComparison,
     })
   }),
 )
@@ -447,62 +689,62 @@ const githubWebhookLayer = Layer.effect(
       ...(baseUrl === undefined ? {} : { baseUrl }),
     })
 
-    const verifyWebhook = Effect.fn(
-      'GitHubProviderPlugin.verifyWebhook',
-    )(function*(input: {
-      readonly deliveryId: string
-      readonly eventName: string
-      readonly signature: string
-      readonly payload: string
-    }) {
-      yield* Effect.annotateCurrentSpan({
-        deliveryId: input.deliveryId,
-        eventName: input.eventName,
-      })
-
-      const isValid = yield* Effect.tryPromise({
-        try: () => app.webhooks.verify(input.payload, input.signature),
-        catch: (cause) =>
-          new GitHubError({
-            operation: 'verifyGitHubWebhook',
-            message: 'GitHub failed to verify the webhook signature',
-            cause,
-          }),
-      })
-
-      if (!isValid) {
-        return yield* new GitHubError({
-          operation: 'verifyGitHubWebhook',
-          message: 'GitHub webhook signature is invalid',
-          cause: null,
+    const verifyWebhook = Effect.fn('GitHubProviderPlugin.verifyWebhook')(
+      function* (input: {
+        readonly deliveryId: string
+        readonly eventName: string
+        readonly signature: string
+        readonly payload: string
+      }) {
+        yield* Effect.annotateCurrentSpan({
+          deliveryId: input.deliveryId,
+          eventName: input.eventName,
         })
-      }
 
-      const payload = yield* Effect.try({
-        try: () => JSON.parse(input.payload) as unknown,
-        catch: (cause) =>
-          new GitHubError({
-            operation: 'verifyGitHubWebhook.parse',
-            message: 'GitHub webhook payload is not valid JSON',
-            cause,
-          }),
-      })
-
-      return yield* decodeGitHubWebhookVerification({
-        deliveryId: input.deliveryId,
-        eventName: input.eventName,
-        payload,
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
+        const isValid = yield* Effect.tryPromise({
+          try: () => app.webhooks.verify(input.payload, input.signature),
+          catch: (cause) =>
             new GitHubError({
-              operation: 'verifyGitHubWebhook.decode',
-              message: 'GitHub webhook verification result is invalid',
+              operation: 'verifyGitHubWebhook',
+              message: 'GitHub failed to verify the webhook signature',
               cause,
             }),
-        ),
-      )
-    })
+        })
+
+        if (!isValid) {
+          return yield* new GitHubError({
+            operation: 'verifyGitHubWebhook',
+            message: 'GitHub webhook signature is invalid',
+            cause: null,
+          })
+        }
+
+        const payload = yield* Effect.try({
+          try: () => JSON.parse(input.payload) as unknown,
+          catch: (cause) =>
+            new GitHubError({
+              operation: 'verifyGitHubWebhook.parse',
+              message: 'GitHub webhook payload is not valid JSON',
+              cause,
+            }),
+        })
+
+        return yield* decodeGitHubWebhookVerification({
+          deliveryId: input.deliveryId,
+          eventName: input.eventName,
+          payload,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitHubError({
+                operation: 'verifyGitHubWebhook.decode',
+                message: 'GitHub webhook verification result is invalid',
+                cause,
+              }),
+          ),
+        )
+      },
+    )
 
     return GitHubWebhookService.of({ verifyWebhook })
   }),

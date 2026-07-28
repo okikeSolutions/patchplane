@@ -20,6 +20,7 @@ const SourceControlTestLayer = Layer.succeed(
     createIssueComment: () => Effect.die('unused'),
     createCheckRun: () => Effect.die('unused'),
     createDraftPullRequest: () => Effect.die('unused'),
+    fetchImmutableComparison: () => Effect.die('unused'),
     createRepositoryCloneCredentials: (input) =>
       Effect.succeed({
         username: 'x-access-token',

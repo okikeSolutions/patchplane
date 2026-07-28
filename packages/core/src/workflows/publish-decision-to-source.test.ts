@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { makePullRequestNumber } from '@patchplane/domain/candidate-subject'
 import {
   makeCandidatePatchSetId,
@@ -128,6 +128,7 @@ describe('PublishDecisionToSource', () => {
             getInstallationAccount: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createRepositoryCloneCredentials: () => Effect.die('unused'),
+            fetchImmutableComparison: () => Effect.die('unused'),
             createDraftPullRequest: () => Effect.die('unused'),
             createIssueComment: (input) =>
               Effect.sync(() => {
@@ -240,6 +241,14 @@ describe('PublishDecisionToSource', () => {
             markWorkflowExecutionFailed: () => Effect.succeed(true),
             recordVerificationRequirement: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
+            getCandidatePatchSetForWorkflow: () =>
+              Effect.succeed(Option.none()),
+            claimCandidateFreeze: () => Effect.succeed(false),
+            releaseCandidateFreeze: () => Effect.succeed(false),
+            failCandidateFreeze: () => Effect.succeed(true),
+            claimIncomingDispatch: () => Effect.succeed(false),
+            startIncomingDispatch: () => Effect.succeed(true),
+            validateIncomingDispatch: () => Effect.succeed(false),
             recordPublicationResult: (input) =>
               Effect.suspend(() => {
                 storageRecords.push({ type: 'publication', input })
@@ -354,6 +363,7 @@ describe('PublishDecisionToSource', () => {
           getInstallationAccount: () => Effect.die('unused'),
           listInstallationRepositories: () => Effect.die('unused'),
           createRepositoryCloneCredentials: () => Effect.die('unused'),
+          fetchImmutableComparison: () => Effect.die('unused'),
           createDraftPullRequest: () => Effect.die('unused'),
           createIssueComment: () =>
             Effect.sync(() => {
@@ -474,6 +484,13 @@ describe('PublishDecisionToSource', () => {
           markWorkflowExecutionFailed: () => Effect.succeed(true),
           recordVerificationRequirement: () => Effect.die('unused'),
           recordVerificationResult: () => Effect.die('unused'),
+          getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+          claimCandidateFreeze: () => Effect.succeed(false),
+          releaseCandidateFreeze: () => Effect.succeed(false),
+          failCandidateFreeze: () => Effect.succeed(true),
+          claimIncomingDispatch: () => Effect.succeed(false),
+          startIncomingDispatch: () => Effect.succeed(true),
+          validateIncomingDispatch: () => Effect.succeed(false),
           recordPublicationResult: (input) =>
             Effect.suspend(() => {
               const id = makePublicationResultId(
@@ -627,6 +644,7 @@ describe('PublishDecisionToSource', () => {
             getInstallationAccount: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createRepositoryCloneCredentials: () => Effect.die('unused'),
+            fetchImmutableComparison: () => Effect.die('unused'),
             createDraftPullRequest: () => Effect.die('unused'),
             createIssueComment: () =>
               Effect.sync(() => {
@@ -737,6 +755,14 @@ describe('PublishDecisionToSource', () => {
             markWorkflowExecutionFailed: () => Effect.succeed(true),
             recordVerificationRequirement: () => Effect.die('unused'),
             recordVerificationResult: () => Effect.die('unused'),
+            getCandidatePatchSetForWorkflow: () =>
+              Effect.succeed(Option.none()),
+            claimCandidateFreeze: () => Effect.succeed(false),
+            releaseCandidateFreeze: () => Effect.succeed(false),
+            failCandidateFreeze: () => Effect.succeed(true),
+            claimIncomingDispatch: () => Effect.succeed(false),
+            startIncomingDispatch: () => Effect.succeed(true),
+            validateIncomingDispatch: () => Effect.succeed(false),
             recordPublicationResult: (input) =>
               Effect.succeed({
                 id: makePublicationResultId(`publication-${input.kind}`),

@@ -1,5 +1,6 @@
 import { Context, Effect, type Option } from 'effect'
 import type { Actor } from '@patchplane/domain/actor'
+import type { CandidateSubject } from '@patchplane/domain/candidate-subject'
 import type {
   CandidatePatchSet,
   CandidatePatchSetStatus,
@@ -70,11 +71,13 @@ export interface ClaimWorkflowExecutionInput extends TelemetryContextFields {
 
 export interface MarkWorkflowExecutionFailedInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
+  readonly incomingDispatchToken?: string | undefined
   readonly summary: string
 }
 
 export interface RecordSandboxExecutionInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
+  readonly incomingDispatchToken?: string | undefined
   readonly provider: string
   readonly sandboxId: string
   readonly command: string
@@ -143,9 +146,34 @@ export interface GetEvidenceArtifactInput extends TelemetryContextFields {
   readonly authToken?: string | undefined
 }
 
+export interface CandidateFreezeInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly leaseToken: string
+}
+
+export interface FailCandidateFreezeInput extends CandidateFreezeInput {
+  readonly summary: string
+}
+
+export interface IncomingDispatchClaimInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly candidatePatchSetId: CandidatePatchSet['id']
+  readonly dispatchToken: string
+}
+
+export interface StartIncomingDispatchInput extends IncomingDispatchClaimInput {
+  readonly sandboxId: string
+}
+
+export interface GetCandidatePatchSetForWorkflowInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+}
+
 export interface RecordCandidatePatchSetInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
   readonly sandboxExecutionId?: SandboxExecution['id'] | undefined
+  readonly subject?: CandidateSubject | undefined
+  readonly candidateFreezeLeaseToken?: string | undefined
   readonly status: CandidatePatchSetStatus
   readonly candidateDigest?: string | undefined
   readonly baseRef?: string | undefined
@@ -324,6 +352,27 @@ export class StorageService extends Context.Service<
     readonly getEvidenceArtifact: (
       input: GetEvidenceArtifactInput,
     ) => Effect.Effect<Option.Option<EvidenceArtifact>, StorageError>
+    readonly getCandidatePatchSetForWorkflow: (
+      input: GetCandidatePatchSetForWorkflowInput,
+    ) => Effect.Effect<Option.Option<CandidatePatchSet>, StorageError>
+    readonly claimCandidateFreeze: (
+      input: CandidateFreezeInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly releaseCandidateFreeze: (
+      input: CandidateFreezeInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly failCandidateFreeze: (
+      input: FailCandidateFreezeInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly claimIncomingDispatch: (
+      input: IncomingDispatchClaimInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly validateIncomingDispatch: (
+      input: IncomingDispatchClaimInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly startIncomingDispatch: (
+      input: StartIncomingDispatchInput,
+    ) => Effect.Effect<boolean, StorageError>
     readonly recordCandidatePatchSet: (
       input: RecordCandidatePatchSetInput,
     ) => Effect.Effect<CandidatePatchSet, StorageError>

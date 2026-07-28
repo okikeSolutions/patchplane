@@ -1007,11 +1007,11 @@ describe('architecture boundaries', () => {
           )
         }
 
-        expect(daytonaPlugin).toContain(
-          'piRuntimeEnvironment({ provider: input.provider })',
+        expect(daytonaPlugin).toMatch(
+          /piRuntimeEnvironment\(\{\s*provider: input\.provider,?\s*\}\)/,
         )
-        expect(daytonaPlugin).toContain(
-          'envVars: input.env === undefined ? undefined : { ...input.env }',
+        expect(daytonaPlugin).toMatch(
+          /envVars:\s*input\.env === undefined\s*\? undefined\s*:\s*\{ \.\.\.input\.env \}/,
         )
         expect(daytonaPlugin).not.toContain('process.env')
         for (const value of forbidden) {

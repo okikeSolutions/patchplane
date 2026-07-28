@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Crypto, Effect, Layer } from 'effect'
+import { Crypto, Effect, Layer, Option } from 'effect'
 import { StorageError } from '@patchplane/domain/errors'
 import {
   makeCandidatePatchSetId,
@@ -169,6 +169,13 @@ describe('ProposeMergeDecision', () => {
               }),
             ),
           getEvidenceArtifact: () => Effect.die('unused'),
+          getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+          claimCandidateFreeze: () => Effect.succeed(false),
+          releaseCandidateFreeze: () => Effect.succeed(false),
+          failCandidateFreeze: () => Effect.succeed(true),
+          claimIncomingDispatch: () => Effect.succeed(false),
+          startIncomingDispatch: () => Effect.succeed(true),
+          validateIncomingDispatch: () => Effect.succeed(false),
           recordCandidatePatchSet: (input) =>
             Effect.succeed({
               id: makeCandidatePatchSetId('patch-set-1'),

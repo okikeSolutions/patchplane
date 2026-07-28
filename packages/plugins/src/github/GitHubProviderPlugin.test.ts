@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Effect } from 'effect'
 import { App } from 'octokit'
 import nock from 'nock'
 import MockDate from 'mockdate'
+import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { GitHubWebhookService } from '@patchplane/core/services/github-webhook-service'
 import { SourceControlService } from '@patchplane/core/services/source-control-service'
 import { GitHubProviderPlugin } from './GitHubProviderPlugin'
@@ -40,7 +41,9 @@ const webhookSecret = 'secret'
 function withGitHubProvider<A, E>(
   effect: Effect.Effect<A, E, SourceControlService | GitHubWebhookService>,
 ) {
-  return Effect.runPromise(effect.pipe(Effect.provide(GitHubProviderPlugin.layer)))
+  return Effect.runPromise(
+    effect.pipe(Effect.provide(GitHubProviderPlugin.layer)),
+  )
 }
 
 function mockInstallationToken() {
@@ -48,10 +51,21 @@ function mockInstallationToken() {
     .post('/app/installations/123/access_tokens')
     .reply(200, {
       token: 'installation-token',
-      expires_at: '2026-01-01T00:00:00.000Z',
+      expires_at: '2027-01-01T00:00:00.000Z',
       permissions: { metadata: 'read', issues: 'write' },
       repository_selection: 'all',
     })
+}
+
+function mockComparisonResponse(response: Response) {
+  const realFetch = globalThis.fetch.bind(globalThis)
+  return vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation((input, init) =>
+      String(input).includes('/access_tokens')
+        ? realFetch(input, init)
+        : Promise.resolve(response),
+    )
 }
 
 function mockScopedInstallationToken() {
@@ -62,7 +76,7 @@ function mockScopedInstallationToken() {
     })
     .reply(201, {
       token: 'scoped-installation-token',
-      expires_at: '2026-01-01T00:00:00.000Z',
+      expires_at: '2027-01-01T00:00:00.000Z',
       permissions: { contents: 'read' },
       repository_selection: 'selected',
     })
@@ -80,6 +94,7 @@ beforeEach(() => {
 afterEach(() => {
   MockDate.reset()
   nock.cleanAll()
+  vi.restoreAllMocks()
   delete process.env.GITHUB_APP_ID
   delete process.env.GITHUB_PRIVATE_KEY
   delete process.env.GITHUB_WEBHOOK_SECRET
@@ -120,6 +135,219 @@ describe('GitHubProviderPlugin', () => {
       repositoryExternalId: '456',
       private: false,
     })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test('fetches exact immutable comparison diff bytes by explicit SHAs', async () => {
+    mockInstallationToken()
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    const diff =
+      'diff --git a/a.txt b/a.txt\nindex 7898192..6178079 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n'
+    const fetchMock = mockComparisonResponse(
+      new Response(diff, {
+        status: 200,
+        headers: { 'content-type': 'application/vnd.github.v3.diff' },
+      }),
+    )
+
+    const comparison = await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.fetchImmutableComparison({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          baseSha,
+          headSha,
+          maxBytes: 1024,
+        })
+      }),
+    )
+
+    expect(new TextDecoder().decode(comparison.bytes)).toBe(diff)
+    expect(comparison).toMatchObject({
+      provider: 'github',
+      baseSha,
+      headSha,
+      contentType: 'application/vnd.github.v3.diff',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/octokit/octokit.js/compare/${baseSha}...${headSha}`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: 'application/vnd.github.v3.diff',
+        }),
+        redirect: 'error',
+      }),
+    )
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.each([
+    {
+      name: 'HTTP 406',
+      status: 406,
+      body: 'diff unavailable',
+      contentType: 'text/plain',
+      message: 'unavailable or truncated',
+    },
+    {
+      name: 'missing commit',
+      status: 404,
+      body: 'missing',
+      contentType: 'text/plain',
+      message: 'missing commit',
+    },
+    {
+      name: 'unexpected content type',
+      status: 200,
+      body: '{}',
+      contentType: 'application/json',
+      message: 'unexpected content type',
+    },
+    {
+      name: 'binary comparison',
+      status: 200,
+      body: 'diff --git a/image.png b/image.png\nBinary files a/image.png and b/image.png differ\n',
+      contentType: 'application/vnd.github.v3.diff',
+      message: 'binary changes',
+    },
+    {
+      name: 'git binary patch',
+      status: 200,
+      body: 'diff --git a/image.png b/image.png\nGIT binary patch\nliteral 1\n',
+      contentType: 'application/vnd.github.v3.diff',
+      message: 'binary changes',
+    },
+    {
+      name: 'invalid UTF-8',
+      status: 200,
+      body: new Uint8Array([0xff, 0xfe]),
+      contentType: 'application/vnd.github.v3.diff',
+      message: 'valid UTF-8',
+    },
+    {
+      name: 'oversized comparison',
+      status: 200,
+      body: '12345',
+      contentType: 'application/vnd.github.v3.diff',
+      message: 'byte limit',
+      maxBytes: 4,
+    },
+  ])(
+    'fails closed for $name',
+    async ({ status, body, contentType, message, maxBytes }) => {
+      mockInstallationToken()
+      const baseSha = makeGitCommitSha('a'.repeat(40))
+      const headSha = makeGitCommitSha('b'.repeat(40))
+      mockComparisonResponse(
+        new Response(body, {
+          status,
+          headers: { 'content-type': contentType },
+        }),
+      )
+
+      await expect(
+        withGitHubProvider(
+          Effect.gen(function* () {
+            const github = yield* SourceControlService
+            return yield* github.fetchImmutableComparison({
+              provider: 'github',
+              installationId: '123',
+              owner: 'octokit',
+              name: 'octokit.js',
+              baseSha,
+              headSha,
+              maxBytes: maxBytes ?? 1024,
+            })
+          }),
+        ),
+      ).rejects.toThrow(message)
+      expect(nock.isDone()).toBe(true)
+    },
+    15_000,
+  )
+
+  test('fails closed when comparison transfer is truncated', async () => {
+    mockInstallationToken()
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    mockComparisonResponse(
+      new Response('abc', {
+        status: 200,
+        headers: {
+          'content-type': 'application/vnd.github.v3.diff',
+          'content-length': '10',
+        },
+      }),
+    )
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.fetchImmutableComparison({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+            baseSha,
+            headSha,
+            maxBytes: 1024,
+          })
+        }),
+      ),
+    ).rejects.toThrow()
+    expect(nock.isDone()).toBe(true)
+  }, 15_000)
+
+  test('aborts a stalled comparison body at the configured deadline', async () => {
+    mockInstallationToken()
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    const realFetch = globalThis.fetch.bind(globalThis)
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      if (String(input).includes('/access_tokens'))
+        return realFetch(input, init)
+      const signal = init?.signal
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener('abort', () =>
+                controller.error(new Error('aborted comparison body')),
+              )
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/vnd.github.v3.diff',
+            },
+          },
+        ),
+      )
+    })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.fetchImmutableComparison({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+            baseSha,
+            headSha,
+            maxBytes: 1024,
+            timeoutMilliseconds: 10,
+          })
+        }),
+      ),
+    ).rejects.toThrow('failed to fetch the immutable comparison diff')
     expect(nock.isDone()).toBe(true)
   })
 
@@ -283,11 +511,13 @@ describe('GitHubProviderPlugin', () => {
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/issues/1/comments')
       .query({ per_page: '100' })
-      .reply(200, [{
-        id: 42,
-        body: 'Existing result\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
-        html_url: 'https://github.test/comment/42',
-      }])
+      .reply(200, [
+        {
+          id: 42,
+          body: 'Existing result\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
+          html_url: 'https://github.test/comment/42',
+        },
+      ])
     nock('https://api.github.com')
       .patch('/repos/octokit/octokit.js/issues/comments/42', {
         body: 'Hello from PatchPlane\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
@@ -312,7 +542,10 @@ describe('GitHubProviderPlugin', () => {
       }),
     )
 
-    expect(result).toEqual({ externalId: '42', url: 'https://github.test/comment/42' })
+    expect(result).toEqual({
+      externalId: '42',
+      url: 'https://github.test/comment/42',
+    })
     expect(nock.isDone()).toBe(true)
   })
 
@@ -320,14 +553,20 @@ describe('GitHubProviderPlugin', () => {
     mockInstallationToken()
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/commits/abc123/check-runs')
-      .query({ check_name: 'PatchPlane Review', filter: 'all', per_page: '100' })
+      .query({
+        check_name: 'PatchPlane Review',
+        filter: 'all',
+        per_page: '100',
+      })
       .reply(200, {
         total_count: 1,
-        check_runs: [{
-          id: 84,
-          external_id: 'decision-1:check-run',
-          html_url: 'https://github.test/check/84',
-        }],
+        check_runs: [
+          {
+            id: 84,
+            external_id: 'decision-1:check-run',
+            html_url: 'https://github.test/check/84',
+          },
+        ],
       })
     nock('https://api.github.com')
       .patch('/repos/octokit/octokit.js/check-runs/84', {
@@ -363,7 +602,10 @@ describe('GitHubProviderPlugin', () => {
       }),
     )
 
-    expect(result).toEqual({ externalId: '84', url: 'https://github.test/check/84' })
+    expect(result).toEqual({
+      externalId: '84',
+      url: 'https://github.test/check/84',
+    })
     expect(nock.isDone()).toBe(true)
   })
 

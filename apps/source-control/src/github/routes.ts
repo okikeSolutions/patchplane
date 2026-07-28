@@ -38,6 +38,11 @@ import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtim
 import { AssemblePatchReportV1 } from '@patchplane/core/patch-report/assemble-patch-report-v1'
 import { PublishDecisionToSource } from '@patchplane/core/workflows/publish-decision-to-source'
 import { PublishSandboxResultToSource } from '@patchplane/core/workflows/publish-sandbox-result-to-source'
+import {
+  ClaimIncomingPullRequestDispatch,
+  FreezeIncomingPullRequestCandidate,
+  type IncomingPullRequestDispatch,
+} from '@patchplane/core/workflows/freeze-incoming-pull-request-candidate'
 import { RunSandboxAgentForWorkflow } from '@patchplane/core/workflows/run-sandbox-agent-for-workflow'
 import { RunSandboxCommandForWorkflow } from '@patchplane/core/workflows/run-sandbox-command-for-workflow'
 import { StartWorkflowFromIntake } from '@patchplane/core/workflows/start-workflow-from-intake'
@@ -76,6 +81,12 @@ import {
 } from '@patchplane/domain/verification'
 import { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { withCapturedCriticalPathScope } from '../critical-path-telemetry'
+
+type SandboxExecutionValue = Schema.Schema.Type<typeof SandboxExecution>
+
+const noIncomingDispatch: Effect.Effect<
+  IncomingPullRequestDispatch | undefined
+> = Effect.void.pipe(Effect.as(undefined))
 
 const lookupGitHubWebhookRoute = makeFunctionReference<
   'query',
@@ -667,35 +678,65 @@ export async function executeWorkflowRerun(
 
   const workflowStart = workflowExit.value
   const executionExit = await runtime.runPromiseExit(
-    (routeConfig.execution.mode === 'daytona-pi'
-      ? RunSandboxAgentForWorkflow({
-          workflowStart,
-          provider: routeConfig.execution.provider,
-          model: routeConfig.execution.model,
-          thinking: routeConfig.execution.thinking,
-          mode: routeConfig.execution.piMode,
-          timeoutSeconds: routeConfig.execution.timeoutSeconds,
-          evidenceTestReportCommand:
-            routeConfig.execution.evidenceTestReportCommand,
-          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-          evidenceBrowserScreenshotCommand:
-            routeConfig.execution.evidenceBrowserScreenshotCommand,
-        })
-      : RunSandboxCommandForWorkflow({
-          workflowStart,
-          command: routeConfig.execution.command,
-          timeoutSeconds: routeConfig.execution.timeoutSeconds,
-          evidenceTestReportCommand:
-            routeConfig.execution.evidenceTestReportCommand,
-          evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-          evidenceBrowserScreenshotCommand:
-            routeConfig.execution.evidenceBrowserScreenshotCommand,
-        })
-    ).pipe(
+    Effect.gen(function* () {
+      const incomingDispatch =
+        workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+          ? yield* FreezeIncomingPullRequestCandidate({ workflowStart }).pipe(
+              Effect.flatMap((candidatePatchSet) =>
+                candidatePatchSet === undefined
+                  ? noIncomingDispatch
+                  : ClaimIncomingPullRequestDispatch({
+                      workflowStart,
+                      candidatePatchSet,
+                    }),
+              ),
+            )
+          : undefined
+      if (
+        workflowStart.workflowRun.candidateIdentityVersion ===
+          'incoming-pr-v1' &&
+        incomingDispatch === undefined
+      ) {
+        return undefined
+      }
+      return yield* routeConfig.execution.mode === 'daytona-pi'
+        ? RunSandboxAgentForWorkflow({
+            workflowStart,
+            ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+            provider: routeConfig.execution.provider,
+            model: routeConfig.execution.model,
+            thinking: routeConfig.execution.thinking,
+            mode: routeConfig.execution.piMode,
+            timeoutSeconds: routeConfig.execution.timeoutSeconds,
+            evidenceTestReportCommand:
+              routeConfig.execution.evidenceTestReportCommand,
+            evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+            evidenceBrowserScreenshotCommand:
+              routeConfig.execution.evidenceBrowserScreenshotCommand,
+          })
+        : RunSandboxCommandForWorkflow({
+            workflowStart,
+            ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+            command: routeConfig.execution.command,
+            timeoutSeconds: routeConfig.execution.timeoutSeconds,
+            evidenceTestReportCommand:
+              routeConfig.execution.evidenceTestReportCommand,
+            evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+            evidenceBrowserScreenshotCommand:
+              routeConfig.execution.evidenceBrowserScreenshotCommand,
+          })
+    }).pipe(
       Effect.flatMap((sandboxExecution) =>
-        PublishSandboxResultToSource({ workflowStart, sandboxExecution }).pipe(
-          Effect.as({ sandboxExecution }),
-        ),
+        sandboxExecution === undefined
+          ? Effect.sync(
+              (): { sandboxExecution: SandboxExecutionValue | undefined } => ({
+                sandboxExecution,
+              }),
+            )
+          : PublishSandboxResultToSource({
+              workflowStart,
+              sandboxExecution,
+            }).pipe(Effect.as({ sandboxExecution })),
       ),
       (effect) =>
         withTelemetrySpan(
@@ -1131,36 +1172,57 @@ export async function handleGitHubWebhook(
     }
 
     const workflowStart = yield* StartWorkflowFromIntake(intake)
+    const incomingDispatch =
+      workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+        ? yield* FreezeIncomingPullRequestCandidate({ workflowStart }).pipe(
+            Effect.flatMap((candidatePatchSet) =>
+              candidatePatchSet === undefined
+                ? noIncomingDispatch
+                : ClaimIncomingPullRequestDispatch({
+                    workflowStart,
+                    candidatePatchSet,
+                  }),
+            ),
+          )
+        : undefined
     const sandboxExecution =
-      routeConfig.execution.mode === 'daytona-pi'
-        ? yield* RunSandboxAgentForWorkflow({
-            workflowStart,
-            provider: routeConfig.execution.provider,
-            model: routeConfig.execution.model,
-            thinking: routeConfig.execution.thinking,
-            mode: routeConfig.execution.piMode,
-            timeoutSeconds: routeConfig.execution.timeoutSeconds,
-            evidenceTestReportCommand:
-              routeConfig.execution.evidenceTestReportCommand,
-            evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-            evidenceBrowserScreenshotCommand:
-              routeConfig.execution.evidenceBrowserScreenshotCommand,
-          })
-        : yield* RunSandboxCommandForWorkflow({
-            workflowStart,
-            command: routeConfig.execution.command,
-            timeoutSeconds: routeConfig.execution.timeoutSeconds,
-            evidenceTestReportCommand:
-              routeConfig.execution.evidenceTestReportCommand,
-            evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
-            evidenceBrowserScreenshotCommand:
-              routeConfig.execution.evidenceBrowserScreenshotCommand,
-          })
+      workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+      incomingDispatch === undefined
+        ? undefined
+        : routeConfig.execution.mode === 'daytona-pi'
+          ? yield* RunSandboxAgentForWorkflow({
+              workflowStart,
+              ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+              provider: routeConfig.execution.provider,
+              model: routeConfig.execution.model,
+              thinking: routeConfig.execution.thinking,
+              mode: routeConfig.execution.piMode,
+              timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              evidenceTestReportCommand:
+                routeConfig.execution.evidenceTestReportCommand,
+              evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+              evidenceBrowserScreenshotCommand:
+                routeConfig.execution.evidenceBrowserScreenshotCommand,
+            })
+          : yield* RunSandboxCommandForWorkflow({
+              workflowStart,
+              ...(incomingDispatch === undefined ? {} : { incomingDispatch }),
+              command: routeConfig.execution.command,
+              timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              evidenceTestReportCommand:
+                routeConfig.execution.evidenceTestReportCommand,
+              evidenceTestPlatform: routeConfig.execution.evidenceTestPlatform,
+              evidenceBrowserScreenshotCommand:
+                routeConfig.execution.evidenceBrowserScreenshotCommand,
+            })
 
-    const publication = yield* PublishSandboxResultToSource({
-      workflowStart,
-      sandboxExecution,
-    })
+    const publication =
+      sandboxExecution === undefined
+        ? undefined
+        : yield* PublishSandboxResultToSource({
+            workflowStart,
+            sandboxExecution,
+          })
     return {
       event,
       intake,

@@ -1,15 +1,33 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { ArtifactsService, type ArtifactBody, type EvidenceArtifactKind } from '@patchplane/core/services/artifacts-service'
+import {
+  ArtifactsService,
+  type ArtifactBody,
+  type EvidenceArtifactKind,
+} from '@patchplane/core/services/artifacts-service'
 import { ArtifactsError } from '@patchplane/domain/errors'
-import { Clock, Config, Crypto, Effect, Encoding, Layer, Option, Redacted } from 'effect'
-import { R2ArtifactsConfig, type R2ArtifactsConfig as R2ArtifactsConfigType } from './R2ArtifactsConfig'
+import {
+  Clock,
+  Config,
+  Crypto,
+  Effect,
+  Encoding,
+  Layer,
+  Option,
+  Redacted,
+} from 'effect'
+import {
+  R2ArtifactsConfig,
+  type R2ArtifactsConfig as R2ArtifactsConfigType,
+} from './R2ArtifactsConfig'
 
 export interface R2ObjectLike {
   readonly key: string
   readonly size: number
   readonly uploaded?: Date | undefined
-  readonly httpMetadata?: { readonly contentType?: string | undefined } | undefined
+  readonly httpMetadata?:
+    | { readonly contentType?: string | undefined }
+    | undefined
   readonly customMetadata?: Readonly<Record<string, string>> | undefined
 }
 
@@ -21,15 +39,19 @@ export interface R2BucketLike {
       readonly httpMetadata?: { readonly contentType?: string | undefined }
       readonly customMetadata?: Readonly<Record<string, string>>
       readonly sha256?: Uint8Array
+      readonly onlyIf?: { readonly etagDoesNotMatch: '*' }
     },
-  ) => Promise<R2ObjectLike>
+  ) => Promise<R2ObjectLike | null>
   readonly head: (key: string) => Promise<R2ObjectLike | null>
   readonly delete: (keys: string | string[]) => Promise<void>
 }
 
 const storageProvider = 'cloudflare-r2' as const
 
-async function normalizeBody(body: ArtifactBody, maxBytes: number): Promise<Uint8Array> {
+async function normalizeBody(
+  body: ArtifactBody,
+  maxBytes: number,
+): Promise<Uint8Array> {
   if (typeof body === 'string') {
     const bytes = new TextEncoder().encode(body)
     assertMaxBytes(bytes.byteLength, maxBytes)
@@ -99,9 +121,10 @@ function storageKey(input: {
   readonly contentType: string
   readonly hint?: string | undefined
 }) {
-  const suffix = input.hint === undefined || input.hint.trim().length === 0
-    ? `${input.objectId}.${extensionForContentType(input.contentType)}`
-    : `${input.objectId}-${sanitizePathSegment(input.hint)}`
+  const suffix =
+    input.hint === undefined || input.hint.trim().length === 0
+      ? `${input.objectId}.${extensionForContentType(input.contentType)}`
+      : `${input.objectId}-${sanitizePathSegment(input.hint)}`
 
   return [
     'workflows',
@@ -134,23 +157,37 @@ function metadataFromObject(object: R2ObjectLike) {
 }
 
 function resolveR2EndpointAndBucket(config: R2ArtifactsConfigType) {
-  const configuredEndpoint = Option.getOrElse(config.s3ApiEndpoint, () => `https://${config.accountId}.r2.cloudflarestorage.com`)
+  const configuredEndpoint = Option.getOrElse(
+    config.s3ApiEndpoint,
+    () => `https://${config.accountId}.r2.cloudflarestorage.com`,
+  )
   const url = new URL(configuredEndpoint)
-  const endpointBucket = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)[0]
+  const endpointBucket = url.pathname
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean)[0]
   url.pathname = '/'
   url.search = ''
   url.hash = ''
-  const bucketName = Option.getOrElse(config.bucketName, () => endpointBucket ?? '')
+  const bucketName = Option.getOrElse(
+    config.bucketName,
+    () => endpointBucket ?? '',
+  )
   if (bucketName.length === 0) {
-    throw new Error('PATCHPLANE_EVIDENCE_R2_BUCKET is required when CLOUDFLARE_S3_API_ENDPOINT does not include a bucket path')
+    throw new Error(
+      'PATCHPLANE_EVIDENCE_R2_BUCKET is required when CLOUDFLARE_S3_API_ENDPOINT does not include a bucket path',
+    )
   }
   return { endpoint: url.toString().replace(/\/$/, ''), bucketName }
 }
 
-function makeS3Client(endpoint: string, input: {
-  readonly accessKeyId: string
-  readonly secretAccessKey: string
-}) {
+function makeS3Client(
+  endpoint: string,
+  input: {
+    readonly accessKeyId: string
+    readonly secretAccessKey: string
+  },
+) {
   return new S3Client({
     region: 'auto',
     endpoint,
@@ -162,12 +199,18 @@ function makeS3Client(endpoint: string, input: {
 }
 
 function requireSigningCredentials(config: R2ArtifactsConfigType) {
-  if (Option.isNone(config.accessKeyId) || Option.isNone(config.secretAccessKey)) {
-    return Effect.fail(new ArtifactsError({
-      operation: 'r2.createSignedReadUrl.config',
-      message: 'PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID and PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY are required to create signed artifact URLs',
-      cause: undefined,
-    }))
+  if (
+    Option.isNone(config.accessKeyId) ||
+    Option.isNone(config.secretAccessKey)
+  ) {
+    return Effect.fail(
+      new ArtifactsError({
+        operation: 'r2.createSignedReadUrl.config',
+        message:
+          'PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID and PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY are required to create signed artifact URLs',
+        cause: undefined,
+      }),
+    )
   }
 
   return Effect.succeed({
@@ -176,7 +219,7 @@ function requireSigningCredentials(config: R2ArtifactsConfigType) {
   })
 }
 
-export const createR2SignedReadUrl = Effect.fnUntraced(function*(
+export const createR2SignedReadUrl = Effect.fnUntraced(function* (
   config: R2ArtifactsConfigType,
   input: { readonly storageKey: string; readonly expiresInSeconds: number },
 ) {
@@ -202,7 +245,10 @@ export const createR2SignedReadUrl = Effect.fnUntraced(function*(
     try: async () => {
       const url = await getSignedUrl(
         signingConfig.s3,
-        new GetObjectCommand({ Bucket: signingConfig.bucketName, Key: input.storageKey }),
+        new GetObjectCommand({
+          Bucket: signingConfig.bucketName,
+          Key: input.storageKey,
+        }),
         { expiresIn: signingConfig.expiresIn },
       )
       return {
@@ -227,15 +273,35 @@ export function makeR2ArtifactsService(
   return ArtifactsService.of({
     putArtifact: (input) =>
       Effect.gen(function* () {
-        const objectId = yield* crypto.randomUUIDv7.pipe(
-          Effect.mapError((cause) =>
-            new ArtifactsError({
-              operation: 'r2.putArtifact.objectId',
-              message: 'Failed to generate artifact object id',
-              cause,
-            })
-          ),
-        )
+        const objectId =
+          input.idempotencyKey === undefined
+            ? yield* crypto.randomUUIDv7.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ArtifactsError({
+                      operation: 'r2.putArtifact.objectId',
+                      message: 'Failed to generate artifact object id',
+                      cause,
+                    }),
+                ),
+              )
+            : `idempotent-${Encoding.encodeHex(
+                yield* crypto
+                  .digest(
+                    'SHA-256',
+                    new TextEncoder().encode(input.idempotencyKey),
+                  )
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ArtifactsError({
+                          operation: 'r2.putArtifact.idempotencyKey',
+                          message: 'Failed to hash artifact idempotency key',
+                          cause,
+                        }),
+                    ),
+                  ),
+              )}`
         const bytes = yield* Effect.tryPromise({
           try: () => normalizeBody(input.body, config.maxArtifactBytes),
           catch: (cause) =>
@@ -246,12 +312,13 @@ export function makeR2ArtifactsService(
             }),
         })
         const digest = yield* crypto.digest('SHA-256', bytes).pipe(
-          Effect.mapError((cause) =>
-            new ArtifactsError({
-              operation: 'r2.putArtifact.sha256',
-              message: 'Failed to hash artifact body',
-              cause,
-            })
+          Effect.mapError(
+            (cause) =>
+              new ArtifactsError({
+                operation: 'r2.putArtifact.sha256',
+                message: 'Failed to hash artifact body',
+                cause,
+              }),
           ),
         )
         const sha256 = Encoding.encodeHex(digest)
@@ -262,19 +329,69 @@ export function makeR2ArtifactsService(
           contentType: input.contentType,
           hint: input.storageKeyHint,
         })
+        const customMetadata = {
+          ...input.metadata,
+          workflowRunId: input.workflowRunId,
+          ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
+          kind: input.kind,
+          sha256,
+          ...(input.retentionPolicy === undefined
+            ? {}
+            : { retentionPolicy: input.retentionPolicy }),
+        }
+        const existing =
+          input.idempotencyKey === undefined
+            ? null
+            : yield* Effect.tryPromise({
+                try: () => bucket.head(key),
+                catch: (cause) =>
+                  new ArtifactsError({
+                    operation: 'r2.putArtifact.idempotencyHead',
+                    message: 'Failed to inspect idempotent artifact in R2',
+                    cause,
+                  }),
+              })
+        let createdByRequest = existing === null
+        const validateExisting = (object: R2ObjectLike) => {
+          const actualMetadata = object.customMetadata ?? {}
+          const expectedMetadata = Object.entries(customMetadata)
+          const metadataDiffers =
+            Object.keys(actualMetadata).length !== expectedMetadata.length ||
+            expectedMetadata.some(
+              ([key, value]) => actualMetadata[key] !== value,
+            )
+          if (
+            object.size !== bytes.byteLength ||
+            object.httpMetadata?.contentType !== input.contentType ||
+            metadataDiffers
+          ) {
+            throw new Error(
+              'Idempotent artifact key already contains different bytes or metadata',
+            )
+          }
+          return object
+        }
         const object = yield* Effect.tryPromise({
-          try: () => bucket.put(key, bytes, {
-            httpMetadata: { contentType: input.contentType },
-            customMetadata: {
-              ...input.metadata,
-              workflowRunId: input.workflowRunId,
-              ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
-              kind: input.kind,
-              sha256,
-              ...(input.retentionPolicy === undefined ? {} : { retentionPolicy: input.retentionPolicy }),
-            },
-            sha256: digest,
-          }),
+          try: async () => {
+            if (existing !== null) return validateExisting(existing)
+            const uploaded = await bucket.put(key, bytes, {
+              httpMetadata: { contentType: input.contentType },
+              customMetadata,
+              sha256: digest,
+              ...(input.idempotencyKey === undefined
+                ? {}
+                : { onlyIf: { etagDoesNotMatch: '*' as const } }),
+            })
+            if (uploaded !== null) return uploaded
+            createdByRequest = false
+            const raced = await bucket.head(key)
+            if (raced === null) {
+              throw new Error(
+                'Conditional artifact upload lost without an existing object',
+              )
+            }
+            return validateExisting(raced)
+          },
           catch: (cause) =>
             new ArtifactsError({
               operation: 'r2.putArtifact',
@@ -290,6 +407,7 @@ export function makeR2ArtifactsService(
           sizeBytes: object.size,
           sha256,
           createdAt: yield* Clock.currentTimeMillis,
+          createdByRequest,
         }
       }),
 
@@ -337,12 +455,15 @@ export function makeR2ArtifactsService(
 
     applyRetentionPolicy: (input) =>
       Effect.gen(function* () {
-        yield* Effect.logDebug('R2 artifact retention policy is enforced by bucket lifecycle rules', {
-          storageKey: input.storageKey,
-          retentionPolicy: input.retentionPolicy,
-          pluginName: 'cloudflare-r2-artifacts',
-          operation: 'r2.applyRetentionPolicy',
-        })
+        yield* Effect.logDebug(
+          'R2 artifact retention policy is enforced by bucket lifecycle rules',
+          {
+            storageKey: input.storageKey,
+            retentionPolicy: input.retentionPolicy,
+            pluginName: 'cloudflare-r2-artifacts',
+            operation: 'r2.applyRetentionPolicy',
+          },
+        )
         const object = yield* Effect.tryPromise({
           try: () => bucket.head(input.storageKey),
           catch: (cause) =>
@@ -384,6 +505,8 @@ export const CloudflareR2ArtifactsPlugin = {
     ),
   config: R2ArtifactsConfig,
 } satisfies {
-  readonly layerFromBucket: (bucket: R2BucketLike) => Layer.Layer<ArtifactsService, Config.ConfigError, Crypto.Crypto>
+  readonly layerFromBucket: (
+    bucket: R2BucketLike,
+  ) => Layer.Layer<ArtifactsService, Config.ConfigError, Crypto.Crypto>
   readonly config: typeof R2ArtifactsConfig
 }

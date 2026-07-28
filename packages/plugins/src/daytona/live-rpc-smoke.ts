@@ -1,4 +1,12 @@
-import { Clock, ConfigProvider, Effect, Layer, Option, Result, Schema } from 'effect'
+import {
+  Clock,
+  ConfigProvider,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema,
+} from 'effect'
 import { Daytona } from '@daytona/sdk'
 import { NodeCrypto } from '@effect/platform-node'
 import {
@@ -14,7 +22,10 @@ import {
   type SandboxRuntimeEvent,
 } from '@patchplane/core/services/sandbox-service'
 import { StorageService } from '@patchplane/core/services/storage-service'
-import { makeEvidenceArtifactId, makeWorkflowRunId } from '@patchplane/domain/ids'
+import {
+  makeEvidenceArtifactId,
+  makeWorkflowRunId,
+} from '@patchplane/domain/ids'
 import {
   CloudflareR2ArtifactsPlugin,
   type R2BucketLike,
@@ -154,20 +165,28 @@ const smokeArtifactStorageLayer = Layer.succeed(
     createWorkflowFromPrompt: () => Effect.die('unused'),
     listRecentWorkflowStarts: () => Effect.succeed([]),
     claimWorkflowExecution: () => Effect.succeed(true),
-        markWorkflowExecutionFailed: () => Effect.succeed(true),
+    markWorkflowExecutionFailed: () => Effect.succeed(true),
     recordSandboxExecution: () => Effect.die('unused'),
     recordRuntimeEvents: () => Effect.succeed([]),
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     markRuntimeSessionStatus: () => Effect.die('unused'),
     getActiveRuntimeSession: () => Effect.succeed(Option.none()),
-    recordEvidenceArtifact: (input) => Effect.gen(function*() {
-      return {
-        id: makeEvidenceArtifactId(`smoke-artifact:${input.storageKey}`),
-        ...input,
-        createdAt: input.createdAt ?? (yield* Clock.currentTimeMillis),
-      }
-    }),
+    recordEvidenceArtifact: (input) =>
+      Effect.gen(function* () {
+        return {
+          id: makeEvidenceArtifactId(`smoke-artifact:${input.storageKey}`),
+          ...input,
+          createdAt: input.createdAt ?? (yield* Clock.currentTimeMillis),
+        }
+      }),
     getEvidenceArtifact: () => Effect.succeed(Option.none()),
+    getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+    claimCandidateFreeze: () => Effect.succeed(false),
+    releaseCandidateFreeze: () => Effect.succeed(false),
+    failCandidateFreeze: () => Effect.succeed(true),
+    claimIncomingDispatch: () => Effect.succeed(false),
+    startIncomingDispatch: () => Effect.succeed(true),
+    validateIncomingDispatch: () => Effect.succeed(false),
     recordCandidatePatchSet: () => Effect.die('unused'),
     recordVerificationRequirement: () => Effect.die('unused'),
     recordVerificationResult: () => Effect.die('unused'),

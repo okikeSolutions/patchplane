@@ -103,7 +103,7 @@ The alpha is being narrowed around one developer-first loop:
 incoming GitHub PR → exact base/head candidate freeze → trusted requirements → Daytona verification → optional read-only review → policy → human decision → one canonical exact-head Patch Report
 ```
 
-The currently deployed sandbox-generated path is implementation foundation, not proof that an incoming PR was verified. PatchPlane is not ready to promote a PR as verified until it can freeze that exact incoming candidate before Daytona or Pi starts and bind every result to it.
+The currently deployed sandbox-generated path is implementation foundation, not proof that an incoming PR was verified. PatchPlane now implements local exact incoming-candidate freeze and candidate-bound Daytona dispatch, but it is not ready to promote a PR as verified until the trusted plan, per-requirement evidence path, canonical publication, and credentialed live acceptance are complete.
 
 The current foundation includes two workflow-start paths:
 

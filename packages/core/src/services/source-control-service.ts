@@ -1,5 +1,6 @@
 import { Context, Effect } from 'effect'
 import type { SourceControlError } from '@patchplane/domain/errors'
+import type { GitCommitSha } from '@patchplane/domain/refinements'
 import type { TelemetryContextFields } from './telemetry-service'
 
 export interface VerifyRepositoryAccessInput extends TelemetryContextFields {
@@ -60,7 +61,14 @@ export interface CreateCheckRunInput extends TelemetryContextFields {
   readonly headSha: string
   readonly checkName: string
   readonly status: 'completed'
-  readonly conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required'
+  readonly conclusion:
+    | 'success'
+    | 'failure'
+    | 'neutral'
+    | 'cancelled'
+    | 'skipped'
+    | 'timed_out'
+    | 'action_required'
   readonly title: string
   readonly summary: string
   readonly text?: string | undefined
@@ -92,26 +100,51 @@ export interface RepositoryCloneCredentials {
   readonly password: string
 }
 
-export class SourceControlService extends Context.Service<SourceControlService, {
-  readonly verifyRepositoryAccess: (
-    input: VerifyRepositoryAccessInput,
-  ) => Effect.Effect<RepositoryRef, SourceControlError>
-  readonly getInstallationAccount: (
-    input: GetInstallationAccountInput,
-  ) => Effect.Effect<InstallationAccountRef, SourceControlError>
-  readonly listInstallationRepositories: (
-    input: ListInstallationRepositoriesInput,
-  ) => Effect.Effect<ReadonlyArray<RepositoryRef>, SourceControlError>
-  readonly createIssueComment: (
-    input: CreateIssueCommentInput,
-  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
-  readonly createCheckRun: (
-    input: CreateCheckRunInput,
-  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
-  readonly createDraftPullRequest: (
-    input: CreateDraftPullRequestInput,
-  ) => Effect.Effect<SourcePublicationRef, SourceControlError>
-  readonly createRepositoryCloneCredentials: (
-    input: CreateRepositoryCloneCredentialsInput,
-  ) => Effect.Effect<RepositoryCloneCredentials, SourceControlError>
-}>()('@patchplane/core/services/SourceControlService') {}
+export interface FetchImmutableComparisonInput extends TelemetryContextFields {
+  readonly provider: 'github'
+  readonly installationId: string
+  readonly owner: string
+  readonly name: string
+  readonly baseSha: GitCommitSha
+  readonly headSha: GitCommitSha
+  readonly maxBytes: number
+  readonly timeoutMilliseconds?: number | undefined
+}
+
+export interface ImmutableComparison {
+  readonly provider: 'github'
+  readonly baseSha: GitCommitSha
+  readonly headSha: GitCommitSha
+  readonly contentType: 'application/vnd.github.v3.diff'
+  readonly bytes: Uint8Array
+}
+
+export class SourceControlService extends Context.Service<
+  SourceControlService,
+  {
+    readonly verifyRepositoryAccess: (
+      input: VerifyRepositoryAccessInput,
+    ) => Effect.Effect<RepositoryRef, SourceControlError>
+    readonly getInstallationAccount: (
+      input: GetInstallationAccountInput,
+    ) => Effect.Effect<InstallationAccountRef, SourceControlError>
+    readonly listInstallationRepositories: (
+      input: ListInstallationRepositoriesInput,
+    ) => Effect.Effect<ReadonlyArray<RepositoryRef>, SourceControlError>
+    readonly createIssueComment: (
+      input: CreateIssueCommentInput,
+    ) => Effect.Effect<SourcePublicationRef, SourceControlError>
+    readonly createCheckRun: (
+      input: CreateCheckRunInput,
+    ) => Effect.Effect<SourcePublicationRef, SourceControlError>
+    readonly createDraftPullRequest: (
+      input: CreateDraftPullRequestInput,
+    ) => Effect.Effect<SourcePublicationRef, SourceControlError>
+    readonly createRepositoryCloneCredentials: (
+      input: CreateRepositoryCloneCredentialsInput,
+    ) => Effect.Effect<RepositoryCloneCredentials, SourceControlError>
+    readonly fetchImmutableComparison: (
+      input: FetchImmutableComparisonInput,
+    ) => Effect.Effect<ImmutableComparison, SourceControlError>
+  }
+>()('@patchplane/core/services/SourceControlService') {}

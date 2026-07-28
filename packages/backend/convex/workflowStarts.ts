@@ -1,13 +1,16 @@
 import type { UserIdentity } from 'convex/server'
 import type { Doc, Id } from './_generated/dataModel'
 import { ConvexError, v } from 'convex/values'
+import { internal } from './_generated/api'
 import {
+  internalMutation,
   mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from './_generated/server'
 
+const incomingDispatchRecoveryTimeoutMs = 60 * 60 * 1_000
 const workflowDetailRuntimeEventLimit = 100
 const workflowDetailRuntimePayloadPreviewLength = 8_000
 const workflowDetailSandboxExecutionLimit = 32
@@ -283,6 +286,31 @@ const evidenceArtifactReturn = v.object({
   createdAt: v.number(),
 })
 
+const candidateSubjectArg = v.union(
+  v.object({
+    kind: v.literal('incoming-pull-request'),
+    repositoryProvider: v.literal('github'),
+    repositoryExternalId: v.string(),
+    repositoryOwner: v.string(),
+    repositoryName: v.string(),
+    repositoryFullName: v.string(),
+    pullRequestExternalId: v.string(),
+    pullRequestNumber: v.number(),
+    baseSha: v.string(),
+    headSha: v.string(),
+    sourceEventProvider: v.literal('github'),
+    sourceEventDeliveryId: v.string(),
+    sourceEventKind: v.union(
+      v.literal('github.pull_request.opened'),
+      v.literal('github.pull_request.synchronize'),
+    ),
+  }),
+  v.object({
+    kind: v.literal('sandbox-generated'),
+    sandboxExecutionId: v.id('sandboxExecutions'),
+  }),
+)
+
 const candidatePatchSetStatusArg = v.union(
   v.literal('captured'),
   v.literal('empty'),
@@ -299,6 +327,7 @@ const candidatePatchSetReturn = v.object({
   id: v.string(),
   workflowRunId: v.string(),
   sandboxExecutionId: v.optional(v.string()),
+  subject: v.optional(candidateSubjectArg),
   status: candidatePatchSetStatusArg,
   candidateDigest: v.optional(v.string()),
   baseRef: v.optional(v.string()),
@@ -1274,6 +1303,28 @@ async function requireWorkflowRun(
   return workflowRun
 }
 
+async function isLatestWorkflowAttempt(
+  ctx: QueryCtx | MutationCtx,
+  workflowRun: {
+    _id: Id<'workflowRuns'>
+    rootWorkflowRunId?: Id<'workflowRuns'>
+    modelVersion?: 'v1'
+  },
+) {
+  if (workflowRun.modelVersion !== 'v1') return true
+  const latest = await ctx.db
+    .query('workflowRuns')
+    .withIndex('by_root_attempt', (q) =>
+      q.eq(
+        'rootWorkflowRunId',
+        workflowRun.rootWorkflowRunId ?? workflowRun._id,
+      ),
+    )
+    .order('desc')
+    .first()
+  return latest === null || latest._id === workflowRun._id
+}
+
 async function requireReviewRunForWorkflow(
   ctx: QueryCtx | MutationCtx,
   reviewRunId: Id<'reviewRuns'>,
@@ -1748,7 +1799,12 @@ export const claimWorkflowExecution = mutation({
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
-    if (workflowRun.status !== 'queued') return false
+    if (
+      workflowRun.status !== 'queued' ||
+      workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+    ) {
+      return false
+    }
     if (
       workflowRun.modelVersion === 'v1' &&
       (workflowRun.sourceCommitSha === undefined ||
@@ -2195,6 +2251,56 @@ export const recordEvidenceArtifact = mutation({
         : { retentionPolicy: args.retentionPolicy }),
       createdAt,
     }
+    const existingArtifact = await ctx.db
+      .query('evidenceArtifacts')
+      .withIndex('by_storage_key', (q) =>
+        q
+          .eq('storageProvider', args.storageProvider)
+          .eq('storageKey', args.storageKey),
+      )
+      .unique()
+    if (existingArtifact !== null) {
+      if (
+        existingArtifact.workflowRunId !== args.workflowRunId ||
+        existingArtifact.producer !== args.producer ||
+        existingArtifact.subjectDigest !== args.subjectDigest ||
+        existingArtifact.traceId !== args.traceId ||
+        existingArtifact.kind !== args.kind ||
+        existingArtifact.label !== args.label ||
+        existingArtifact.contentType !== args.contentType ||
+        existingArtifact.sizeBytes !== args.sizeBytes ||
+        existingArtifact.sha256 !== args.sha256 ||
+        existingArtifact.retentionPolicy !== args.retentionPolicy
+      ) {
+        throw new ConvexError('Evidence artifact storage key conflict')
+      }
+      return {
+        id: existingArtifact._id,
+        workflowRunId: existingArtifact.workflowRunId,
+        ...(existingArtifact.producer === undefined
+          ? {}
+          : { producer: existingArtifact.producer }),
+        ...(existingArtifact.subjectDigest === undefined
+          ? {}
+          : { subjectDigest: existingArtifact.subjectDigest }),
+        ...(existingArtifact.traceId === undefined
+          ? {}
+          : { traceId: existingArtifact.traceId }),
+        kind: existingArtifact.kind,
+        ...(existingArtifact.label === undefined
+          ? {}
+          : { label: existingArtifact.label }),
+        storageProvider: existingArtifact.storageProvider,
+        storageKey: existingArtifact.storageKey,
+        contentType: existingArtifact.contentType,
+        sizeBytes: existingArtifact.sizeBytes,
+        sha256: existingArtifact.sha256,
+        ...(existingArtifact.retentionPolicy === undefined
+          ? {}
+          : { retentionPolicy: existingArtifact.retentionPolicy }),
+        createdAt: existingArtifact.createdAt,
+      }
+    }
     const id = await ctx.db.insert('evidenceArtifacts', artifact)
     await insertProvenanceEvent(ctx, {
       workflowRunId: args.workflowRunId,
@@ -2213,11 +2319,328 @@ export const recordEvidenceArtifact = mutation({
   },
 })
 
+export const getCandidatePatchSetForWorkflow = query({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+  },
+  returns: v.union(v.null(), candidatePatchSetReturn),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    await requireWorkflowRun(ctx, args.workflowRunId)
+    const candidate = await ctx.db
+      .query('candidatePatchSets')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', args.workflowRunId),
+      )
+      .unique()
+    if (candidate === null) return null
+    return {
+      id: candidate._id,
+      workflowRunId: candidate.workflowRunId,
+      ...(candidate.sandboxExecutionId === undefined
+        ? {}
+        : { sandboxExecutionId: candidate.sandboxExecutionId }),
+      ...(candidate.subject === undefined
+        ? {}
+        : { subject: candidate.subject }),
+      status: candidate.status,
+      ...(candidate.candidateDigest === undefined
+        ? {}
+        : { candidateDigest: candidate.candidateDigest }),
+      ...(candidate.baseRef === undefined
+        ? {}
+        : { baseRef: candidate.baseRef }),
+      ...(candidate.baseSha === undefined
+        ? {}
+        : { baseSha: candidate.baseSha }),
+      ...(candidate.headRef === undefined
+        ? {}
+        : { headRef: candidate.headRef }),
+      ...(candidate.headSha === undefined
+        ? {}
+        : { headSha: candidate.headSha }),
+      ...(candidate.diffArtifactId === undefined
+        ? {}
+        : { diffArtifactId: candidate.diffArtifactId }),
+      ...(candidate.summary === undefined
+        ? {}
+        : { summary: candidate.summary }),
+      ...(candidate.stats === undefined ? {} : { stats: candidate.stats }),
+      ...(candidate.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: candidate.idempotencyKey }),
+      createdAt: candidate.createdAt,
+    }
+  },
+})
+
+export const claimCandidateFreeze = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    leaseToken: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (
+      workflowRun.status !== 'queued' ||
+      workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' ||
+      !(await isLatestWorkflowAttempt(ctx, workflowRun))
+    ) {
+      return false
+    }
+    const existing = await ctx.db
+      .query('candidatePatchSets')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', args.workflowRunId),
+      )
+      .first()
+    if (existing !== null) return false
+    const now = Date.now()
+    if (
+      workflowRun.candidateFreezeClaimedAt !== undefined &&
+      now - workflowRun.candidateFreezeClaimedAt < 300_000
+    ) {
+      return false
+    }
+    if (args.leaseToken.trim().length < 16) {
+      throw new ConvexError('Candidate freeze lease token is invalid')
+    }
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      candidateFreezeClaimedAt: now,
+      candidateFreezeLeaseToken: args.leaseToken,
+    })
+    return true
+  },
+})
+
+export const releaseCandidateFreeze = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    leaseToken: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (
+      workflowRun.candidateFreezeClaimedAt === undefined ||
+      workflowRun.candidateFreezeLeaseToken !== args.leaseToken
+    ) {
+      return false
+    }
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      candidateFreezeClaimedAt: undefined,
+      candidateFreezeLeaseToken: undefined,
+    })
+    return true
+  },
+})
+
+export const failCandidateFreeze = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    leaseToken: v.string(),
+    summary: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (
+      workflowRun.status !== 'queued' ||
+      workflowRun.candidateFreezeLeaseToken !== args.leaseToken
+    ) {
+      return false
+    }
+    const completedAt = Date.now()
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      status: 'failed',
+      candidateFreezeClaimedAt: undefined,
+      candidateFreezeLeaseToken: undefined,
+    })
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'candidate-freeze',
+      operation: 'workflowStarts.failCandidateFreeze',
+      status: 'failed',
+      startedAt: completedAt,
+      completedAt,
+      summary: args.summary,
+      artifactRefs: [],
+      errorCategory: 'candidate-freeze',
+      idempotencyKey: `${String(args.workflowRunId)}:candidate-freeze-failed`,
+    })
+    return true
+  },
+})
+
+export const claimIncomingDispatch = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    dispatchToken: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    const candidate = await ctx.db.get(
+      'candidatePatchSets',
+      args.candidatePatchSetId,
+    )
+    if (
+      args.dispatchToken.trim().length < 16 ||
+      workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' ||
+      !(await isLatestWorkflowAttempt(ctx, workflowRun)) ||
+      candidate === null ||
+      candidate.workflowRunId !== args.workflowRunId ||
+      candidate.subject?.kind !== 'incoming-pull-request' ||
+      candidate.status !== 'captured'
+    ) {
+      return false
+    }
+    const now = Date.now()
+    const activeLease =
+      workflowRun.status === 'running' &&
+      workflowRun.incomingDispatchClaimedAt !== undefined &&
+      now - workflowRun.incomingDispatchClaimedAt < 300_000
+    if (
+      workflowRun.incomingDispatchStartedAt !== undefined ||
+      activeLease ||
+      (workflowRun.status !== 'queued' && workflowRun.status !== 'running')
+    ) {
+      return false
+    }
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      status: 'running',
+      incomingDispatchClaimedAt: now,
+      incomingDispatchToken: args.dispatchToken,
+      incomingDispatchCandidatePatchSetId: args.candidatePatchSetId,
+    })
+    return true
+  },
+})
+
+export const startIncomingDispatch = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    dispatchToken: v.string(),
+    sandboxId: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (
+      args.sandboxId.trim().length === 0 ||
+      !(await isLatestWorkflowAttempt(ctx, workflowRun)) ||
+      workflowRun.status !== 'running' ||
+      workflowRun.incomingDispatchToken !== args.dispatchToken ||
+      workflowRun.incomingDispatchCandidatePatchSetId !==
+        args.candidatePatchSetId ||
+      workflowRun.incomingDispatchClaimedAt === undefined ||
+      Date.now() - workflowRun.incomingDispatchClaimedAt >= 300_000
+    ) {
+      return false
+    }
+    if (workflowRun.incomingDispatchStartedAt !== undefined) {
+      return workflowRun.incomingDispatchSandboxId === args.sandboxId
+    }
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      incomingDispatchStartedAt: Date.now(),
+      incomingDispatchSandboxId: args.sandboxId,
+    })
+    await ctx.scheduler.runAfter(
+      incomingDispatchRecoveryTimeoutMs,
+      internal.workflowStarts.expireStartedIncomingDispatch,
+      {
+        workflowRunId: args.workflowRunId,
+        dispatchToken: args.dispatchToken,
+        sandboxId: args.sandboxId,
+      },
+    )
+    return true
+  },
+})
+
+export const expireStartedIncomingDispatch = internalMutation({
+  args: {
+    workflowRunId: v.id('workflowRuns'),
+    dispatchToken: v.string(),
+    sandboxId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+    if (
+      workflowRun === null ||
+      workflowRun.status !== 'running' ||
+      workflowRun.incomingDispatchToken !== args.dispatchToken ||
+      workflowRun.incomingDispatchSandboxId !== args.sandboxId
+    ) {
+      return null
+    }
+    const completedAt = Date.now()
+    await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: args.workflowRunId,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'sandbox-execution',
+      operation: 'workflowStarts.expireStartedIncomingDispatch',
+      status: 'failed',
+      startedAt: workflowRun.incomingDispatchStartedAt ?? completedAt,
+      completedAt,
+      summary:
+        'Started incoming dispatch did not complete all durable workflow persistence before its recovery deadline.',
+      artifactRefs: [],
+      errorCategory: 'execution-recovery-timeout',
+      idempotencyKey: `${String(args.workflowRunId)}:incoming-dispatch-timeout`,
+    })
+    return null
+  },
+})
+
+export const validateIncomingDispatch = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    candidatePatchSetId: v.id('candidatePatchSets'),
+    dispatchToken: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    return (
+      (await isLatestWorkflowAttempt(ctx, workflowRun)) &&
+      workflowRun.status === 'running' &&
+      workflowRun.incomingDispatchToken === args.dispatchToken &&
+      workflowRun.incomingDispatchCandidatePatchSetId ===
+        args.candidatePatchSetId &&
+      workflowRun.incomingDispatchClaimedAt !== undefined &&
+      (workflowRun.incomingDispatchStartedAt !== undefined ||
+        Date.now() - workflowRun.incomingDispatchClaimedAt < 300_000)
+    )
+  },
+})
+
 export const recordCandidatePatchSet = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
     sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
+    subject: v.optional(candidateSubjectArg),
+    candidateFreezeLeaseToken: v.optional(v.string()),
     status: candidatePatchSetStatusArg,
     candidateDigest: v.optional(v.string()),
     baseRef: v.optional(v.string()),
@@ -2260,17 +2683,75 @@ export const recordCandidatePatchSet = mutation({
             args.diffArtifactId,
             args.workflowRunId,
           )
-    if (args.headSha !== undefined || args.headRef !== undefined) {
+    const incomingSubject =
+      args.subject?.kind === 'incoming-pull-request' ? args.subject : undefined
+    const generatedSubject =
+      args.subject?.kind === 'sandbox-generated' ? args.subject : undefined
+    if (
+      generatedSubject !== undefined &&
+      generatedSubject.sandboxExecutionId !== args.sandboxExecutionId
+    ) {
       throw new ConvexError(
-        'Candidate commit publication is not supported until materialization evidence is recorded',
+        'Generated candidate subject must match its producing sandbox execution',
       )
     }
-    if (args.status === 'captured') {
-      if (args.sandboxExecutionId === undefined) {
+    if (workflowRun.candidateIdentityVersion === 'incoming-pr-v1') {
+      if (!(await isLatestWorkflowAttempt(ctx, workflowRun))) {
         throw new ConvexError(
-          'Captured candidate requires its producing sandbox execution',
+          'A newer workflow attempt supersedes this candidate freeze',
         )
       }
+      if (
+        incomingSubject === undefined ||
+        args.candidateFreezeLeaseToken === undefined ||
+        workflowRun.candidateFreezeLeaseToken !== args.candidateFreezeLeaseToken
+      ) {
+        throw new ConvexError(
+          'Current incoming-PR attempt requires its subject and active freeze lease',
+        )
+      }
+      if (args.sandboxExecutionId !== undefined) {
+        throw new ConvexError(
+          'Incoming PR candidate cannot be produced by a sandbox execution',
+        )
+      }
+      const promptRequest = await ctx.db.get(
+        'promptRequests',
+        workflowRun.promptRequestId,
+      )
+      const externalRef = promptRequest?.externalRef
+      if (
+        workflowRun.sourceBaseSha === undefined ||
+        workflowRun.sourceCommitSha === undefined ||
+        args.baseSha !== workflowRun.sourceBaseSha ||
+        args.headSha !== workflowRun.sourceCommitSha ||
+        incomingSubject.baseSha !== workflowRun.sourceBaseSha ||
+        incomingSubject.headSha !== workflowRun.sourceCommitSha ||
+        externalRef === undefined ||
+        incomingSubject.repositoryProvider !== externalRef.repositoryProvider ||
+        incomingSubject.repositoryExternalId !==
+          externalRef.repositoryExternalId ||
+        incomingSubject.repositoryOwner !== externalRef.repositoryOwner ||
+        incomingSubject.repositoryName !== externalRef.repositoryName ||
+        incomingSubject.repositoryFullName !== externalRef.repositoryFullName ||
+        incomingSubject.pullRequestExternalId !==
+          externalRef.pullRequestExternalId ||
+        incomingSubject.pullRequestNumber !== externalRef.pullRequestNumber ||
+        incomingSubject.sourceEventProvider !== externalRef.provider ||
+        incomingSubject.sourceEventDeliveryId !== externalRef.deliveryId ||
+        incomingSubject.sourceEventKind !== externalRef.eventKind
+      ) {
+        throw new ConvexError(
+          'Incoming PR candidate subject does not match its immutable workflow identity',
+        )
+      }
+    } else if (incomingSubject !== undefined) {
+      throw new ConvexError(
+        'Legacy workflow attempt cannot accept an incoming PR candidate subject',
+      )
+    }
+
+    if (args.status === 'captured') {
       if (diffArtifact === undefined || diffArtifact.kind !== 'diff') {
         throw new ConvexError('Captured candidate requires a diff artifact')
       }
@@ -2279,32 +2760,41 @@ export const recordCandidatePatchSet = mutation({
           'Candidate digest must match the defining diff artifact',
         )
       }
-      const expectedProducer = `sandbox:candidate:${sandboxExecution?.provider}:${sandboxExecution?.sandboxId}:${sandboxExecution?.startedAt}`
+      const expectedProducer =
+        incomingSubject === undefined
+          ? `sandbox:candidate:${sandboxExecution?.provider}:${sandboxExecution?.sandboxId}:${sandboxExecution?.startedAt}`
+          : `source-control:github:compare:${incomingSubject.repositoryExternalId}:${incomingSubject.baseSha}...${incomingSubject.headSha}`
       if (
         diffArtifact.producer !== expectedProducer ||
         diffArtifact.subjectDigest !== args.candidateDigest
       ) {
         throw new ConvexError(
-          'Candidate diff artifact must be bound to its producing sandbox execution and subject',
+          'Candidate diff artifact must be bound to its trusted producer and subject',
         )
       }
-      if (args.baseSha === undefined) {
-        throw new ConvexError('Captured candidate requires a base commit SHA')
-      }
-      if (
-        workflowRun.sourceCommitSha === undefined ||
-        workflowRun.sourceCommitSha.trim().length === 0
-      ) {
-        throw new ConvexError(
-          'Captured V1 candidate requires a pinned workflow source revision',
-        )
-      }
-      if (
-        args.baseSha.toLowerCase() !== workflowRun.sourceCommitSha.toLowerCase()
-      ) {
-        throw new ConvexError(
-          'Candidate base commit does not match the pinned workflow source revision',
-        )
+      if (incomingSubject === undefined) {
+        if (args.sandboxExecutionId === undefined) {
+          throw new ConvexError(
+            'Generated captured candidate requires its producing sandbox execution',
+          )
+        }
+        if (args.headSha !== undefined || args.headRef !== undefined) {
+          throw new ConvexError(
+            'Generated candidate commit publication requires materialization evidence',
+          )
+        }
+        if (args.baseSha === undefined) {
+          throw new ConvexError('Captured candidate requires a base commit SHA')
+        }
+        if (
+          workflowRun.sourceCommitSha === undefined ||
+          args.baseSha.toLowerCase() !==
+            workflowRun.sourceCommitSha.toLowerCase()
+        ) {
+          throw new ConvexError(
+            'Generated candidate base does not match the pinned workflow source revision',
+          )
+        }
       }
     } else if (
       args.diffArtifactId !== undefined ||
@@ -2327,6 +2817,7 @@ export const recordCandidatePatchSet = mutation({
     if (existing !== undefined) {
       if (
         existing.sandboxExecutionId !== args.sandboxExecutionId ||
+        JSON.stringify(existing.subject) !== JSON.stringify(args.subject) ||
         existing.status !== args.status ||
         existing.candidateDigest !== args.candidateDigest ||
         existing.baseRef !== args.baseRef ||
@@ -2346,6 +2837,9 @@ export const recordCandidatePatchSet = mutation({
         ...(existing.sandboxExecutionId === undefined
           ? {}
           : { sandboxExecutionId: existing.sandboxExecutionId }),
+        ...(existing.subject === undefined
+          ? {}
+          : { subject: existing.subject }),
         status: existing.status,
         ...(existing.candidateDigest === undefined
           ? {}
@@ -2385,6 +2879,7 @@ export const recordCandidatePatchSet = mutation({
       ...(args.sandboxExecutionId === undefined
         ? {}
         : { sandboxExecutionId: args.sandboxExecutionId }),
+      ...(args.subject === undefined ? {} : { subject: args.subject }),
       status: args.status,
       ...(args.candidateDigest === undefined
         ? {}
@@ -2402,6 +2897,12 @@ export const recordCandidatePatchSet = mutation({
       createdAt,
     }
     const id = await ctx.db.insert('candidatePatchSets', patchSet)
+    if (incomingSubject !== undefined) {
+      await ctx.db.patch('workflowRuns', args.workflowRunId, {
+        candidateFreezeClaimedAt: undefined,
+        candidateFreezeLeaseToken: undefined,
+      })
+    }
     await insertProvenanceEvent(ctx, {
       workflowRunId: args.workflowRunId,
       traceId: workflowRun.traceId ?? 'legacy',
@@ -3066,6 +3567,11 @@ export const recordPolicyDecision = mutation({
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
+    if (workflowRun.status === 'failed') {
+      throw new ConvexError(
+        'Failed workflow attempts cannot record policy decisions',
+      )
+    }
     const reviewRun =
       args.reviewRunId === undefined
         ? undefined
@@ -3316,6 +3822,12 @@ export const recordPolicyDecision = mutation({
           : { idempotencyKey: existingPolicyDecision.idempotencyKey }),
         createdAt: existingPolicyDecision.createdAt,
       }
+    }
+
+    if (workflowRun.modelVersion === 'v1' && workflowRun.status !== 'running') {
+      throw new ConvexError(
+        'V1 policy decision requires an active workflow execution',
+      )
     }
 
     const createdAt = args.createdAt ?? Date.now()
@@ -3721,6 +4233,7 @@ export const markWorkflowExecutionFailed = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    incomingDispatchToken: v.optional(v.string()),
     summary: v.string(),
   },
   returns: v.boolean(),
@@ -3728,7 +4241,13 @@ export const markWorkflowExecutionFailed = mutation({
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
     if (workflowRun.status === 'failed') return true
-    if (workflowRun.status !== 'running') return false
+    if (
+      workflowRun.status !== 'running' ||
+      (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+        workflowRun.incomingDispatchToken !== args.incomingDispatchToken)
+    ) {
+      return false
+    }
     const completedAt = Date.now()
     await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
     await insertProvenanceEvent(ctx, {
@@ -3752,6 +4271,7 @@ export const recordSandboxExecution = mutation({
   args: {
     systemSecret: v.string(),
     workflowRunId: v.id('workflowRuns'),
+    incomingDispatchToken: v.optional(v.string()),
     provider: v.string(),
     sandboxId: v.string(),
     command: v.string(),
@@ -3772,6 +4292,17 @@ export const recordSandboxExecution = mutation({
       throw new ConvexError('Workflow run not found')
     }
     if (workflowRun.modelVersion === 'v1') {
+      if (
+        workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+        (workflowRun.incomingDispatchStartedAt === undefined ||
+          workflowRun.incomingDispatchToken !== args.incomingDispatchToken ||
+          workflowRun.incomingDispatchSandboxId !== args.sandboxId ||
+          !(await isLatestWorkflowAttempt(ctx, workflowRun)))
+      ) {
+        throw new ConvexError(
+          'Incoming PR sandbox execution requires its active started dispatch',
+        )
+      }
       if (workflowRun.status !== 'running') {
         throw new ConvexError(
           'V1 sandbox execution requires an active execution claim',
@@ -4880,6 +5411,9 @@ export const getDecisionPublicationReplayFixture = query({
               ...(candidatePatchSet.sandboxExecutionId === undefined
                 ? {}
                 : { sandboxExecutionId: candidatePatchSet.sandboxExecutionId }),
+              ...(candidatePatchSet.subject === undefined
+                ? {}
+                : { subject: candidatePatchSet.subject }),
               status: candidatePatchSet.status,
               ...(candidatePatchSet.candidateDigest === undefined
                 ? {}
@@ -5538,6 +6072,9 @@ export const getDetail = query({
         ...(patchSet.sandboxExecutionId === undefined
           ? {}
           : { sandboxExecutionId: patchSet.sandboxExecutionId }),
+        ...(patchSet.subject === undefined
+          ? {}
+          : { subject: patchSet.subject }),
         status: patchSet.status,
         ...(patchSet.candidateDigest === undefined
           ? {}

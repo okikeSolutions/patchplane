@@ -3,7 +3,12 @@ import { Effect, Layer, Option } from 'effect'
 import { makeRuntimeSessionId, makeWorkflowRunId } from '@patchplane/domain/ids'
 import { SandboxService } from '../services/sandbox-service'
 import { StorageService } from '../services/storage-service'
-import { AbortRuntimeSession, FollowUpRuntimeSession, SteerRuntimeSession, TerminateRuntimeSession } from './control-runtime-session'
+import {
+  AbortRuntimeSession,
+  FollowUpRuntimeSession,
+  SteerRuntimeSession,
+  TerminateRuntimeSession,
+} from './control-runtime-session'
 
 const activeSession = {
   id: makeRuntimeSessionId('runtime-1'),
@@ -21,57 +26,104 @@ function storageLayer(
   events: Array<unknown>,
   session: typeof activeSession | null = activeSession,
 ) {
-  return Layer.succeed(StorageService, StorageService.of({
-    createWorkflowFromIntake: () => Effect.die('unused'),
-    createWorkflowFromPrompt: () => Effect.die('unused'),
-    listRecentWorkflowStarts: () => Effect.die('unused'),
-    claimWorkflowExecution: () => Effect.succeed(true),
-    markWorkflowExecutionFailed: () => Effect.succeed(true),
-    recordSandboxExecution: () => Effect.die('unused'),
-    recordRuntimeEvents: () => Effect.die('unused'),
-    recordRuntimeSessionStarted: () => Effect.die('unused'),
-    getActiveRuntimeSession: () =>
-      Effect.succeed(
-        session === null ? Option.none() : Option.some(session),
-      ),
-    recordEvidenceArtifact: () => Effect.die('unused'),
-    getEvidenceArtifact: () => Effect.die('unused'),
-    recordCandidatePatchSet: () => Effect.die('unused'),
-    recordVerificationRequirement: () => Effect.die('unused'),
-    recordVerificationResult: () => Effect.die('unused'),
-    recordReviewRun: () => Effect.die('unused'),
-    recordReviewFinding: () => Effect.die('unused'),
-    recordPolicyDecision: () => Effect.die('unused'),
-    recordPublicationResult: () => Effect.die('unused'),
-    recordProvenanceEvent: () => Effect.die('unused'),
-    markRuntimeSessionStatus: (input) => Effect.sync(() => {
-      events.push(input)
-      return { ...activeSession, status: input.status, updatedAt: 2, ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }) }
+  return Layer.succeed(
+    StorageService,
+    StorageService.of({
+      createWorkflowFromIntake: () => Effect.die('unused'),
+      createWorkflowFromPrompt: () => Effect.die('unused'),
+      listRecentWorkflowStarts: () => Effect.die('unused'),
+      claimWorkflowExecution: () => Effect.succeed(true),
+      markWorkflowExecutionFailed: () => Effect.succeed(true),
+      recordSandboxExecution: () => Effect.die('unused'),
+      recordRuntimeEvents: () => Effect.die('unused'),
+      recordRuntimeSessionStarted: () => Effect.die('unused'),
+      getActiveRuntimeSession: () =>
+        Effect.succeed(session === null ? Option.none() : Option.some(session)),
+      recordEvidenceArtifact: () => Effect.die('unused'),
+      getEvidenceArtifact: () => Effect.die('unused'),
+      getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
+      claimCandidateFreeze: () => Effect.succeed(false),
+      releaseCandidateFreeze: () => Effect.succeed(false),
+      failCandidateFreeze: () => Effect.succeed(true),
+      claimIncomingDispatch: () => Effect.succeed(false),
+      startIncomingDispatch: () => Effect.succeed(true),
+      validateIncomingDispatch: () => Effect.succeed(false),
+      recordCandidatePatchSet: () => Effect.die('unused'),
+      recordVerificationRequirement: () => Effect.die('unused'),
+      recordVerificationResult: () => Effect.die('unused'),
+      recordReviewRun: () => Effect.die('unused'),
+      recordReviewFinding: () => Effect.die('unused'),
+      recordPolicyDecision: () => Effect.die('unused'),
+      recordPublicationResult: () => Effect.die('unused'),
+      recordProvenanceEvent: () => Effect.die('unused'),
+      markRuntimeSessionStatus: (input) =>
+        Effect.sync(() => {
+          events.push(input)
+          return {
+            ...activeSession,
+            status: input.status,
+            updatedAt: 2,
+            ...(input.completedAt === undefined
+              ? {}
+              : { completedAt: input.completedAt }),
+          }
+        }),
     }),
-  }))
+  )
 }
 
 function sandboxLayer(events: Array<unknown>) {
-  return Layer.succeed(SandboxService, SandboxService.of({
-    runRepositoryAgent: () => Effect.die('unused'),
-    runRepositoryCommand: () => Effect.die('unused'),
-    abortRuntimeSession: (input) => Effect.sync(() => {
-      events.push({ operation: 'abort', input })
-      return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
+  return Layer.succeed(
+    SandboxService,
+    SandboxService.of({
+      runRepositoryAgent: () => Effect.die('unused'),
+      runRepositoryCommand: () => Effect.die('unused'),
+      abortRuntimeSession: (input) =>
+        Effect.sync(() => {
+          events.push({ operation: 'abort', input })
+          return {
+            provider: 'daytona:pi-rpc',
+            sandboxId: input.sandboxId,
+            sessionId: input.sessionId,
+            commandId: input.commandId,
+            status: 'sent' as const,
+          }
+        }),
+      steerRuntimeSession: (input) =>
+        Effect.sync(() => {
+          events.push({ operation: 'steer', input })
+          return {
+            provider: 'daytona:pi-rpc',
+            sandboxId: input.sandboxId,
+            sessionId: input.sessionId,
+            commandId: input.commandId,
+            status: 'sent' as const,
+          }
+        }),
+      followUpRuntimeSession: (input) =>
+        Effect.sync(() => {
+          events.push({ operation: 'followUp', input })
+          return {
+            provider: 'daytona:pi-rpc',
+            sandboxId: input.sandboxId,
+            sessionId: input.sessionId,
+            commandId: input.commandId,
+            status: 'sent' as const,
+          }
+        }),
+      terminateRuntimeSession: (input) =>
+        Effect.sync(() => {
+          events.push({ operation: 'terminate', input })
+          return {
+            provider: 'daytona:pi-rpc',
+            sandboxId: input.sandboxId,
+            sessionId: input.sessionId,
+            commandId: input.commandId,
+            status: 'terminated' as const,
+          }
+        }),
     }),
-    steerRuntimeSession: (input) => Effect.sync(() => {
-      events.push({ operation: 'steer', input })
-      return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-    }),
-    followUpRuntimeSession: (input) => Effect.sync(() => {
-      events.push({ operation: 'followUp', input })
-      return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'sent' as const }
-    }),
-    terminateRuntimeSession: (input) => Effect.sync(() => {
-      events.push({ operation: 'terminate', input })
-      return { provider: 'daytona:pi-rpc', sandboxId: input.sandboxId, sessionId: input.sessionId, commandId: input.commandId, status: 'terminated' as const }
-    }),
-  }))
+  )
 }
 
 const input = { workflowRunId: activeSession.workflowRunId, traceId: 'trace-1' }
@@ -88,13 +140,16 @@ describe('ControlRuntimeSession workflows', () => {
 
       expect(result.status).toBe('no_active_session')
       expect(events).toEqual([])
-    }))
+    }),
+  )
 
   it.effect('sends soft abort and marks the runtime session cancelled', () =>
     Effect.gen(function* () {
       const events: Array<unknown> = []
       const result = yield* AbortRuntimeSession(input).pipe(
-        Effect.provide(Layer.mergeAll(storageLayer(events), sandboxLayer(events))),
+        Effect.provide(
+          Layer.mergeAll(storageLayer(events), sandboxLayer(events)),
+        ),
       )
 
       expect(result.status).toBe('sent')
@@ -102,29 +157,40 @@ describe('ControlRuntimeSession workflows', () => {
         expect.objectContaining({ operation: 'abort' }),
         expect.objectContaining({ status: 'cancelled' }),
       ])
-    }))
+    }),
+  )
 
   it.effect('sends steer and follow-up without completing the session', () =>
     Effect.gen(function* () {
       const events: Array<unknown> = []
       yield* SteerRuntimeSession({ ...input, message: 'change course' }).pipe(
-        Effect.provide(Layer.mergeAll(storageLayer(events), sandboxLayer(events))),
+        Effect.provide(
+          Layer.mergeAll(storageLayer(events), sandboxLayer(events)),
+        ),
       )
-      yield* FollowUpRuntimeSession({ ...input, message: 'then summarize' }).pipe(
-        Effect.provide(Layer.mergeAll(storageLayer(events), sandboxLayer(events))),
+      yield* FollowUpRuntimeSession({
+        ...input,
+        message: 'then summarize',
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(storageLayer(events), sandboxLayer(events)),
+        ),
       )
 
       expect(events).toEqual([
         expect.objectContaining({ operation: 'steer' }),
         expect.objectContaining({ operation: 'followUp' }),
       ])
-    }))
+    }),
+  )
 
   it.effect('hard terminates and marks the runtime session cancelled', () =>
     Effect.gen(function* () {
       const events: Array<unknown> = []
       const result = yield* TerminateRuntimeSession(input).pipe(
-        Effect.provide(Layer.mergeAll(storageLayer(events), sandboxLayer(events))),
+        Effect.provide(
+          Layer.mergeAll(storageLayer(events), sandboxLayer(events)),
+        ),
       )
 
       expect(result.status).toBe('terminated')
@@ -132,5 +198,6 @@ describe('ControlRuntimeSession workflows', () => {
         expect.objectContaining({ operation: 'terminate' }),
         expect.objectContaining({ status: 'cancelled' }),
       ])
-    }))
+    }),
+  )
 })

@@ -17,6 +17,7 @@ import {
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
 import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
 import { CandidatePatchStatsFromSandboxResult } from './candidate-patch-stats'
+import type { IncomingPullRequestDispatch } from './freeze-incoming-pull-request-candidate'
 import {
   PersistConfiguredVerificationRequirements,
   PersistSandboxVerificationEvidence,
@@ -38,6 +39,7 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
   '@patchplane/core/workflows/RunSandboxAgentForWorkflow',
 )(function* (input: {
   readonly workflowStart: WorkflowStart
+  readonly incomingDispatch?: IncomingPullRequestDispatch | undefined
   readonly provider: string
   readonly model: string
   readonly thinking?: string | undefined
@@ -52,17 +54,68 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     traceId: input.workflowStart.workflowRun.traceId,
     workflowRunId: input.workflowStart.workflowRun.id,
   } as const
-  const claimed = yield* withAttemptClaimTransition(
-    {
-      ...transitionContext,
-      operation: 'runSandboxAgentForWorkflow.claimExecution',
-    },
-    storage.claimWorkflowExecution({
-      workflowRunId: input.workflowStart.workflowRun.id,
-      traceId: input.workflowStart.workflowRun.traceId,
-      operation: 'runSandboxAgentForWorkflow.claimExecution',
-    }),
-  )
+  const frozenCandidate = input.incomingDispatch?.candidatePatchSet
+  const workflowRun = input.workflowStart.workflowRun
+  if (
+    workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+    (frozenCandidate?.subject?.kind !== 'incoming-pull-request' ||
+      frozenCandidate.status !== 'captured' ||
+      frozenCandidate.candidateDigest === undefined ||
+      frozenCandidate.diffArtifactId === undefined ||
+      frozenCandidate.workflowRunId !== workflowRun.id ||
+      frozenCandidate.baseSha !== workflowRun.sourceBaseSha ||
+      frozenCandidate.headSha !== workflowRun.sourceCommitSha ||
+      frozenCandidate.subject.baseSha !== workflowRun.sourceBaseSha ||
+      frozenCandidate.subject.headSha !== workflowRun.sourceCommitSha)
+  ) {
+    return yield* new SandboxError({
+      operation: 'runSandboxAgentForWorkflow.requireFrozenCandidate',
+      message:
+        'Incoming PR workflow cannot dispatch before its candidate is frozen',
+      cause: undefined,
+    })
+  }
+  if (
+    workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' &&
+    input.incomingDispatch !== undefined
+  ) {
+    return yield* new SandboxError({
+      operation: 'runSandboxAgentForWorkflow.validateDispatch',
+      message:
+        'Incoming candidate dispatch cannot be used for a legacy workflow',
+      cause: undefined,
+    })
+  }
+  if (
+    input.incomingDispatch !== undefined &&
+    !(yield* storage.validateIncomingDispatch({
+      workflowRunId: workflowRun.id,
+      candidatePatchSetId: frozenCandidate!.id,
+      dispatchToken: input.incomingDispatch.dispatchToken,
+      traceId: workflowRun.traceId,
+      operation: 'runSandboxAgentForWorkflow.validateDispatchLease',
+    }))
+  ) {
+    return yield* new SandboxError({
+      operation: 'runSandboxAgentForWorkflow.validateDispatchLease',
+      message: 'Incoming candidate dispatch lease is not active',
+      cause: undefined,
+    })
+  }
+  const claimed =
+    input.incomingDispatch !== undefined
+      ? true
+      : yield* withAttemptClaimTransition(
+          {
+            ...transitionContext,
+            operation: 'runSandboxAgentForWorkflow.claimExecution',
+          },
+          storage.claimWorkflowExecution({
+            workflowRunId: input.workflowStart.workflowRun.id,
+            traceId: input.workflowStart.workflowRun.traceId,
+            operation: 'runSandboxAgentForWorkflow.claimExecution',
+          }),
+        )
   if (!claimed) return undefined
 
   return yield* Effect.gen(function* () {
@@ -115,6 +168,36 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
         evidenceBrowserScreenshotCommand:
           input.evidenceBrowserScreenshotCommand,
         traceId: input.workflowStart.workflowRun.traceId,
+        ...(input.incomingDispatch === undefined
+          ? {}
+          : {
+              onSandboxStarted: (sandboxId: string) =>
+                storage
+                  .startIncomingDispatch({
+                    workflowRunId: input.workflowStart.workflowRun.id,
+                    candidatePatchSetId:
+                      input.incomingDispatch!.candidatePatchSet.id,
+                    dispatchToken: input.incomingDispatch!.dispatchToken,
+                    sandboxId,
+                    traceId: input.workflowStart.workflowRun.traceId,
+                    operation:
+                      'runSandboxAgentForWorkflow.startIncomingDispatch',
+                  })
+                  .pipe(
+                    Effect.filterOrFail(
+                      (started) => started,
+                      () =>
+                        new SandboxError({
+                          operation:
+                            'runSandboxAgentForWorkflow.startIncomingDispatch',
+                          message:
+                            'Incoming candidate dispatch lease could not be started',
+                          cause: input.workflowStart.workflowRun.id,
+                        }),
+                    ),
+                    Effect.asVoid,
+                  ),
+            }),
         onRuntimeSessionStarted: (session) =>
           Effect.gen(function* () {
             runtimeSession = yield* storage.recordRuntimeSessionStarted({
@@ -227,6 +310,25 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
       })
     }
 
+    const sandboxExecution = yield* storage.recordSandboxExecution({
+      workflowRunId: input.workflowStart.workflowRun.id,
+      ...(input.incomingDispatch === undefined
+        ? {}
+        : { incomingDispatchToken: input.incomingDispatch.dispatchToken }),
+      provider: result.provider,
+      sandboxId: result.sandboxId,
+      command: result.command,
+      status: result.exitCode === 0 ? 'succeeded' : 'failed',
+      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+      stdout: truncatePreview(result.stdout),
+      ...(result.stderr === undefined
+        ? {}
+        : { stderr: truncatePreview(result.stderr) }),
+      ...(result.policy === undefined ? {} : { policy: result.policy }),
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+    })
+
     if (shouldCaptureAsArtifact(result.stdout)) {
       yield* CaptureEvidenceArtifact({
         workflowRunId: input.workflowStart.workflowRun.id,
@@ -257,64 +359,54 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
       result,
     })
 
-    const sandboxExecution = yield* storage.recordSandboxExecution({
-      workflowRunId: input.workflowStart.workflowRun.id,
-      provider: result.provider,
-      sandboxId: result.sandboxId,
-      command: result.command,
-      status: result.exitCode === 0 ? 'succeeded' : 'failed',
-      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-      stdout: truncatePreview(result.stdout),
-      ...(result.stderr === undefined
-        ? {}
-        : { stderr: truncatePreview(result.stderr) }),
-      ...(result.policy === undefined ? {} : { policy: result.policy }),
-      startedAt: result.startedAt,
-      completedAt: result.completedAt,
-    })
-
-    const diffArtifact = evidenceArtifacts.find(
-      (artifact) => artifact.kind === 'diff',
-    )
-    const baseSha =
-      result.baseSha === undefined
-        ? undefined
-        : yield* Schema.decodeUnknownEffect(GitCommitSha)(result.baseSha).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SandboxError({
-                  operation: 'runSandboxAgentForWorkflow.decodeBaseSha',
-                  message: 'Sandbox returned an invalid candidate base SHA',
-                  cause,
-                }),
-            ),
-          )
-    const captured = diffArtifact !== undefined && baseSha !== undefined
-    const stats = yield* CandidatePatchStatsFromSandboxResult(result)
-    const candidatePatchSet = yield* withCandidateFreezeTransition(
-      {
-        ...transitionContext,
-        operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
-      },
-      storage.recordCandidatePatchSet({
-        workflowRunId: input.workflowStart.workflowRun.id,
-        sandboxExecutionId: sandboxExecution.id,
-        status: captured ? 'captured' : 'empty',
-        ...(captured
-          ? { candidateDigest: `sha256:${diffArtifact.sha256}` }
-          : {}),
-        ...(baseSha === undefined ? {} : { baseSha }),
-        ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
-        ...(captured && stats !== undefined ? { stats } : {}),
-        summary: captured
-          ? 'Captured candidate patch diff from sandbox worktree.'
-          : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
-        idempotencyKey: `${sandboxExecution.id}:candidate`,
-        createdAt: result.completedAt,
-        traceId: input.workflowStart.workflowRun.traceId,
-        operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
-      }),
-    )
+    const candidatePatchSet =
+      frozenCandidate ??
+      (yield* Effect.gen(function* () {
+        const diffArtifact = evidenceArtifacts.find(
+          (artifact) => artifact.kind === 'diff',
+        )
+        const baseSha =
+          result.baseSha === undefined
+            ? undefined
+            : yield* Schema.decodeUnknownEffect(GitCommitSha)(
+                result.baseSha,
+              ).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new SandboxError({
+                      operation: 'runSandboxAgentForWorkflow.decodeBaseSha',
+                      message: 'Sandbox returned an invalid candidate base SHA',
+                      cause,
+                    }),
+                ),
+              )
+        const captured = diffArtifact !== undefined && baseSha !== undefined
+        const stats = yield* CandidatePatchStatsFromSandboxResult(result)
+        return yield* withCandidateFreezeTransition(
+          {
+            ...transitionContext,
+            operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
+          },
+          storage.recordCandidatePatchSet({
+            workflowRunId: input.workflowStart.workflowRun.id,
+            sandboxExecutionId: sandboxExecution.id,
+            status: captured ? 'captured' : 'empty',
+            ...(captured
+              ? { candidateDigest: `sha256:${diffArtifact.sha256}` }
+              : {}),
+            ...(baseSha === undefined ? {} : { baseSha }),
+            ...(captured ? { diffArtifactId: diffArtifact.id } : {}),
+            ...(captured && stats !== undefined ? { stats } : {}),
+            summary: captured
+              ? 'Captured candidate patch diff from sandbox worktree.'
+              : 'Sandbox completed without a candidate that could be bound to a base commit and diff artifact.',
+            idempotencyKey: `${sandboxExecution.id}:candidate`,
+            createdAt: result.completedAt,
+            traceId: input.workflowStart.workflowRun.traceId,
+            operation: 'runSandboxAgentForWorkflow.recordCandidatePatchSet',
+          }),
+        )
+      }))
 
     const verificationEvidence = yield* withVerificationTransition(
       {
@@ -349,6 +441,9 @@ export const RunSandboxAgentForWorkflow = Effect.fn(
     Effect.tapCause(() =>
       storage.markWorkflowExecutionFailed({
         workflowRunId: input.workflowStart.workflowRun.id,
+        ...(input.incomingDispatch === undefined
+          ? {}
+          : { incomingDispatchToken: input.incomingDispatch.dispatchToken }),
         summary: 'Workflow execution failed after the attempt was claimed.',
         traceId: input.workflowStart.workflowRun.traceId,
         operation: 'runSandboxAgentForWorkflow.markExecutionFailed',
