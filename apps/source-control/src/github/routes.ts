@@ -33,7 +33,8 @@ import {
   type WorkerEnv,
 } from './config'
 import { GitHubEventToWorkflowIntake } from '@patchplane/core/workflows/github-event-to-intake'
-import { IngestGitHubWebhook } from '@patchplane/core/workflows/ingest-github-webhook'
+import { NormalizeGitHubWebhookEvent } from '@patchplane/core/github/normalize-github-webhook-event'
+import { GitHubWebhookService } from '@patchplane/core/services/github-webhook-service'
 import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
 import { AssemblePatchReportV1 } from '@patchplane/core/patch-report/assemble-patch-report-v1'
 import { PublishDecisionToSource } from '@patchplane/core/workflows/publish-decision-to-source'
@@ -87,6 +88,9 @@ import { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { withCapturedCriticalPathScope } from '../critical-path-telemetry'
 
 type SandboxExecutionValue = Schema.Schema.Type<typeof SandboxExecution>
+
+const hostedVerificationAggregateLimitSeconds = 14 * 60
+const hostedVerificationCommandLimitSeconds = 30
 
 const noIncomingDispatch: Effect.Effect<
   IncomingPullRequestDispatch | undefined
@@ -360,6 +364,31 @@ const decisionPublicationFixtureSchema = Schema.Struct({
   publicationResults: Schema.Array(PublicationResult),
 })
 
+const bindQueuedGitHubDeliveryToWorkflowMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    deliveryId: string
+    workflowRunId: string
+    repositoryExternalId: string
+    issueExternalId: string
+    pullRequestBaseSha: string
+    pullRequestHeadSha: string
+  },
+  'bound' | 'coalesced' | 'rejected'
+>('workflowStarts:bindQueuedGitHubDeliveryToWorkflow')
+
+const terminalizeQueuedGitHubDeliveryMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    deliveryId: string
+    deliveryToken: string
+    processingToken: string
+  },
+  { readonly terminalized: boolean; readonly workflowRunId?: string }
+>('workflowStarts:terminalizeQueuedGitHubDelivery')
+
 const markWorkflowExecutionFailedMutation = makeFunctionReference<
   'mutation',
   { systemSecret: string; workflowRunId: string; summary: string },
@@ -587,6 +616,67 @@ function isPatchPlaneResultComment(input: {
   )
 }
 
+export async function markQueuedDeliveryExhausted(
+  request: Request,
+  env: WorkerEnv,
+  runtime: SourceControlRuntime,
+) {
+  const input: unknown = await request.json().catch(() => undefined)
+  const fields =
+    input !== null && typeof input === 'object'
+      ? (input as Record<string, unknown>)
+      : undefined
+  const deliveryId =
+    typeof fields?.deliveryId === 'string' ? fields.deliveryId : undefined
+  const deliveryToken =
+    typeof fields?.deliveryToken === 'string' ? fields.deliveryToken : undefined
+  const processingToken =
+    typeof fields?.processingToken === 'string'
+      ? fields.processingToken
+      : undefined
+  if (
+    deliveryId === undefined ||
+    deliveryId.length === 0 ||
+    deliveryId.length > 128 ||
+    deliveryToken === undefined ||
+    deliveryToken.length === 0 ||
+    deliveryToken.length > 128 ||
+    processingToken === undefined ||
+    processingToken.length === 0 ||
+    processingToken.length > 128
+  ) {
+    return jsonResponse(
+      { ok: false, error: 'Invalid delivery identity' },
+      { status: 400 },
+    )
+  }
+  const configExit = await runtime.runPromiseExit(
+    loadSourceControlRouteConfig(env),
+  )
+  if (Exit.isFailure(configExit)) {
+    return jsonResponse(
+      { ok: false, error: 'Source-control configuration is invalid' },
+      { status: 500 },
+    )
+  }
+  const secret = Redacted.value(configExit.value.systemIngestionSecret)
+  if (secret.length === 0) {
+    return jsonResponse(
+      { ok: false, error: 'System ingestion is not configured' },
+      { status: 500 },
+    )
+  }
+  const terminal = await new ConvexHttpClient(
+    configuredConvexUrl(configExit.value),
+  ).mutation(terminalizeQueuedGitHubDeliveryMutation, {
+    systemSecret: secret,
+    deliveryId,
+    deliveryToken,
+    processingToken,
+  })
+  return jsonResponse({ ok: true, ...terminal }, { status: 200 })
+}
+
 export async function syncGitHubInstallation(
   request: Request,
   runtime: SourceControlRuntime,
@@ -806,7 +896,10 @@ export async function executeWorkflowRerun(
               testPlatform: routeConfig.execution.evidenceTestPlatform,
               browserCommand:
                 routeConfig.execution.evidenceBrowserScreenshotCommand,
-              timeoutSeconds: routeConfig.execution.timeoutSeconds,
+              timeoutSeconds: Math.min(
+                routeConfig.execution.timeoutSeconds,
+                hostedVerificationCommandLimitSeconds,
+              ),
               createdAt: Date.now(),
               traceId: workflowStart.workflowRun.traceId,
               operation: 'github.rerun.persistVerificationPlan',
@@ -837,11 +930,24 @@ export async function executeWorkflowRerun(
         incomingDispatch !== undefined &&
         persistedVerification !== undefined
       ) {
-        const execution = yield* RunIncomingVerificationPlan({
-          workflowStart,
-          incomingDispatch,
-          verificationPlan: persistedVerification,
-        })
+        const execution = yield* Effect.raceFirst(
+          RunIncomingVerificationPlan({
+            workflowStart,
+            incomingDispatch,
+            verificationPlan: persistedVerification,
+            maxAggregateExecutionSeconds:
+              hostedVerificationAggregateLimitSeconds,
+          }),
+          Effect.sleep('14 minutes').pipe(
+            Effect.andThen(
+              Effect.fail(
+                new SourceControlWorkerRequestError({
+                  message: 'Hosted verification exceeded its hard deadline',
+                }),
+              ),
+            ),
+          ),
+        )
         return execution.sandboxExecutions.at(-1)
       }
       return yield* routeConfig.execution.mode === 'daytona-pi'
@@ -1214,11 +1320,44 @@ export async function handleGitHubWebhook(
   const routeConfig = routeConfigExit.value
 
   const program = Effect.gen(function* () {
-    const event = yield* IngestGitHubWebhook({
+    const githubWebhooks = yield* GitHubWebhookService
+    const verified = yield* githubWebhooks.verifyWebhook({
       deliveryId,
       eventName,
       signature,
       payload,
+      traceId,
+      operation: 'github.webhook.verify',
+    })
+    if (eventName === 'pull_request') {
+      const action = yield* Schema.decodeUnknownEffect(
+        Schema.Struct({ action: Schema.String }),
+      )(verified.payload).pipe(
+        Effect.mapError(
+          () =>
+            new SourceControlWorkerRequestError({
+              message: 'GitHub pull request action is malformed',
+            }),
+        ),
+      )
+      if (action.action !== 'opened' && action.action !== 'synchronize') {
+        return {
+          event: undefined,
+          intake: undefined,
+          workflowStart: undefined,
+          sandboxExecution: undefined,
+          publication: undefined,
+          ignoredReason: 'unsupported_pull_request_action',
+          verificationTerminal: true,
+        }
+      }
+    }
+    const event = yield* NormalizeGitHubWebhookEvent(verified)
+    yield* Effect.logInfo('Ingested GitHub webhook event', {
+      deliveryId: event.deliveryId,
+      kind: event.kind,
+      owner: event.owner,
+      repo: event.repo,
     })
     const repositoryFullName = `${event.owner}/${event.repo}`
     if (
@@ -1328,6 +1467,73 @@ export async function handleGitHubWebhook(
     }
 
     const workflowStart = yield* StartWorkflowFromIntake(intake)
+    if (request.headers.get('x-patchplane-queued-delivery') === 'v1') {
+      const externalRef = intake.externalRef
+      if (
+        externalRef?.repositoryExternalId === undefined ||
+        externalRef.issueExternalId === undefined ||
+        externalRef.pullRequestBaseSha === undefined ||
+        externalRef.pullRequestHeadSha === undefined
+      ) {
+        return yield* new SourceControlWorkerRequestError({
+          message: 'Queued delivery is missing exact workflow lineage',
+        })
+      }
+      const repositoryExternalId = externalRef.repositoryExternalId
+      const issueExternalId = externalRef.issueExternalId
+      const pullRequestBaseSha = externalRef.pullRequestBaseSha
+      const pullRequestHeadSha = externalRef.pullRequestHeadSha
+      const bound: unknown = yield* Effect.tryPromise({
+        try: () =>
+          new ConvexHttpClient(configuredConvexUrl(config)).mutation(
+            bindQueuedGitHubDeliveryToWorkflowMutation,
+            {
+              systemSecret: Redacted.value(config.systemIngestionSecret),
+              deliveryId,
+              workflowRunId: workflowStart.workflowRun.id,
+              repositoryExternalId,
+              issueExternalId,
+              pullRequestBaseSha,
+              pullRequestHeadSha,
+            },
+          ),
+        catch: () =>
+          new SourceControlWorkerRequestError({
+            message: 'Queued delivery could not bind its workflow attempt',
+          }),
+      })
+      if (bound !== 'bound' && bound !== 'coalesced') {
+        return yield* new SourceControlWorkerRequestError({
+          message: 'Queued delivery workflow binding was rejected',
+        })
+      }
+      if (bound === 'coalesced') {
+        return {
+          event,
+          intake,
+          workflowStart,
+          sandboxExecution: undefined,
+          publication: undefined,
+          ignoredReason: undefined,
+          verificationTerminal: true,
+          deliveryCoalesced: true,
+        }
+      }
+    }
+    if (
+      workflowStart.workflowRun.status === 'reviewed' ||
+      workflowStart.workflowRun.status === 'failed'
+    ) {
+      return {
+        event,
+        intake,
+        workflowStart,
+        sandboxExecution: undefined,
+        publication: undefined,
+        ignoredReason: undefined,
+        verificationTerminal: true,
+      }
+    }
     const trustedPolicyLayers = yield* loadConfiguredVerificationPolicyLayers(
       routeConfig,
       workflowStart,
@@ -1341,7 +1547,10 @@ export async function handleGitHubWebhook(
             testPlatform: routeConfig.execution.evidenceTestPlatform,
             browserCommand:
               routeConfig.execution.evidenceBrowserScreenshotCommand,
-            timeoutSeconds: routeConfig.execution.timeoutSeconds,
+            timeoutSeconds: Math.min(
+              routeConfig.execution.timeoutSeconds,
+              hostedVerificationCommandLimitSeconds,
+            ),
             createdAt: Date.now(),
             traceId: workflowStart.workflowRun.traceId,
             operation: 'github.webhook.persistVerificationPlan',
@@ -1360,16 +1569,33 @@ export async function handleGitHubWebhook(
             ),
           )
         : undefined
+    const incomingExecution =
+      incomingDispatch !== undefined && persistedVerification !== undefined
+        ? yield* Effect.raceFirst(
+            RunIncomingVerificationPlan({
+              workflowStart,
+              incomingDispatch,
+              verificationPlan: persistedVerification,
+              maxAggregateExecutionSeconds:
+                hostedVerificationAggregateLimitSeconds,
+            }),
+            Effect.sleep('14 minutes').pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new SourceControlWorkerRequestError({
+                    message: 'Hosted verification exceeded its hard deadline',
+                  }),
+                ),
+              ),
+            ),
+          )
+        : undefined
     const sandboxExecution =
       workflowStart.workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
       incomingDispatch === undefined
         ? undefined
-        : incomingDispatch !== undefined && persistedVerification !== undefined
-          ? (yield* RunIncomingVerificationPlan({
-              workflowStart,
-              incomingDispatch,
-              verificationPlan: persistedVerification,
-            })).sandboxExecutions.at(-1)
+        : incomingExecution !== undefined
+          ? incomingExecution.sandboxExecutions.at(-1)
           : routeConfig.execution.mode === 'daytona-pi'
             ? yield* RunSandboxAgentForWorkflow({
                 workflowStart,
@@ -1406,7 +1632,7 @@ export async function handleGitHubWebhook(
               })
 
     const publication =
-      sandboxExecution === undefined
+      sandboxExecution === undefined || incomingExecution !== undefined
         ? undefined
         : yield* PublishSandboxResultToSource({
             workflowStart,
@@ -1419,6 +1645,7 @@ export async function handleGitHubWebhook(
       sandboxExecution,
       publication,
       ignoredReason: undefined,
+      verificationTerminal: incomingExecution?.complete,
     }
   }).pipe(
     (effect) =>
@@ -1457,9 +1684,19 @@ export async function handleGitHubWebhook(
         ignoredReason: exit.value.ignoredReason,
         externalProvider: exit.value.intake?.externalRef?.provider ?? 'github',
         externalEventKind:
-          exit.value.intake?.externalRef?.eventKind ?? exit.value.event.kind,
+          exit.value.intake?.externalRef?.eventKind ??
+          exit.value.event?.kind ??
+          `github.${eventName}.ignored`,
         sandboxExecutionId: exit.value.sandboxExecution?.id,
         sandboxStatus: exit.value.sandboxExecution?.status,
+        verificationTerminal:
+          exit.value.workflowStart === undefined ||
+          ('verificationTerminal' in exit.value &&
+            exit.value.verificationTerminal === true),
+        deliveryId,
+        deliveryCoalesced:
+          'deliveryCoalesced' in exit.value &&
+          exit.value.deliveryCoalesced === true,
         publishedProvider: exit.value.publication?.provider,
         publishedIssueNumber: exit.value.publication?.issueNumber,
       },

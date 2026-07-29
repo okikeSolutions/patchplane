@@ -35,7 +35,10 @@ import type {
 } from '@patchplane/domain/runtime-session'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
-import type { GitCommitSha } from '@patchplane/domain/refinements'
+import type {
+  GitCommitSha,
+  ProviderProcessId,
+} from '@patchplane/domain/refinements'
 import type {
   VerificationExecutionGroup,
   VerificationPlanV1,
@@ -87,6 +90,8 @@ export interface RecordSandboxExecutionInput extends TelemetryContextFields {
   readonly idempotencyKey?: string | undefined
   readonly provider: string
   readonly sandboxId: string
+  readonly providerSessionId?: ProviderProcessId | undefined
+  readonly providerCommandId?: ProviderProcessId | undefined
   readonly command: string
   readonly status: 'succeeded' | 'failed'
   readonly exitCode?: number | undefined
@@ -259,6 +264,15 @@ export interface StartVerificationExecutionGroupInput extends TelemetryContextFi
   readonly sandboxId: string
 }
 
+export interface RecordVerificationExecutionCommandInput extends TelemetryContextFields {
+  readonly workflowRunId: WorkflowRunId
+  readonly executionGroupId: VerificationExecutionGroup['id']
+  readonly claimToken: string
+  readonly sandboxId: string
+  readonly providerSessionId: ProviderProcessId
+  readonly providerCommandId: ProviderProcessId
+}
+
 export interface FailVerificationExecutionGroupInput extends TelemetryContextFields {
   readonly workflowRunId: WorkflowRunId
   readonly executionGroupId: VerificationExecutionGroup['id']
@@ -293,6 +307,8 @@ export interface RecordVerificationResultInput extends TelemetryContextFields {
   readonly platform: VerificationPlatform
   readonly architecture: VerificationResult['architecture']
   readonly environmentImage?: string | undefined
+  readonly providerSessionId?: ProviderProcessId | undefined
+  readonly providerCommandId?: ProviderProcessId | undefined
   readonly status: VerificationResultStatus
   readonly exitCode?: number | undefined
   readonly summary?: string | undefined
@@ -480,6 +496,9 @@ export class StorageService extends Context.Service<
     ) => Effect.Effect<VerificationExecutionGroup | undefined, StorageError>
     readonly startVerificationExecutionGroup: (
       input: StartVerificationExecutionGroupInput,
+    ) => Effect.Effect<boolean, StorageError>
+    readonly recordVerificationExecutionCommand?: (
+      input: RecordVerificationExecutionCommandInput,
     ) => Effect.Effect<boolean, StorageError>
     readonly failVerificationExecutionGroup: (
       input: FailVerificationExecutionGroupInput,

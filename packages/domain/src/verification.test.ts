@@ -1,7 +1,11 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { makeWorkflowRunId } from './ids'
-import { decodeVerificationRequirement, decodeVerificationResult } from './verification'
+import {
+  decodeVerificationExecutionGroup,
+  decodeVerificationRequirement,
+  decodeVerificationResult,
+} from './verification'
 
 describe('verification evidence schemas', () => {
   it.effect('decodes a candidate-bound native-platform result', () =>
@@ -47,6 +51,27 @@ describe('verification evidence schemas', () => {
         status: 'passed',
       })
     }),
+  )
+
+  it.effect('rejects oversized provider process identities', () =>
+    decodeVerificationExecutionGroup({
+      id: 'group-1',
+      workflowRunId: makeWorkflowRunId('run-1'),
+      verificationPlanId: 'plan-1',
+      requirementId: 'requirement-1',
+      candidatePatchSetId: 'candidate-1',
+      stableKey: 'plan-1:requirement-1:candidate-1',
+      provider: 'daytona',
+      platform: 'linux',
+      architecture: 'x86_64',
+      sharedState: false,
+      status: 'running',
+      sandboxId: 'sandbox-1',
+      providerSessionId: 's'.repeat(257),
+      providerCommandId: 'command-1',
+      claimedAt: 1,
+      startedAt: 2,
+    }).pipe(Effect.flip, Effect.asVoid),
   )
 
   it.effect('rejects an unknown result status', () =>

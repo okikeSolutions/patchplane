@@ -5,7 +5,7 @@ import {
   type EvidenceArtifact,
 } from '@patchplane/domain/evidence-artifact'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
-import { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
+import { EffectiveSandboxPolicy } from '@patchplane/domain/sandbox-environment'
 import {
   VerificationPlatform,
   VerificationRequirementKind,
@@ -37,6 +37,11 @@ import { ProposeMergeDecision } from './propose-merge-decision'
 const commandLogMaxBytes = 1024 * 1024
 const inlineLogPreviewBytes = 16 * 1024
 const defaultRequirementTimeoutSeconds = 900
+// Hosted alpha admits one requirement only. Its lifecycle allowance covers
+// create/start (240s), ten bounded probes and session cleanup (350s), command
+// polling grace (15s), sandbox deletion/confirmation (149s), and provider
+// readback slack. The separate route deadline remains authoritative.
+const hostedGroupLifecycleAllowanceSeconds = 800
 
 function hex(bytes: Uint8Array) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
@@ -64,7 +69,7 @@ const TrustedProviderEnvelope = Schema.Struct({
   exitCode: Schema.optional(Schema.Int),
   stdout: Schema.String,
   stderr: Schema.optional(Schema.String),
-  policy: Schema.optional(SandboxPolicy),
+  policy: Schema.optional(EffectiveSandboxPolicy),
   evidenceArtifacts: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -130,12 +135,25 @@ function isTrustedProviderEnvelopeBounded(input: {
     result.provider.length <= 128 &&
     result.sandboxId.length > 0 &&
     result.sandboxId.length <= 256 &&
+    result.sessionId !== undefined &&
+    result.sessionId.length <= 256 &&
+    result.commandId !== undefined &&
+    result.commandId.length <= 256 &&
     Number.isSafeInteger(result.startedAt) &&
     Number.isSafeInteger(result.completedAt) &&
     result.startedAt >= 0 &&
     result.completedAt >= result.startedAt &&
     result.completedAt <= Date.now() + 60_000 &&
     outputBytes <= commandLogMaxBytes * 2 &&
+    (result.policy?.environment === undefined ||
+      (result.policy.environment.sandboxClass.length <= 128 &&
+        result.policy.environment.operatingSystem.length <= 128 &&
+        result.policy.environment.architecture.length <= 128 &&
+        result.policy.environment.image.length <= 512 &&
+        result.policy.environment.target.length <= 256 &&
+        result.policy.environment.providerState.length <= 128 &&
+        result.policy.environment.observedAt >= result.startedAt &&
+        result.policy.environment.observedAt <= result.completedAt)) &&
     (result.verificationResults?.length ?? 0) === 1 &&
     (result.evidenceArtifacts?.length ?? 0) <= 14 &&
     (result.verificationResults ?? []).every(
@@ -191,6 +209,7 @@ function sameRequirement(
 export interface IncomingVerificationPlanExecution {
   readonly sandboxExecutions: ReadonlyArray<SandboxExecution>
   readonly verificationResults: ReadonlyArray<VerificationResult>
+  readonly complete: boolean
 }
 
 /** Executes every trusted requirement in its own fresh, non-shared Daytona sandbox. */
@@ -200,6 +219,7 @@ export const RunIncomingVerificationPlan = Effect.fn(
   readonly workflowStart: WorkflowStart
   readonly incomingDispatch: IncomingPullRequestDispatch
   readonly verificationPlan: PersistedVerificationPlanV1
+  readonly maxAggregateExecutionSeconds?: number | undefined
 }) {
   const storage = yield* StorageService
   const sandbox = yield* SandboxService
@@ -209,9 +229,11 @@ export const RunIncomingVerificationPlan = Effect.fn(
   const planCapability = input.verificationPlan
   const claimGroup = storage.claimVerificationExecutionGroup
   const startGroup = storage.startVerificationExecutionGroup
+  const recordCommand = storage.recordVerificationExecutionCommand
 
   if (
     workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' ||
+    recordCommand === undefined ||
     !isPersistedVerificationPlanV1(planCapability) ||
     planCapability.plan.workflowRunId !== workflowRun.id ||
     planCapability.requirements.length !==
@@ -318,8 +340,22 @@ export const RunIncomingVerificationPlan = Effect.fn(
     }
   }
 
-  const clone = yield* PrepareRepositoryClone(input.workflowStart)
-  if (clone === undefined || clone.commitId !== workflowRun.sourceCommitSha) {
+  const aggregateExecutionSeconds = Array.from(claimedGroups.values()).reduce(
+    (total, claimed) =>
+      total + claimed.timeoutSeconds + hostedGroupLifecycleAllowanceSeconds,
+    0,
+  )
+  const capacityBlocked =
+    input.maxAggregateExecutionSeconds !== undefined &&
+    (claimedGroups.size !== 1 ||
+      aggregateExecutionSeconds > input.maxAggregateExecutionSeconds)
+  const clone = capacityBlocked
+    ? undefined
+    : yield* PrepareRepositoryClone(input.workflowStart)
+  if (
+    !capacityBlocked &&
+    (clone === undefined || clone.commitId !== workflowRun.sourceCommitSha)
+  ) {
     return yield* new SandboxError({
       operation: 'runIncomingVerificationPlan.prepareRepository',
       message:
@@ -336,9 +372,19 @@ export const RunIncomingVerificationPlan = Effect.fn(
     const platform = requirement.platform ?? 'linux'
     const architecture = requirement.architecture ?? 'x86_64'
     const command = requirement.command
+    let providerProcessIdentity:
+      | {
+          readonly providerSessionId: NonNullable<
+            SandboxCommandResult['sessionId']
+          >
+          readonly providerCommandId: NonNullable<
+            SandboxCommandResult['commandId']
+          >
+        }
+      | undefined
 
     yield* Effect.gen(function* () {
-      if (platform !== 'linux' || command === undefined) {
+      if (capacityBlocked || platform !== 'linux' || command === undefined) {
         const completedAt = yield* Clock.currentTimeMillis
         yield* storage.recordVerificationResult({
           workflowRunId: workflowRun.id,
@@ -353,8 +399,9 @@ export const RunIncomingVerificationPlan = Effect.fn(
           platform,
           architecture,
           status: 'blocked',
-          summary:
-            command === undefined
+          summary: capacityBlocked
+            ? 'Trusted verification plan exceeds the hosted execution capacity bound.'
+            : command === undefined
               ? 'Trusted requirement has no executable command envelope.'
               : `Required ${platform} verification is unavailable in the Daytona Linux executor.`,
           artifactIds: [],
@@ -373,6 +420,13 @@ export const RunIncomingVerificationPlan = Effect.fn(
         return
       }
 
+      if (clone === undefined) {
+        return yield* new SandboxError({
+          operation: 'runIncomingVerificationPlan.prepareRepository',
+          message: 'Trusted verification repository clone is unavailable',
+          cause: group.id,
+        })
+      }
       const sandboxResult = yield* sandbox
         .runRepositoryCommand({
           ...clone,
@@ -410,6 +464,33 @@ export const RunIncomingVerificationPlan = Effect.fn(
               ),
               Effect.asVoid,
             ),
+          onVerificationCommandStarted: ({ sandboxId, sessionId, commandId }) =>
+            Effect.gen(function* () {
+              providerProcessIdentity = {
+                providerSessionId: sessionId,
+                providerCommandId: commandId,
+              }
+              const recorded = yield* recordCommand({
+                workflowRunId: workflowRun.id,
+                executionGroupId: group.id,
+                claimToken,
+                sandboxId,
+                providerSessionId: sessionId,
+                providerCommandId: commandId,
+                traceId: workflowRun.traceId,
+                operation:
+                  'runIncomingVerificationPlan.recordVerificationCommand',
+              })
+              if (!recorded) {
+                return yield* new SandboxError({
+                  operation:
+                    'runIncomingVerificationPlan.recordVerificationCommand',
+                  message:
+                    'Verification provider command identity persistence was fenced',
+                  cause: group.id,
+                })
+              }
+            }),
         })
         .pipe(
           Effect.onInterrupt(() =>
@@ -426,6 +507,9 @@ export const RunIncomingVerificationPlan = Effect.fn(
                 commandDigest,
                 platform,
                 architecture,
+                ...(providerProcessIdentity === undefined
+                  ? {}
+                  : providerProcessIdentity),
                 status: 'cancelled',
                 summary: 'Trusted command execution was interrupted.',
                 artifactIds: [],
@@ -448,6 +532,14 @@ export const RunIncomingVerificationPlan = Effect.fn(
           }),
         )
 
+      yield* Effect.logInfo(
+        'Daytona trusted command lifecycle returned to core',
+        {
+          workflowRunId: workflowRun.id,
+          executionGroupId: group.id,
+          succeeded: sandboxResult.ok,
+        },
+      )
       if (!sandboxResult.ok) {
         const completedAt = yield* Clock.currentTimeMillis
         yield* storage.recordVerificationResult({
@@ -462,8 +554,11 @@ export const RunIncomingVerificationPlan = Effect.fn(
           commandDigest,
           platform,
           architecture,
+          ...(providerProcessIdentity === undefined
+            ? {}
+            : providerProcessIdentity),
           status: 'error',
-          summary: 'Daytona could not complete the trusted command envelope.',
+          summary: `Daytona could not complete the trusted command envelope (${sandboxResult.error.operation}).`,
           artifactIds: [],
           producedArtifactKinds: [],
           stdoutCaptureStatus: 'failed',
@@ -481,7 +576,15 @@ export const RunIncomingVerificationPlan = Effect.fn(
 
       const result = sandboxResult.value
       if (
-        !isTrustedProviderEnvelopeBounded({ expectedCommand: command, result })
+        !isTrustedProviderEnvelopeBounded({
+          expectedCommand: command,
+          result,
+        }) ||
+        result.sessionId === undefined ||
+        result.commandId === undefined ||
+        providerProcessIdentity === undefined ||
+        result.sessionId !== providerProcessIdentity.providerSessionId ||
+        result.commandId !== providerProcessIdentity.providerCommandId
       ) {
         yield* storage.recordVerificationResult({
           workflowRunId: workflowRun.id,
@@ -495,6 +598,9 @@ export const RunIncomingVerificationPlan = Effect.fn(
           commandDigest,
           platform,
           architecture,
+          ...(providerProcessIdentity === undefined
+            ? {}
+            : providerProcessIdentity),
           status: 'error',
           summary: 'Daytona returned an invalid or oversized command envelope.',
           artifactIds: [],
@@ -518,6 +624,8 @@ export const RunIncomingVerificationPlan = Effect.fn(
         idempotencyKey: `${group.id}:sandbox-execution`,
         provider: result.provider,
         sandboxId: result.sandboxId,
+        providerSessionId: result.sessionId,
+        providerCommandId: result.commandId,
         command: result.command,
         status: result.exitCode === 0 ? 'succeeded' : 'failed',
         ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
@@ -590,6 +698,22 @@ export const RunIncomingVerificationPlan = Effect.fn(
         result.baseSha === candidate.headSha
       const logsCaptured =
         stdout?.status === 'captured' && stderr?.status === 'captured'
+      const environment = result.policy?.environment
+      const effectiveEnvironment =
+        environment !== undefined &&
+        environment.sandboxClass === 'linux-container' &&
+        environment.sandboxClassSource === 'trusted-request' &&
+        environment.operatingSystem === 'Linux' &&
+        environment.architecture === architecture &&
+        environment.providerState === 'started' &&
+        environment.public === false &&
+        environment.linked === false &&
+        environment.volumeCount === 0 &&
+        result.policy?.lifecycle.ephemeral === true &&
+        result.policy.lifecycle.retainAfterRun === false &&
+        result.policy.resources.cpu !== undefined &&
+        result.policy.resources.memoryGb !== undefined &&
+        result.policy.resources.diskGb !== undefined
       const status: VerificationResult['status'] = !candidateUnchanged
         ? 'invalidated'
         : transient === undefined ||
@@ -598,6 +722,7 @@ export const RunIncomingVerificationPlan = Effect.fn(
             transient.architecture !== architecture ||
             transient.exitCode === undefined ||
             result.cleanupStatus !== 'deleted' ||
+            !effectiveEnvironment ||
             !providerArtifactsCaptured ||
             !logsCaptured ||
             !requiredArtifactsPresent
@@ -620,6 +745,11 @@ export const RunIncomingVerificationPlan = Effect.fn(
         commandDigest,
         platform,
         architecture,
+        ...(environment?.image === undefined
+          ? {}
+          : { environmentImage: environment.image }),
+        providerSessionId: result.sessionId,
+        providerCommandId: result.commandId,
         status,
         ...(transient?.exitCode === undefined
           ? {}
@@ -658,9 +788,9 @@ export const RunIncomingVerificationPlan = Effect.fn(
         operation: 'runIncomingVerificationPlan.recordResult',
       })
     }).pipe(
-      Effect.catch((error) =>
+      Effect.tapError((error) =>
         Effect.logWarning(
-          'Verification execution group persistence failed; recovery will terminalize the claimed group',
+          'Verification execution group persistence failed; delivery recovery must retry or terminalize the claimed group',
           {
             workflowRunId: workflowRun.id,
             executionGroupId: group.id,
@@ -729,5 +859,6 @@ export const RunIncomingVerificationPlan = Effect.fn(
   return {
     sandboxExecutions: durableState.sandboxExecutions,
     verificationResults: durableState.results,
+    complete,
   }
 })

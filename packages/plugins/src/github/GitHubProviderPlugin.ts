@@ -524,7 +524,7 @@ const sourceControlLayer = Layer.effect(
               'user-agent': 'patchplane',
               'x-github-api-version': '2022-11-28',
             },
-            redirect: 'error',
+            redirect: 'manual',
             signal: controller.signal,
           })
           try {

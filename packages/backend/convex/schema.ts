@@ -180,6 +180,21 @@ const sandboxPolicy = v.object({
     memoryGb: v.optional(v.number()),
     diskGb: v.optional(v.number()),
   }),
+  environment: v.optional(
+    v.object({
+      sandboxClass: v.string(),
+      sandboxClassSource: v.literal('trusted-request'),
+      operatingSystem: v.string(),
+      architecture: v.string(),
+      image: v.string(),
+      target: v.string(),
+      providerState: v.string(),
+      public: v.boolean(),
+      linked: v.boolean(),
+      volumeCount: v.number(),
+      observedAt: v.number(),
+    }),
+  ),
   timeoutSeconds: v.optional(v.number()),
 })
 
@@ -258,6 +273,37 @@ export default defineSchema({
     .index('by_actor', ['actorId'])
     .index('by_trace', ['traceId']),
 
+  webhookQueueReceipts: defineTable({
+    provider: v.literal('github'),
+    deliveryId: v.string(),
+    status: v.union(v.literal('delivering'), v.literal('terminal')),
+    envelopeStorageKey: v.string(),
+    envelopeSha256: v.string(),
+    activeDeliveryToken: v.string(),
+    processingToken: v.optional(v.string()),
+    processingUntil: v.optional(v.number()),
+    outcome: v.optional(
+      v.union(
+        v.literal('completed'),
+        v.literal('ignored'),
+        v.literal('failed'),
+        v.literal('coalesced'),
+      ),
+    ),
+    workflowRunId: v.optional(v.id('workflowRuns')),
+    createdAt: v.number(),
+    nextAttemptAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index('by_provider_and_delivery_id', ['provider', 'deliveryId'])
+    .index('by_provider_status_and_next_attempt', [
+      'provider',
+      'status',
+      'nextAttemptAt',
+    ])
+    .index('by_workflow_run', ['workflowRunId'])
+    .index('by_workflow_run_and_status', ['workflowRunId', 'status']),
+
   externalWorkflowRefs: defineTable({
     provider: v.string(),
     workspaceId: v.optional(v.string()),
@@ -309,6 +355,7 @@ export default defineSchema({
       staged: true,
     })
     .index('by_comment', ['provider', 'commentExternalId'])
+    .index('by_workflow_run', ['workflowRunId'])
     .index('by_provider_and_repository_external_id', [
       'provider',
       'repositoryExternalId',
@@ -375,6 +422,8 @@ export default defineSchema({
     sharedState: v.literal(false),
     status: verificationExecutionGroupStatus,
     sandboxId: v.optional(v.string()),
+    providerSessionId: v.optional(v.string()),
+    providerCommandId: v.optional(v.string()),
     sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
     claimedAt: v.number(),
     startedAt: v.optional(v.number()),
@@ -391,6 +440,8 @@ export default defineSchema({
     idempotencyKey: v.optional(v.string()),
     provider: v.string(),
     sandboxId: v.string(),
+    providerSessionId: v.optional(v.string()),
+    providerCommandId: v.optional(v.string()),
     command: v.string(),
     status: v.union(v.literal('succeeded'), v.literal('failed')),
     exitCode: v.optional(v.number()),
@@ -513,6 +564,8 @@ export default defineSchema({
     platform: verificationPlatform,
     architecture: v.string(),
     environmentImage: v.optional(v.string()),
+    providerSessionId: v.optional(v.string()),
+    providerCommandId: v.optional(v.string()),
     status: verificationResultStatus,
     exitCode: v.optional(v.number()),
     summary: v.optional(v.string()),

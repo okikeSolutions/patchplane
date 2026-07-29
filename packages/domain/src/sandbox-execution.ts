@@ -4,7 +4,7 @@ import {
   VerificationExecutionGroupId,
   WorkflowRunId,
 } from './ids'
-import { EpochMillis } from './refinements'
+import { EpochMillis, ProviderProcessId } from './refinements'
 import { SandboxPolicy } from './sandbox-policy'
 
 export const SandboxExecutionStatus = Schema.Literals(['succeeded', 'failed'])
@@ -26,6 +26,8 @@ export const SandboxExecution = Schema.Struct({
   idempotencyKey: Schema.optional(Schema.NonEmptyString),
   provider: Schema.NonEmptyString,
   sandboxId: Schema.NonEmptyString,
+  providerSessionId: Schema.optional(ProviderProcessId),
+  providerCommandId: Schema.optional(ProviderProcessId),
   command: Schema.NonEmptyString,
   status: SandboxExecutionStatus,
   exitCode: Schema.optional(Schema.Int),

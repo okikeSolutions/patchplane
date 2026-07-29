@@ -21,6 +21,21 @@ const workflowDetailSandboxOutputPreviewLength = 16_000
 function isEpochMillis(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0
 }
+
+function isValidProviderProcessIdentityPair(
+  sessionId: string | undefined,
+  commandId: string | undefined,
+): boolean {
+  return (
+    (sessionId === undefined && commandId === undefined) ||
+    (sessionId !== undefined &&
+      sessionId.length > 0 &&
+      sessionId.length <= 256 &&
+      commandId !== undefined &&
+      commandId.length > 0 &&
+      commandId.length <= 256)
+  )
+}
 const workflowDetailVerificationRequirementLimit = 64
 const workflowDetailVerificationResultLimit = 128
 const workflowDetailRuntimeSessionLimit = 32
@@ -242,6 +257,21 @@ const sandboxPolicyArg = v.object({
     memoryGb: v.optional(v.number()),
     diskGb: v.optional(v.number()),
   }),
+  environment: v.optional(
+    v.object({
+      sandboxClass: v.string(),
+      sandboxClassSource: v.literal('trusted-request'),
+      operatingSystem: v.string(),
+      architecture: v.string(),
+      image: v.string(),
+      target: v.string(),
+      providerState: v.string(),
+      public: v.boolean(),
+      linked: v.boolean(),
+      volumeCount: v.number(),
+      observedAt: v.number(),
+    }),
+  ),
   timeoutSeconds: v.optional(v.number()),
 })
 
@@ -468,6 +498,8 @@ const verificationExecutionGroupReturn = v.object({
   sharedState: v.literal(false),
   status: verificationExecutionGroupStatusArg,
   sandboxId: v.optional(v.string()),
+  providerSessionId: v.optional(v.string()),
+  providerCommandId: v.optional(v.string()),
   sandboxExecutionId: v.optional(v.id('sandboxExecutions')),
   claimedAt: v.number(),
   startedAt: v.optional(v.number()),
@@ -488,6 +520,8 @@ const verificationResultReturn = v.object({
   platform: verificationPlatformArg,
   architecture: v.string(),
   environmentImage: v.optional(v.string()),
+  providerSessionId: v.optional(v.string()),
+  providerCommandId: v.optional(v.string()),
   status: verificationResultStatusArg,
   exitCode: v.optional(v.number()),
   summary: v.optional(v.string()),
@@ -714,6 +748,8 @@ const sandboxExecutionReturn = v.object({
   idempotencyKey: v.optional(v.string()),
   provider: v.string(),
   sandboxId: v.string(),
+  providerSessionId: v.optional(v.string()),
+  providerCommandId: v.optional(v.string()),
   command: v.string(),
   runtimeModel: v.optional(v.string()),
   status: v.union(v.literal('succeeded'), v.literal('failed')),
@@ -3411,6 +3447,12 @@ function verificationExecutionGroupValue(
     sharedState: group.sharedState,
     status: group.status,
     ...(group.sandboxId === undefined ? {} : { sandboxId: group.sandboxId }),
+    ...(group.providerSessionId === undefined
+      ? {}
+      : { providerSessionId: group.providerSessionId }),
+    ...(group.providerCommandId === undefined
+      ? {}
+      : { providerCommandId: group.providerCommandId }),
     ...(group.sandboxExecutionId === undefined
       ? {}
       : { sandboxExecutionId: group.sandboxExecutionId }),
@@ -3447,6 +3489,12 @@ function verificationResultValue(result: Doc<'verificationResults'>) {
     ...(result.environmentImage === undefined
       ? {}
       : { environmentImage: result.environmentImage }),
+    ...(result.providerSessionId === undefined
+      ? {}
+      : { providerSessionId: result.providerSessionId }),
+    ...(result.providerCommandId === undefined
+      ? {}
+      : { providerCommandId: result.providerCommandId }),
     status: result.status,
     ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
     ...(result.summary === undefined ? {} : { summary: result.summary }),
@@ -3502,6 +3550,12 @@ function sandboxExecutionValue(execution: Doc<'sandboxExecutions'>) {
       : { idempotencyKey: execution.idempotencyKey }),
     provider: execution.provider,
     sandboxId: execution.sandboxId,
+    ...(execution.providerSessionId === undefined
+      ? {}
+      : { providerSessionId: execution.providerSessionId }),
+    ...(execution.providerCommandId === undefined
+      ? {}
+      : { providerCommandId: execution.providerCommandId }),
     command: execution.command,
     status: execution.status,
     ...(execution.exitCode === undefined
@@ -3850,6 +3904,12 @@ export const expireIncomingVerificationDispatch = internalMutation({
             : { commandDigest: group.commandDigest }),
           platform: group.platform,
           architecture: group.architecture,
+          ...(group.providerSessionId === undefined
+            ? {}
+            : { providerSessionId: group.providerSessionId }),
+          ...(group.providerCommandId === undefined
+            ? {}
+            : { providerCommandId: group.providerCommandId }),
           status: 'error',
           summary: 'Verification plan exceeded its durable recovery deadline.',
           artifactIds: [],
@@ -3951,6 +4011,53 @@ export const startVerificationExecutionGroup = mutation({
   },
 })
 
+export const recordVerificationExecutionCommand = mutation({
+  args: {
+    systemSecret: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    executionGroupId: v.id('verificationExecutionGroups'),
+    claimToken: v.string(),
+    sandboxId: v.string(),
+    providerSessionId: v.string(),
+    providerCommandId: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const group = await ctx.db.get(
+      'verificationExecutionGroups',
+      args.executionGroupId,
+    )
+    if (
+      group === null ||
+      group.workflowRunId !== args.workflowRunId ||
+      group.claimToken !== args.claimToken ||
+      group.status !== 'running' ||
+      group.sandboxId !== args.sandboxId ||
+      args.providerSessionId.length === 0 ||
+      args.providerSessionId.length > 256 ||
+      args.providerCommandId.length === 0 ||
+      args.providerCommandId.length > 256
+    ) {
+      return false
+    }
+    if (
+      group.providerSessionId !== undefined ||
+      group.providerCommandId !== undefined
+    ) {
+      return (
+        group.providerSessionId === args.providerSessionId &&
+        group.providerCommandId === args.providerCommandId
+      )
+    }
+    await ctx.db.patch('verificationExecutionGroups', group._id, {
+      providerSessionId: args.providerSessionId,
+      providerCommandId: args.providerCommandId,
+    })
+    return true
+  },
+})
+
 export const expireVerificationExecutionGroup = internalMutation({
   args: {
     executionGroupId: v.id('verificationExecutionGroups'),
@@ -4008,6 +4115,12 @@ export const expireVerificationExecutionGroup = internalMutation({
           : { commandDigest: group.commandDigest }),
         platform: group.platform,
         architecture: group.architecture,
+        ...(group.providerSessionId === undefined
+          ? {}
+          : { providerSessionId: group.providerSessionId }),
+        ...(group.providerCommandId === undefined
+          ? {}
+          : { providerCommandId: group.providerCommandId }),
         status: 'error',
         summary:
           'Started verification group exceeded its durable recovery deadline.',
@@ -4159,6 +4272,8 @@ export const recordVerificationResult = mutation({
     platform: verificationPlatformArg,
     architecture: v.string(),
     environmentImage: v.optional(v.string()),
+    providerSessionId: v.optional(v.string()),
+    providerCommandId: v.optional(v.string()),
     status: verificationResultStatusArg,
     exitCode: v.optional(v.number()),
     summary: v.optional(v.string()),
@@ -4185,6 +4300,14 @@ export const recordVerificationResult = mutation({
       throw new ConvexError('Verification result artifacts exceed limit')
     }
     if (
+      !isValidProviderProcessIdentityPair(
+        args.providerSessionId,
+        args.providerCommandId,
+      )
+    ) {
+      throw new ConvexError('Verification provider process identity is invalid')
+    }
+    if (
       !isEpochMillis(args.startedAt) ||
       (args.completedAt !== undefined &&
         (!isEpochMillis(args.completedAt) ||
@@ -4194,7 +4317,7 @@ export const recordVerificationResult = mutation({
       throw new ConvexError('Verification completion cannot predate its start')
     }
 
-    const [requirement, candidate, sandboxExecution, executionGroup] =
+    const [requirement, candidate, sandboxExecution, loadedExecutionGroup] =
       await Promise.all([
         ctx.db.get('verificationRequirements', args.requirementId),
         ctx.db.get('candidatePatchSets', args.candidatePatchSetId),
@@ -4205,6 +4328,28 @@ export const recordVerificationResult = mutation({
           ? Promise.resolve(null)
           : ctx.db.get('verificationExecutionGroups', args.executionGroupId),
       ])
+    let executionGroup = loadedExecutionGroup
+    if (
+      executionGroup !== null &&
+      executionGroup.workflowRunId === args.workflowRunId &&
+      executionGroup.claimToken === args.executionGroupClaimToken &&
+      executionGroup.status === 'running' &&
+      executionGroup.providerSessionId === undefined &&
+      executionGroup.providerCommandId === undefined &&
+      args.providerSessionId !== undefined &&
+      args.providerCommandId !== undefined &&
+      args.status !== 'passed'
+    ) {
+      await ctx.db.patch('verificationExecutionGroups', executionGroup._id, {
+        providerSessionId: args.providerSessionId,
+        providerCommandId: args.providerCommandId,
+      })
+      executionGroup = {
+        ...executionGroup,
+        providerSessionId: args.providerSessionId,
+        providerCommandId: args.providerCommandId,
+      }
+    }
     const artifacts = await Promise.all(
       args.artifactIds.map((artifactId) =>
         ctx.db.get('evidenceArtifacts', artifactId),
@@ -4275,6 +4420,8 @@ export const recordVerificationResult = mutation({
         executionGroup.provider !== args.provider ||
         executionGroup.platform !== args.platform ||
         executionGroup.architecture !== args.architecture ||
+        executionGroup.providerSessionId !== args.providerSessionId ||
+        executionGroup.providerCommandId !== args.providerCommandId ||
         executionGroup.commandDigest !== args.commandDigest ||
         args.commandDigest !== computedCommandDigest ||
         requirement.command !== args.command ||
@@ -4320,6 +4467,7 @@ export const recordVerificationResult = mutation({
       executionGroup.provider === args.provider &&
       executionGroup.platform === args.platform &&
       executionGroup.architecture === args.architecture
+    const trustedGroup = trustedIncomingExecutionGroup ? executionGroup : null
     if (
       args.status === 'passed' &&
       candidate.subject?.kind === 'incoming-pull-request' &&
@@ -4345,19 +4493,80 @@ export const recordVerificationResult = mutation({
         args.candidateDigestAfter !== candidate.candidateDigest ||
         !requirementMatchesInvocation ||
         !artifactsBoundToCandidate ||
-        (trustedIncomingExecutionGroup &&
+        (trustedGroup !== null &&
           (sandboxExecution.provider !== args.provider ||
             sandboxExecution.command !== args.command ||
             args.startedAt < sandboxExecution.startedAt ||
             args.completedAt > sandboxExecution.completedAt ||
             args.commandDigest === undefined ||
             args.commandDigest !== computedCommandDigest ||
-            executionGroup.commandDigest !== args.commandDigest ||
-            executionGroup.timeoutSeconds === undefined ||
+            trustedGroup.commandDigest !== args.commandDigest ||
+            trustedGroup.providerSessionId === undefined ||
+            trustedGroup.providerSessionId !== args.providerSessionId ||
+            trustedGroup.providerCommandId === undefined ||
+            trustedGroup.providerCommandId !== args.providerCommandId ||
+            sandboxExecution.providerSessionId !== args.providerSessionId ||
+            sandboxExecution.providerCommandId !== args.providerCommandId ||
+            trustedGroup.timeoutSeconds === undefined ||
             sandboxExecution.policy?.timeoutSeconds !==
-              executionGroup.timeoutSeconds ||
+              trustedGroup.timeoutSeconds ||
+            sandboxExecution.policy.environment === undefined ||
+            sandboxExecution.policy.environment.sandboxClass !==
+              'linux-container' ||
+            sandboxExecution.policy.environment.sandboxClassSource !==
+              'trusted-request' ||
+            sandboxExecution.policy.environment.operatingSystem !== 'Linux' ||
+            sandboxExecution.policy.environment.architecture !==
+              args.architecture ||
+            sandboxExecution.policy.environment.providerState !== 'started' ||
+            sandboxExecution.policy.environment.public !== false ||
+            sandboxExecution.policy.environment.linked !== false ||
+            sandboxExecution.policy.environment.volumeCount !== 0 ||
+            sandboxExecution.policy.environment.image !==
+              args.environmentImage ||
+            sandboxExecution.policy.environment.image.length === 0 ||
+            sandboxExecution.policy.environment.image.length > 512 ||
+            sandboxExecution.policy.environment.target.length === 0 ||
+            sandboxExecution.policy.environment.target.length > 256 ||
+            sandboxExecution.policy.environment.sandboxClass.length === 0 ||
+            sandboxExecution.policy.environment.sandboxClass.length > 128 ||
+            sandboxExecution.policy.environment.architecture.length === 0 ||
+            sandboxExecution.policy.environment.architecture.length > 128 ||
+            !Number.isSafeInteger(
+              sandboxExecution.policy.environment.observedAt,
+            ) ||
+            sandboxExecution.policy.environment.observedAt <
+              sandboxExecution.startedAt ||
+            sandboxExecution.policy.environment.observedAt >
+              sandboxExecution.completedAt ||
+            sandboxExecution.policy.lifecycle.ephemeral !== true ||
+            sandboxExecution.policy.lifecycle.retainAfterRun !== false ||
+            sandboxExecution.policy.lifecycle.autoDeleteMinutes !== 0 ||
+            sandboxExecution.policy.lifecycle.autoStopMinutes === undefined ||
+            !Number.isSafeInteger(
+              sandboxExecution.policy.lifecycle.autoStopMinutes,
+            ) ||
+            sandboxExecution.policy.lifecycle.autoStopMinutes <= 0 ||
+            (sandboxExecution.policy.lifecycle.autoArchiveMinutes !==
+              undefined &&
+              (!Number.isSafeInteger(
+                sandboxExecution.policy.lifecycle.autoArchiveMinutes,
+              ) ||
+                sandboxExecution.policy.lifecycle.autoArchiveMinutes < 0)) ||
+            sandboxExecution.policy.resources.cpu === undefined ||
+            !Number.isFinite(sandboxExecution.policy.resources.cpu) ||
+            sandboxExecution.policy.resources.cpu <= 0 ||
+            sandboxExecution.policy.resources.memoryGb === undefined ||
+            !Number.isFinite(sandboxExecution.policy.resources.memoryGb) ||
+            sandboxExecution.policy.resources.memoryGb <= 0 ||
+            sandboxExecution.policy.resources.diskGb === undefined ||
+            !Number.isFinite(sandboxExecution.policy.resources.diskGb) ||
+            sandboxExecution.policy.resources.diskGb <= 0 ||
+            (sandboxExecution.policy.network.allowList !== undefined &&
+              (sandboxExecution.policy.network.allowList.length === 0 ||
+                sandboxExecution.policy.network.allowList.length > 4_096)) ||
             args.completedAt - args.startedAt >
-              executionGroup.timeoutSeconds * 1_000 ||
+              trustedGroup.timeoutSeconds * 1_000 ||
             args.stdoutCaptureStatus !== 'captured' ||
             args.stderrCaptureStatus !== 'captured' ||
             stdoutArtifact === null ||
@@ -4389,6 +4598,8 @@ export const recordVerificationResult = mutation({
         existing.platform !== args.platform ||
         existing.architecture !== args.architecture ||
         existing.environmentImage !== args.environmentImage ||
+        existing.providerSessionId !== args.providerSessionId ||
+        existing.providerCommandId !== args.providerCommandId ||
         existing.status !== args.status ||
         existing.exitCode !== args.exitCode ||
         existing.summary !== args.summary ||
@@ -4505,6 +4716,12 @@ export const recordVerificationResult = mutation({
       ...(args.environmentImage === undefined
         ? {}
         : { environmentImage: args.environmentImage }),
+      ...(args.providerSessionId === undefined
+        ? {}
+        : { providerSessionId: args.providerSessionId }),
+      ...(args.providerCommandId === undefined
+        ? {}
+        : { providerCommandId: args.providerCommandId }),
       status: args.status,
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
       ...(args.summary === undefined ? {} : { summary: args.summary }),
@@ -5570,6 +5787,8 @@ export const recordSandboxExecution = mutation({
     idempotencyKey: v.optional(v.string()),
     provider: v.string(),
     sandboxId: v.string(),
+    providerSessionId: v.optional(v.string()),
+    providerCommandId: v.optional(v.string()),
     command: v.string(),
     status: v.union(v.literal('succeeded'), v.literal('failed')),
     exitCode: v.optional(v.number()),
@@ -5588,6 +5807,10 @@ export const recordSandboxExecution = mutation({
       throw new ConvexError('Workflow run not found')
     }
     if (
+      !isValidProviderProcessIdentityPair(
+        args.providerSessionId,
+        args.providerCommandId,
+      ) ||
       !isEpochMillis(args.startedAt) ||
       !isEpochMillis(args.completedAt) ||
       args.completedAt < args.startedAt ||
@@ -5618,6 +5841,8 @@ export const recordSandboxExecution = mutation({
           existing.executionGroupId === args.executionGroupId &&
           existing.provider === args.provider &&
           existing.sandboxId === args.sandboxId &&
+          existing.providerSessionId === args.providerSessionId &&
+          existing.providerCommandId === args.providerCommandId &&
           existing.command === args.command &&
           existing.status === args.status &&
           existing.exitCode === args.exitCode &&
@@ -5639,6 +5864,8 @@ export const recordSandboxExecution = mutation({
           executionGroup.claimToken !== args.executionGroupClaimToken ||
           executionGroup.status !== 'running' ||
           executionGroup.sandboxId !== args.sandboxId ||
+          executionGroup.providerSessionId !== args.providerSessionId ||
+          executionGroup.providerCommandId !== args.providerCommandId ||
           executionGroup.sandboxExecutionId !== undefined ||
           args.idempotencyKey !==
             `${String(args.executionGroupId)}:sandbox-execution` ||
@@ -5690,6 +5917,12 @@ export const recordSandboxExecution = mutation({
         : { idempotencyKey: args.idempotencyKey }),
       provider: args.provider,
       sandboxId: args.sandboxId,
+      ...(args.providerSessionId === undefined
+        ? {}
+        : { providerSessionId: args.providerSessionId }),
+      ...(args.providerCommandId === undefined
+        ? {}
+        : { providerCommandId: args.providerCommandId }),
       command: args.command,
       status: args.status,
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
@@ -5738,6 +5971,12 @@ export const recordSandboxExecution = mutation({
         : { idempotencyKey: args.idempotencyKey }),
       provider: args.provider,
       sandboxId: args.sandboxId,
+      ...(args.providerSessionId === undefined
+        ? {}
+        : { providerSessionId: args.providerSessionId }),
+      ...(args.providerCommandId === undefined
+        ? {}
+        : { providerCommandId: args.providerCommandId }),
       command: args.command,
       status: args.status,
       ...(args.exitCode === undefined ? {} : { exitCode: args.exitCode }),
@@ -6160,6 +6399,589 @@ export const recordHumanDecision = mutation({
   },
 })
 
+export const recordQueuedGitHubDelivery = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    envelopeStorageKey: v.string(),
+    envelopeSha256: v.string(),
+    deliveryToken: v.string(),
+  },
+  returns: v.object({
+    accepted: v.boolean(),
+    deliveryToken: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    if (
+      args.deliveryId.length === 0 ||
+      args.deliveryId.length > 128 ||
+      args.envelopeStorageKey.length === 0 ||
+      args.envelopeStorageKey.length > 512 ||
+      !/^[0-9a-f]{64}$/.test(args.envelopeSha256) ||
+      args.deliveryToken.length === 0 ||
+      args.deliveryToken.length > 128
+    )
+      return { accepted: false }
+    const existing = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    if (existing !== null) {
+      return existing.envelopeStorageKey === args.envelopeStorageKey &&
+        existing.envelopeSha256 === args.envelopeSha256
+        ? { accepted: true, deliveryToken: existing.activeDeliveryToken }
+        : { accepted: false }
+    }
+    await ctx.db.insert('webhookQueueReceipts', {
+      provider: 'github',
+      deliveryId: args.deliveryId,
+      status: 'delivering',
+      envelopeStorageKey: args.envelopeStorageKey,
+      envelopeSha256: args.envelopeSha256,
+      activeDeliveryToken: args.deliveryToken,
+      createdAt: Date.now(),
+      nextAttemptAt: Date.now() + 60 * 60 * 1_000,
+    })
+    return { accepted: true, deliveryToken: args.deliveryToken }
+  },
+})
+
+export const claimStaleGitHubDeliveries = mutation({
+  args: { systemSecret: v.string() },
+  returns: v.array(
+    v.object({
+      deliveryId: v.string(),
+      envelopeStorageKey: v.string(),
+      envelopeSha256: v.string(),
+      deliveryToken: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const now = Date.now()
+    const receipts = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_status_and_next_attempt', (q) =>
+        q
+          .eq('provider', 'github')
+          .eq('status', 'delivering')
+          .lte('nextAttemptAt', now),
+      )
+      .take(32)
+    for (const receipt of receipts) {
+      await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+        activeDeliveryToken: `${now}:${String(receipt._id)}`,
+        processingToken: undefined,
+        processingUntil: undefined,
+        nextAttemptAt: now + 60 * 60 * 1_000,
+      })
+    }
+    return receipts.map((receipt) => ({
+      deliveryId: receipt.deliveryId,
+      envelopeStorageKey: receipt.envelopeStorageKey,
+      envelopeSha256: receipt.envelopeSha256,
+      deliveryToken: `${now}:${String(receipt._id)}`,
+    }))
+  },
+})
+
+export const getGitHubDeliveryReceipt = query({
+  args: { systemSecret: v.string(), deliveryId: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      status: v.union(v.literal('delivering'), v.literal('terminal')),
+      envelopeStorageKey: v.string(),
+      envelopeSha256: v.string(),
+      activeDeliveryToken: v.string(),
+      outcome: v.optional(
+        v.union(
+          v.literal('completed'),
+          v.literal('ignored'),
+          v.literal('failed'),
+          v.literal('coalesced'),
+        ),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const receipt = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    return receipt === null
+      ? null
+      : {
+          status: receipt.status,
+          envelopeStorageKey: receipt.envelopeStorageKey,
+          envelopeSha256: receipt.envelopeSha256,
+          activeDeliveryToken: receipt.activeDeliveryToken,
+          ...(receipt.outcome === undefined
+            ? {}
+            : { outcome: receipt.outcome }),
+        }
+  },
+})
+
+export const claimGitHubDeliveryProcessing = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    deliveryToken: v.string(),
+    processingToken: v.string(),
+  },
+  returns: v.union(
+    v.literal('claimed'),
+    v.literal('busy'),
+    v.literal('stale'),
+    v.literal('terminal'),
+  ),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const receipt = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    if (
+      receipt === null ||
+      receipt.activeDeliveryToken !== args.deliveryToken
+    ) {
+      return 'stale'
+    }
+    if (receipt.status === 'terminal') return 'terminal'
+    const now = Date.now()
+    if ((receipt.processingUntil ?? 0) > now) return 'busy'
+    await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+      processingToken: args.processingToken,
+      processingUntil: now + 15 * 60 * 1_000,
+    })
+    return 'claimed'
+  },
+})
+
+export const releaseGitHubDeliveryProcessing = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    deliveryToken: v.string(),
+    processingToken: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const receipt = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    if (
+      receipt === null ||
+      receipt.status !== 'delivering' ||
+      receipt.activeDeliveryToken !== args.deliveryToken ||
+      receipt.processingToken !== args.processingToken
+    )
+      return false
+    await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+      processingToken: undefined,
+      processingUntil: undefined,
+    })
+    return true
+  },
+})
+
+export const bindQueuedGitHubDeliveryToWorkflow = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    workflowRunId: v.id('workflowRuns'),
+    repositoryExternalId: v.string(),
+    issueExternalId: v.string(),
+    pullRequestBaseSha: v.string(),
+    pullRequestHeadSha: v.string(),
+  },
+  returns: v.union(
+    v.literal('bound'),
+    v.literal('coalesced'),
+    v.literal('rejected'),
+  ),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const [receipt, workflowRun] = await Promise.all([
+      ctx.db
+        .query('webhookQueueReceipts')
+        .withIndex('by_provider_and_delivery_id', (q) =>
+          q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+        )
+        .unique(),
+      ctx.db.get('workflowRuns', args.workflowRunId),
+    ])
+    if (receipt === null || workflowRun === null) return 'rejected'
+    const externalRefs = await ctx.db
+      .query('externalWorkflowRefs')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', workflowRun._id),
+      )
+      .take(32)
+    if (
+      !externalRefs.some(
+        (ref) =>
+          ref.provider === 'github' &&
+          ref.repositoryExternalId === args.repositoryExternalId &&
+          ref.issueExternalId === args.issueExternalId &&
+          ref.pullRequestBaseSha === args.pullRequestBaseSha &&
+          ref.pullRequestHeadSha === args.pullRequestHeadSha,
+      )
+    )
+      return 'rejected'
+    if (receipt.workflowRunId !== undefined) {
+      if (receipt.workflowRunId !== workflowRun._id) return 'rejected'
+      return receipt.outcome === 'coalesced' ? 'coalesced' : 'bound'
+    }
+    if (receipt.status !== 'delivering') return 'rejected'
+    const workflowReceipts = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_workflow_run_and_status', (q) =>
+        q.eq('workflowRunId', workflowRun._id).eq('status', 'delivering'),
+      )
+      .take(2)
+    const activeReceipt = workflowReceipts.find(
+      (candidate) => candidate._id !== receipt._id,
+    )
+    if (activeReceipt !== undefined) {
+      await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+        workflowRunId: workflowRun._id,
+        status: 'terminal',
+        outcome: 'coalesced',
+        completedAt: Date.now(),
+      })
+      return 'coalesced'
+    }
+    await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+      workflowRunId: workflowRun._id,
+    })
+    return 'bound'
+  },
+})
+
+export const completeQueuedGitHubDelivery = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    deliveryToken: v.string(),
+    processingToken: v.string(),
+    workflowRunId: v.optional(v.id('workflowRuns')),
+    outcome: v.union(
+      v.literal('completed'),
+      v.literal('ignored'),
+      v.literal('failed'),
+      v.literal('coalesced'),
+    ),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const receipt = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    if (
+      receipt === null ||
+      receipt.activeDeliveryToken !== args.deliveryToken ||
+      receipt.processingToken !== args.processingToken
+    )
+      return false
+    if (receipt.status === 'terminal') {
+      return (
+        receipt.workflowRunId === args.workflowRunId &&
+        receipt.outcome === args.outcome
+      )
+    }
+    if (args.outcome === 'completed') {
+      if (args.workflowRunId === undefined) return false
+      const workflowRun = await ctx.db.get('workflowRuns', args.workflowRunId)
+      if (
+        workflowRun === null ||
+        receipt.workflowRunId !== workflowRun._id ||
+        (workflowRun.status !== 'reviewed' && workflowRun.status !== 'failed')
+      ) {
+        return false
+      }
+    } else if (args.workflowRunId !== undefined) {
+      return false
+    }
+    await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+      status: 'terminal',
+      outcome: args.outcome,
+      ...(args.workflowRunId === undefined
+        ? {}
+        : { workflowRunId: args.workflowRunId }),
+      completedAt: Date.now(),
+    })
+    return true
+  },
+})
+
+export const terminalizeQueuedGitHubDelivery = mutation({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+    deliveryToken: v.string(),
+    processingToken: v.string(),
+  },
+  returns: v.object({
+    terminalized: v.boolean(),
+    workflowRunId: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    if (args.deliveryId.length === 0 || args.deliveryId.length > 128) {
+      return { terminalized: false }
+    }
+    const receipt = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_provider_and_delivery_id', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    if (
+      receipt === null ||
+      receipt.activeDeliveryToken !== args.deliveryToken ||
+      receipt.processingToken !== args.processingToken
+    )
+      return { terminalized: false }
+    if (receipt.status === 'terminal') {
+      return {
+        terminalized: true,
+        ...(receipt.workflowRunId === undefined
+          ? {}
+          : { workflowRunId: receipt.workflowRunId }),
+      }
+    }
+    const ref = await ctx.db
+      .query('externalWorkflowRefs')
+      .withIndex('by_delivery', (q) =>
+        q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+      )
+      .unique()
+    const workflowRunId = receipt.workflowRunId ?? ref?.workflowRunId
+    if (workflowRunId === undefined) {
+      await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+        status: 'terminal',
+        outcome: 'failed',
+        completedAt: Date.now(),
+      })
+      return { terminalized: true }
+    }
+    const activeReceipts = await ctx.db
+      .query('webhookQueueReceipts')
+      .withIndex('by_workflow_run_and_status', (q) =>
+        q.eq('workflowRunId', workflowRunId).eq('status', 'delivering'),
+      )
+      .take(2)
+    if (activeReceipts.some((candidate) => candidate._id !== receipt._id)) {
+      await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+        workflowRunId,
+        status: 'terminal',
+        outcome: 'coalesced',
+        completedAt: Date.now(),
+      })
+      return { terminalized: true, workflowRunId }
+    }
+    const workflowRun = await ctx.db.get('workflowRuns', workflowRunId)
+    if (workflowRun === null) return { terminalized: false }
+    if (workflowRun.status === 'reviewed' || workflowRun.status === 'failed') {
+      await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+        status: 'terminal',
+        outcome: workflowRun.status === 'reviewed' ? 'completed' : 'failed',
+        workflowRunId: workflowRun._id,
+        completedAt: Date.now(),
+      })
+      return { terminalized: true, workflowRunId: workflowRun._id }
+    }
+    const completedAt = Date.now()
+    await ctx.db.patch('workflowRuns', workflowRun._id, { status: 'failed' })
+    const groups = await ctx.db
+      .query('verificationExecutionGroups')
+      .withIndex('by_workflow_run', (q) =>
+        q.eq('workflowRunId', workflowRun._id),
+      )
+      .take(32)
+    if (
+      workflowRun.incomingVerificationPlanId !== undefined &&
+      workflowRun.incomingVerificationCandidatePatchSetId !== undefined
+    ) {
+      const requirements = await ctx.db
+        .query('verificationRequirements')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', workflowRun._id),
+        )
+        .take(32)
+      for (const requirement of requirements) {
+        if (
+          requirement.verificationPlanId !==
+            workflowRun.incomingVerificationPlanId ||
+          groups.some((group) => group.requirementId === requirement._id)
+        ) {
+          continue
+        }
+        const commandDigest =
+          requirement.command === undefined
+            ? undefined
+            : `sha256:${Array.from(
+                new Uint8Array(
+                  await crypto.subtle.digest(
+                    'SHA-256',
+                    new TextEncoder().encode(requirement.command),
+                  ),
+                ),
+                (byte) => byte.toString(16).padStart(2, '0'),
+              ).join('')}`
+        const groupId = await ctx.db.insert('verificationExecutionGroups', {
+          workflowRunId: workflowRun._id,
+          verificationPlanId: workflowRun.incomingVerificationPlanId,
+          requirementId: requirement._id,
+          candidatePatchSetId:
+            workflowRun.incomingVerificationCandidatePatchSetId,
+          stableKey: `${String(workflowRun.incomingVerificationPlanId)}:${String(requirement._id)}:${String(workflowRun.incomingVerificationCandidatePatchSetId)}`,
+          claimToken: `queue-recovery:${String(requirement._id)}`,
+          provider: 'daytona',
+          platform: requirement.platform ?? 'linux',
+          architecture: requirement.architecture ?? 'x86_64',
+          ...(commandDigest === undefined ? {} : { commandDigest }),
+          timeoutSeconds: requirement.timeoutSeconds ?? 900,
+          sharedState: false,
+          status: 'claimed',
+          claimedAt: workflowRun.incomingVerificationStartedAt ?? completedAt,
+        })
+        const inserted = await ctx.db.get(
+          'verificationExecutionGroups',
+          groupId,
+        )
+        if (inserted !== null) groups.push(inserted)
+      }
+    }
+    for (const group of groups) {
+      if (group.status !== 'claimed' && group.status !== 'running') continue
+      const idempotencyKey = `${String(group._id)}:result`
+      const existingResult = await ctx.db
+        .query('verificationResults')
+        .withIndex('by_workflow_run_and_idempotency_key', (q) =>
+          q
+            .eq('workflowRunId', workflowRun._id)
+            .eq('idempotencyKey', idempotencyKey),
+        )
+        .unique()
+      const [requirement, candidate] = await Promise.all([
+        ctx.db.get('verificationRequirements', group.requirementId),
+        ctx.db.get('candidatePatchSets', group.candidatePatchSetId),
+      ])
+      await ctx.db.patch('verificationExecutionGroups', group._id, {
+        status: 'failed',
+        completedAt,
+      })
+      if (existingResult === null && requirement !== null) {
+        await ctx.db.insert('verificationResults', {
+          workflowRunId: workflowRun._id,
+          verificationPlanId: group.verificationPlanId,
+          executionGroupId: group._id,
+          requirementId: group.requirementId,
+          candidatePatchSetId: group.candidatePatchSetId,
+          ...(group.sandboxExecutionId === undefined
+            ? {}
+            : { sandboxExecutionId: group.sandboxExecutionId }),
+          provider: group.provider,
+          ...(requirement.command === undefined
+            ? {}
+            : { command: requirement.command }),
+          ...(group.commandDigest === undefined
+            ? {}
+            : { commandDigest: group.commandDigest }),
+          platform: group.platform,
+          architecture: group.architecture,
+          ...(group.providerSessionId === undefined
+            ? {}
+            : { providerSessionId: group.providerSessionId }),
+          ...(group.providerCommandId === undefined
+            ? {}
+            : { providerCommandId: group.providerCommandId }),
+          status: 'error',
+          summary: 'Hosted verification exhausted its queue delivery budget.',
+          artifactIds: [],
+          producedArtifactKinds: [],
+          stdoutCaptureStatus: 'failed',
+          stderrCaptureStatus: 'failed',
+          cleanupStatus: 'failed',
+          ...(candidate?.candidateDigest === undefined
+            ? {}
+            : { candidateDigestBefore: candidate.candidateDigest }),
+          startedAt: group.startedAt ?? group.claimedAt,
+          completedAt,
+          idempotencyKey,
+        })
+      }
+    }
+    await ctx.db.patch('webhookQueueReceipts', receipt._id, {
+      status: 'terminal',
+      outcome: 'failed',
+      workflowRunId: workflowRun._id,
+      completedAt,
+    })
+    await insertProvenanceEvent(ctx, {
+      workflowRunId: workflowRun._id,
+      traceId: workflowRun.traceId ?? 'legacy',
+      type: 'verification-plan-execution',
+      operation: 'workflowStarts.terminalizeQueuedGitHubDelivery',
+      status: 'failed',
+      startedAt: workflowRun.incomingVerificationStartedAt ?? completedAt,
+      completedAt,
+      summary:
+        'Hosted verification exhausted its bounded queue delivery budget.',
+      artifactRefs: [],
+      errorCategory: 'queue-delivery-exhausted',
+      idempotencyKey: `${String(workflowRun._id)}:queue-delivery-exhausted`,
+    })
+    return { terminalized: true, workflowRunId: workflowRun._id }
+  },
+})
+
+export const getTrustLoopWorkflowForDelivery = query({
+  args: {
+    systemSecret: v.string(),
+    deliveryId: v.string(),
+  },
+  returns: v.object({ workflowRunId: v.optional(v.string()) }),
+  handler: async (ctx, args) => {
+    requireSystemIngestionSecret(args.systemSecret)
+    const [ref, receipt] = await Promise.all([
+      ctx.db
+        .query('externalWorkflowRefs')
+        .withIndex('by_delivery', (q) =>
+          q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+        )
+        .unique(),
+      ctx.db
+        .query('webhookQueueReceipts')
+        .withIndex('by_provider_and_delivery_id', (q) =>
+          q.eq('provider', 'github').eq('deliveryId', args.deliveryId),
+        )
+        .unique(),
+    ])
+    const workflowRunId = receipt?.workflowRunId ?? ref?.workflowRunId
+    return workflowRunId === undefined ? {} : { workflowRunId }
+  },
+})
+
 export const getTrustLoopAcceptanceSnapshot = query({
   args: {
     systemSecret: v.string(),
@@ -6178,6 +7000,15 @@ export const getTrustLoopAcceptanceSnapshot = query({
     hasRuntimeSessions: v.boolean(),
     sandboxExecutionStatuses: v.array(
       v.union(v.literal('succeeded'), v.literal('failed')),
+    ),
+    sandboxExecutions: v.array(
+      v.object({
+        id: v.string(),
+        status: v.union(v.literal('succeeded'), v.literal('failed')),
+        executionGroupId: v.optional(v.string()),
+        providerSessionId: v.optional(v.string()),
+        providerCommandId: v.optional(v.string()),
+      }),
     ),
     latestSandboxExecution: v.optional(
       v.object({
@@ -6203,7 +7034,52 @@ export const getTrustLoopAcceptanceSnapshot = query({
         status: candidatePatchSetStatusArg,
         diffArtifactId: v.optional(v.string()),
         headSha: v.optional(v.string()),
+        subjectKind: v.optional(
+          v.union(
+            v.literal('incoming-pull-request'),
+            v.literal('sandbox-generated'),
+          ),
+        ),
         createdAt: v.number(),
+      }),
+    ),
+    verificationPlans: v.array(
+      v.object({
+        id: v.string(),
+        digest: v.string(),
+        totalCount: v.number(),
+        requiredCount: v.number(),
+      }),
+    ),
+    verificationExecutionGroups: v.array(
+      v.object({
+        id: v.string(),
+        status: verificationExecutionGroupStatusArg,
+        sharedState: v.boolean(),
+        sandboxId: v.optional(v.string()),
+        providerSessionId: v.optional(v.string()),
+        providerCommandId: v.optional(v.string()),
+      }),
+    ),
+    verificationResults: v.array(
+      v.object({
+        id: v.string(),
+        verificationPlanId: v.optional(v.string()),
+        executionGroupId: v.optional(v.string()),
+        candidatePatchSetId: v.string(),
+        requirementId: v.string(),
+        required: v.boolean(),
+        sandboxExecutionId: v.optional(v.string()),
+        status: verificationResultStatusArg,
+        platform: verificationPlatformArg,
+        environmentImage: v.optional(v.string()),
+        providerSessionId: v.optional(v.string()),
+        providerCommandId: v.optional(v.string()),
+        summary: v.optional(v.string()),
+        stdoutCaptureStatus: v.optional(verificationLogCaptureStatusArg),
+        stderrCaptureStatus: v.optional(verificationLogCaptureStatusArg),
+        cleanupStatus: v.optional(sandboxCleanupStatusArg),
+        artifactIds: v.array(v.string()),
       }),
     ),
     reviewRunStatuses: v.array(reviewRunStatusArg),
@@ -6252,6 +7128,10 @@ export const getTrustLoopAcceptanceSnapshot = query({
       sandboxExecutions,
       evidenceArtifacts,
       candidatePatchSets,
+      verificationPlans,
+      verificationRequirements,
+      verificationExecutionGroups,
+      verificationResults,
       reviewRuns,
       policyDecisions,
       humanDecisions,
@@ -6291,6 +7171,34 @@ export const getTrustLoopAcceptanceSnapshot = query({
         )
         .order('desc')
         .take(32),
+      ctx.db
+        .query('verificationPlans')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', args.workflowRunId),
+        )
+        .order('desc')
+        .take(16),
+      ctx.db
+        .query('verificationRequirements')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', args.workflowRunId),
+        )
+        .order('desc')
+        .take(32),
+      ctx.db
+        .query('verificationExecutionGroups')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', args.workflowRunId),
+        )
+        .order('desc')
+        .take(32),
+      ctx.db
+        .query('verificationResults')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', args.workflowRunId),
+        )
+        .order('desc')
+        .take(64),
       ctx.db
         .query('reviewRuns')
         .withIndex('by_workflow_run', (q) =>
@@ -6373,6 +7281,19 @@ export const getTrustLoopAcceptanceSnapshot = query({
       sandboxExecutionStatuses: sandboxExecutions.map(
         (execution) => execution.status,
       ),
+      sandboxExecutions: sandboxExecutions.map((execution) => ({
+        id: execution._id,
+        status: execution.status,
+        ...(execution.executionGroupId === undefined
+          ? {}
+          : { executionGroupId: execution.executionGroupId }),
+        ...(execution.providerSessionId === undefined
+          ? {}
+          : { providerSessionId: execution.providerSessionId }),
+        ...(execution.providerCommandId === undefined
+          ? {}
+          : { providerCommandId: execution.providerCommandId }),
+      })),
       ...(latestSandboxExecution === undefined
         ? {}
         : {
@@ -6405,9 +7326,74 @@ export const getTrustLoopAcceptanceSnapshot = query({
               ...(latestCandidatePatchSet.headSha === undefined
                 ? {}
                 : { headSha: latestCandidatePatchSet.headSha }),
+              ...(latestCandidatePatchSet.subject?.kind === undefined
+                ? {}
+                : { subjectKind: latestCandidatePatchSet.subject.kind }),
               createdAt: latestCandidatePatchSet.createdAt,
             },
           }),
+      verificationPlans: verificationPlans.map((plan) => ({
+        id: plan._id,
+        digest: plan.digest,
+        totalCount: plan.requirements.length,
+        requiredCount: plan.requirements.filter(
+          (requirement) => requirement.required,
+        ).length,
+      })),
+      verificationExecutionGroups: verificationExecutionGroups.map((group) => ({
+        id: group._id,
+        status: group.status,
+        sharedState: group.sharedState,
+        ...(group.sandboxId === undefined
+          ? {}
+          : { sandboxId: group.sandboxId }),
+        ...(group.providerSessionId === undefined
+          ? {}
+          : { providerSessionId: group.providerSessionId }),
+        ...(group.providerCommandId === undefined
+          ? {}
+          : { providerCommandId: group.providerCommandId }),
+      })),
+      verificationResults: verificationResults.map((result) => ({
+        id: result._id,
+        ...(result.verificationPlanId === undefined
+          ? {}
+          : { verificationPlanId: result.verificationPlanId }),
+        ...(result.executionGroupId === undefined
+          ? {}
+          : { executionGroupId: result.executionGroupId }),
+        candidatePatchSetId: result.candidatePatchSetId,
+        requirementId: result.requirementId,
+        required:
+          verificationRequirements.find(
+            (requirement) => requirement._id === result.requirementId,
+          )?.required ?? false,
+        ...(result.sandboxExecutionId === undefined
+          ? {}
+          : { sandboxExecutionId: result.sandboxExecutionId }),
+        status: result.status,
+        platform: result.platform,
+        ...(result.environmentImage === undefined
+          ? {}
+          : { environmentImage: result.environmentImage }),
+        ...(result.providerSessionId === undefined
+          ? {}
+          : { providerSessionId: result.providerSessionId }),
+        ...(result.providerCommandId === undefined
+          ? {}
+          : { providerCommandId: result.providerCommandId }),
+        ...(result.summary === undefined ? {} : { summary: result.summary }),
+        ...(result.stdoutCaptureStatus === undefined
+          ? {}
+          : { stdoutCaptureStatus: result.stdoutCaptureStatus }),
+        ...(result.stderrCaptureStatus === undefined
+          ? {}
+          : { stderrCaptureStatus: result.stderrCaptureStatus }),
+        ...(result.cleanupStatus === undefined
+          ? {}
+          : { cleanupStatus: result.cleanupStatus }),
+        artifactIds: result.artifactIds,
+      })),
       reviewRunStatuses: reviewRuns.map((reviewRun) => reviewRun.status),
       ...(latestReviewRun === undefined
         ? {}

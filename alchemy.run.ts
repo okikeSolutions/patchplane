@@ -140,6 +140,13 @@ export default Alchemy.Stack(
       rateLimitingTechnique: 'sliding',
     })
 
+    const verificationExecutionQueue = yield* Cloudflare.Queues.Queue(
+      'VerificationExecutionQueue',
+    )
+    const verificationExecutionDeadLetterQueue = yield* Cloudflare.Queues.Queue(
+      'VerificationExecutionDeadLetterQueue',
+    )
+
     const sourceControlWorker = yield* Cloudflare.Worker(
       'SourceControlWorker',
       {
@@ -169,9 +176,44 @@ export default Alchemy.Stack(
         ),
         compatibility: { flags: ['nodejs_compat'] },
         observability: devWorkerObservability,
+        crons: ['*/5 * * * *'],
         env: {
           CLOUDFLARE_SENTRY_DSN: sourceControlRuntimeEnv.CLOUDFLARE_SENTRY_DSN,
+          GITHUB_WEBHOOK_SECRET: sourceControlRuntimeEnv.GITHUB_WEBHOOK_SECRET,
+          CONVEX_URL: sourceControlRuntimeEnv.CONVEX_URL,
+          PATCHPLANE_SYSTEM_INGESTION_SECRET:
+            sourceControlRuntimeEnv.PATCHPLANE_SYSTEM_INGESTION_SECRET,
           SOURCE_CONTROL_WORKER: sourceControlWorker,
+          PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket,
+          VERIFICATION_EXECUTION_QUEUE: verificationExecutionQueue,
+          VERIFICATION_DEAD_LETTER_QUEUE_NAME:
+            verificationExecutionDeadLetterQueue.queueName,
+        },
+      },
+    )
+
+    yield* Cloudflare.Queues.Consumer('VerificationExecutionConsumer', {
+      queueId: verificationExecutionQueue.queueId,
+      scriptName: githubWebhookWorker.workerName,
+      settings: {
+        batchSize: 1,
+        maxRetries: 3,
+        maxWaitTimeMs: 1_000,
+        retryDelay: 30,
+      },
+      deadLetterQueue: verificationExecutionDeadLetterQueue.queueName,
+    })
+
+    yield* Cloudflare.Queues.Consumer(
+      'VerificationExecutionDeadLetterConsumer',
+      {
+        queueId: verificationExecutionDeadLetterQueue.queueId,
+        scriptName: githubWebhookWorker.workerName,
+        settings: {
+          batchSize: 1,
+          maxRetries: 100,
+          maxWaitTimeMs: 1_000,
+          retryDelay: 3_600,
         },
       },
     )

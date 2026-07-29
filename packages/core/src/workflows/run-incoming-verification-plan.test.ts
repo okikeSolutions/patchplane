@@ -203,6 +203,7 @@ describe('RunIncomingVerificationPlan', () => {
             return group
           }),
         startVerificationExecutionGroup: () => Effect.succeed(false),
+        recordVerificationExecutionCommand: () => Effect.succeed(true),
         failVerificationExecutionGroup: () => Effect.succeed(false),
         recordVerificationResult: (input) =>
           Effect.sync(() => {

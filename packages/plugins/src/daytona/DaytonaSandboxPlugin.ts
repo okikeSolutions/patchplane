@@ -5,6 +5,7 @@ import {
   Exit,
   Layer,
   Option,
+  Result,
   Schedule,
   Schema,
   Stream,
@@ -13,8 +14,11 @@ import { Daytona } from '@daytona/sdk'
 import { XMLValidator } from 'fast-xml-parser'
 import { PNG } from 'pngjs'
 import { SandboxError } from '@patchplane/domain/errors'
+import { EffectiveSandboxPolicy } from '@patchplane/domain/sandbox-environment'
 import {
   SandboxService,
+  type SandboxCommandInput,
+  type SandboxCommandResult,
   type SandboxEvidenceArtifact,
   type SandboxVerificationResult,
 } from '@patchplane/core/services/sandbox-service'
@@ -38,6 +42,7 @@ import {
   executeSandboxCommand,
   startSandboxSessionCommand,
   streamSandboxSessionCommandLogs,
+  waitForSandboxSessionCommand,
 } from './daytona-process'
 import { sanitizeDaytonaCause } from './daytona-redaction'
 import { shellQuote } from './daytona-shell'
@@ -72,7 +77,7 @@ export interface DaytonaClientLike {
     sandbox: DaytonaSandboxLike,
     timeout?: number,
   ) => Promise<void>
-  readonly get?: (sandboxIdOrName: string) => Promise<DaytonaSandboxLike>
+  readonly get: (sandboxIdOrName: string) => Promise<DaytonaSandboxLike>
   readonly [Symbol.asyncDispose]?: () => Promise<void>
 }
 
@@ -81,6 +86,20 @@ export interface DaytonaSandboxLike {
   readonly name?: string | undefined
   readonly target?: string | undefined
   readonly state?: string | undefined
+  readonly snapshot?: string | undefined
+  readonly buildInfo?: { readonly snapshotRef?: string | undefined } | undefined
+  readonly public?: boolean | undefined
+  readonly cpu?: number | undefined
+  readonly memory?: number | undefined
+  readonly disk?: number | undefined
+  readonly autoStopInterval?: number | undefined
+  readonly autoArchiveInterval?: number | null | undefined
+  readonly autoDeleteInterval?: number | undefined
+  readonly networkBlockAll?: boolean | null | undefined
+  readonly networkAllowList?: string | null | undefined
+  readonly linkedSandboxId?: string | undefined
+  readonly volumes?: ReadonlyArray<unknown> | undefined
+  readonly refreshData: () => Promise<void>
   readonly git: {
     readonly clone: (
       url: string,
@@ -93,6 +112,18 @@ export interface DaytonaSandboxLike {
     ) => Promise<void>
   }
   readonly process: {
+    readonly executeCommand?: (
+      command: string,
+      cwd?: string,
+      env?: Record<string, string>,
+      timeout?: number,
+    ) => Promise<{
+      readonly exitCode?: number | undefined
+      readonly result?: string | undefined
+      readonly output?: string | undefined
+      readonly stdout?: string | undefined
+      readonly stderr?: string | undefined
+    }>
     readonly createSession: (sessionId: string) => Promise<void>
     readonly executeSessionCommand: (
       sessionId: string,
@@ -144,8 +175,36 @@ export interface DaytonaSandboxLike {
 }
 
 function isDaytonaNotFoundCause(cause: unknown): boolean {
-  const text = cause instanceof Error ? cause.message : String(cause)
-  return /\b(404|not found|not_found)\b/i.test(text)
+  if (typeof cause !== 'object' || cause === null) return false
+  const value = cause as {
+    readonly name?: unknown
+    readonly statusCode?: unknown
+    readonly errorCode?: unknown
+  }
+  return (
+    value.statusCode === 404 &&
+    (value.name === 'DaytonaNotFoundError' || value.errorCode === 'NOT_FOUND')
+  )
+}
+
+export async function settleDaytonaPromise<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Daytona operation deadline exceeded')),
+          timeoutMs,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 function sandboxBoundaryError(operation: string, message: string) {
@@ -156,6 +215,187 @@ function sandboxBoundaryError(operation: string, message: string) {
       cause: sanitizeDaytonaCause(cause),
     })
 }
+
+const readEffectiveSandboxPolicy = Effect.fnUntraced(function* (
+  config: DaytonaConfig,
+  sandbox: DaytonaSandboxLike,
+  input: {
+    readonly timeoutSeconds?: number | undefined
+    readonly traceId: string
+  },
+) {
+  yield* Effect.raceFirst(
+    Effect.tryPromise({
+      try: () => sandbox.refreshData(),
+      catch: sandboxBoundaryError(
+        'daytona.refreshSandbox',
+        'Daytona failed to read back the effective sandbox environment',
+      ),
+    }),
+    Effect.sleep('10 seconds').pipe(
+      Effect.andThen(
+        Effect.fail(
+          new SandboxError({
+            operation: 'daytona.refreshSandbox.timeout',
+            message: 'Daytona effective environment readback timed out',
+            cause: undefined,
+          }),
+        ),
+      ),
+    ),
+  )
+  const system = yield* executeSandboxCommand(sandbox, {
+    command: 'uname -s && uname -m',
+    timeoutSeconds: evidenceCaptureTimeoutSeconds,
+    traceId: `${input.traceId}-environment`,
+    stateless: true,
+  })
+  const [operatingSystem, architecture] = system.stdout.trim().split(/\r?\n/u)
+  const requested = toSandboxPolicy(config, input)
+  const image = (sandbox.buildInfo?.snapshotRef ?? sandbox.snapshot)?.trim()
+  const target = sandbox.target?.trim()
+  const state = sandbox.state?.trim()
+  const resources = {
+    cpu: sandbox.cpu,
+    memoryGb: sandbox.memory,
+    diskGb: sandbox.disk,
+  }
+  const valid =
+    system.exitCode === 0 &&
+    operatingSystem === 'Linux' &&
+    typeof architecture === 'string' &&
+    architecture.length > 0 &&
+    architecture.length <= 128 &&
+    image !== undefined &&
+    image.length > 0 &&
+    image.length <= 512 &&
+    target !== undefined &&
+    target.length > 0 &&
+    target.length <= 256 &&
+    state === 'started' &&
+    sandbox.public === false &&
+    sandbox.linkedSandboxId === undefined &&
+    Array.isArray(sandbox.volumes) &&
+    sandbox.volumes.length === 0 &&
+    Number.isFinite(resources.cpu) &&
+    Number(resources.cpu) > 0 &&
+    Number.isFinite(resources.memoryGb) &&
+    Number(resources.memoryGb) > 0 &&
+    Number.isFinite(resources.diskGb) &&
+    Number(resources.diskGb) > 0 &&
+    sandbox.autoStopInterval === requested.lifecycle.autoStopMinutes &&
+    (sandbox.autoArchiveInterval === requested.lifecycle.autoArchiveMinutes ||
+      (requested.lifecycle.autoArchiveMinutes === 0 &&
+        (sandbox.autoArchiveInterval === undefined ||
+          sandbox.autoArchiveInterval === null))) &&
+    sandbox.autoDeleteInterval === requested.lifecycle.autoDeleteMinutes &&
+    (requested.network.blockAll === undefined ||
+      sandbox.networkBlockAll === requested.network.blockAll) &&
+    (requested.network.allowList === undefined ||
+      sandbox.networkAllowList === requested.network.allowList) &&
+    (requested.resources.cpu === undefined ||
+      sandbox.cpu === requested.resources.cpu) &&
+    (requested.resources.memoryGb === undefined ||
+      sandbox.memory === requested.resources.memoryGb) &&
+    (requested.resources.diskGb === undefined ||
+      sandbox.disk === requested.resources.diskGb)
+  if (!valid) {
+    return yield* new SandboxError({
+      operation: 'daytona.validateSandboxEnvironment',
+      message:
+        'Daytona effective sandbox environment did not match the trusted request',
+      cause: {
+        sandboxId: sandbox.id,
+        stateMatched: state === 'started',
+        hasBoundedImage:
+          image !== undefined && image.length > 0 && image.length <= 512,
+        hasBoundedTarget:
+          target !== undefined && target.length > 0 && target.length <= 256,
+        public: sandbox.public,
+        linked: sandbox.linkedSandboxId !== undefined,
+        volumeCount: Array.isArray(sandbox.volumes)
+          ? sandbox.volumes.length
+          : undefined,
+        autoStopMatched:
+          sandbox.autoStopInterval === requested.lifecycle.autoStopMinutes,
+        autoArchiveInterval: sandbox.autoArchiveInterval,
+        autoArchiveMatched:
+          sandbox.autoArchiveInterval ===
+            requested.lifecycle.autoArchiveMinutes ||
+          (requested.lifecycle.autoArchiveMinutes === 0 &&
+            (sandbox.autoArchiveInterval === undefined ||
+              sandbox.autoArchiveInterval === null)),
+        autoDeleteMatched:
+          sandbox.autoDeleteInterval === requested.lifecycle.autoDeleteMinutes,
+        networkBlockMatched:
+          requested.network.blockAll === undefined ||
+          sandbox.networkBlockAll === requested.network.blockAll,
+        networkAllowListMatched:
+          requested.network.allowList === undefined ||
+          sandbox.networkAllowList === requested.network.allowList,
+        resourcesMatched:
+          (requested.resources.cpu === undefined ||
+            sandbox.cpu === requested.resources.cpu) &&
+          (requested.resources.memoryGb === undefined ||
+            sandbox.memory === requested.resources.memoryGb) &&
+          (requested.resources.diskGb === undefined ||
+            sandbox.disk === requested.resources.diskGb),
+        exitCode: system.exitCode,
+      },
+    })
+  }
+  const normalized = {
+    ...requested,
+    lifecycle: {
+      ephemeral: requested.lifecycle.ephemeral,
+      retainAfterRun: requested.lifecycle.retainAfterRun,
+      ...(sandbox.autoStopInterval === undefined
+        ? {}
+        : { autoStopMinutes: sandbox.autoStopInterval }),
+      ...(sandbox.autoArchiveInterval === undefined ||
+      sandbox.autoArchiveInterval === null
+        ? {}
+        : { autoArchiveMinutes: sandbox.autoArchiveInterval }),
+      ...(sandbox.autoDeleteInterval === undefined
+        ? {}
+        : { autoDeleteMinutes: sandbox.autoDeleteInterval }),
+    },
+    network: {
+      ...(sandbox.networkBlockAll === undefined ||
+      sandbox.networkBlockAll === null
+        ? {}
+        : { blockAll: sandbox.networkBlockAll }),
+      ...(sandbox.networkAllowList === undefined ||
+      sandbox.networkAllowList === null
+        ? {}
+        : { allowList: sandbox.networkAllowList }),
+    },
+    resources: resources as { cpu: number; memoryGb: number; diskGb: number },
+    environment: {
+      sandboxClass: 'linux-container',
+      sandboxClassSource: 'trusted-request' as const,
+      operatingSystem,
+      architecture,
+      image,
+      target,
+      providerState: state,
+      public: false,
+      linked: false,
+      volumeCount: 0,
+      observedAt: yield* Clock.currentTimeMillis,
+    },
+  }
+  return yield* Schema.decodeUnknownEffect(EffectiveSandboxPolicy)(
+    normalized,
+  ).pipe(
+    Effect.mapError(
+      sandboxBoundaryError(
+        'daytona.decodeSandboxEnvironment',
+        'Daytona effective sandbox environment was outside PatchPlane bounds',
+      ),
+    ),
+  )
+})
 
 function deleteSandboxWithRetries(input: {
   readonly daytona: DaytonaClientLike
@@ -168,9 +408,16 @@ function deleteSandboxWithRetries(input: {
   let attempt = 0
 
   return Effect.tryPromise({
-    try: () => input.daytona.delete(input.sandbox, input.timeoutSeconds),
+    try: () =>
+      settleDaytonaPromise(
+        input.daytona.delete(input.sandbox, input.timeoutSeconds),
+        (input.timeoutSeconds + 5) * 1_000,
+      ),
     catch: (cause) => ({ cause, attempt: ++attempt }),
   }).pipe(
+    Effect.catch((error) =>
+      isDaytonaNotFoundCause(error.cause) ? Effect.void : Effect.fail(error),
+    ),
     Effect.tapError(({ cause, attempt: loggedAttempt }) =>
       Effect.logWarning('Failed to delete Daytona sandbox', {
         traceId: input.traceId,
@@ -184,6 +431,57 @@ function deleteSandboxWithRetries(input: {
     Effect.retry(Schedule.recurs(totalRetries)),
   )
 }
+
+const confirmSandboxDeleted = Effect.fnUntraced(function* (input: {
+  readonly daytona: DaytonaClientLike
+  readonly sandboxId: string
+  readonly traceId: string
+}) {
+  const cleanupDeadline = Date.now() + 120_000
+  let consecutiveReadFailures = 0
+  for (let attempt = 1; attempt <= 120; attempt += 1) {
+    const remainingMs = cleanupDeadline - Date.now()
+    if (remainingMs <= 0) break
+    const readback = yield* Effect.raceFirst(
+      Effect.tryPromise({
+        try: () => input.daytona.get(input.sandboxId),
+        catch: (cause) => ({ cause }),
+      }),
+      Effect.sleep(Math.min(5_000, remainingMs)).pipe(
+        Effect.andThen(
+          Effect.fail({
+            cause: new SandboxError({
+              operation: 'daytona.confirmSandboxDeleted.timeout',
+              message: 'Daytona sandbox deletion readback timed out',
+              cause: undefined,
+            }),
+          }),
+        ),
+      ),
+    ).pipe(Effect.result)
+    if (Result.isFailure(readback)) {
+      if (isDaytonaNotFoundCause(readback.failure.cause)) return
+      consecutiveReadFailures += 1
+      if (consecutiveReadFailures < 3) continue
+      return yield* new SandboxError({
+        operation: 'daytona.confirmSandboxDeleted',
+        message: 'Daytona sandbox deletion readback failed after retries',
+        cause: sanitizeDaytonaCause(readback.failure.cause),
+      })
+    }
+    consecutiveReadFailures = 0
+    if (attempt < 120) {
+      const sleepMs = Math.min(1_000, cleanupDeadline - Date.now())
+      if (sleepMs > 0) yield* Effect.sleep(sleepMs)
+    }
+  }
+  return yield* new SandboxError({
+    operation: 'daytona.confirmSandboxDeleted',
+    message:
+      'Daytona sandbox still existed after the deletion confirmation deadline',
+    cause: { sandboxId: input.sandboxId, traceId: input.traceId },
+  })
+})
 
 function makeDefaultDaytonaClient(config: DaytonaConfig): DaytonaClientLike {
   const daytona = new Daytona(toDaytonaClientConfig(config))
@@ -322,6 +620,7 @@ const captureRepositoryBaseSha = Effect.fnUntraced(function* (
     command: 'git rev-parse HEAD',
     timeoutSeconds: evidenceCaptureTimeoutSeconds,
     traceId: `${traceId}-base-sha`,
+    stateless: true,
   })
   const baseSha = result.stdout.trim()
   if (result.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
@@ -354,9 +653,10 @@ const captureCandidateStateDigest = Effect.fnUntraced(function* (
   input: { readonly baseSha: string; readonly traceId: string },
 ) {
   const result = yield* executeSandboxCommand(sandbox, {
-    command: `git add -N . >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} | sha256sum`,
+    command: `git add -N . ${evidenceOutputPathspecExclusions} >/dev/null 2>&1 || true; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . | sha256sum`,
     timeoutSeconds: evidenceCaptureTimeoutSeconds,
     traceId: input.traceId,
+    stateless: true,
   })
   const digest = result.stdout.trim().split(/\s+/, 1)[0]
   return result.exitCode === 0 &&
@@ -370,7 +670,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
   sandbox: DaytonaSandboxLike,
   input: {
     readonly traceId: string
-    readonly baseSha: string
+    readonly candidateBaseSha: string
     readonly verificationInvocation?:
       | {
           readonly requirementKey: string
@@ -389,6 +689,8 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     readonly evidenceBrowserScreenshotCommand?: string | undefined
     readonly evidenceBrowserTimeoutSeconds?: number | undefined
     readonly timeoutSeconds?: number | undefined
+    readonly observedArchitecture?: string | undefined
+    readonly onVerificationCommandStarted?: SandboxCommandInput['onVerificationCommandStarted']
   },
 ) {
   const artifacts: Array<SandboxEvidenceArtifact> = []
@@ -405,6 +707,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
       timeoutSeconds,
       traceId: `${input.traceId}-${operation}`,
       ...(maxOutputBytes === undefined ? {} : { maxOutputBytes }),
+      stateless: true,
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning('Evidence artifact probe failed', {
@@ -418,15 +721,19 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     return { ...result, startedAt, completedAt: yield* Clock.currentTimeMillis }
   })
 
-  const architectureProbe = yield* runCaptureCommand('architecture', 'uname -m')
+  const architectureProbe =
+    input.observedArchitecture === undefined
+      ? yield* runCaptureCommand('architecture', 'uname -m')
+      : undefined
   const architecture =
-    architectureProbe?.exitCode === 0 &&
+    input.observedArchitecture ??
+    (architectureProbe?.exitCode === 0 &&
     architectureProbe.stdout.trim().length > 0
       ? architectureProbe.stdout.trim()
-      : 'unknown'
+      : 'unknown')
   const captureCandidateState = (operation: string) =>
     captureCandidateStateDigest(sandbox, {
-      baseSha: input.baseSha,
+      baseSha: input.candidateBaseSha,
       traceId: `${input.traceId}-${operation}`,
     }).pipe(
       Effect.catch((error) =>
@@ -446,6 +753,8 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
         readonly stderr?: string | undefined
         readonly startedAt: number
         readonly completedAt: number
+        readonly sessionId: NonNullable<SandboxCommandResult['sessionId']>
+        readonly commandId: NonNullable<SandboxCommandResult['commandId']>
       }
     | undefined
   if (invocation !== undefined) {
@@ -471,18 +780,50 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     const candidateDigestBefore = yield* captureCandidateState(
       'verification-candidate-before',
     )
-    invocationCommandResult =
-      cleanup?.exitCode === 0
-        ? yield* runCaptureCommand(
-            'verification-command',
-            invocation.command,
-            invocation.timeoutSeconds,
-            maxVerificationCommandOutputBytes,
-          )
-        : undefined
+    if (cleanup?.exitCode === 0) {
+      const invocationStartedAt = yield* Clock.currentTimeMillis
+      const handle = yield* startSandboxSessionCommand(sandbox, {
+        command: invocation.command,
+        timeoutSeconds: invocation.timeoutSeconds,
+        traceId: `${input.traceId}-verification-command`,
+        maxOutputBytes: maxVerificationCommandOutputBytes,
+      })
+      const terminal = yield* Effect.gen(function* () {
+        if (input.onVerificationCommandStarted !== undefined) {
+          yield* input.onVerificationCommandStarted({
+            sandboxId: sandbox.id,
+            sessionId: handle.sessionId,
+            commandId: handle.commandId,
+          })
+        }
+        return yield* waitForSandboxSessionCommand(handle, {
+          timeoutSeconds: invocation.timeoutSeconds,
+          maxOutputBytes: maxVerificationCommandOutputBytes,
+        })
+      }).pipe(Effect.ensuring(handle.deleteSession))
+      invocationCommandResult = {
+        ...terminal,
+        startedAt: invocationStartedAt,
+        completedAt: yield* Clock.currentTimeMillis,
+        sessionId: handle.sessionId,
+        commandId: handle.commandId,
+      }
+      yield* Effect.logInfo('Daytona trusted command reached terminal status', {
+        traceId: input.traceId,
+        sandboxId: sandbox.id,
+        sessionId: handle.sessionId,
+        commandId: handle.commandId,
+        exitCode: terminal.exitCode,
+      })
+    }
     const candidateDigestAfter = yield* captureCandidateState(
       'verification-candidate-after',
     )
+    yield* Effect.logInfo('Captured candidate state after trusted command', {
+      traceId: input.traceId,
+      sandboxId: sandbox.id,
+      candidateUnchanged: candidateDigestBefore === candidateDigestAfter,
+    })
     verificationResults.push({
       requirementKey: invocation.requirementKey,
       kind: invocation.kind,
@@ -737,7 +1078,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
 
   const diff = yield* runCaptureCommand(
     'diff',
-    `git add -N . >/dev/null 2>&1 || true; tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; git diff --binary --no-ext-diff ${shellQuote(input.baseSha)} -- . ${evidenceOutputPathspecExclusions} > "$tmp" || exit $?; node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"r");try{const body=Buffer.alloc(${maxCandidateDiffBytes + 1});const read=fs.readSync(fd,body,0,body.length,0);if(read>${maxCandidateDiffBytes})process.exit(65);process.stdout.write(body.subarray(0,read));}finally{fs.closeSync(fd);}' "$tmp"`,
+    `git add -N . ${evidenceOutputPathspecExclusions} >/dev/null 2>&1 || true; tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; git diff --binary --no-ext-diff ${shellQuote(input.candidateBaseSha)} -- . > "$tmp" || exit $?; node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"r");try{const body=Buffer.alloc(${maxCandidateDiffBytes + 1});const read=fs.readSync(fd,body,0,body.length,0);if(read>${maxCandidateDiffBytes})process.exit(65);process.stdout.write(body.subarray(0,read));}finally{fs.closeSync(fd);}' "$tmp"`,
   )
   if (
     diff !== undefined &&
@@ -779,13 +1120,35 @@ export function makeDaytonaSandboxLayer(
           Effect.sync(() => makeClient(config)),
           use,
           (daytona) =>
-            Effect.tryPromise({
-              try: () => daytona[Symbol.asyncDispose]?.() ?? Promise.resolve(),
-              catch: sandboxBoundaryError(
-                'daytona.disposeClient',
-                'Daytona client disposal failed',
+            Effect.logInfo('Starting Daytona client disposal').pipe(
+              Effect.andThen(
+                Effect.tryPromise({
+                  try: async () => {
+                    const dispose =
+                      daytona[Symbol.asyncDispose]?.() ?? Promise.resolve()
+                    let timer: ReturnType<typeof setTimeout> | undefined
+                    try {
+                      await Promise.race([
+                        dispose,
+                        new Promise<void>((resolve) => {
+                          timer = setTimeout(resolve, 5_000)
+                        }),
+                      ])
+                    } finally {
+                      if (timer !== undefined) clearTimeout(timer)
+                    }
+                  },
+                  catch: sandboxBoundaryError(
+                    'daytona.disposeClient',
+                    'Daytona client disposal failed',
+                  ),
+                }),
               ),
-            }).pipe(Effect.ignore),
+              Effect.tap(() =>
+                Effect.logInfo('Finished Daytona client disposal'),
+              ),
+              Effect.ignore,
+            ),
         )
 
       const runWithSandbox = <A>(
@@ -795,6 +1158,7 @@ export function makeDaytonaSandboxLayer(
           readonly envVars?: Record<string, string> | undefined
           readonly retainAfterUse?: boolean | undefined
           readonly forceDeleteAfterUse?: boolean | undefined
+          readonly timeoutSeconds?: number | undefined
           readonly onSandboxCleanup?:
             | ((status: 'deleted' | 'failed' | 'retained') => void)
             | undefined
@@ -802,16 +1166,22 @@ export function makeDaytonaSandboxLayer(
             | ((sandboxId: string) => Effect.Effect<void, unknown>)
             | undefined
         },
-        use: (sandbox: DaytonaSandboxLike) => Effect.Effect<A, unknown>,
+        use: (
+          sandbox: DaytonaSandboxLike,
+          effectivePolicy: ReturnType<typeof toSandboxPolicy>,
+        ) => Effect.Effect<A, unknown>,
       ) =>
         withDaytonaClient((daytona) => {
           const retainSandboxes = shouldRetainDaytonaSandboxes(config)
           return Effect.acquireUseRelease(
             Effect.tryPromise({
               try: () =>
-                daytona.create(toDaytonaCreateSandboxParams(config, input), {
-                  timeout: DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS,
-                }),
+                settleDaytonaPromise(
+                  daytona.create(toDaytonaCreateSandboxParams(config, input), {
+                    timeout: DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS,
+                  }),
+                  (DAYTONA_DEFAULT_CREATE_TIMEOUT_SECONDS + 5) * 1_000,
+                ),
               catch: sandboxBoundaryError(
                 'daytona.createSandbox',
                 'Daytona failed to create sandbox',
@@ -847,8 +1217,14 @@ export function makeDaytonaSandboxLayer(
                 if (input.onSandboxStarted !== undefined) {
                   yield* input.onSandboxStarted(sandbox.id)
                 }
-
-                return yield* use(sandbox)
+                return yield* use(sandbox, toSandboxPolicy(config, input)).pipe(
+                  Effect.tap(() =>
+                    Effect.logInfo('Daytona sandbox work completed', {
+                      traceId: input.traceId,
+                      sandboxId: sandbox.id,
+                    }),
+                  ),
+                )
               }),
             (sandbox, exit) =>
               Effect.gen(function* () {
@@ -866,6 +1242,10 @@ export function makeDaytonaSandboxLayer(
                     },
                   )
                 } else {
+                  yield* Effect.logInfo('Starting Daytona sandbox cleanup', {
+                    traceId: input.traceId,
+                    sandboxId: sandbox.id,
+                  })
                   const deleteExit = yield* deleteSandboxWithRetries({
                     daytona,
                     sandbox,
@@ -882,19 +1262,29 @@ export function makeDaytonaSandboxLayer(
                     Effect.exit,
                   )
 
-                  if (Exit.isSuccess(deleteExit)) {
+                  const confirmationExit = yield* confirmSandboxDeleted({
+                    daytona,
+                    sandboxId: sandbox.id,
+                    traceId: input.traceId,
+                  }).pipe(Effect.exit)
+                  if (Exit.isSuccess(confirmationExit)) {
                     input.onSandboxCleanup?.('deleted')
-                    yield* Effect.logInfo('Deleted Daytona sandbox', {
-                      traceId: input.traceId,
-                      sandboxId: sandbox.id,
-                    })
-                  } else {
-                    input.onSandboxCleanup?.('failed')
-                    yield* Effect.logWarning(
-                      'Failed to delete Daytona sandbox after retries',
+                    yield* Effect.logInfo(
+                      'Confirmed Daytona sandbox deletion',
                       {
                         traceId: input.traceId,
                         sandboxId: sandbox.id,
+                        deleteRequestCompleted: Exit.isSuccess(deleteExit),
+                      },
+                    )
+                  } else {
+                    input.onSandboxCleanup?.('failed')
+                    yield* Effect.logWarning(
+                      'Daytona sandbox deletion could not be confirmed',
+                      {
+                        traceId: input.traceId,
+                        sandboxId: sandbox.id,
+                        deleteRequestCompleted: Exit.isSuccess(deleteExit),
                       },
                     )
                   }
@@ -1039,9 +1429,11 @@ export function makeDaytonaSandboxLayer(
                         Effect.ignore,
                         Effect.andThen(
                           Effect.gen(function* () {
-                            const reconcileLogs = yield* handle.getLogs.pipe(
-                              Effect.orElseSucceed(() => ({ stdout: '' })),
-                            )
+                            const reconcileLogs = yield* handle
+                              .getLogs(maxVerificationCommandOutputBytes)
+                              .pipe(
+                                Effect.orElseSucceed(() => ({ stdout: '' })),
+                              )
                             const reconciledEvents = yield* Stream.make(
                               reconcileLogs.stdout,
                             ).pipe(
@@ -1080,7 +1472,9 @@ export function makeDaytonaSandboxLayer(
                           message: input.prompt,
                         }),
                       )
-                      const logs = yield* handle.getLogs
+                      const logs = yield* handle.getLogs(
+                        maxVerificationCommandOutputBytes,
+                      )
                       const commandStatus = yield* handle.getCommand
                       const parsedRuntimeEvents = yield* Stream.make(
                         logs.stdout,
@@ -1100,7 +1494,7 @@ export function makeDaytonaSandboxLayer(
                         candidateStateDigest,
                       } = yield* collectSandboxEvidenceArtifacts(sandbox, {
                         ...input,
-                        baseSha,
+                        candidateBaseSha: input.candidateBaseSha ?? baseSha,
                       })
 
                       return {
@@ -1168,7 +1562,7 @@ export function makeDaytonaSandboxLayer(
                       candidateStateDigest,
                     } = yield* collectSandboxEvidenceArtifacts(sandbox, {
                       ...input,
-                      baseSha,
+                      candidateBaseSha: input.candidateBaseSha ?? baseSha,
                     })
 
                     return {
@@ -1379,19 +1773,33 @@ export function makeDaytonaSandboxLayer(
                   'Daytona failed to get sandbox for runtime termination',
                 ),
               })
-              yield* Effect.tryPromise({
-                try: async () => {
-                  try {
-                    await sandbox.process.deleteSession(input.sessionId)
-                  } catch (cause) {
-                    if (!isDaytonaNotFoundCause(cause)) throw cause
-                  }
-                },
-                catch: sandboxBoundaryError(
-                  'daytona.deleteSession',
-                  'Daytona failed to terminate runtime session',
+              yield* Effect.raceFirst(
+                Effect.tryPromise({
+                  try: async () => {
+                    try {
+                      await sandbox.process.deleteSession(input.sessionId)
+                    } catch (cause) {
+                      if (!isDaytonaNotFoundCause(cause)) throw cause
+                    }
+                  },
+                  catch: sandboxBoundaryError(
+                    'daytona.deleteSession',
+                    'Daytona failed to terminate runtime session',
+                  ),
+                }),
+                Effect.sleep('5 seconds').pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      new SandboxError({
+                        operation: 'daytona.deleteSession.timeout',
+                        message:
+                          'Daytona runtime session termination timed out',
+                        cause: undefined,
+                      }),
+                    ),
+                  ),
                 ),
-              })
+              )
               return {
                 provider: 'daytona:pi-rpc',
                 sandboxId: input.sandboxId,
@@ -1414,13 +1822,33 @@ export function makeDaytonaSandboxLayer(
                 ...input,
                 envVars: input.env === undefined ? undefined : { ...input.env },
                 forceDeleteAfterUse: input.forceDeleteAfterUse,
+                timeoutSeconds: input.timeoutSeconds,
                 onSandboxCleanup: (status) => {
                   cleanupStatus = status
                 },
               },
-              (sandbox) =>
+              (sandbox, requestedPolicy) =>
                 Effect.gen(function* () {
                   yield* cloneRepository(sandbox, input)
+                  const effectivePolicy =
+                    input.verificationInvocation === undefined
+                      ? requestedPolicy
+                      : yield* readEffectiveSandboxPolicy(
+                          config,
+                          sandbox,
+                          input,
+                        )
+                  const policyEnvironment: unknown =
+                    'environment' in effectivePolicy
+                      ? effectivePolicy.environment
+                      : undefined
+                  const observedArchitecture =
+                    typeof policyEnvironment === 'object' &&
+                    policyEnvironment !== null &&
+                    'architecture' in policyEnvironment &&
+                    typeof policyEnvironment.architecture === 'string'
+                      ? policyEnvironment.architecture
+                      : undefined
                   const baseSha = yield* captureRepositoryBaseSha(
                     sandbox,
                     input.traceId,
@@ -1454,7 +1882,10 @@ export function makeDaytonaSandboxLayer(
                     invocationCommandResult,
                   } = yield* collectSandboxEvidenceArtifacts(sandbox, {
                     ...input,
-                    baseSha,
+                    candidateBaseSha: input.candidateBaseSha ?? baseSha,
+                    ...(observedArchitecture === undefined
+                      ? {}
+                      : { observedArchitecture }),
                   })
                   const executed = invocationCommandResult ?? response
                   const executedCommand =
@@ -1463,11 +1894,17 @@ export function makeDaytonaSandboxLayer(
                   return {
                     provider: 'daytona',
                     sandboxId: sandbox.id,
+                    ...(invocationCommandResult === undefined
+                      ? {}
+                      : {
+                          sessionId: invocationCommandResult.sessionId,
+                          commandId: invocationCommandResult.commandId,
+                        }),
                     command: executedCommand,
                     exitCode: executed?.exitCode,
                     stdout: executed?.stdout ?? '',
                     stderr: executed?.stderr,
-                    policy: toSandboxPolicy(config, { timeoutSeconds }),
+                    policy: effectivePolicy,
                     evidenceArtifacts,
                     verificationResults,
                     candidateStateDigest,
@@ -1479,6 +1916,14 @@ export function makeDaytonaSandboxLayer(
                     completedAt: yield* Clock.currentTimeMillis,
                   }
                 }),
+            )
+            yield* Effect.logInfo(
+              'Daytona repository command lifecycle returned',
+              {
+                traceId: input.traceId,
+                sandboxId: result.sandboxId,
+                cleanupStatus,
+              },
             )
             return { ...result, cleanupStatus }
           }).pipe(

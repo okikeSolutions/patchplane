@@ -21,6 +21,11 @@ const startGroup = makeFunctionReference<
   Record<string, unknown>,
   boolean
 >('workflowStarts:startVerificationExecutionGroup')
+const recordCommand = makeFunctionReference<
+  'mutation',
+  Record<string, unknown>,
+  boolean
+>('workflowStarts:recordVerificationExecutionCommand')
 const recordSandbox = makeFunctionReference<
   'mutation',
   Record<string, unknown>,
@@ -277,6 +282,82 @@ describe('trusted verification execution groups', () => {
     vi.useRealTimers()
   })
 
+  test('atomically reconciles a committed command identity with its terminal error', async () => {
+    const t = convexTest(schema, modules)
+    const fixture = await seedIncomingExecutionGroupFixture(t)
+    await t.mutation(startPlan, {
+      systemSecret: 'system_test',
+      workflowRunId: fixture.workflowRunId,
+      verificationPlanId: fixture.planId,
+      candidatePatchSetId: fixture.candidatePatchSetId,
+      incomingDispatchToken: fixture.incomingDispatchToken,
+    })
+    const claimToken = 'claim-token-atomic-terminal-00001'
+    const stableKey = `${fixture.planId}:${fixture.requirementId}:${fixture.candidatePatchSetId}`
+    const group = await t.mutation(claimGroup, {
+      systemSecret: 'system_test',
+      workflowRunId: fixture.workflowRunId,
+      verificationPlanId: fixture.planId,
+      requirementId: fixture.requirementId,
+      candidatePatchSetId: fixture.candidatePatchSetId,
+      stableKey,
+      claimToken,
+      incomingDispatchToken: fixture.incomingDispatchToken,
+      provider: 'daytona',
+      platform: 'linux',
+      architecture: 'x86_64',
+      commandDigest: fixture.commandDigest,
+      timeoutSeconds: 60,
+      claimedAt: 10,
+    })
+    if (group === null) throw new Error('Expected claimed group')
+    await t.mutation(startGroup, {
+      systemSecret: 'system_test',
+      workflowRunId: fixture.workflowRunId,
+      executionGroupId: group.id,
+      claimToken,
+      sandboxId: 'sandbox-atomic-terminal',
+    })
+    const result = await t.mutation(recordResult, {
+      systemSecret: 'system_test',
+      workflowRunId: fixture.workflowRunId,
+      verificationPlanId: fixture.planId,
+      executionGroupId: group.id,
+      executionGroupClaimToken: claimToken,
+      requirementId: fixture.requirementId,
+      candidatePatchSetId: fixture.candidatePatchSetId,
+      provider: 'daytona',
+      command: 'bun test',
+      commandDigest: fixture.commandDigest,
+      platform: 'linux',
+      architecture: 'x86_64',
+      providerSessionId: 'patchplane-atomic-terminal',
+      providerCommandId: 'command-atomic-terminal',
+      status: 'error',
+      summary: 'Command status persistence response was ambiguous.',
+      artifactIds: [],
+      stdoutCaptureStatus: 'failed',
+      stderrCaptureStatus: 'failed',
+      cleanupStatus: 'failed',
+      candidateDigestBefore: fixture.digest,
+      startedAt: 10,
+      completedAt: 11,
+      idempotencyKey: `${group.id}:result`,
+    })
+    expect(result).toMatchObject({
+      status: 'error',
+      providerSessionId: 'patchplane-atomic-terminal',
+      providerCommandId: 'command-atomic-terminal',
+    })
+    expect(
+      await t.run((ctx) => ctx.db.get('verificationExecutionGroups', group.id)),
+    ).toMatchObject({
+      status: 'failed',
+      providerSessionId: 'patchplane-atomic-terminal',
+      providerCommandId: 'command-atomic-terminal',
+    })
+  })
+
   test('fences duplicate groups and accepts only a complete candidate-bound envelope', async () => {
     const t = convexTest(schema, modules)
     const fixture = await seedIncomingExecutionGroupFixture(t)
@@ -338,6 +419,23 @@ describe('trusted verification execution groups', () => {
         sandboxId: 'sandbox-fresh-1',
       }),
     ).toBe(true)
+    const commandIdentity = {
+      systemSecret: 'system_test',
+      workflowRunId: fixture.workflowRunId,
+      executionGroupId: group.id,
+      claimToken,
+      sandboxId: 'sandbox-fresh-1',
+      providerSessionId: 'patchplane-trace-execution-group',
+      providerCommandId: 'command-1',
+    }
+    expect(await t.mutation(recordCommand, commandIdentity)).toBe(true)
+    expect(await t.mutation(recordCommand, commandIdentity)).toBe(true)
+    expect(
+      await t.mutation(recordCommand, {
+        ...commandIdentity,
+        providerCommandId: 'command-conflict',
+      }),
+    ).toBe(false)
     const sandbox = await t.mutation(recordSandbox, {
       systemSecret: 'system_test',
       workflowRunId: fixture.workflowRunId,
@@ -346,15 +444,36 @@ describe('trusted verification execution groups', () => {
       idempotencyKey: `${group.id}:sandbox-execution`,
       provider: 'daytona',
       sandboxId: 'sandbox-fresh-1',
+      providerSessionId: commandIdentity.providerSessionId,
+      providerCommandId: commandIdentity.providerCommandId,
       command: 'bun test',
       status: 'succeeded',
       exitCode: 0,
       stdout: 'passed',
       stderr: '',
       policy: {
-        lifecycle: { ephemeral: true, retainAfterRun: false },
+        lifecycle: {
+          ephemeral: true,
+          retainAfterRun: false,
+          autoStopMinutes: 5,
+          autoArchiveMinutes: 0,
+          autoDeleteMinutes: 0,
+        },
         network: {},
-        resources: {},
+        resources: { cpu: 2, memoryGb: 4, diskGb: 8 },
+        environment: {
+          sandboxClass: 'linux-container',
+          sandboxClassSource: 'trusted-request',
+          operatingSystem: 'Linux',
+          architecture: 'x86_64',
+          image: 'snapshot-immutable-1',
+          target: 'test-target',
+          providerState: 'started',
+          public: false,
+          linked: false,
+          volumeCount: 0,
+          observedAt: startedAt,
+        },
         timeoutSeconds: 60,
       },
       startedAt,
@@ -368,15 +487,36 @@ describe('trusted verification execution groups', () => {
       idempotencyKey: `${group.id}:sandbox-execution`,
       provider: 'daytona',
       sandboxId: 'sandbox-fresh-1',
+      providerSessionId: commandIdentity.providerSessionId,
+      providerCommandId: commandIdentity.providerCommandId,
       command: 'bun test',
       status: 'succeeded',
       exitCode: 0,
       stdout: 'passed',
       stderr: '',
       policy: {
-        lifecycle: { ephemeral: true, retainAfterRun: false },
+        lifecycle: {
+          ephemeral: true,
+          retainAfterRun: false,
+          autoStopMinutes: 5,
+          autoArchiveMinutes: 0,
+          autoDeleteMinutes: 0,
+        },
         network: {},
-        resources: {},
+        resources: { cpu: 2, memoryGb: 4, diskGb: 8 },
+        environment: {
+          sandboxClass: 'linux-container',
+          sandboxClassSource: 'trusted-request',
+          operatingSystem: 'Linux',
+          architecture: 'x86_64',
+          image: 'snapshot-immutable-1',
+          target: 'test-target',
+          providerState: 'started',
+          public: false,
+          linked: false,
+          volumeCount: 0,
+          observedAt: startedAt,
+        },
         timeoutSeconds: 60,
       },
       startedAt,
@@ -416,6 +556,9 @@ describe('trusted verification execution groups', () => {
       commandDigest: fixture.commandDigest,
       platform: 'linux' as const,
       architecture: 'x86_64',
+      environmentImage: 'snapshot-immutable-1',
+      providerSessionId: commandIdentity.providerSessionId,
+      providerCommandId: commandIdentity.providerCommandId,
       status: 'passed' as const,
       exitCode: 0,
       artifactIds: [stdoutArtifactId, stderrArtifactId],
@@ -436,6 +579,20 @@ describe('trusted verification execution groups', () => {
         executionGroupClaimToken: 'wrong-token-00000000000000000',
       }),
     ).rejects.toThrow('Verification execution group does not match result')
+    await expect(
+      t.mutation(recordResult, {
+        ...resultArgs,
+        providerCommandId: 'command-conflict',
+      }),
+    ).rejects.toThrow('Verification execution group does not match result')
+    await expect(
+      t.mutation(recordResult, {
+        ...resultArgs,
+        environmentImage: undefined,
+      }),
+    ).rejects.toThrow(
+      'Passed verification result does not satisfy evidence invariants',
+    )
     const result = await t.mutation(recordResult, resultArgs)
     const resultReplay = await t.mutation(recordResult, resultArgs)
     expect(resultReplay.id).toBe(result.id)
@@ -453,7 +610,14 @@ describe('trusted verification execution groups', () => {
       candidatePatchSetId: fixture.candidatePatchSetId,
     })
     expect(state).toMatchObject({
-      groups: [{ id: group.id, status: 'completed' }],
+      groups: [
+        {
+          id: group.id,
+          status: 'completed',
+          providerSessionId: commandIdentity.providerSessionId,
+          providerCommandId: commandIdentity.providerCommandId,
+        },
+      ],
       results: [{ id: result.id, executionGroupId: group.id }],
       sandboxExecutions: [{ id: sandbox.id, executionGroupId: group.id }],
     })

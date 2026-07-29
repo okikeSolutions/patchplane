@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vitest'
+import { DaytonaNotFoundError } from '@daytona/sdk'
 import {
   ConfigProvider,
   Effect,
@@ -10,10 +11,13 @@ import {
   Redacted,
   Stream,
 } from 'effect'
+import { TestClock } from 'effect/testing'
+import { SandboxError } from '@patchplane/domain/errors'
 import { SandboxService } from '@patchplane/core/services/sandbox-service'
 import type { DaytonaConfig } from './DaytonaConfig'
 import {
   makeDaytonaSandboxLayer,
+  settleDaytonaPromise,
   type DaytonaClientLike,
   type DaytonaSandboxLike,
 } from './DaytonaSandboxPlugin'
@@ -25,6 +29,7 @@ import {
   executeSandboxCommand,
   startSandboxSessionCommand,
   streamSandboxSessionCommandLogs,
+  waitForSandboxSessionCommand,
   type DaytonaCommandSandbox,
 } from './daytona-process'
 import {
@@ -58,6 +63,16 @@ function fakeSandbox(overrides: Partial<DaytonaSandboxLike> = {}) {
     name: 'patchplane-test',
     target: 'test-target',
     state: 'started',
+    snapshot: 'node:22',
+    public: false,
+    cpu: 2,
+    memory: 4,
+    disk: 8,
+    autoStopInterval: 5,
+    autoArchiveInterval: 43_200,
+    autoDeleteInterval: -1,
+    volumes: [],
+    refreshData: vi.fn(async () => undefined),
     git: {
       clone: vi.fn(async () => undefined),
     },
@@ -67,7 +82,9 @@ function fakeSandbox(overrides: Partial<DaytonaSandboxLike> = {}) {
         async (_sessionId: string, request: { readonly command: string }) =>
           request.command.includes('git rev-parse HEAD')
             ? { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
-            : { exitCode: 0, stdout: 'ok', stderr: '' },
+            : request.command.includes('uname -s')
+              ? { exitCode: 0, stdout: 'Linux\nx86_64\n', stderr: '' }
+              : { exitCode: 0, stdout: 'ok', stderr: '' },
       ),
       deleteSession: vi.fn(async () => undefined),
     },
@@ -85,6 +102,9 @@ function fakeClient(
   const client: DaytonaClientLike = {
     create: vi.fn(async () => sandbox),
     delete: vi.fn(async () => undefined),
+    get: vi.fn(async () => {
+      throw new DaytonaNotFoundError('sandbox not found', 404)
+    }),
     [Symbol.asyncDispose]: vi.fn(async () => undefined),
     ...overrides,
   }
@@ -131,6 +151,29 @@ async function streamingLogsFixture(
   return { stdout: '', stderr: '' }
 }
 
+function getVerificationCommandLogs(
+  sessionId: string,
+  commandId: string,
+): Promise<{ readonly stdout: string; readonly stderr: string }>
+function getVerificationCommandLogs(
+  sessionId: string,
+  commandId: string,
+  onStdout: (chunk: string) => void,
+  onStderr: (chunk: string) => void,
+): Promise<void>
+function getVerificationCommandLogs(
+  _sessionId: string,
+  _commandId: string,
+  onStdout?: (chunk: string) => void,
+  onStderr?: (chunk: string) => void,
+) {
+  if (onStdout !== undefined && onStderr !== undefined) {
+    onStdout('tests passed')
+    return Promise.resolve()
+  }
+  return Promise.resolve({ stdout: 'tests passed', stderr: '' })
+}
+
 const commandInput = {
   traceId: 'trace-1',
   repositoryUrl: 'https://github.com/okikeSolutions/guerillaglass.git',
@@ -150,7 +193,7 @@ describe('Daytona sandbox boundary adapters', () => {
         language: 'typescript',
         ephemeral: true,
         autoStopInterval: 5,
-        autoArchiveInterval: 0,
+        autoArchiveInterval: 43_200,
         labels: {
           app: 'patchplane',
           traceId: 'trace-1',
@@ -215,7 +258,7 @@ describe('Daytona sandbox boundary adapters', () => {
             ephemeral: true,
             retainAfterRun: false,
             autoStopMinutes: 5,
-            autoArchiveMinutes: 0,
+            autoArchiveMinutes: 43_200,
             autoDeleteMinutes: 0,
           },
           network: { blockAll: false, allowList: '0.0.0.0/0' },
@@ -242,7 +285,7 @@ describe('Daytona sandbox boundary adapters', () => {
           .pipe(Effect.exit)
 
         expect(Exit.isFailure(exit)).toBe(true)
-        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
         expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
       }).pipe(Effect.provide(testLayer(client)))
     },
@@ -273,7 +316,7 @@ describe('Daytona sandbox boundary adapters', () => {
         undefined,
         undefined,
       )
-      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
       expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
     }).pipe(Effect.provide(testLayer(client)))
   })
@@ -305,7 +348,7 @@ describe('Daytona sandbox boundary adapters', () => {
           .pipe(Effect.exit)
 
         expect(Exit.isFailure(exit)).toBe(true)
-        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
         expect(client[Symbol.asyncDispose]).toHaveBeenCalled()
       }).pipe(Effect.provide(testLayer(client, { OPENAI_API_KEY: 'test-key' })))
     },
@@ -382,7 +425,7 @@ describe('Daytona sandbox boundary adapters', () => {
         expect(sandbox.process.deleteSession).toHaveBeenCalledWith(
           'patchplane-trace-1',
         )
-        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
       }).pipe(Effect.provide(testLayer(client)))
     },
   )
@@ -391,6 +434,7 @@ describe('Daytona sandbox boundary adapters', () => {
     'runs one trusted verification invocation in a fresh force-deleted sandbox',
     () => {
       const candidateDigest = `sha256:${'d'.repeat(64)}`
+      let trustedProviderCommand = ''
       const executeSessionCommand = vi.fn(
         async (_sessionId: string, request: { readonly command: string }) => {
           if (request.command.includes('git rev-parse HEAD')) {
@@ -399,11 +443,15 @@ describe('Daytona sandbox boundary adapters', () => {
           if (request.command.includes('sha256sum')) {
             return { exitCode: 0, stdout: `${'d'.repeat(64)}  -`, stderr: '' }
           }
+          if (request.command.includes('uname -s')) {
+            return { exitCode: 0, stdout: 'Linux\nx86_64\n', stderr: '' }
+          }
           if (request.command === 'uname -m') {
             return { exitCode: 0, stdout: 'x86_64', stderr: '' }
           }
           if (request.command.includes('bun test --reporter=junit')) {
-            return { exitCode: 0, stdout: 'tests passed', stderr: '' }
+            trustedProviderCommand = request.command
+            return { cmdId: 'command-trusted-1' }
           }
           return { exitCode: 0, stdout: '', stderr: '' }
         },
@@ -412,15 +460,23 @@ describe('Daytona sandbox boundary adapters', () => {
         process: {
           createSession: vi.fn(async () => undefined),
           executeSessionCommand,
+          getSessionCommand: vi.fn(async () => ({
+            id: 'command-trusted-1',
+            command: trustedProviderCommand,
+            exitCode: 0,
+          })),
+          getSessionCommandLogs: getVerificationCommandLogs,
           deleteSession: vi.fn(async () => undefined),
         },
       })
       const client = fakeClient(sandbox)
+      const onVerificationCommandStarted = vi.fn(() => Effect.void)
       return Effect.gen(function* () {
         const service = yield* SandboxService
         const result = yield* service.runRepositoryCommand({
           ...commandInput,
           candidateBaseSha: 'b'.repeat(40),
+          onVerificationCommandStarted,
           verificationInvocation: {
             requirementKey: 'trusted:test',
             kind: 'test',
@@ -435,9 +491,25 @@ describe('Daytona sandbox boundary adapters', () => {
 
         expect(result).toMatchObject({
           command: 'bun test --reporter=junit',
+          sessionId: 'patchplane-trace-1-verification-command',
+          commandId: 'command-trusted-1',
           exitCode: 0,
           stdout: 'tests passed',
           cleanupStatus: 'deleted',
+          policy: {
+            environment: {
+              sandboxClass: 'linux-container',
+              sandboxClassSource: 'trusted-request',
+              operatingSystem: 'Linux',
+              architecture: 'x86_64',
+              image: 'node:22',
+              target: 'test-target',
+              providerState: 'started',
+              public: false,
+              linked: false,
+              volumeCount: 0,
+            },
+          },
           initialCandidateStateDigest: candidateDigest,
           candidateStateDigest: candidateDigest,
           verificationResults: [
@@ -455,10 +527,135 @@ describe('Daytona sandbox boundary adapters', () => {
             request.command.includes('bun test --reporter=junit'),
           ),
         ).toHaveLength(1)
-        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+        const digestCommands = executeSessionCommand.mock.calls
+          .filter(([, request]) => request.command.includes('sha256sum'))
+          .map(([, request]) => request.command)
+        expect(
+          digestCommands.every((candidateCommand) =>
+            candidateCommand.includes('b'.repeat(40)),
+          ),
+        ).toBe(true)
+        expect(
+          digestCommands.every(
+            (candidateCommand) =>
+              candidateCommand.includes(
+                "git add -N . ':(exclude).patchplane/**'",
+              ) && candidateCommand.includes('-- . | sha256sum'),
+          ),
+        ).toBe(true)
+        expect(onVerificationCommandStarted).toHaveBeenCalledWith({
+          sandboxId: sandbox.id,
+          sessionId: 'patchplane-trace-1-verification-command',
+          commandId: 'command-trusted-1',
+        })
+        vi.mocked(sandbox.process.deleteSession).mockClear()
+        const callbackFailure = yield* service
+          .runRepositoryCommand({
+            ...commandInput,
+            candidateBaseSha: 'b'.repeat(40),
+            verificationInvocation: {
+              requirementKey: 'trusted:test',
+              kind: 'test',
+              command: 'bun test --reporter=junit',
+              platform: 'linux',
+              architecture: 'x86_64',
+              timeoutSeconds: 60,
+              requiredArtifactKinds: [],
+            },
+            forceDeleteAfterUse: true,
+            onVerificationCommandStarted: () =>
+              Effect.fail(
+                new SandboxError({
+                  operation: 'test.commandIdentity',
+                  message: 'fenced',
+                  cause: undefined,
+                }),
+              ),
+          })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(callbackFailure)).toBe(true)
+        expect(sandbox.process.deleteSession).toHaveBeenCalledWith(
+          'patchplane-trace-1-verification-command',
+        )
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
+        expect(client.get).toHaveBeenCalledWith(sandbox.id)
       }).pipe(
         Effect.provide(testLayer(client, { DAYTONA_RETAIN_SANDBOXES: 'true' })),
       )
+    },
+  )
+
+  it.effect(
+    'rejects missing effective volume readback before trusted execution',
+    () => {
+      const sandbox = fakeSandbox({ volumes: undefined })
+      const client = fakeClient(sandbox)
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        const exit = yield* service
+          .runRepositoryCommand({
+            ...commandInput,
+            verificationInvocation: {
+              requirementKey: 'trusted:test',
+              kind: 'test',
+              command: 'bun test',
+              platform: 'linux',
+              architecture: 'x86_64',
+              timeoutSeconds: 60,
+              requiredArtifactKinds: [],
+            },
+            forceDeleteAfterUse: true,
+          })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
+      }).pipe(Effect.provide(testLayer(client)))
+    },
+  )
+
+  it.effect(
+    'does not report cleanup as deleted when provider readback fails',
+    () => {
+      const sandbox = fakeSandbox()
+      const client = fakeClient(sandbox, {
+        get: vi.fn(async () => {
+          throw new Error(
+            'proxy 404 route not found while provider unavailable',
+          )
+        }),
+      })
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        const result = yield* service.runRepositoryCommand(commandInput)
+        expect(result.cleanupStatus).toBe('failed')
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
+      }).pipe(Effect.provide(testLayer(client)))
+    },
+  )
+
+  it.effect(
+    'retries a transient deletion readback after the sandbox still exists',
+    () => {
+      const sandbox = fakeSandbox()
+      let reads = 0
+      const client = fakeClient(sandbox, {
+        get: vi.fn(async () => {
+          reads += 1
+          if (reads === 1) return sandbox
+          if (reads === 2) throw new Error('temporary provider failure')
+          throw new DaytonaNotFoundError('sandbox not found', 404)
+        }),
+      })
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        const fiber = yield* Effect.forkChild(
+          service.runRepositoryCommand(commandInput),
+        )
+        yield* TestClock.adjust('1 second')
+        const result = yield* Fiber.join(fiber)
+        expect(result.cleanupStatus).toBe('deleted')
+        expect(client.get).toHaveBeenCalledTimes(3)
+      }).pipe(Effect.provide(testLayer(client)))
     },
   )
 
@@ -484,7 +681,7 @@ describe('Daytona sandbox boundary adapters', () => {
       expect(result.exitCode).toBe(42)
       expect(result.stdout).toBe('out')
       expect(result.stderr).toBe('err')
-      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
     }).pipe(Effect.provide(testLayer(client)))
   })
 
@@ -597,7 +794,7 @@ describe('Daytona sandbox boundary adapters', () => {
           }),
           expect.any(Number),
         )
-        expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
       }).pipe(Effect.provide(testLayer(client)))
     },
   )
@@ -769,6 +966,65 @@ describe('Daytona sandbox boundary adapters', () => {
     },
   )
 
+  it('settles an unresponsive Daytona promise at its native deadline', async () => {
+    const startedAt = Date.now()
+    await expect(
+      settleDaytonaPromise(new Promise<never>(() => undefined), 10),
+    ).rejects.toThrow('Daytona operation deadline exceeded')
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+  })
+
+  it('bounds an unresponsive sandbox creation with a native deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const sandbox = fakeSandbox()
+      const client = fakeClient(sandbox, {
+        create: vi.fn(() => new Promise<never>(() => undefined)),
+      })
+      const program = Effect.gen(function* () {
+        const service = yield* SandboxService
+        return yield* service.runRepositoryCommand(commandInput)
+      }).pipe(Effect.provide(testLayer(client)))
+      const result = Effect.runPromise(program)
+      const assertion = expect(result).rejects.toMatchObject({
+        operation: 'daytona.runRepositoryCommand',
+        cause: { operation: 'daytona.createSandbox' },
+      })
+
+      await vi.advanceTimersByTimeAsync(125_001)
+
+      await assertion
+      expect(client.delete).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds deletion confirmation with one absolute deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const sandbox = fakeSandbox()
+      const client = fakeClient(sandbox, {
+        get: vi.fn(async () => sandbox),
+      })
+      const program = Effect.gen(function* () {
+        const service = yield* SandboxService
+        return yield* service.runRepositoryCommand(commandInput)
+      }).pipe(Effect.provide(testLayer(client)))
+      const result = Effect.runPromise(program)
+      const assertion = expect(result).resolves.toMatchObject({
+        cleanupStatus: 'failed',
+      })
+
+      await vi.advanceTimersByTimeAsync(120_001)
+
+      await assertion
+      expect(client.get).toHaveBeenCalledTimes(120)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.effect('deletes sandbox when repository command is interrupted', () =>
     Effect.gen(function* () {
       const sandbox = fakeSandbox({
@@ -796,7 +1052,7 @@ describe('Daytona sandbox boundary adapters', () => {
 
       yield* Fiber.interrupt(fiber)
 
-      expect(client.delete).toHaveBeenCalledWith(sandbox, 120)
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
     }),
   )
 
@@ -818,22 +1074,23 @@ describe('Daytona sandbox boundary adapters', () => {
     },
   )
 
-  it.effect('retries Daytona sandbox deletion before giving up', () => {
-    const sandbox = fakeSandbox()
-    const deleteSandbox = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('delete failed 1'))
-      .mockRejectedValueOnce(new Error('delete failed 2'))
-      .mockResolvedValueOnce(undefined)
-    const client = fakeClient(sandbox, { delete: deleteSandbox })
+  it.effect(
+    'confirms absence after an ambiguous Daytona deletion request',
+    () => {
+      const sandbox = fakeSandbox()
+      const deleteSandbox = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('delete response unavailable'))
+      const client = fakeClient(sandbox, { delete: deleteSandbox })
 
-    return Effect.gen(function* () {
-      const service = yield* SandboxService
-      yield* service.runRepositoryCommand(commandInput)
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        yield* service.runRepositoryCommand(commandInput)
 
-      expect(deleteSandbox).toHaveBeenCalledTimes(3)
-    }).pipe(Effect.provide(testLayer(client)))
-  })
+        expect(deleteSandbox).toHaveBeenCalledTimes(1)
+      }).pipe(Effect.provide(testLayer(client)))
+    },
+  )
 
   it.effect(
     'uses Daytona session execution so stdout and stderr are captured',
@@ -870,6 +1127,45 @@ describe('Daytona sandbox boundary adapters', () => {
         expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
         expect(result).toEqual({ exitCode: 1, stdout: 'out', stderr: 'err' })
       }),
+  )
+
+  it.effect('uses one stateless Daytona subrequest for capture commands', () =>
+    Effect.gen(function* () {
+      const executeCommand = vi.fn(async () => ({
+        exitCode: 0,
+        stdout: 'captured',
+        stderr: '',
+      }))
+      const createSession = vi.fn(async () => undefined)
+      const executeSessionCommand = vi.fn(async () => ({ exitCode: 0 }))
+      const deleteSession = vi.fn(async () => undefined)
+      const sandbox = {
+        process: {
+          executeCommand,
+          createSession,
+          executeSessionCommand,
+          deleteSession,
+        },
+      }
+
+      const result = yield* executeSandboxCommand(sandbox, {
+        command: 'git status --short',
+        timeoutSeconds: 7,
+        traceId: 'trace-stateless',
+        stateless: true,
+      })
+
+      expect(executeCommand).toHaveBeenCalledWith(
+        "cd 'workspace/repo' && git status --short",
+        undefined,
+        undefined,
+        7,
+      )
+      expect(createSession).not.toHaveBeenCalled()
+      expect(executeSessionCommand).not.toHaveBeenCalled()
+      expect(deleteSession).not.toHaveBeenCalled()
+      expect(result).toEqual({ exitCode: 0, stdout: 'captured' })
+    }),
   )
 
   it.effect('bounds trusted command output inside the sandbox shell', () =>
@@ -926,8 +1222,9 @@ describe('Daytona sandbox boundary adapters', () => {
         'Daytona command could not be formatted safely',
       )
 
+      expect(createSession).not.toHaveBeenCalled()
       expect(executeSessionCommand).not.toHaveBeenCalled()
-      expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
+      expect(deleteSession).not.toHaveBeenCalled()
     }),
   )
 
@@ -1035,7 +1332,7 @@ describe('Daytona sandbox boundary adapters', () => {
             stderr: '',
           })),
           deleteSession: vi.fn(async () => {
-            throw new Error('404 not found')
+            throw new DaytonaNotFoundError('session not found', 404)
           }),
         },
       })
@@ -1086,7 +1383,11 @@ describe('Daytona sandbox boundary adapters', () => {
       const createSession = vi.fn(async () => undefined)
       const executeSessionCommand = vi.fn(async () => ({ cmdId: 'cmd-1' }))
       const sendSessionCommandInput = vi.fn(async () => undefined)
-      const getSessionCommand = vi.fn(async () => ({ exitCode: undefined }))
+      const getSessionCommand = vi.fn(async () => ({
+        id: 'cmd-1',
+        command: "cd 'workspace/repo' && pi --mode rpc",
+        exitCode: undefined,
+      }))
       const getSessionCommandLogsSpy = vi.fn(
         async (_sessionId: string, _commandId: string) => ({
           stdout: '{"type":"agent_start"}\n',
@@ -1109,8 +1410,10 @@ describe('Daytona sandbox boundary adapters', () => {
         onStdout?: (chunk: string) => void,
         onStderr?: (chunk: string) => void,
       ) {
-        if (onStdout !== undefined && onStderr !== undefined)
+        if (onStdout !== undefined && onStderr !== undefined) {
+          onStdout('{"type":"agent_start"}\n')
           return Promise.resolve()
+        }
         return getSessionCommandLogsSpy(sessionId, commandId)
       }
       const deleteSession = vi.fn(async () => undefined)
@@ -1132,7 +1435,7 @@ describe('Daytona sandbox boundary adapters', () => {
       })
       yield* handle.sendInput('{"type":"get_state"}\n')
       const command = yield* handle.getCommand
-      const logs = yield* handle.getLogs
+      const logs = yield* handle.getLogs(1_024)
       yield* handle.deleteSession
 
       expect(handle.sessionId).toBe('patchplane-trace-1')
@@ -1151,10 +1454,71 @@ describe('Daytona sandbox boundary adapters', () => {
         'cmd-1',
         '{"type":"get_state"}\n',
       )
-      expect(command).toEqual({ exitCode: undefined })
+      expect(command).toEqual({
+        id: 'cmd-1',
+        command: "cd 'workspace/repo' && pi --mode rpc",
+        exitCode: undefined,
+      })
       expect(logs).toEqual({ stdout: '{"type":"agent_start"}\n', stderr: '' })
       expect(deleteSession).toHaveBeenCalledWith('patchplane-trace-1')
     }),
+  )
+
+  it.effect(
+    'retries bounded status reads and rejects command identity drift',
+    () =>
+      Effect.gen(function* () {
+        let wrappedCommand = ''
+        const getSessionCommand = vi
+          .fn()
+          .mockRejectedValueOnce(new Error('transient read'))
+          .mockResolvedValueOnce({
+            id: 'cmd-1',
+            command: '',
+            exitCode: 0,
+          })
+        const sandbox: DaytonaCommandSandbox = {
+          process: {
+            createSession: vi.fn(async () => undefined),
+            executeSessionCommand: vi.fn(async (_sessionId, request) => {
+              wrappedCommand = request.command
+              return { cmdId: 'cmd-1' }
+            }),
+            getSessionCommand: async (...args) => {
+              const snapshot = await getSessionCommand(...args)
+              return { ...snapshot, command: wrappedCommand }
+            },
+            getSessionCommandLogs: getVerificationCommandLogs,
+            deleteSession: vi.fn(async () => undefined),
+          },
+        }
+        const handle = yield* startSandboxSessionCommand(sandbox, {
+          command: 'bun test',
+          timeoutSeconds: 9,
+          traceId: 'trace-retry',
+          maxOutputBytes: 1_024,
+        })
+        const result = yield* waitForSandboxSessionCommand(handle, {
+          timeoutSeconds: 9,
+          maxOutputBytes: 1_024,
+        })
+        expect(result).toMatchObject({ exitCode: 0, stdout: 'tests passed' })
+        expect(getSessionCommand).toHaveBeenCalledTimes(2)
+
+        const drifted = {
+          ...handle,
+          getCommand: Effect.succeed({
+            id: handle.commandId,
+            command: 'different command',
+            exitCode: 0,
+          }),
+        }
+        const driftExit = yield* waitForSandboxSessionCommand(drifted, {
+          timeoutSeconds: 9,
+          maxOutputBytes: 1_024,
+        }).pipe(Effect.exit)
+        expect(Exit.isFailure(driftExit)).toBe(true)
+      }),
   )
 
   it.effect(

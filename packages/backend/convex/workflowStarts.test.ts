@@ -99,6 +99,41 @@ interface WorkflowDetailResult {
   readonly provenanceEvents?: ReadonlyArray<Record<string, unknown>> | undefined
 }
 
+const recordQueuedGitHubDelivery = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    deliveryId: string
+    envelopeStorageKey: string
+    envelopeSha256: string
+    deliveryToken: string
+  },
+  { accepted: boolean; deliveryToken?: string }
+>('workflowStarts:recordQueuedGitHubDelivery')
+const bindQueuedGitHubDeliveryToWorkflow = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    deliveryId: string
+    workflowRunId: string
+    repositoryExternalId: string
+    issueExternalId: string
+    pullRequestBaseSha: string
+    pullRequestHeadSha: string
+  },
+  'bound' | 'coalesced' | 'rejected'
+>('workflowStarts:bindQueuedGitHubDeliveryToWorkflow')
+const getTrustLoopWorkflowForDelivery = makeFunctionReference<
+  'query',
+  { systemSecret: string; deliveryId: string },
+  { workflowRunId?: string }
+>('workflowStarts:getTrustLoopWorkflowForDelivery')
+const claimStaleGitHubDeliveries = makeFunctionReference<
+  'mutation',
+  { systemSecret: string },
+  Array<Record<string, unknown>>
+>('workflowStarts:claimStaleGitHubDeliveries')
+
 const createWorkflowStart = makeFunctionReference<
   'mutation',
   CreateWorkflowStartArgs,
@@ -497,6 +532,115 @@ async function seedDecisionPublicationReplayFixture(
 
   return { workflowStart, ...records }
 }
+
+describe('workflowStarts webhook queue receipts', () => {
+  test('leases a digest-bound envelope and only reclaims it after expiry', async () => {
+    const t = authenticatedTest()
+    vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    expect(
+      await t.mutation(recordQueuedGitHubDelivery, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-1',
+        envelopeStorageKey: `webhook-queue/github/delivery-1/${'a'.repeat(64)}.json`,
+        envelopeSha256: 'a'.repeat(64),
+        deliveryToken: 'delivery-token-1',
+      }),
+    ).toEqual({ accepted: true, deliveryToken: 'delivery-token-1' })
+    expect(
+      await t.mutation(recordQueuedGitHubDelivery, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-1',
+        envelopeStorageKey: `webhook-queue/github/delivery-1/${'a'.repeat(64)}.json`,
+        envelopeSha256: 'a'.repeat(64),
+        deliveryToken: 'replacement-token',
+      }),
+    ).toEqual({ accepted: true, deliveryToken: 'delivery-token-1' })
+
+    await seedMembership(t)
+    const workflowStart = (await t.mutation(
+      createWorkflowStart,
+      createArgs(),
+    )) as WorkflowStartResult
+    await t.run((ctx) =>
+      ctx.db.insert('externalWorkflowRefs', {
+        provider: 'github',
+        workspaceId: 'workos:org_123',
+        deliveryId: 'original-delivery',
+        eventKind: 'github.pull_request.opened',
+        repositoryExternalId: 'repo-1',
+        issueExternalId: 'pr-1',
+        pullRequestBaseSha: 'a'.repeat(40),
+        pullRequestHeadSha: 'b'.repeat(40),
+        promptRequestId: workflowStart.promptRequest.id,
+        workflowRunId: workflowStart.workflowRun.id,
+        createdAt: 1_000,
+      }),
+    )
+    expect(
+      await t.mutation(bindQueuedGitHubDeliveryToWorkflow, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-1',
+        workflowRunId: workflowStart.workflowRun.id,
+        repositoryExternalId: 'repo-1',
+        issueExternalId: 'pr-1',
+        pullRequestBaseSha: 'a'.repeat(40),
+        pullRequestHeadSha: 'b'.repeat(40),
+      }),
+    ).toBe('bound')
+    expect(
+      await t.query(getTrustLoopWorkflowForDelivery, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-1',
+      }),
+    ).toEqual({ workflowRunId: workflowStart.workflowRun.id })
+
+    expect(
+      await t.mutation(recordQueuedGitHubDelivery, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-2',
+        envelopeStorageKey: `webhook-queue/github/delivery-2/${'c'.repeat(64)}.json`,
+        envelopeSha256: 'c'.repeat(64),
+        deliveryToken: 'delivery-token-2',
+      }),
+    ).toEqual({ accepted: true, deliveryToken: 'delivery-token-2' })
+    expect(
+      await t.mutation(bindQueuedGitHubDeliveryToWorkflow, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-2',
+        workflowRunId: workflowStart.workflowRun.id,
+        repositoryExternalId: 'repo-1',
+        issueExternalId: 'pr-1',
+        pullRequestBaseSha: 'a'.repeat(40),
+        pullRequestHeadSha: 'b'.repeat(40),
+      }),
+    ).toBe('coalesced')
+    expect(
+      await t.query(getTrustLoopWorkflowForDelivery, {
+        systemSecret: 'system_test',
+        deliveryId: 'delivery-2',
+      }),
+    ).toEqual({ workflowRunId: workflowStart.workflowRun.id })
+
+    expect(
+      await t.mutation(claimStaleGitHubDeliveries, {
+        systemSecret: 'system_test',
+      }),
+    ).toEqual([])
+
+    vi.spyOn(Date, 'now').mockReturnValue(60 * 60 * 1_000 + 1_001)
+    expect(
+      await t.mutation(claimStaleGitHubDeliveries, {
+        systemSecret: 'system_test',
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        deliveryId: 'delivery-1',
+        envelopeSha256: 'a'.repeat(64),
+      }),
+    ])
+    vi.restoreAllMocks()
+  })
+})
 
 describe('workflowStarts V1 execution claim', () => {
   test('allows only one caller to claim a workflow attempt', async () => {

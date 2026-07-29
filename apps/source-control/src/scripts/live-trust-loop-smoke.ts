@@ -24,10 +24,17 @@ import {
 
 export interface AcceptanceSnapshot {
   readonly workflowRunId: string
-  readonly workflowStatus: 'queued' | 'running' | 'reviewed'
+  readonly workflowStatus: 'queued' | 'running' | 'reviewed' | 'failed'
   readonly hasRuntimeEvents: boolean
   readonly hasRuntimeSessions: boolean
   readonly sandboxExecutionStatuses: ReadonlyArray<'succeeded' | 'failed'>
+  readonly sandboxExecutions: ReadonlyArray<{
+    readonly id: string
+    readonly status: 'succeeded' | 'failed'
+    readonly executionGroupId?: string
+    readonly providerSessionId?: string
+    readonly providerCommandId?: string
+  }>
   readonly latestSandboxExecution?: {
     readonly id: string
     readonly status: 'succeeded' | 'failed'
@@ -49,8 +56,48 @@ export interface AcceptanceSnapshot {
     readonly status: 'captured' | 'empty' | 'failed'
     readonly diffArtifactId?: string
     readonly headSha?: string
+    readonly subjectKind?: 'incoming-pull-request' | 'sandbox-generated'
     readonly createdAt: number
   }
+  readonly verificationPlans: ReadonlyArray<{
+    readonly id: string
+    readonly digest: string
+    readonly totalCount: number
+    readonly requiredCount: number
+  }>
+  readonly verificationExecutionGroups: ReadonlyArray<{
+    readonly id: string
+    readonly status:
+      | 'claimed'
+      | 'running'
+      | 'completed'
+      | 'failed'
+      | 'blocked'
+      | 'cancelled'
+    readonly sharedState: boolean
+    readonly sandboxId?: string
+    readonly providerSessionId?: string
+    readonly providerCommandId?: string
+  }>
+  readonly verificationResults: ReadonlyArray<{
+    readonly id: string
+    readonly verificationPlanId?: string
+    readonly executionGroupId?: string
+    readonly candidatePatchSetId: string
+    readonly requirementId: string
+    readonly required: boolean
+    readonly sandboxExecutionId?: string
+    readonly status: string
+    readonly platform: 'linux' | 'macos' | 'windows'
+    readonly environmentImage?: string
+    readonly providerSessionId?: string
+    readonly providerCommandId?: string
+    readonly summary?: string
+    readonly stdoutCaptureStatus?: 'captured' | 'truncated' | 'failed'
+    readonly stderrCaptureStatus?: 'captured' | 'truncated' | 'failed'
+    readonly cleanupStatus?: 'deleted' | 'failed' | 'retained' | 'not-started'
+    readonly artifactIds: ReadonlyArray<string>
+  }>
   readonly reviewRunStatuses: ReadonlyArray<
     'queued' | 'running' | 'completed' | 'failed'
   >
@@ -107,6 +154,8 @@ const TrustLoopWebhookResponse = Schema.Struct({
   ok: Schema.optional(Schema.Boolean),
   error: Schema.optional(Schema.String),
   workflowRunId: Schema.optional(Schema.String),
+  queued: Schema.optional(Schema.Boolean),
+  deliveryId: Schema.optional(Schema.String),
   sandboxStatus: Schema.optional(Schema.String),
   publishedIssueNumber: Schema.optional(Schema.Finite),
 })
@@ -123,6 +172,12 @@ const decodeTrustLoopWebhookResponse = Schema.decodeUnknownSync(
 export const decodeDecisionPublicationReplayFixture = Schema.decodeUnknownSync(
   DecisionPublicationReplayFixture,
 )
+
+const getWorkflowForDelivery = makeFunctionReference<
+  'query',
+  { systemSecret: string; deliveryId: string },
+  { readonly workflowRunId?: string }
+>('workflowStarts:getTrustLoopWorkflowForDelivery')
 
 const getAcceptanceSnapshot = makeFunctionReference<
   'query',
@@ -212,21 +267,142 @@ async function resolveWebhookUrl() {
   return `https://${worker}.${subdomain.result.subdomain}.workers.dev/api/github/webhook`
 }
 
-export function assertSnapshot(snapshot: AcceptanceSnapshot) {
-  if (snapshot.workflowStatus !== 'reviewed')
-    throw new Error('Workflow did not reach reviewed status')
-  if (!snapshot.hasRuntimeEvents)
-    throw new Error('Workflow did not persist Pi runtime events')
+export function assertSnapshot(
+  snapshot: AcceptanceSnapshot,
+  expectedIncomingHeadSha?: string,
+) {
+  if (snapshot.workflowStatus !== 'reviewed') {
+    const results = snapshot.verificationResults
+      .map((result) => `${result.status}:${result.summary ?? 'no-summary'}`)
+      .join(',')
+    throw new Error(
+      `Workflow did not reach reviewed status (${snapshot.workflowStatus}; results=${results || 'none'})`,
+    )
+  }
+  const incoming =
+    snapshot.latestCandidatePatchSet?.subjectKind === 'incoming-pull-request'
+  if (!incoming && !snapshot.hasRuntimeEvents)
+    throw new Error('Generated workflow did not persist Pi runtime events')
 
   const sandbox = snapshot.latestSandboxExecution
-  if (sandbox === undefined)
-    throw new Error('Workflow did not persist a sandbox execution')
+  if (sandbox === undefined) {
+    const groupStatuses = snapshot.verificationExecutionGroups
+      .map((group) => group.status)
+      .join(',')
+    const resultStatuses = snapshot.verificationResults
+      .map((result) =>
+        result.summary === undefined
+          ? result.status
+          : `${result.status}:${result.summary.slice(0, 256)}`,
+      )
+      .join(',')
+    throw new Error(
+      `Workflow did not persist a sandbox execution (groups=${groupStatuses || 'none'}; results=${resultStatuses || 'none'})`,
+    )
+  }
 
   const candidate = snapshot.latestCandidatePatchSet
   if (candidate?.status !== 'captured')
     throw new Error('Latest workflow candidate patch was not captured')
-  if (candidate.createdAt < sandbox.completedAt) {
-    throw new Error('Candidate patch predates the latest sandbox execution')
+  if (!incoming && candidate.createdAt < sandbox.completedAt) {
+    throw new Error(
+      'Generated candidate patch predates the latest sandbox execution',
+    )
+  }
+  if (incoming) {
+    const plan = snapshot.verificationPlans[0]
+    if (
+      plan === undefined ||
+      !/^sha256:[a-f0-9]{64}$/.test(plan.digest) ||
+      plan.requiredCount <= 0 ||
+      candidate.headSha === undefined ||
+      (expectedIncomingHeadSha !== undefined &&
+        candidate.headSha !== expectedIncomingHeadSha)
+    ) {
+      throw new Error(
+        'Incoming workflow has no bounded verification plan or exact submitted head identity',
+      )
+    }
+    const planResults = snapshot.verificationResults.filter(
+      (item) => item.verificationPlanId === plan.id,
+    )
+    const planGroups = snapshot.verificationExecutionGroups.filter((group) =>
+      planResults.some((result) => result.executionGroupId === group.id),
+    )
+    const coherentResult = (result: (typeof planResults)[number]) => {
+      const group = planGroups.find(
+        (candidateGroup) => candidateGroup.id === result.executionGroupId,
+      )
+      const terminalGroup =
+        group !== undefined &&
+        ['completed', 'failed', 'blocked', 'cancelled'].includes(group.status)
+      if (
+        result.candidatePatchSetId !== candidate.id ||
+        !terminalGroup ||
+        group.sharedState !== false
+      ) {
+        return false
+      }
+      if (!result.required) {
+        return (
+          result.status !== 'queued' &&
+          result.status !== 'running' &&
+          (group.providerSessionId === result.providerSessionId ||
+            (group.providerSessionId === undefined &&
+              result.providerSessionId === undefined)) &&
+          (group.providerCommandId === result.providerCommandId ||
+            (group.providerCommandId === undefined &&
+              result.providerCommandId === undefined))
+        )
+      }
+      return (
+        result.status === 'passed' &&
+        result.sandboxExecutionId !== undefined &&
+        snapshot.sandboxExecutions.some(
+          (execution) =>
+            execution.id === result.sandboxExecutionId &&
+            execution.status === 'succeeded' &&
+            execution.executionGroupId === group.id &&
+            execution.providerSessionId === result.providerSessionId &&
+            execution.providerCommandId === result.providerCommandId,
+        ) &&
+        result.environmentImage !== undefined &&
+        result.stdoutCaptureStatus === 'captured' &&
+        result.stderrCaptureStatus === 'captured' &&
+        result.cleanupStatus === 'deleted' &&
+        result.artifactIds.length >= 2 &&
+        result.artifactIds.every((id) =>
+          snapshot.evidenceArtifacts.some((artifact) => artifact.id === id),
+        ) &&
+        group.status === 'completed' &&
+        group.sandboxId !== undefined &&
+        group.providerSessionId !== undefined &&
+        group.providerSessionId === result.providerSessionId &&
+        group.providerCommandId !== undefined &&
+        group.providerCommandId === result.providerCommandId
+      )
+    }
+    const requiredResults = planResults.filter((item) => item.required)
+    if (
+      plan.totalCount <= 0 ||
+      plan.requiredCount > plan.totalCount ||
+      planResults.length !== plan.totalCount ||
+      planGroups.length !== plan.totalCount ||
+      planResults.filter((item) => item.required).length !==
+        plan.requiredCount ||
+      requiredResults.some((item) => item.status !== 'passed') ||
+      planResults.some((item) => !coherentResult(item)) ||
+      new Set(planResults.map((item) => item.requirementId)).size !==
+        plan.totalCount ||
+      new Set(planResults.map((item) => item.executionGroupId)).size !==
+        plan.totalCount ||
+      new Set(requiredResults.map((item) => item.sandboxExecutionId)).size !==
+        plan.requiredCount
+    ) {
+      throw new Error(
+        'Incoming Linux verification lacks coherent plan/group/environment/log/artifact/cleanup evidence',
+      )
+    }
   }
 
   const review = snapshot.latestReviewRun
@@ -288,16 +464,45 @@ export function latestPublishedHumanDecision(snapshot: AcceptanceSnapshot) {
     : undefined
 }
 
+async function waitForWorkflowDelivery(
+  deliveryId: string,
+  systemSecret: string,
+) {
+  const deadline =
+    Date.now() + Number(process.env.PATCHPLANE_SMOKE_TIMEOUT_MS ?? 600_000)
+  while (Date.now() < deadline) {
+    const result = await convexClient().query(getWorkflowForDelivery, {
+      systemSecret,
+      deliveryId,
+    })
+    if (result.workflowRunId !== undefined) return result.workflowRunId
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+  }
+  throw new Error('Queued GitHub delivery did not create a workflow attempt')
+}
+
 async function readAcceptanceSnapshot(
   workflowRunId: string,
   systemSecret: string,
+  expectedIncomingHeadSha?: string,
 ) {
-  const snapshot = await convexClient().query(getAcceptanceSnapshot, {
-    systemSecret,
-    workflowRunId,
-  })
-  assertSnapshot(snapshot)
-  return snapshot
+  const deadline =
+    Date.now() + Number(process.env.PATCHPLANE_SMOKE_TIMEOUT_MS ?? 600_000)
+  while (true) {
+    const snapshot = await convexClient().query(getAcceptanceSnapshot, {
+      systemSecret,
+      workflowRunId,
+    })
+    if (
+      snapshot.workflowStatus === 'reviewed' ||
+      snapshot.workflowStatus === 'failed' ||
+      Date.now() >= deadline
+    ) {
+      assertSnapshot(snapshot, expectedIncomingHeadSha)
+      return snapshot
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+  }
 }
 
 async function readReplayFixture(
@@ -759,7 +964,7 @@ async function runFresh(
   )
   const deliveryId = `patchplane-live-${randomUUID()}`
   const payload = JSON.stringify({
-    action: 'synchronize',
+    action: 'opened',
     installation: { id: installationId },
     repository: {
       id: pullRequest.base.repo.id,
@@ -770,15 +975,12 @@ async function runFresh(
     pull_request: {
       id: pullRequest.id,
       number: pullRequest.number,
-      title: 'PatchPlane live acceptance smoke',
-      body: [
-        'Create a file named .patchplane/live-e2e.txt containing one line:',
-        `PatchPlane live trust loop ${deliveryId}`,
-        'Do not change any other file. Then stop.',
-      ].join('\n'),
+      title: pullRequest.title,
+      body: pullRequest.body ?? '',
       html_url: pullRequest.html_url,
+      updated_at: pullRequest.updated_at,
       head: { ref: pullRequest.head.ref, sha: pullRequest.head.sha },
-      base: { ref: pullRequest.base.ref },
+      base: { ref: pullRequest.base.ref, sha: pullRequest.base.sha },
     },
   })
   const signature = `sha256=${createHmac(
@@ -812,16 +1014,27 @@ async function runFresh(
   if (
     response.status !== 202 ||
     result.ok !== true ||
-    result.workflowRunId === undefined
+    (result.workflowRunId === undefined && result.queued !== true)
   ) {
     throw new Error(
       `Trust-loop webhook failed (${response.status}): ${result.error ?? 'unknown error'}`,
     )
   }
 
+  const workflowRunId =
+    result.workflowRunId ??
+    (await waitForWorkflowDelivery(
+      result.deliveryId ?? deliveryId,
+      systemSecret,
+    ))
+  emit({
+    type: 'trust_loop_workflow_accepted',
+    workflowRunId,
+  })
   const snapshot = await readAcceptanceSnapshot(
-    result.workflowRunId,
+    workflowRunId,
     systemSecret,
+    pullRequest.head.sha,
   )
   const commentsAfter = await octokit.paginate(
     octokit.rest.issues.listComments,
@@ -838,8 +1051,9 @@ async function runFresh(
       comment.body?.startsWith('## PatchPlane Patch Report'),
   )
   if (
-    publication === undefined ||
-    result.publishedIssueNumber !== pullRequestNumber
+    !reviewReadyOnly &&
+    (publication === undefined ||
+      result.publishedIssueNumber !== pullRequestNumber)
   ) {
     throw new Error(
       'Trust loop did not publish a new Patch Report comment to the source pull request',
@@ -848,17 +1062,23 @@ async function runFresh(
 
   emit({
     type: 'trust_loop_review_ready',
-    workflowRunId: result.workflowRunId,
+    workflowRunId,
     sandboxStatus: result.sandboxStatus,
     hasRuntimeEvents: snapshot.hasRuntimeEvents,
     hasRuntimeSessions: snapshot.hasRuntimeSessions,
     artifactCount: snapshot.evidenceArtifacts.length,
     hasProvenanceEvents: snapshot.hasProvenanceEvents,
-    publicationUrl: publication.html_url,
+    ...(publication === undefined
+      ? {}
+      : { publicationUrl: publication.html_url }),
   })
 
   if (reviewReadyOnly) {
-    if (snapshot.latestSandboxExecution?.status !== 'succeeded') {
+    if (
+      snapshot.latestCandidatePatchSet?.subjectKind !==
+        'incoming-pull-request' &&
+      snapshot.latestSandboxExecution?.status !== 'succeeded'
+    ) {
       throw new Error(
         'Convex sandbox smoke requires the latest sandbox execution to succeed',
       )
@@ -869,7 +1089,7 @@ async function runFresh(
       mode: 'fresh',
       completion: 'review-ready',
       m10Complete: false,
-      workflowRunId: result.workflowRunId,
+      workflowRunId,
     })
     return true
   }
@@ -877,7 +1097,7 @@ async function runFresh(
   emit({
     type: 'trust_loop_human_decision_required',
     ok: false,
-    workflowRunId: result.workflowRunId,
+    workflowRunId,
     instruction:
       'Submit an authenticated decision in the deployed client, then rerun with PATCHPLANE_SMOKE_WORKFLOW_RUN_ID.',
   })
@@ -887,7 +1107,7 @@ async function runFresh(
     mode: 'fresh',
     completion: 'human-decision-required',
     m10Complete: false,
-    workflowRunId: result.workflowRunId,
+    workflowRunId,
   })
   return false
 }
@@ -957,7 +1177,22 @@ export async function orchestrate(
       return true
     }
     return await runFresh(githubConfig, reviewReadyOnly)
-  } catch {
+  } catch (error) {
+    const taggedFailure =
+      typeof error === 'object' && error !== null
+        ? Reflect.get(error, '_tag')
+        : undefined
+    const failure =
+      error instanceof Error
+        ? error.message.slice(0, 512)
+        : typeof error === 'object' &&
+            error !== null &&
+            'message' in error &&
+            typeof error.message === 'string'
+          ? error.message.slice(0, 512)
+          : typeof taggedFailure === 'string'
+            ? `Trust-loop Effect failure: ${taggedFailure.slice(0, 128)}`
+            : 'Unknown trust-loop acceptance failure'
     emit({
       type: 'trust_loop_summary',
       ok: false,
@@ -965,6 +1200,7 @@ export async function orchestrate(
       completion: 'failed',
       m10Complete: false,
       errorCategory: 'acceptance-check-failed',
+      failure,
     })
     return false
   }

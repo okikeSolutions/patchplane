@@ -1,5 +1,7 @@
 import { Context, Effect } from 'effect'
 import type { SandboxError, StorageError } from '@patchplane/domain/errors'
+import type { SandboxEnvironmentIdentity } from '@patchplane/domain/sandbox-environment'
+import type { ProviderProcessId } from '@patchplane/domain/refinements'
 import type { SandboxPolicy } from '@patchplane/domain/sandbox-policy'
 import type {
   SandboxCleanupStatus,
@@ -41,6 +43,11 @@ export interface SandboxCommandInput extends TelemetryContextFields {
   readonly onSandboxStarted?: (
     sandboxId: string,
   ) => Effect.Effect<void, SandboxError | StorageError>
+  readonly onVerificationCommandStarted?: (input: {
+    readonly sandboxId: string
+    readonly sessionId: ProviderProcessId
+    readonly commandId: ProviderProcessId
+  }) => Effect.Effect<void, SandboxError | StorageError>
 }
 
 export interface SandboxRuntimeSessionStarted {
@@ -122,13 +129,17 @@ export interface SandboxVerificationResult {
 export interface SandboxCommandResult {
   readonly provider: string
   readonly sandboxId: string
-  readonly sessionId?: string | undefined
-  readonly commandId?: string | undefined
+  readonly sessionId?: ProviderProcessId | undefined
+  readonly commandId?: ProviderProcessId | undefined
   readonly command: string
   readonly exitCode: number | undefined
   readonly stdout: string
   readonly stderr?: string | undefined
-  readonly policy?: SandboxPolicy | undefined
+  readonly policy?:
+    | (SandboxPolicy & {
+        readonly environment?: SandboxEnvironmentIdentity | undefined
+      })
+    | undefined
   readonly runtimeEvents?: ReadonlyArray<SandboxRuntimeEvent> | undefined
   readonly evidenceArtifacts?:
     | ReadonlyArray<SandboxEvidenceArtifact>

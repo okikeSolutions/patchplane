@@ -9,6 +9,7 @@ import {
   executeWorkflowRerun,
   handleGitHubWebhook,
   makeSourceControlRuntime,
+  markQueuedDeliveryExhausted,
   publishDecision,
   syncGitHubInstallation,
 } from './github/routes'
@@ -33,6 +34,13 @@ export default withCloudflareSentry({
     const runtime = makeSourceControlRuntime(env)
 
     try {
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/internal/queue/exhausted'
+      ) {
+        return await markQueuedDeliveryExhausted(request, env, runtime)
+      }
+
       if (
         request.method === 'POST' &&
         url.pathname === '/internal/github/install/sync'

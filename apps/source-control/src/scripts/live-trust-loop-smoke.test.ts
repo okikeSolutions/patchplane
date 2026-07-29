@@ -16,6 +16,7 @@ function acceptanceSnapshot(
     hasRuntimeEvents: true,
     hasRuntimeSessions: false,
     sandboxExecutionStatuses: ['succeeded'],
+    sandboxExecutions: [{ id: 'sandbox-1', status: 'succeeded' }],
     latestSandboxExecution: {
       id: 'sandbox-1',
       status: 'succeeded',
@@ -33,6 +34,9 @@ function acceptanceSnapshot(
       },
     ],
     candidatePatchStatuses: ['captured'],
+    verificationPlans: [],
+    verificationExecutionGroups: [],
+    verificationResults: [],
     latestCandidatePatchSet: {
       id: 'candidate-1',
       status: 'captured',
@@ -133,6 +137,98 @@ describe('trust-loop publication readback', () => {
     expect(() => assertSnapshot(acceptanceSnapshot())).not.toThrow()
   })
 
+  test('accepts coherent incoming Linux plan/group/environment evidence without Pi events', () => {
+    const snapshot = acceptanceSnapshot({
+      hasRuntimeEvents: false,
+      evidenceArtifacts: [
+        {
+          id: 'artifact-1',
+          kind: 'diff',
+          storageKey: 'workflow-1/diff.patch',
+          sizeBytes: 42,
+          sha256:
+            'e6ff7f597b8273fcf32be7311134f8ae97f0652a4fcac0d8049144a2b682e3d7',
+          createdAt: 1,
+        },
+        {
+          id: 'stdout-1',
+          kind: 'stdout',
+          storageKey: 'workflow-1/stdout.txt',
+          sizeBytes: 1,
+          sha256: 'a'.repeat(64),
+          createdAt: 9,
+        },
+        {
+          id: 'stderr-1',
+          kind: 'stderr',
+          storageKey: 'workflow-1/stderr.txt',
+          sizeBytes: 1,
+          sha256: 'b'.repeat(64),
+          createdAt: 9,
+        },
+      ],
+      sandboxExecutions: [
+        {
+          id: 'sandbox-1',
+          status: 'succeeded',
+          executionGroupId: 'group-1',
+          providerSessionId: 'patchplane-trace-1-verification-command',
+          providerCommandId: 'command-1',
+        },
+      ],
+      latestCandidatePatchSet: {
+        id: 'candidate-1',
+        status: 'captured',
+        subjectKind: 'incoming-pull-request',
+        diffArtifactId: 'artifact-1',
+        headSha: 'b'.repeat(40),
+        createdAt: 1,
+      },
+      verificationPlans: [
+        {
+          id: 'plan-1',
+          digest: `sha256:${'c'.repeat(64)}`,
+          totalCount: 1,
+          requiredCount: 1,
+        },
+      ],
+      verificationExecutionGroups: [
+        {
+          id: 'group-1',
+          status: 'completed',
+          sharedState: false,
+          sandboxId: 'sandbox-provider-1',
+          providerSessionId: 'patchplane-trace-1-verification-command',
+          providerCommandId: 'command-1',
+        },
+      ],
+      verificationResults: [
+        {
+          id: 'result-1',
+          verificationPlanId: 'plan-1',
+          executionGroupId: 'group-1',
+          candidatePatchSetId: 'candidate-1',
+          requirementId: 'requirement-1',
+          required: true,
+          sandboxExecutionId: 'sandbox-1',
+          status: 'passed',
+          platform: 'linux',
+          environmentImage: 'snapshot-1',
+          providerSessionId: 'patchplane-trace-1-verification-command',
+          providerCommandId: 'command-1',
+          stdoutCaptureStatus: 'captured',
+          stderrCaptureStatus: 'captured',
+          cleanupStatus: 'deleted',
+          artifactIds: ['stdout-1', 'stderr-1'],
+        },
+      ],
+    })
+    expect(() => assertSnapshot(snapshot, 'b'.repeat(40))).not.toThrow()
+    expect(() => assertSnapshot(snapshot, 'a'.repeat(40))).toThrow(
+      'Incoming workflow has no bounded verification plan or exact submitted head identity',
+    )
+  })
+
   test('rejects stale successful records after a newer sandbox retry', () => {
     expect(() =>
       assertSnapshot(
@@ -145,7 +241,7 @@ describe('trust-loop publication readback', () => {
           },
         }),
       ),
-    ).toThrow('Candidate patch predates the latest sandbox execution')
+    ).toThrow('Generated candidate patch predates the latest sandbox execution')
   })
 
   test('rejects a review linked to an older candidate projection', () => {
@@ -203,8 +299,12 @@ describe('trust-loop publication readback', () => {
       hasRuntimeEvents: true,
       hasRuntimeSessions: false,
       sandboxExecutionStatuses: ['succeeded' as const],
+      sandboxExecutions: [],
       evidenceArtifacts: [],
       candidatePatchStatuses: ['captured' as const],
+      verificationPlans: [],
+      verificationExecutionGroups: [],
+      verificationResults: [],
       reviewRunStatuses: ['completed' as const],
       policyDecisionStatuses: ['manual-review'],
       humanDecisions: [

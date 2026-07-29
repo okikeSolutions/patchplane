@@ -47,13 +47,18 @@ const baseClientBudgetMiB = 3
 const pierreDiffsClientAllowanceMiB = 11
 const baseClientJsGzipBudgetKiB = 762
 const pierreDiffsClientJsGzipAllowanceKiB = 2_048
+// EXEC-010 adds the PatchPlane-owned bounded provider process identity schema
+// to server-side Patch Report decoding. The measured production delta is
+// 2,203 raw bytes; keep a narrowly rounded allowance rather than weakening
+// client transfer or largest-chunk limits.
+const providerProcessIdentityServerAllowanceMiB = 0.01
 
 function parseOptions(argv: readonly string[]): Options {
   let check = false
   let json = false
   let skipBuild = false
   let top = 10
-  let serverBudgetMiB = 7.5
+  let serverBudgetMiB = 7.5 + providerProcessIdentityServerAllowanceMiB
   let clientBudgetMiB = baseClientBudgetMiB + pierreDiffsClientAllowanceMiB
   let clientJsGzipBudgetKiB =
     baseClientJsGzipBudgetKiB + pierreDiffsClientJsGzipAllowanceKiB
@@ -126,7 +131,7 @@ Options:
   --json                     Print machine-readable JSON
   --skip-build               Measure existing apps/client/dist output
   --top=N                    Number of largest files to show (default: 10)
-  --server-budget-mib=N      Server total budget for --check (default: 7.5)
+  --server-budget-mib=N      Server total budget for --check (default: 7.51)
   --client-budget-mib=N      Client total budget for --check (default: 14)
   --client-js-gzip-budget-kib=N
                              Client JavaScript gzip budget (default: 2810)

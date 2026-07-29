@@ -636,7 +636,7 @@ describe('architecture boundaries', () => {
           'SentryTelemetryPlugin.layer',
         )
         expect(sourceControlGitHubRoutes).toContain('ControlRuntimeSession')
-        expect(sourceControlGitHubRoutes).toContain('IngestGitHubWebhook')
+        expect(sourceControlGitHubRoutes).toContain('StartWorkflowFromIntake')
         expect(sourceControlGitHubRoutes).toContain(
           'GitHubEventToWorkflowIntake',
         )

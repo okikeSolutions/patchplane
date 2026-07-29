@@ -8,6 +8,7 @@
     "./diff/project-candidate-changed-files": "./src/diff/project-candidate-changed-files.ts",
     "./diff/parse-unified-diff-stats": "./src/diff/parse-unified-diff-stats.ts",
     "./patch-report/assemble-patch-report-v1": "./src/patch-report/assemble-patch-report-v1.ts",
+    "./github/normalize-github-webhook-event": "./src/github/normalize-github-webhook-event.ts",
     "./services/auth-request-context": "./src/services/auth-request-context.ts",
     "./services/alpha-review-policy": "./src/services/alpha-review-policy.ts",
     "./services/artifacts-service": "./src/services/artifacts-service.ts",

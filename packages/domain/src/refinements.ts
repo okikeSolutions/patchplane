@@ -12,6 +12,11 @@ export const Sha256Hex = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{64}$/i),
 )
 
+export const ProviderProcessId = Schema.NonEmptyString.check(
+  Schema.isMaxLength(256),
+).pipe(Schema.brand('ProviderProcessId'))
+export type ProviderProcessId = Schema.Schema.Type<typeof ProviderProcessId>
+
 export const Sha256Digest = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/i),
 )

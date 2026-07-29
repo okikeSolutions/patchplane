@@ -101,3 +101,30 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after remediation.
 - Herdr documentation/tracker audit — no actionable findings after remediation.
 - Herdr code/security review — no actionable findings after remediation.
+
+## Task 6 — supported Linux provider proof
+
+Status: Complete
+
+- Added PatchPlane-owned effective sandbox environment identity covering the PatchPlane-declared class source, provider image/snapshot identity, target, OS, architecture, provider state, public/link/volume posture, resources, network settings, lifecycle settings, and observation time.
+- Trusted Linux execution refreshes provider state and runs an independent OS/architecture probe before the repository requirement; requested/effective lifecycle, network, and resource mismatches fail closed.
+- Incoming verification cannot pass without a complete matching effective Linux environment, exact candidate state, bounded artifacts/logs, and cleanup confirmation.
+- Daytona deletion is now credited only after bounded provider polling observes a structured SDK not-found result; deletion API success without readback confirmation remains failed cleanup. Worker-crash cleanup reconciliation remains open and cannot receive deletion credit.
+- Durable verification results bind the resolved environment image to candidate/plan/group/command/log/cleanup identity.
+- Switched trusted requirements from one blocking provider call to Daytona asynchronous process sessions: bounded provider session/command IDs are persisted on the fenced execution group before terminal polling, bounded log snapshots, process-session deletion, and sandbox cleanup.
+- Kept PTY and live log streaming outside deterministic verification credit; PTY is interactive state, while provider log snapshots remain untrusted until bounded and persisted as PatchPlane evidence.
+- Added domain, Daytona, Convex, source-control smoke, and provider regression coverage.
+- Credentialed PR 129 directly proved exact-head Daytona checkout, effective environment readback, trusted command execution, and structured delete-to-not-found. At that point, the hosted path had proved candidate freeze, plan/group claim, and sandbox start but had not persisted a terminal result; its experimental queue was removed rather than retained as unverified architecture. The temporary PR/branch and queued messages were cleaned up before the later PR 150 acceptance run.
+
+Validation:
+
+- `bun run verify` — passed after the hosted acceptance, native provider-deadline remediation, documentation updates, and 37-test Daytona boundary suite.
+- Credentialed direct Daytona PR 129 lifecycle/readback probe — passed; sandbox deletion confirmed.
+- Credentialed hosted PR 129 smoke — incomplete; no terminal Convex result, no acceptance claim, experimental queue removed, and temporary PR/branch removed.
+- Reintroduced the hosted queue only after adding a digest-bound Convex ingress receipt, raw-envelope R2 outbox, scheduled replay for ambiguous sends, one-message terminal acknowledgements, delayed DLQ recovery, whole-service abort bounds, and per-requirement terminal synthesis. Each authenticated receipt now binds atomically to the exact new or reused candidate workflow so redeliveries cannot lose terminal identity.
+- Hosted PR 131 proved queue delivery, workflow reuse, receipt/workflow binding, and a terminal `completed` receipt. Its immutable workflow had already persisted an empty plan before the Linux command was deployed, so it produced no execution group and granted no Task 6 acceptance.
+- No-PR experiments isolated the remaining hosted failure to Cloudflare Free's 50-external-subrequest limit. Cloudflare Workflows share that 50-request budget across the whole free-plan workflow instance and therefore did not solve it; a two-Worker service-binding experiment proved separate invocation budgets, while replacing evidence-probe sessions with bounded stateless Daytona commands reduced each probe from three provider requests to one without weakening the durable asynchronous identity of the trusted requirement.
+- Hosted PR 150 completed in about 20 seconds on the free plan: workflow `ms7exrs2kbe5ng7gsrtk3m7c698bf449`, exact head `b520e8435f36b1cc7498d898d8ace927b51e11a1`, candidate `qh7b8r6q992rea3jjc757qkaq98bf8pm`, plan `s577pa9bm0ekkpnhneyrck1n0h8bfre7`, group `s171pg1nfekjm4y7dnqneckd5n8bfmhs`, sandbox execution `ps7e4qyreb7w2et356bz2532418bftwz`, and result `rs7bhcpct7ce5var1j33yftvs18ben6q`. The result passed with candidate-bound test-report/diff/stdout/stderr artifacts, effective Linux environment readback, durable provider process identity, and delete-to-not-found cleanup; queue delivery `5b7118c0-8b27-11f1-87de-7a284358103f` became terminal/completed and the workflow reached `reviewed`. The temporary PR and branch were removed.
+- Herdr Effect/branded-types audit — no actionable findings after native sandbox-creation and absolute cleanup-deadline remediation.
+- Herdr documentation/tracker audit — no actionable findings after PR 150 capability/evidence reconciliation.
+- Herdr code/security review — no actionable findings.

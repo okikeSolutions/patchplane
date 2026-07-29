@@ -19,7 +19,9 @@ export type CloudflareSentryEnv = {
 export function captureCloudflareRequestFailure(
   operation:
     | 'source-control.worker.fetch'
-    | 'github-webhook-worker.service-binding.fetch',
+    | 'github-webhook-worker.service-binding.fetch'
+    | 'github-webhook-worker.queue.send'
+    | 'github-webhook-worker.queue.service-binding',
 ): void {
   try {
     Sentry.withScope((scope) => {

@@ -15,6 +15,7 @@ import {
   EpochMillis,
   GitCommitSha,
   NonNegativeInt,
+  ProviderProcessId,
   Sha256Digest,
 } from './refinements'
 
@@ -175,6 +176,8 @@ export const VerificationExecutionGroup = Schema.Struct({
   sharedState: Schema.Literal(false),
   status: VerificationExecutionGroupStatus,
   sandboxId: Schema.optional(Schema.NonEmptyString),
+  providerSessionId: Schema.optional(ProviderProcessId),
+  providerCommandId: Schema.optional(ProviderProcessId),
   sandboxExecutionId: Schema.optional(SandboxExecutionId),
   claimedAt: EpochMillis,
   startedAt: Schema.optional(EpochMillis),
@@ -217,6 +220,8 @@ export const VerificationResult = Schema.Struct({
   platform: VerificationPlatform,
   architecture: Schema.NonEmptyString,
   environmentImage: Schema.optional(Schema.NonEmptyString),
+  providerSessionId: Schema.optional(ProviderProcessId),
+  providerCommandId: Schema.optional(ProviderProcessId),
   status: VerificationResultStatus,
   exitCode: Schema.optional(Schema.Int),
   summary: Schema.optional(Schema.String),

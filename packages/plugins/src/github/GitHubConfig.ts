@@ -1,8 +1,8 @@
 import { Config, Schema } from 'effect'
 
-/** GitHub App credentials and optional Enterprise API endpoint. */
+/** GitHub accepts either the numeric App ID or the 20-character client ID as JWT issuer. */
 const GitHubAppId = Schema.String.check(
-  Schema.isPattern(/^[1-9]\d*$/),
+  Schema.isPattern(/^(?:[1-9]\d*|[A-Za-z0-9]{20})$/),
 )
 
 export const GitHubConfig = Config.all({

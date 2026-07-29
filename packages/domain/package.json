@@ -26,6 +26,7 @@
     "./runtime-control": "./src/runtime-control.ts",
     "./runtime-session": "./src/runtime-session.ts",
     "./sandbox-execution": "./src/sandbox-execution.ts",
+    "./sandbox-environment": "./src/sandbox-environment.ts",
     "./sandbox-policy": "./src/sandbox-policy.ts",
     "./server-function": "./src/server-function.ts",
     "./start-workflow": "./src/start-workflow.ts",

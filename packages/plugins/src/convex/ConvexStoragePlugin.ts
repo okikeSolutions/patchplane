@@ -49,6 +49,7 @@ import {
   type GetVerificationExecutionStateInput,
   type RecordEvidenceArtifactInput,
   type RecordCandidatePatchSetInput,
+  type RecordVerificationExecutionCommandInput,
   type RecordPolicyDecisionInput,
   type RecordProvenanceEventInput,
   type RecordPublicationResultInput,
@@ -63,6 +64,23 @@ import {
   type StorageListRecentWorkflowStartsInput,
 } from '@patchplane/core/services/storage-service'
 import { ConvexConfig } from './ConvexConfig'
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Convex operation deadline exceeded')),
+          timeoutMs,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 interface ExternalWorkflowRefInput {
   readonly provider: string
@@ -205,6 +223,8 @@ const recordSandboxExecutionMutation = makeFunctionReference<
     idempotencyKey?: string
     provider: string
     sandboxId: string
+    providerSessionId?: string
+    providerCommandId?: string
     command: string
     status: 'succeeded' | 'failed'
     exitCode?: number
@@ -418,6 +438,20 @@ const startVerificationExecutionGroupMutation = makeFunctionReference<
   boolean
 >('workflowStarts:startVerificationExecutionGroup')
 
+const recordVerificationExecutionCommandMutation = makeFunctionReference<
+  'mutation',
+  {
+    systemSecret: string
+    workflowRunId: string
+    executionGroupId: string
+    claimToken: string
+    sandboxId: string
+    providerSessionId: string
+    providerCommandId: string
+  },
+  boolean
+>('workflowStarts:recordVerificationExecutionCommand')
+
 const failVerificationExecutionGroupMutation = makeFunctionReference<
   'mutation',
   {
@@ -459,6 +493,8 @@ const recordVerificationResultMutation = makeFunctionReference<
     platform: RecordVerificationResultInput['platform']
     architecture: string
     environmentImage?: string
+    providerSessionId?: string
+    providerCommandId?: string
     status: RecordVerificationResultInput['status']
     exitCode?: number
     summary?: string
@@ -844,36 +880,45 @@ export const ConvexStoragePlugin = {
         const value = yield* Effect.tryPromise({
           try: () => {
             const client = new ConvexHttpClient(convexUrl)
-            return client.mutation(recordSandboxExecutionMutation, {
-              systemSecret: Redacted.value(systemIngestionSecret),
-              workflowRunId: input.workflowRunId,
-              ...(input.incomingDispatchToken === undefined
-                ? {}
-                : { incomingDispatchToken: input.incomingDispatchToken }),
-              ...(input.executionGroupId === undefined
-                ? {}
-                : { executionGroupId: input.executionGroupId }),
-              ...(input.executionGroupClaimToken === undefined
-                ? {}
-                : {
-                    executionGroupClaimToken: input.executionGroupClaimToken,
-                  }),
-              ...(input.idempotencyKey === undefined
-                ? {}
-                : { idempotencyKey: input.idempotencyKey }),
-              provider: input.provider,
-              sandboxId: input.sandboxId,
-              command: input.command,
-              status: input.status,
-              ...(input.exitCode === undefined
-                ? {}
-                : { exitCode: input.exitCode }),
-              stdout: input.stdout,
-              ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
-              ...(input.policy === undefined ? {} : { policy: input.policy }),
-              startedAt: input.startedAt,
-              completedAt: input.completedAt,
-            })
+            return settleWithin(
+              client.mutation(recordSandboxExecutionMutation, {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                ...(input.incomingDispatchToken === undefined
+                  ? {}
+                  : { incomingDispatchToken: input.incomingDispatchToken }),
+                ...(input.executionGroupId === undefined
+                  ? {}
+                  : { executionGroupId: input.executionGroupId }),
+                ...(input.executionGroupClaimToken === undefined
+                  ? {}
+                  : {
+                      executionGroupClaimToken: input.executionGroupClaimToken,
+                    }),
+                ...(input.idempotencyKey === undefined
+                  ? {}
+                  : { idempotencyKey: input.idempotencyKey }),
+                provider: input.provider,
+                sandboxId: input.sandboxId,
+                ...(input.providerSessionId === undefined
+                  ? {}
+                  : { providerSessionId: input.providerSessionId }),
+                ...(input.providerCommandId === undefined
+                  ? {}
+                  : { providerCommandId: input.providerCommandId }),
+                command: input.command,
+                status: input.status,
+                ...(input.exitCode === undefined
+                  ? {}
+                  : { exitCode: input.exitCode }),
+                stdout: input.stdout,
+                ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
+                ...(input.policy === undefined ? {} : { policy: input.policy }),
+                startedAt: input.startedAt,
+                completedAt: input.completedAt,
+              }),
+              15_000,
+            )
           },
           catch: (cause) =>
             new StorageError({
@@ -1752,6 +1797,51 @@ export const ConvexStoragePlugin = {
         )
       })
 
+      const recordVerificationExecutionCommand = Effect.fn(
+        '@patchplane/plugins/convex/recordVerificationExecutionCommand',
+      )(function* (input: RecordVerificationExecutionCommandInput) {
+        if (systemIngestionSecret === undefined) {
+          return yield* new StorageError({
+            operation: 'recordVerificationExecutionCommand.config',
+            message:
+              'PATCHPLANE_SYSTEM_INGESTION_SECRET is required to record verification command identity',
+            cause: undefined,
+          })
+        }
+        const value = yield* Effect.tryPromise({
+          try: () =>
+            new ConvexHttpClient(convexUrl).mutation(
+              recordVerificationExecutionCommandMutation,
+              {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workflowRunId: input.workflowRunId,
+                executionGroupId: input.executionGroupId,
+                claimToken: input.claimToken,
+                sandboxId: input.sandboxId,
+                providerSessionId: input.providerSessionId,
+                providerCommandId: input.providerCommandId,
+              },
+            ),
+          catch: (cause) =>
+            new StorageError({
+              operation: 'recordVerificationExecutionCommand',
+              message: 'Convex failed to record verification command identity',
+              cause,
+            }),
+        })
+        return yield* Schema.decodeUnknownEffect(Schema.Boolean)(value).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StorageError({
+                operation: 'recordVerificationExecutionCommand.decode',
+                message:
+                  'Convex returned invalid verification command identity result',
+                cause,
+              }),
+          ),
+        )
+      })
+
       const failVerificationExecutionGroup = Effect.fn(
         '@patchplane/plugins/convex/failVerificationExecutionGroup',
       )(function* (input: FailVerificationExecutionGroupInput) {
@@ -1856,83 +1946,93 @@ export const ConvexStoragePlugin = {
         }
         const value = yield* Effect.tryPromise({
           try: () =>
-            new ConvexHttpClient(convexUrl).mutation(
-              recordVerificationResultMutation,
-              {
-                systemSecret: Redacted.value(systemIngestionSecret),
-                workflowRunId: input.workflowRunId,
-                ...(input.verificationPlanId === undefined
-                  ? {}
-                  : { verificationPlanId: input.verificationPlanId }),
-                ...(input.executionGroupId === undefined
-                  ? {}
-                  : { executionGroupId: input.executionGroupId }),
-                ...(input.executionGroupClaimToken === undefined
-                  ? {}
-                  : {
-                      executionGroupClaimToken: input.executionGroupClaimToken,
-                    }),
-                requirementId: input.requirementId,
-                candidatePatchSetId: input.candidatePatchSetId,
-                ...(input.sandboxExecutionId === undefined
-                  ? {}
-                  : { sandboxExecutionId: input.sandboxExecutionId }),
-                provider: input.provider,
-                ...(input.command === undefined
-                  ? {}
-                  : { command: input.command }),
-                ...(input.commandDigest === undefined
-                  ? {}
-                  : { commandDigest: input.commandDigest }),
-                platform: input.platform,
-                architecture: input.architecture,
-                ...(input.environmentImage === undefined
-                  ? {}
-                  : { environmentImage: input.environmentImage }),
-                status: input.status,
-                ...(input.exitCode === undefined
-                  ? {}
-                  : { exitCode: input.exitCode }),
-                ...(input.summary === undefined
-                  ? {}
-                  : { summary: input.summary }),
-                ...(input.passedCount === undefined
-                  ? {}
-                  : { passedCount: input.passedCount }),
-                ...(input.failedCount === undefined
-                  ? {}
-                  : { failedCount: input.failedCount }),
-                ...(input.skippedCount === undefined
-                  ? {}
-                  : { skippedCount: input.skippedCount }),
-                artifactIds: input.artifactIds,
-                ...(input.stdoutArtifactId === undefined
-                  ? {}
-                  : { stdoutArtifactId: input.stdoutArtifactId }),
-                ...(input.stderrArtifactId === undefined
-                  ? {}
-                  : { stderrArtifactId: input.stderrArtifactId }),
-                ...(input.stdoutCaptureStatus === undefined
-                  ? {}
-                  : { stdoutCaptureStatus: input.stdoutCaptureStatus }),
-                ...(input.stderrCaptureStatus === undefined
-                  ? {}
-                  : { stderrCaptureStatus: input.stderrCaptureStatus }),
-                ...(input.cleanupStatus === undefined
-                  ? {}
-                  : { cleanupStatus: input.cleanupStatus }),
-                ...(input.candidateDigestBefore === undefined
-                  ? {}
-                  : { candidateDigestBefore: input.candidateDigestBefore }),
-                ...(input.candidateDigestAfter === undefined
-                  ? {}
-                  : { candidateDigestAfter: input.candidateDigestAfter }),
-                startedAt: input.startedAt,
-                ...(input.completedAt === undefined
-                  ? {}
-                  : { completedAt: input.completedAt }),
-                idempotencyKey: input.idempotencyKey,
-              },
+            settleWithin(
+              new ConvexHttpClient(convexUrl).mutation(
+                recordVerificationResultMutation,
+                {
+                  systemSecret: Redacted.value(systemIngestionSecret),
+                  workflowRunId: input.workflowRunId,
+                  ...(input.verificationPlanId === undefined
+                    ? {}
+                    : { verificationPlanId: input.verificationPlanId }),
+                  ...(input.executionGroupId === undefined
+                    ? {}
+                    : { executionGroupId: input.executionGroupId }),
+                  ...(input.executionGroupClaimToken === undefined
+                    ? {}
+                    : {
+                        executionGroupClaimToken:
+                          input.executionGroupClaimToken,
+                      }),
+                  requirementId: input.requirementId,
+                  candidatePatchSetId: input.candidatePatchSetId,
+                  ...(input.sandboxExecutionId === undefined
+                    ? {}
+                    : { sandboxExecutionId: input.sandboxExecutionId }),
+                  provider: input.provider,
+                  ...(input.command === undefined
+                    ? {}
+                    : { command: input.command }),
+                  ...(input.commandDigest === undefined
+                    ? {}
+                    : { commandDigest: input.commandDigest }),
+                  platform: input.platform,
+                  architecture: input.architecture,
+                  ...(input.environmentImage === undefined
+                    ? {}
+                    : { environmentImage: input.environmentImage }),
+                  ...(input.providerSessionId === undefined
+                    ? {}
+                    : { providerSessionId: input.providerSessionId }),
+                  ...(input.providerCommandId === undefined
+                    ? {}
+                    : { providerCommandId: input.providerCommandId }),
+                  status: input.status,
+                  ...(input.exitCode === undefined
+                    ? {}
+                    : { exitCode: input.exitCode }),
+                  ...(input.summary === undefined
+                    ? {}
+                    : { summary: input.summary }),
+                  ...(input.passedCount === undefined
+                    ? {}
+                    : { passedCount: input.passedCount }),
+                  ...(input.failedCount === undefined
+                    ? {}
+                    : { failedCount: input.failedCount }),
+                  ...(input.skippedCount === undefined
+                    ? {}
+                    : { skippedCount: input.skippedCount }),
+                  artifactIds: input.artifactIds,
+                  ...(input.stdoutArtifactId === undefined
+                    ? {}
+                    : { stdoutArtifactId: input.stdoutArtifactId }),
+                  ...(input.stderrArtifactId === undefined
+                    ? {}
+                    : { stderrArtifactId: input.stderrArtifactId }),
+                  ...(input.stdoutCaptureStatus === undefined
+                    ? {}
+                    : { stdoutCaptureStatus: input.stdoutCaptureStatus }),
+                  ...(input.stderrCaptureStatus === undefined
+                    ? {}
+                    : { stderrCaptureStatus: input.stderrCaptureStatus }),
+                  ...(input.cleanupStatus === undefined
+                    ? {}
+                    : { cleanupStatus: input.cleanupStatus }),
+                  ...(input.candidateDigestBefore === undefined
+                    ? {}
+                    : { candidateDigestBefore: input.candidateDigestBefore }),
+                  ...(input.candidateDigestAfter === undefined
+                    ? {}
+                    : { candidateDigestAfter: input.candidateDigestAfter }),
+                  startedAt: input.startedAt,
+                  ...(input.completedAt === undefined
+                    ? {}
+                    : { completedAt: input.completedAt }),
+                  idempotencyKey: input.idempotencyKey,
+                },
+              ),
+              15_000,
             ),
           catch: (cause) =>
             new StorageError({
@@ -2290,6 +2390,7 @@ export const ConvexStoragePlugin = {
         startIncomingVerificationPlan,
         claimVerificationExecutionGroup,
         startVerificationExecutionGroup,
+        recordVerificationExecutionCommand,
         failVerificationExecutionGroup,
         getVerificationExecutionState,
         recordVerificationResult,

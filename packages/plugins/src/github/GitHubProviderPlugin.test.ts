@@ -179,7 +179,7 @@ describe('GitHubProviderPlugin', () => {
         headers: expect.objectContaining({
           accept: 'application/vnd.github.v3.diff',
         }),
-        redirect: 'error',
+        redirect: 'manual',
       }),
     )
     expect(nock.isDone()).toBe(true)
