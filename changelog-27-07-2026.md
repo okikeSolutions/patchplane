@@ -104,7 +104,7 @@ Validation:
 
 ## Task 6 — supported Linux provider proof
 
-Status: Complete
+Status: Reopened after post-review transient-mutation analysis; provider lifecycle evidence remains valid
 
 - Added PatchPlane-owned effective sandbox environment identity covering the PatchPlane-declared class source, provider image/snapshot identity, target, OS, architecture, provider state, public/link/volume posture, resources, network settings, lifecycle settings, and observation time.
 - Trusted Linux execution refreshes provider state and runs an independent OS/architecture probe before the repository requirement; requested/effective lifecycle, network, and resource mismatches fail closed.
@@ -128,3 +128,12 @@ Validation:
 - Herdr Effect/branded-types audit — no actionable findings after native sandbox-creation and absolute cleanup-deadline remediation.
 - Herdr documentation/tracker audit — no actionable findings after PR 150 capability/evidence reconciliation.
 - Herdr code/security review — no actionable findings.
+
+### Post-review Task 1–6 hardening
+
+- Rejected uppercase and mixed-case Git SHA-1/SHA-256 identifiers at domain, GitHub, Convex, and Daytona boundaries instead of silently canonicalizing them.
+- Required exact repository HEAD observations before and after trusted Linux execution in addition to frozen final-state digests. Endpoint snapshots reject persistent mutation and HEAD drift; transient edit/restore is now explicitly uncredited until provider-attested protected source execution exists.
+- Bounded every queue-to-source-control service-binding response by one owned whole-response deadline, strict JSON content type, fatal UTF-8 decoding, and a 16 KiB byte cap, including delayed DLQ recovery.
+- Failed malformed provider-envelope cleanup provenance closed to `failed` rather than copying an untrusted cleanup status.
+- Required R2 provider-validated SHA-256 checksums for upload, idempotent reconciliation, metadata reads, and retention readback; custom metadata alone is no longer checksum authority.
+- Revalidated the Convex candidate evidence row and matching provider-checksummed R2 object immediately before issuing an incoming dispatch claim.

@@ -91,6 +91,46 @@ type SandboxExecutionValue = Schema.Schema.Type<typeof SandboxExecution>
 
 const hostedVerificationAggregateLimitSeconds = 14 * 60
 const hostedVerificationCommandLimitSeconds = 30
+const internalJsonMaxBytes = 16 * 1024
+
+async function readBoundedJson(request: Request): Promise<unknown | undefined> {
+  const declared = request.headers.get('content-length')
+  if (declared !== null) {
+    const size = Number(declared)
+    if (!Number.isSafeInteger(size) || size < 0 || size > internalJsonMaxBytes) {
+      return undefined
+    }
+  }
+  const contentType = request.headers.get('content-type') ?? ''
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) return undefined
+  const reader = request.body?.getReader()
+  if (reader === undefined) return undefined
+  const chunks: Array<Uint8Array> = []
+  let size = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > internalJsonMaxBytes) {
+      await reader.cancel().catch(() => undefined)
+      return undefined
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    return JSON.parse(
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    ) as unknown
+  } catch {
+    return undefined
+  }
+}
 
 const noIncomingDispatch: Effect.Effect<
   IncomingPullRequestDispatch | undefined
@@ -621,7 +661,7 @@ export async function markQueuedDeliveryExhausted(
   env: WorkerEnv,
   runtime: SourceControlRuntime,
 ) {
-  const input: unknown = await request.json().catch(() => undefined)
+  const input = await readBoundedJson(request)
   const fields =
     input !== null && typeof input === 'object'
       ? (input as Record<string, unknown>)

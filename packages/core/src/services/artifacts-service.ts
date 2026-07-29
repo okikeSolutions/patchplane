@@ -16,7 +16,10 @@ export type EvidenceArtifactKind =
 
 export type ArtifactBody = string | Uint8Array | AsyncIterable<Uint8Array>
 
-/** Provider-level metadata for raw artifact bytes. Product artifact identity lives in StorageService/Convex. */
+/**
+ * Provider-level metadata for raw artifact bytes. Product artifact identity lives in StorageService/Convex.
+ * `sha256` must be obtained from a provider-validated checksum of the current stored bytes, never only custom metadata.
+ */
 export interface StoredArtifactObjectMetadata {
   readonly storageProvider: 'cloudflare-r2'
   readonly storageKey: string

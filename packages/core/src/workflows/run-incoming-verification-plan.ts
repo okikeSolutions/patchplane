@@ -100,6 +100,8 @@ const TrustedProviderEnvelope = Schema.Struct({
       }),
     ),
   ),
+  repositoryHeadBefore: Schema.optional(GitCommitSha),
+  repositoryHeadAfter: Schema.optional(GitCommitSha),
   baseSha: Schema.optional(GitCommitSha),
   candidateStateDigest: Schema.optional(Sha256Digest),
   initialCandidateStateDigest: Schema.optional(Sha256Digest),
@@ -119,7 +121,7 @@ function artifactBodyByteLength(body: unknown): number | undefined {
   return undefined
 }
 
-function isTrustedProviderEnvelopeBounded(input: {
+export function isTrustedProviderEnvelopeBounded(input: {
   readonly expectedCommand: string
   readonly result: SandboxCommandResult
 }) {
@@ -178,6 +180,39 @@ function isTrustedProviderEnvelopeBounded(input: {
         size <= 5_000_000
       )
     })
+  )
+}
+
+export function invalidProviderEnvelopeCleanupStatus() {
+  return 'failed' as const
+}
+
+export function verificationCandidateIntegrityFailureStatus(
+  candidateStateMatches: boolean,
+) {
+  return candidateStateMatches ? undefined : ('invalidated' as const)
+}
+
+export function verificationCandidateStateMatches(input: {
+  readonly candidateDigest: string
+  readonly candidateHeadSha: string
+  readonly transientDigestBefore?: string | undefined
+  readonly transientDigestAfter?: string | undefined
+  readonly initialCandidateStateDigest?: string | undefined
+  readonly finalCandidateStateDigest?: string | undefined
+  readonly repositoryHeadBefore?: string | undefined
+  readonly repositoryHeadAfter?: string | undefined
+  readonly compatibilityBaseSha?: string | undefined
+}) {
+  return (
+    input.transientDigestBefore !== undefined &&
+    input.transientDigestBefore === input.transientDigestAfter &&
+    input.transientDigestBefore === input.initialCandidateStateDigest &&
+    input.transientDigestAfter === input.finalCandidateStateDigest &&
+    input.repositoryHeadBefore === input.candidateHeadSha &&
+    input.repositoryHeadAfter === input.candidateHeadSha &&
+    input.compatibilityBaseSha === input.candidateHeadSha &&
+    input.transientDigestBefore === input.candidateDigest
   )
 }
 
@@ -607,7 +642,7 @@ export const RunIncomingVerificationPlan = Effect.fn(
           producedArtifactKinds: [],
           stdoutCaptureStatus: 'failed',
           stderrCaptureStatus: 'failed',
-          cleanupStatus: result.cleanupStatus ?? 'failed',
+          cleanupStatus: invalidProviderEnvelopeCleanupStatus(),
           candidateDigestBefore: candidate.candidateDigest,
           startedAt: claimedAt,
           completedAt: yield* Clock.currentTimeMillis,
@@ -689,13 +724,17 @@ export const RunIncomingVerificationPlan = Effect.fn(
       const requiredArtifactsPresent = requirement.requiredArtifactKinds.every(
         (kind) => artifacts.some((artifact) => artifact.kind === kind),
       )
-      const candidateUnchanged =
-        transient?.candidateDigestBefore !== undefined &&
-        transient.candidateDigestBefore === transient.candidateDigestAfter &&
-        transient.candidateDigestBefore ===
-          result.initialCandidateStateDigest &&
-        transient.candidateDigestAfter === result.candidateStateDigest &&
-        result.baseSha === candidate.headSha
+      const candidateUnchanged = verificationCandidateStateMatches({
+        candidateDigest: candidate.candidateDigest!,
+        candidateHeadSha: candidate.headSha!,
+        transientDigestBefore: transient?.candidateDigestBefore,
+        transientDigestAfter: transient?.candidateDigestAfter,
+        initialCandidateStateDigest: result.initialCandidateStateDigest,
+        finalCandidateStateDigest: result.candidateStateDigest,
+        repositoryHeadBefore: result.repositoryHeadBefore,
+        repositoryHeadAfter: result.repositoryHeadAfter,
+        compatibilityBaseSha: result.baseSha,
+      })
       const logsCaptured =
         stdout?.status === 'captured' && stderr?.status === 'captured'
       const environment = result.policy?.environment
@@ -714,9 +753,11 @@ export const RunIncomingVerificationPlan = Effect.fn(
         result.policy.resources.cpu !== undefined &&
         result.policy.resources.memoryGb !== undefined &&
         result.policy.resources.diskGb !== undefined
-      const status: VerificationResult['status'] = !candidateUnchanged
-        ? 'invalidated'
-        : transient === undefined ||
+      const integrityFailureStatus =
+        verificationCandidateIntegrityFailureStatus(candidateUnchanged)
+      const status: VerificationResult['status'] =
+        integrityFailureStatus ??
+        (transient === undefined ||
             transient.command !== command ||
             transient.platform !== platform ||
             transient.architecture !== architecture ||
@@ -731,7 +772,7 @@ export const RunIncomingVerificationPlan = Effect.fn(
             ? 'passed'
             : transient.exitCode !== 0
               ? 'failed'
-              : 'error'
+              : 'error')
       yield* storage.recordVerificationResult({
         workflowRunId: workflowRun.id,
         verificationPlanId: planCapability.plan.id,

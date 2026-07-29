@@ -29,6 +29,10 @@ export interface R2ObjectLike {
     | { readonly contentType?: string | undefined }
     | undefined
   readonly customMetadata?: Readonly<Record<string, string>> | undefined
+  /** Provider-computed checksums for the currently stored object bytes. */
+  readonly checksums?:
+    | { readonly sha256?: ArrayBuffer | Uint8Array | undefined }
+    | undefined
 }
 
 export interface R2BucketLike {
@@ -141,9 +145,19 @@ function validateExpiresInSeconds(value: number) {
   return value
 }
 
+function providerSha256(object: R2ObjectLike) {
+  const value = object.checksums?.sha256
+  if (value === undefined) return undefined
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
+  return bytes.byteLength === 32 ? Encoding.encodeHex(bytes) : undefined
+}
+
 function metadataFromObject(object: R2ObjectLike) {
-  const sha256 = object.customMetadata?.sha256
-  if (sha256 === undefined) {
+  const providerDigest = providerSha256(object)
+  if (
+    providerDigest === undefined ||
+    object.customMetadata?.sha256 !== providerDigest
+  ) {
     return undefined
   }
   return {
@@ -151,7 +165,7 @@ function metadataFromObject(object: R2ObjectLike) {
     storageKey: object.key,
     contentType: object.httpMetadata?.contentType ?? 'application/octet-stream',
     sizeBytes: object.size,
-    sha256,
+    sha256: providerDigest,
     createdAt: object.uploaded?.getTime() ?? 0,
   }
 }
@@ -363,6 +377,7 @@ export function makeR2ArtifactsService(
           if (
             object.size !== bytes.byteLength ||
             object.httpMetadata?.contentType !== input.contentType ||
+            providerSha256(object) !== sha256 ||
             metadataDiffers
           ) {
             throw new Error(
@@ -382,7 +397,7 @@ export function makeR2ArtifactsService(
                 ? {}
                 : { onlyIf: { etagDoesNotMatch: '*' as const } }),
             })
-            if (uploaded !== null) return uploaded
+            if (uploaded !== null) return validateExisting(uploaded)
             createdByRequest = false
             const raced = await bucket.head(key)
             if (raced === null) {
@@ -400,15 +415,15 @@ export function makeR2ArtifactsService(
             }),
         })
 
-        return {
-          storageProvider,
-          storageKey: object.key,
-          contentType: input.contentType,
-          sizeBytes: object.size,
-          sha256,
-          createdAt: yield* Clock.currentTimeMillis,
-          createdByRequest,
+        const metadata = metadataFromObject(object)
+        if (metadata === undefined || metadata.sha256 !== sha256) {
+          return yield* new ArtifactsError({
+            operation: 'r2.putArtifact.checksum',
+            message: 'R2 object is missing a matching provider SHA-256 checksum',
+            cause: undefined,
+          })
         }
+        return { ...metadata, createdByRequest }
       }),
 
     getArtifactMetadata: (input) =>
@@ -433,7 +448,8 @@ export function makeR2ArtifactsService(
         if (metadata === undefined) {
           return yield* new ArtifactsError({
             operation: 'r2.getArtifactMetadata.sha256',
-            message: 'Artifact object is missing sha256 metadata',
+            message:
+              'Artifact object is missing a matching provider SHA-256 checksum',
             cause: undefined,
           })
         }
@@ -484,7 +500,8 @@ export function makeR2ArtifactsService(
         if (metadata === undefined) {
           return yield* new ArtifactsError({
             operation: 'r2.applyRetentionPolicy.sha256',
-            message: 'Artifact object is missing sha256 metadata',
+            message:
+              'Artifact object is missing a matching provider SHA-256 checksum',
             cause: undefined,
           })
         }

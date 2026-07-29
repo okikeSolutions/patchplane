@@ -1,4 +1,4 @@
-import { Exit, Schema, SchemaTransformation } from 'effect'
+import { Exit, Schema } from 'effect'
 
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -21,13 +21,9 @@ export const Sha256Digest = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/i),
 )
 
-const GitCommitShaHex = Schema.String.check(
-  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i),
-)
-export const GitCommitSha = GitCommitShaHex.pipe(
-  Schema.decodeTo(GitCommitShaHex, SchemaTransformation.toLowerCase()),
-  Schema.brand('GitCommitSha'),
-)
+export const GitCommitSha = Schema.String.check(
+  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+).pipe(Schema.brand('GitCommitSha'))
 export type GitCommitSha = Schema.Schema.Type<typeof GitCommitSha>
 export const makeGitCommitSha = Schema.decodeUnknownSync(GitCommitSha)
 

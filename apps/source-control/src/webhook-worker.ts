@@ -247,18 +247,79 @@ async function readBoundedPayload(request: Request) {
   }
 }
 
-async function fetchWithServiceBindingDeadline(
+const maxServiceBindingResponseBytes = 16 * 1024
+
+async function fetchBoundedJsonWithServiceBindingDeadline(
   service: ServiceBinding,
   input: RequestInfo | URL,
   init: RequestInit,
   timeoutMs = (14 * 60 + 30) * 1_000,
-): Promise<Response> {
+): Promise<{ readonly response: Response; readonly body: unknown }> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      void reader?.cancel().catch(() => undefined)
+      reject(new Error('Source-control service binding deadline exceeded'))
+    }, timeoutMs)
+  })
+  const operation = async () => {
+    const response = await service.fetch(input, {
+      ...init,
+      signal: controller.signal,
+    })
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+      throw new Error('Source-control service binding returned non-JSON content')
+    }
+    const contentLengthHeader = response.headers.get('content-length')
+    if (contentLengthHeader !== null) {
+      const contentLength = Number(contentLengthHeader)
+      if (
+        !Number.isSafeInteger(contentLength) ||
+        contentLength < 0 ||
+        contentLength > maxServiceBindingResponseBytes
+      ) {
+        throw new Error(
+          'Source-control service binding response exceeded its byte limit',
+        )
+      }
+    }
+    reader = response.body?.getReader()
+    const chunks: Array<Uint8Array> = []
+    let size = 0
+    if (reader !== undefined) {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > maxServiceBindingResponseBytes) {
+          throw new Error(
+            'Source-control service binding response exceeded its byte limit',
+          )
+        }
+        chunks.push(value)
+      }
+    }
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return { response, body: JSON.parse(text) as unknown }
+  }
   try {
-    return await service.fetch(input, { ...init, signal: controller.signal })
+    return await Promise.race([operation(), deadline])
+  } catch (cause) {
+    controller.abort()
+    void reader?.cancel().catch(() => undefined)
+    throw cause
   } finally {
-    clearTimeout(timer)
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -417,7 +478,7 @@ const handler = {
             },
           )
           if (claim === 'claimed') {
-            const response = await fetchWithServiceBindingDeadline(
+            const bounded = await fetchBoundedJsonWithServiceBindingDeadline(
               env.SOURCE_CONTROL_WORKER,
               'https://source-control.internal/internal/queue/exhausted',
               {
@@ -430,10 +491,10 @@ const handler = {
                 }),
               },
               30_000,
-            )
-            const body: unknown = await response.json().catch(() => undefined)
+            ).catch(() => undefined)
+            const body = bounded?.body
             const terminalized =
-              response.ok &&
+              bounded?.response.ok === true &&
               body !== null &&
               typeof body === 'object' &&
               (body as Record<string, unknown>).terminalized === true
@@ -521,7 +582,8 @@ const handler = {
             continue
           }
           processingClaimed = true
-          const response = await env.SOURCE_CONTROL_WORKER.fetch(
+          const bounded = await fetchBoundedJsonWithServiceBindingDeadline(
+            env.SOURCE_CONTROL_WORKER,
             'https://source-control.internal/internal/queue/exhausted',
             {
               method: 'POST',
@@ -532,14 +594,14 @@ const handler = {
                 processingToken,
               }),
             },
+            30_000,
           )
-          const body: unknown = await response.json().catch(() => undefined)
           const decoded =
-            body !== null && typeof body === 'object'
-              ? (body as Record<string, unknown>)
+            bounded.body !== null && typeof bounded.body === 'object'
+              ? (bounded.body as Record<string, unknown>)
               : undefined
           if (
-            response.ok &&
+            bounded.response.ok &&
             decoded?.ok === true &&
             decoded.terminalized === true &&
             (decoded.workflowRunId === undefined ||
@@ -626,7 +688,7 @@ const handler = {
           continue
         }
         processingClaimed = true
-        const response = await fetchWithServiceBindingDeadline(
+        const bounded = await fetchBoundedJsonWithServiceBindingDeadline(
           env.SOURCE_CONTROL_WORKER,
           'https://source-control.internal/api/github/webhook',
           {
@@ -641,13 +703,12 @@ const handler = {
             body: message.body.payload,
           },
         )
-        const body: unknown = await response.json().catch(() => undefined)
         const decoded =
-          body !== null && typeof body === 'object'
-            ? (body as Record<string, unknown>)
+          bounded.body !== null && typeof bounded.body === 'object'
+            ? (bounded.body as Record<string, unknown>)
             : undefined
         const terminal =
-          response.status === 202 &&
+          bounded.response.status === 202 &&
           decoded?.ok === true &&
           decoded.verificationTerminal === true &&
           decoded.deliveryId === message.body.deliveryId &&

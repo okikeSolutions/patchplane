@@ -4,6 +4,8 @@ import {
   CandidatePatchSet,
   type CandidatePatchSet as CandidatePatchSetType,
 } from '@patchplane/domain/decision-review'
+import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
+import { ArtifactsError } from '@patchplane/domain/errors'
 import {
   makeCandidatePatchSetId,
   makeEvidenceArtifactId,
@@ -83,6 +85,9 @@ describe('FreezeIncomingPullRequestCandidate', () => {
     () => {
       const order: Array<string> = []
       let persistedCandidate: CandidatePatchSetType | undefined
+      let persistedArtifact: EvidenceArtifact | undefined
+      let artifactObjectAvailable = true
+      let artifactObjectSha256 = digestHex
       const layer = Layer.mergeAll(
         Layer.succeed(
           Crypto.Crypto,
@@ -132,7 +137,23 @@ describe('FreezeIncomingPullRequestCandidate', () => {
                   createdAt: 2,
                 }
               }),
-            getArtifactMetadata: () => Effect.die('unused'),
+            getArtifactMetadata: () =>
+              artifactObjectAvailable
+                ? Effect.succeed({
+                    storageProvider: 'cloudflare-r2',
+                    storageKey: 'workflows/run-1/diff/incoming.diff',
+                    contentType: 'application/vnd.github.v3.diff',
+                    sizeBytes: comparisonBytes.byteLength,
+                    sha256: artifactObjectSha256,
+                    createdAt: 2,
+                  })
+                : Effect.fail(
+                    new ArtifactsError({
+                      operation: 'test.getArtifactMetadata',
+                      message: 'missing',
+                      cause: undefined,
+                    }),
+                  ),
             createSignedReadUrl: () => Effect.die('unused'),
             deleteArtifact: () => Effect.void,
             applyRetentionPolicy: () => Effect.die('unused'),
@@ -154,13 +175,19 @@ describe('FreezeIncomingPullRequestCandidate', () => {
             recordEvidenceArtifact: (input) =>
               Effect.sync(() => {
                 order.push('artifact-metadata')
-                return {
+                persistedArtifact = {
                   id: makeEvidenceArtifactId('artifact-1'),
                   ...input,
                   createdAt: input.createdAt ?? 2,
                 }
+                return persistedArtifact
               }),
-            getEvidenceArtifact: () => Effect.succeed(Option.none()),
+            getEvidenceArtifact: () =>
+              Effect.succeed(
+                persistedArtifact === undefined
+                  ? Option.none()
+                  : Option.some(persistedArtifact),
+              ),
             getCandidatePatchSetForWorkflow: () =>
               Effect.sync(() => {
                 order.push('candidate-read')
@@ -238,6 +265,30 @@ describe('FreezeIncomingPullRequestCandidate', () => {
           candidatePatchSet: candidate,
         })
         assert.isDefined(dispatch)
+        artifactObjectAvailable = false
+        const missingArtifactError = yield* ClaimIncomingPullRequestDispatch({
+          workflowStart,
+          candidatePatchSet: candidate,
+        }).pipe(Effect.flip)
+        assert.strictEqual(
+          missingArtifactError.message,
+          'Incoming PR dispatch candidate artifact is missing or inconsistent',
+        )
+        artifactObjectAvailable = true
+        artifactObjectSha256 = 'ff'.repeat(32)
+        const mismatchedArtifactError =
+          yield* ClaimIncomingPullRequestDispatch({
+            workflowStart,
+            candidatePatchSet: candidate,
+          }).pipe(Effect.flip)
+        assert.strictEqual(
+          mismatchedArtifactError.message,
+          'Incoming PR dispatch candidate artifact is missing or inconsistent',
+        )
+        assert.strictEqual(
+          order.filter((entry) => entry === 'execution-claim').length,
+          1,
+        )
         const staleHead = 'c'.repeat(40)
         const staleCandidate = yield* Schema.decodeUnknownEffect(
           CandidatePatchSet,
@@ -275,6 +326,8 @@ describe('FreezeIncomingPullRequestCandidate', () => {
           'candidate-read',
           'candidate-read',
           'execution-claim',
+          'candidate-read',
+          'candidate-read',
           'candidate-read',
         ])
         assert.strictEqual(candidate?.candidateDigest, `sha256:${digestHex}`)

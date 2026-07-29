@@ -1354,7 +1354,7 @@ async function latestPullRequestLineage(
 }
 
 function isGitCommitSha(value: string) {
-  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)
 }
 
 function requireIncomingPullRequestIdentity(externalRef: {
@@ -1632,13 +1632,13 @@ export const createFromExternalIntake = mutation({
     requireIncomingPullRequestIdentity(args.externalRef)
     const externalRef = {
       ...args.externalRef,
-      pullRequestBaseSha: args.externalRef.pullRequestBaseSha!.toLowerCase(),
-      pullRequestHeadSha: args.externalRef.pullRequestHeadSha!.toLowerCase(),
+      pullRequestBaseSha: args.externalRef.pullRequestBaseSha!,
+      pullRequestHeadSha: args.externalRef.pullRequestHeadSha!,
       ...(args.externalRef.pullRequestPreviousHeadSha === undefined
         ? {}
         : {
             pullRequestPreviousHeadSha:
-              args.externalRef.pullRequestPreviousHeadSha.toLowerCase(),
+              args.externalRef.pullRequestPreviousHeadSha,
           }),
     }
 
@@ -2947,8 +2947,7 @@ export const recordCandidatePatchSet = mutation({
         }
         if (
           workflowRun.sourceCommitSha === undefined ||
-          args.baseSha.toLowerCase() !==
-            workflowRun.sourceCommitSha.toLowerCase()
+          args.baseSha !== workflowRun.sourceCommitSha
         ) {
           throw new ConvexError(
             'Generated candidate base does not match the pinned workflow source revision',

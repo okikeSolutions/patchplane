@@ -152,8 +152,7 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
       payload.action === 'synchronize' &&
       (payload.before === undefined ||
         payload.after === undefined ||
-        payload.after.toLowerCase() !==
-          payload.pull_request.head.sha.toLowerCase())
+        payload.after !== payload.pull_request.head.sha)
     ) {
       return yield* new GitHubError({
         operation: 'normalizeGitHubWebhookEvent.pull_request.synchronize',
@@ -163,8 +162,7 @@ export const NormalizeGitHubWebhookEvent = Effect.fn(
           hasBefore: payload.before !== undefined,
           hasAfter: payload.after !== undefined,
           afterMatchesHead:
-            payload.after?.toLowerCase() ===
-            payload.pull_request.head.sha.toLowerCase(),
+            payload.after === payload.pull_request.head.sha,
         },
       })
     }

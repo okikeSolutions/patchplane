@@ -623,7 +623,10 @@ const captureRepositoryBaseSha = Effect.fnUntraced(function* (
     stateless: true,
   })
   const baseSha = result.stdout.trim()
-  if (result.exitCode !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+  if (
+    result.exitCode !== 0 ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseSha)
+  ) {
     return yield* new SandboxError({
       operation: 'daytona.captureRepositoryBaseSha',
       message:
@@ -695,6 +698,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
 ) {
   const artifacts: Array<SandboxEvidenceArtifact> = []
   const verificationResults: Array<SandboxVerificationResult> = []
+  let repositoryHeadAfter: string | undefined
   const runCaptureCommand = Effect.fnUntraced(function* (
     operation: string,
     command: string,
@@ -816,6 +820,17 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
         exitCode: terminal.exitCode,
       })
     }
+    repositoryHeadAfter = yield* captureRepositoryBaseSha(
+      sandbox,
+      `${input.traceId}-verification-head-after`,
+    ).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('Repository HEAD capture failed after trusted command', {
+          traceId: input.traceId,
+          error: error.message,
+        }).pipe(Effect.as(undefined)),
+      ),
+    )
     const candidateDigestAfter = yield* captureCandidateState(
       'verification-candidate-after',
     )
@@ -1099,6 +1114,7 @@ const collectSandboxEvidenceArtifacts = Effect.fnUntraced(function* (
     artifacts,
     verificationResults,
     candidateStateDigest,
+    repositoryHeadAfter,
     invocationCommandResult,
   }
 })
@@ -1879,6 +1895,7 @@ export function makeDaytonaSandboxLayer(
                     artifacts: evidenceArtifacts,
                     verificationResults,
                     candidateStateDigest,
+                    repositoryHeadAfter,
                     invocationCommandResult,
                   } = yield* collectSandboxEvidenceArtifacts(sandbox, {
                     ...input,
@@ -1911,6 +1928,10 @@ export function makeDaytonaSandboxLayer(
                     ...(initialCandidateStateDigest === undefined
                       ? {}
                       : { initialCandidateStateDigest }),
+                    repositoryHeadBefore: baseSha,
+                    ...(repositoryHeadAfter === undefined
+                      ? {}
+                      : { repositoryHeadAfter }),
                     baseSha,
                     startedAt,
                     completedAt: yield* Clock.currentTimeMillis,

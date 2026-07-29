@@ -41,6 +41,10 @@ class FakeBucket implements R2BucketLike {
         options && typeof options === 'object' && 'customMetadata' in options
           ? (options as any).customMetadata
           : undefined,
+      checksums:
+        options && typeof options === 'object' && 'sha256' in options
+          ? { sha256: Uint8Array.from((options as any).sha256) }
+          : undefined,
     }
     this.objects.set(key, { body: value, options, object })
     return object
@@ -113,6 +117,18 @@ describe('CloudflareR2ArtifactsPlugin', () => {
         kind: 'stdout',
         sha256: metadata.sha256,
       })
+      expect(
+        (yield* artifacts.getArtifactMetadata({
+          storageKey: metadata.storageKey,
+        })).sha256,
+      ).toBe(metadata.sha256)
+      const stored = bucket.objects.get(metadata.storageKey)
+      if (stored === undefined) throw new Error('Expected stored artifact')
+      stored.object = { ...stored.object, checksums: undefined }
+      const missingChecksum = yield* Effect.exit(
+        artifacts.getArtifactMetadata({ storageKey: metadata.storageKey }),
+      )
+      expect(Exit.isFailure(missingChecksum)).toBe(true)
     }).pipe(Effect.provide(layer(bucket)))
   })
 
@@ -158,11 +174,21 @@ describe('CloudflareR2ArtifactsPlugin', () => {
           }),
         )
         expect(conflict.message).toContain('Failed to upload artifact to R2')
-        expect(
-          new TextDecoder().decode(
-            bucket.objects.get(idempotentFirst.storageKey)?.body,
-          ),
-        ).toBe('{"ok":true}')
+        const stored = bucket.objects.get(idempotentFirst.storageKey)
+        expect(new TextDecoder().decode(stored?.body)).toBe('{"ok":true}')
+        if (stored === undefined) throw new Error('Expected stored artifact')
+        stored.body = new TextEncoder().encode('{"no":true}')
+        stored.object = {
+          ...stored.object,
+          checksums: { sha256: new Uint8Array(32).fill(0xff) },
+        }
+        const tampered = yield* Effect.flip(
+          artifacts.putArtifact({
+            ...input,
+            idempotencyKey: 'run_123:test-report:report',
+          }),
+        )
+        expect(tampered.message).toContain('Failed to upload artifact to R2')
         expect(first.storageKey).toMatch(
           /^workflows\/run_123\/test-report\/.+-report\.json$/,
         )

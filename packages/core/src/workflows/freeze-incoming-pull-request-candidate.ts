@@ -3,6 +3,7 @@ import type { CandidatePatchSet } from '@patchplane/domain/decision-review'
 import { WorkflowStateError } from '@patchplane/domain/errors'
 import { decodeIncomingPullRequestCandidateSubject } from '@patchplane/domain/candidate-subject'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
+import { ArtifactsService } from '../services/artifacts-service'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
 import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
@@ -125,6 +126,48 @@ export const ClaimIncomingPullRequestDispatch = Effect.fn(
     })
   }
   const workflowRun = input.workflowStart.workflowRun
+  const artifactId = durableCandidate.value.diffArtifactId!
+  const evidence = yield* storage.getEvidenceArtifact({
+    artifactId,
+    workflowRunId: workflowRun.id,
+    traceId: workflowRun.traceId,
+    operation: 'claimIncomingPullRequestDispatch.getEvidenceArtifact',
+  })
+  if (Option.isNone(evidence)) {
+    return yield* new WorkflowStateError({
+      message: 'Incoming PR dispatch candidate artifact is not durably persisted',
+    })
+  }
+  const artifact = evidence.value
+  const artifacts = yield* ArtifactsService
+  const object = yield* artifacts
+    .getArtifactMetadata({
+      storageKey: artifact.storageKey,
+      traceId: workflowRun.traceId,
+      workflowRunId: workflowRun.id,
+      operation: 'claimIncomingPullRequestDispatch.getArtifactMetadata',
+    })
+    .pipe(Effect.option)
+  const expectedDigest = durableCandidate.value.candidateDigest!
+  if (
+    artifact.id !== artifactId ||
+    artifact.workflowRunId !== workflowRun.id ||
+    artifact.kind !== 'diff' ||
+    artifact.storageProvider !== 'cloudflare-r2' ||
+    artifact.subjectDigest !== expectedDigest ||
+    `sha256:${artifact.sha256}` !== expectedDigest ||
+    Option.isNone(object) ||
+    object.value.storageProvider !== artifact.storageProvider ||
+    object.value.storageKey !== artifact.storageKey ||
+    object.value.contentType !== artifact.contentType ||
+    object.value.sizeBytes !== artifact.sizeBytes ||
+    object.value.sha256 !== artifact.sha256
+  ) {
+    return yield* new WorkflowStateError({
+      message:
+        'Incoming PR dispatch candidate artifact is missing or inconsistent',
+    })
+  }
   const crypto = yield* Crypto.Crypto
   const dispatchToken = hex(yield* crypto.randomBytes(16))
   const claimed = yield* withAttemptClaimTransition(

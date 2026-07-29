@@ -237,6 +237,142 @@ describe('GitHub webhook Worker', () => {
     assert.strictEqual(retry.mock.calls.length, 0)
   })
 
+  it('rejects oversized service-binding responses before acknowledgement', async () => {
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const messageBody = {
+      deliveryId: 'delivery-1',
+      eventName: 'pull_request',
+      signature: await signature(payload),
+      payload,
+      deliveryToken: 'delivery-token-1',
+    }
+    sentryMocks.convexQuery.mockResolvedValueOnce(await receiptFor(messageBody))
+    sentryMocks.convexMutation
+      .mockResolvedValueOnce('claimed')
+      .mockResolvedValueOnce(true)
+    const oversized = JSON.stringify({
+      ok: true,
+      verificationTerminal: true,
+      deliveryId: 'delivery-1',
+      padding: 'x'.repeat(20 * 1024),
+    })
+    await worker.queue(
+      {
+        queue: 'verification-execution',
+        messages: [{ body: messageBody, ack, retry }],
+      } as unknown as Parameters<typeof worker.queue>[0],
+      env({
+        SOURCE_CONTROL_WORKER: {
+          fetch: vi.fn(async () =>
+            new Response(oversized, {
+              status: 202,
+              headers: { 'content-type': 'application/json' },
+            }),
+          ),
+        },
+      }),
+    )
+    assert.strictEqual(ack.mock.calls.length, 0)
+    assert.deepStrictEqual(retry.mock.calls, [[{ delaySeconds: 30 }]])
+  })
+
+  it('keeps the owned deadline active while reading a response body', async () => {
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const messageBody = {
+      deliveryId: 'delivery-1',
+      eventName: 'pull_request',
+      signature: await signature(payload),
+      payload,
+      deliveryToken: 'delivery-token-1',
+    }
+    sentryMocks.convexQuery.mockResolvedValueOnce(await receiptFor(messageBody))
+    sentryMocks.convexMutation
+      .mockResolvedValueOnce('claimed')
+      .mockResolvedValueOnce(true)
+    let markHeadersReturned: (() => void) | undefined
+    const headersReturned = new Promise<void>((resolve) => {
+      markHeadersReturned = resolve
+    })
+    vi.useFakeTimers()
+    try {
+      const pending = worker.queue(
+        {
+          queue: 'verification-execution',
+          messages: [{ body: messageBody, ack, retry }],
+        } as unknown as Parameters<typeof worker.queue>[0],
+        env({
+          SOURCE_CONTROL_WORKER: {
+            fetch: vi.fn(async () => {
+              markHeadersReturned?.()
+              return new Response(
+                new ReadableStream<Uint8Array>({
+                  cancel: () => new Promise<void>(() => undefined),
+                }),
+                {
+                  status: 202,
+                  headers: { 'content-type': 'application/json' },
+                },
+              )
+            }),
+          },
+        }),
+      )
+      await headersReturned
+      await vi.advanceTimersByTimeAsync((14 * 60 + 30) * 1_000)
+      await pending
+    } finally {
+      vi.useRealTimers()
+    }
+    assert.strictEqual(ack.mock.calls.length, 0)
+    assert.deepStrictEqual(retry.mock.calls, [[{ delaySeconds: 30 }]])
+  })
+
+  it('bounds a never-settling DLQ service binding and retries', async () => {
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const messageBody = {
+      deliveryId: 'delivery-1',
+      eventName: 'pull_request',
+      signature: await signature(payload),
+      payload,
+      deliveryToken: 'delivery-token-1',
+    }
+    sentryMocks.convexQuery.mockResolvedValueOnce(await receiptFor(messageBody))
+    sentryMocks.convexMutation
+      .mockResolvedValueOnce('claimed')
+      .mockResolvedValueOnce(true)
+    let markBindingReached: (() => void) | undefined
+    const bindingReached = new Promise<void>((resolve) => {
+      markBindingReached = resolve
+    })
+    vi.useFakeTimers()
+    try {
+      const pending = worker.queue(
+        {
+          queue: 'verification-dlq',
+          messages: [{ body: messageBody, ack, retry }],
+        } as unknown as Parameters<typeof worker.queue>[0],
+        env({
+          SOURCE_CONTROL_WORKER: {
+            fetch: vi.fn(() => {
+              markBindingReached?.()
+              return new Promise<Response>(() => undefined)
+            }),
+          },
+        }),
+      )
+      await bindingReached
+      await vi.advanceTimersByTimeAsync(30_000)
+      await pending
+    } finally {
+      vi.useRealTimers()
+    }
+    assert.strictEqual(ack.mock.calls.length, 0)
+    assert.deepStrictEqual(retry.mock.calls, [[{ delaySeconds: 3_600 }]])
+  })
+
   it('acknowledges a DLQ message only after delivery-fenced terminalization', async () => {
     const ack = vi.fn()
     const retry = vi.fn()

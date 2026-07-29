@@ -13,7 +13,10 @@ describe('trust primitive refinements', () => {
   it('accepts only full SHA-1 or SHA-256 commit identifiers', () => {
     const decodeCommitSha = Schema.decodeUnknownSync(GitCommitSha)
     assert.strictEqual(decodeCommitSha('a'.repeat(40)), 'a'.repeat(40))
-    assert.strictEqual(decodeCommitSha('B'.repeat(64)), 'b'.repeat(64))
+    assert.strictEqual(decodeCommitSha('b'.repeat(64)), 'b'.repeat(64))
+    assert.throws(() => decodeCommitSha('A'.repeat(40)))
+    assert.throws(() => decodeCommitSha('B'.repeat(64)))
+    assert.throws(() => decodeCommitSha(`${'a'.repeat(39)}B`))
     assert.throws(() => decodeCommitSha('a'.repeat(39)))
     assert.throws(() => decodeCommitSha('a'.repeat(41)))
     assert.throws(() => decodeCommitSha('g'.repeat(40)))

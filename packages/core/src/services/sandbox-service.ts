@@ -147,6 +147,11 @@ export interface SandboxCommandResult {
   readonly verificationResults?:
     | ReadonlyArray<SandboxVerificationResult>
     | undefined
+  /** Exact repository HEAD observed immediately before trusted execution. */
+  readonly repositoryHeadBefore?: string | undefined
+  /** Exact repository HEAD observed immediately after trusted execution. */
+  readonly repositoryHeadAfter?: string | undefined
+  /** @deprecated Compatibility alias for repositoryHeadBefore. */
   readonly baseSha?: string | undefined
   readonly candidateStateDigest?: string | undefined
   readonly initialCandidateStateDigest?: string | undefined

@@ -2,6 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { CandidatePatchSet } from '@patchplane/domain/decision-review'
 import {
+  makeEvidenceArtifactId,
   makePolicyDecisionId,
   makeReviewRunId,
   makeVerificationExecutionGroupId,
@@ -17,13 +18,22 @@ import { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { ArtifactsService } from '../services/artifacts-service'
 import { PolicyService } from '../services/policy-service'
 import { ReviewService } from '../services/review-service'
-import { SandboxService } from '../services/sandbox-service'
+import {
+  SandboxService,
+  type SandboxCommandResult,
+} from '../services/sandbox-service'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
 import { TelemetryService } from '../services/telemetry-service'
 import { ClaimIncomingPullRequestDispatch } from './freeze-incoming-pull-request-candidate'
 import { PersistConfiguredVerificationRequirements } from './persist-sandbox-verification-evidence'
-import { RunIncomingVerificationPlan } from './run-incoming-verification-plan'
+import {
+  RunIncomingVerificationPlan,
+  invalidProviderEnvelopeCleanupStatus,
+  isTrustedProviderEnvelopeBounded,
+  verificationCandidateIntegrityFailureStatus,
+  verificationCandidateStateMatches,
+} from './run-incoming-verification-plan'
 
 const baseSha = 'a'.repeat(40)
 const headSha = 'b'.repeat(40)
@@ -102,6 +112,77 @@ function dieUnused() {
 }
 
 describe('RunIncomingVerificationPlan', () => {
+  it('fails cleanup closed after rejecting a provider envelope', () => {
+    const malformed = {
+      provider: '',
+      sandboxId: 'sandbox-1',
+      sessionId: 'session-1',
+      commandId: 'command-1',
+      command: 'bun test',
+      exitCode: 0,
+      stdout: 'ok',
+      startedAt: 1,
+      completedAt: 2,
+    }
+    for (const cleanupStatus of ['deleted', 'invalid-cleanup']) {
+      assert.isFalse(
+        isTrustedProviderEnvelopeBounded({
+          expectedCommand: 'bun test',
+          result: { ...malformed, cleanupStatus } as SandboxCommandResult,
+        }),
+      )
+      assert.strictEqual(invalidProviderEnvelopeCleanupStatus(), 'failed')
+    }
+  })
+
+  it('requires exact before/after HEAD and frozen candidate digests', () => {
+    const exact = {
+      candidateDigest,
+      candidateHeadSha: headSha,
+      transientDigestBefore: candidateDigest,
+      transientDigestAfter: candidateDigest,
+      initialCandidateStateDigest: candidateDigest,
+      finalCandidateStateDigest: candidateDigest,
+      repositoryHeadBefore: headSha,
+      repositoryHeadAfter: headSha,
+      compatibilityBaseSha: headSha,
+    }
+    assert.isTrue(verificationCandidateStateMatches(exact))
+    const headDriftMatches = verificationCandidateStateMatches({
+      ...exact,
+      repositoryHeadAfter: 'd'.repeat(40),
+    })
+    assert.isFalse(headDriftMatches)
+    assert.strictEqual(
+      verificationCandidateIntegrityFailureStatus(headDriftMatches),
+      'invalidated',
+    )
+    assert.isFalse(
+      verificationCandidateStateMatches({
+        ...exact,
+        transientDigestAfter: `sha256:${'e'.repeat(64)}`,
+      }),
+    )
+  })
+
+  it('does not claim endpoint snapshots detect transient edit and restore', () => {
+    const endpointObservationsMatch = verificationCandidateStateMatches({
+      candidateDigest,
+      candidateHeadSha: headSha,
+      transientDigestBefore: candidateDigest,
+      transientDigestAfter: candidateDigest,
+      initialCandidateStateDigest: candidateDigest,
+      finalCandidateStateDigest: candidateDigest,
+      repositoryHeadBefore: headSha,
+      repositoryHeadAfter: headSha,
+      compatibilityBaseSha: headSha,
+    })
+    assert.isTrue(endpointObservationsMatch)
+    assert.isUndefined(
+      verificationCandidateIntegrityFailureStatus(endpointObservationsMatch),
+    )
+  })
+
   it.effect(
     'creates one stable non-shared group and blocked result per unsupported requirement',
     () => {
@@ -125,7 +206,25 @@ describe('RunIncomingVerificationPlan', () => {
         markRuntimeSessionStatus: dieUnused,
         getActiveRuntimeSession: () => Effect.succeed(Option.none()),
         recordEvidenceArtifact: dieUnused,
-        getEvidenceArtifact: () => Effect.succeed(Option.none()),
+        getEvidenceArtifact: () =>
+          Effect.succeed(
+            Option.some({
+              id: makeEvidenceArtifactId('artifact-diff'),
+              workflowRunId: workflowStart.workflowRun.id,
+              producer: 'source-control:github:compare',
+              subjectDigest: candidateDigest,
+              traceId: workflowStart.workflowRun.traceId,
+              kind: 'diff',
+              label: 'Incoming PR immutable comparison',
+              storageProvider: 'cloudflare-r2',
+              storageKey: 'workflows/run-1/diff/incoming.diff',
+              contentType: 'application/vnd.github.v3.diff',
+              sizeBytes: 123,
+              sha256: candidateDigest.slice('sha256:'.length),
+              retentionPolicy: 'alpha-14d',
+              createdAt: 1,
+            }),
+          ),
         getCandidatePatchSetForWorkflow: () =>
           Effect.succeed(Option.some(candidate)),
         claimCandidateFreeze: () => Effect.succeed(false),
@@ -371,7 +470,15 @@ describe('RunIncomingVerificationPlan', () => {
           ArtifactsService,
           ArtifactsService.of({
             putArtifact: dieUnused,
-            getArtifactMetadata: dieUnused,
+            getArtifactMetadata: () =>
+              Effect.succeed({
+                storageProvider: 'cloudflare-r2',
+                storageKey: 'workflows/run-1/diff/incoming.diff',
+                contentType: 'application/vnd.github.v3.diff',
+                sizeBytes: 123,
+                sha256: candidateDigest.slice('sha256:'.length),
+                createdAt: 1,
+              }),
             createSignedReadUrl: dieUnused,
             deleteArtifact: dieUnused,
             applyRetentionPolicy: dieUnused,

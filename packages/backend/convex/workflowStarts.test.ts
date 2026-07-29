@@ -1502,13 +1502,23 @@ describe('workflowStarts trusted boundary and authz', () => {
     }
 
     const first = await t.mutation(createWorkflowStartFromExternalIntake, input)
+    await expect(
+      t.mutation(createWorkflowStartFromExternalIntake, {
+        ...input,
+        traceId: 'trace-sync-uppercase',
+        externalRef: {
+          ...externalRef,
+          deliveryId: 'delivery-sync-uppercase',
+          pullRequestBaseSha: externalRef.pullRequestBaseSha.toUpperCase(),
+        },
+      }),
+    ).rejects.toThrow('complete valid GitHub pull request identity')
     const replay = await t.mutation(createWorkflowStartFromExternalIntake, {
       ...input,
       traceId: 'trace-sync-replay',
       externalRef: {
         ...externalRef,
         deliveryId: 'delivery-sync-replay',
-        pullRequestBaseSha: externalRef.pullRequestBaseSha.toUpperCase(),
       },
     })
     if (!isWorkflowStartResult(first) || !isWorkflowStartResult(replay)) {

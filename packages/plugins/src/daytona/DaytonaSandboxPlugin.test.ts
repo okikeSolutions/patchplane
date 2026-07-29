@@ -435,10 +435,20 @@ describe('Daytona sandbox boundary adapters', () => {
     () => {
       const candidateDigest = `sha256:${'d'.repeat(64)}`
       let trustedProviderCommand = ''
+      let repositoryHeadReads = 0
+      let changeFinalRepositoryHead = false
       const executeSessionCommand = vi.fn(
         async (_sessionId: string, request: { readonly command: string }) => {
           if (request.command.includes('git rev-parse HEAD')) {
-            return { exitCode: 0, stdout: repositoryBaseSha, stderr: '' }
+            repositoryHeadReads += 1
+            return {
+              exitCode: 0,
+              stdout:
+                changeFinalRepositoryHead && repositoryHeadReads === 2
+                  ? 'c'.repeat(40)
+                  : repositoryBaseSha,
+              stderr: '',
+            }
           }
           if (request.command.includes('sha256sum')) {
             return { exitCode: 0, stdout: `${'d'.repeat(64)}  -`, stderr: '' }
@@ -510,6 +520,8 @@ describe('Daytona sandbox boundary adapters', () => {
               volumeCount: 0,
             },
           },
+          repositoryHeadBefore: repositoryBaseSha,
+          repositoryHeadAfter: repositoryBaseSha,
           initialCandidateStateDigest: candidateDigest,
           candidateStateDigest: candidateDigest,
           verificationResults: [
@@ -579,6 +591,25 @@ describe('Daytona sandbox boundary adapters', () => {
         )
         expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
         expect(client.get).toHaveBeenCalledWith(sandbox.id)
+
+        repositoryHeadReads = 0
+        changeFinalRepositoryHead = true
+        const headDrift = yield* service.runRepositoryCommand({
+          ...commandInput,
+          candidateBaseSha: 'b'.repeat(40),
+          verificationInvocation: {
+            requirementKey: 'trusted:test',
+            kind: 'test',
+            command: 'bun test --reporter=junit',
+            platform: 'linux',
+            architecture: 'x86_64',
+            timeoutSeconds: 60,
+            requiredArtifactKinds: [],
+          },
+          forceDeleteAfterUse: true,
+        })
+        expect(headDrift.repositoryHeadBefore).toBe(repositoryBaseSha)
+        expect(headDrift.repositoryHeadAfter).toBe('c'.repeat(40))
       }).pipe(
         Effect.provide(testLayer(client, { DAYTONA_RETAIN_SANDBOXES: 'true' })),
       )
@@ -681,6 +712,30 @@ describe('Daytona sandbox boundary adapters', () => {
       expect(result.exitCode).toBe(42)
       expect(result.stdout).toBe('out')
       expect(result.stderr).toBe('err')
+      expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
+    }).pipe(Effect.provide(testLayer(client)))
+  })
+
+  it.effect('rejects a noncanonical uppercase repository HEAD', () => {
+    const sandbox = fakeSandbox({
+      process: {
+        createSession: vi.fn(async () => undefined),
+        executeSessionCommand: vi.fn(
+          async (_sessionId: string, request: { readonly command: string }) =>
+            request.command.includes('git rev-parse HEAD')
+              ? { exitCode: 0, stdout: 'A'.repeat(40), stderr: '' }
+              : { exitCode: 0, stdout: '', stderr: '' },
+        ),
+        deleteSession: vi.fn(async () => undefined),
+      },
+    })
+    const client = fakeClient(sandbox)
+    return Effect.gen(function* () {
+      const service = yield* SandboxService
+      const exit = yield* service.runRepositoryCommand(commandInput).pipe(
+        Effect.exit,
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
       expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
     }).pipe(Effect.provide(testLayer(client)))
   })
