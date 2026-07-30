@@ -2,7 +2,6 @@ import {
   Config,
   ConfigProvider,
   Effect,
-  Layer,
   Option,
   Redacted,
   Schema,
@@ -11,8 +10,8 @@ import {
 export type WorkerEnv = Record<string, unknown>
 
 export const PATCHPLANE_DEFAULT_AGENT_PROVIDER = 'openai'
-export const PATCHPLANE_DEFAULT_AGENT_MODEL = 'gpt-5.5'
-export const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
+const PATCHPLANE_DEFAULT_AGENT_MODEL = 'gpt-5.5'
+const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
 
 const SourceControlRouteConfigEnvironment = Config.all({
   convexUrl: Config.all({
@@ -88,14 +87,9 @@ export function sourceControlConfigLayer(env: WorkerEnv) {
   return ConfigProvider.layer(ConfigProvider.fromEnv({ env: configEnv(env) }))
 }
 
-export function provideSourceControlConfig<R, E, A>(env: WorkerEnv) {
+function provideSourceControlConfig<R, E, A>(env: WorkerEnv) {
   return (effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provide(sourceControlConfigLayer(env)))
-}
-
-export function provideSourceControlConfigLayer<R, E, A>(env: WorkerEnv) {
-  return (layer: Layer.Layer<A, E, R>) =>
-    layer.pipe(Layer.provide(sourceControlConfigLayer(env)))
 }
 
 export const loadSourceControlRouteConfig = Effect.fnUntraced(function* (

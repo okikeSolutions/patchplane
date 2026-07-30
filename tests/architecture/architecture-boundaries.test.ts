@@ -542,18 +542,6 @@ describe('architecture boundaries', () => {
         expect(startWorkflow).toContain('effectServerFn({')
         expect(startWorkflow).not.toContain('createServerFn')
 
-        const runtimeControl = yield* fileText(
-          'apps/client/src/lib/control-runtime-session.ts',
-        )
-        expect(runtimeControl).toContain('effectServerFn({')
-        expect(runtimeControl).toContain('authorizeRuntimeControl')
-        expect(runtimeControl).toContain('/internal/runtime/control')
-        expect(runtimeControl).not.toContain('DaytonaSandboxPlugin')
-        expect(runtimeControl).not.toContain('SandboxService')
-        expect(runtimeControl).not.toContain('sandboxId')
-        expect(runtimeControl).not.toContain('sessionId')
-        expect(runtimeControl).not.toContain('commandId')
-
         const directCoreWorkflowImports = (yield* sourceImportsUnder(
           'apps/client/src',
         )).filter(
@@ -586,9 +574,18 @@ describe('architecture boundaries', () => {
         const githubWebhookWorker = yield* fileText(
           'apps/source-control/src/webhook-worker.ts',
         )
-        const sourceControlGitHubRoutes = yield* fileText(
-          'apps/source-control/src/github/routes.ts',
-        )
+        const sourceControlGitHubRoutes = (yield* Effect.all(
+          [
+            'apps/source-control/src/github/routes.ts',
+            'apps/source-control/src/github/routes/support.ts',
+            'apps/source-control/src/github/routes/markQueuedDeliveryExhausted.ts',
+            'apps/source-control/src/github/routes/syncGitHubInstallation.ts',
+            'apps/source-control/src/github/routes/controlRuntimeSession.ts',
+            'apps/source-control/src/github/routes/executeWorkflowRerun.ts',
+            'apps/source-control/src/github/routes/publishDecision.ts',
+            'apps/source-control/src/github/routes/handleGitHubWebhook.ts',
+          ].map(fileText),
+        )).join('\n')
         const infra = yield* fileText('alchemy.run.ts')
 
         expect(clientCallback).toContain('getSourceControlWorker')
@@ -762,9 +759,14 @@ describe('architecture boundaries', () => {
         const workflowDetailPage = yield* fileText(
           'apps/client/src/components/app-shell/workflow-detail-page.tsx',
         )
-        const renderer = yield* fileText(
-          'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
-        )
+        const renderer = (yield* Effect.all([
+          fileText(
+            'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
+          ),
+          fileText(
+            'apps/client/src/components/app-shell/candidate-diff-renderer-sections.tsx',
+          ),
+        ])).join('\n')
         const rendererFailureBoundary = yield* fileText(
           'apps/client/src/components/app-shell/candidate-diff-failure-boundary.tsx',
         )
@@ -989,6 +991,16 @@ describe('architecture boundaries', () => {
         const daytonaPlugin = yield* fileText(
           'packages/plugins/src/daytona/DaytonaSandboxPlugin.ts',
         )
+        const daytonaProduction = (yield* Effect.all(
+          (yield* sourceFilesUnder('packages/plugins/src/daytona'))
+            .filter(
+              (file) =>
+                !file.endsWith('.test.ts') &&
+                !file.endsWith('.d.ts') &&
+                !file.endsWith('/live-rpc-smoke.ts'),
+            )
+            .map(fileText),
+        )).join('\n')
         const forbidden = [
           'workos',
           'convex',
@@ -1013,9 +1025,9 @@ describe('architecture boundaries', () => {
         expect(daytonaPlugin).toMatch(
           /envVars:\s*input\.env === undefined\s*\? undefined\s*:\s*\{ \.\.\.input\.env \}/,
         )
-        expect(daytonaPlugin).not.toContain('process.env')
+        expect(daytonaProduction).not.toContain('process.env')
         for (const value of forbidden) {
-          expect(daytonaPlugin).not.toContain(value)
+          expect(daytonaProduction).not.toContain(value)
         }
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )

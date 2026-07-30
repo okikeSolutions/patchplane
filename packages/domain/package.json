@@ -20,7 +20,6 @@
     "./patch-report-v1": "./src/patch-report-v1.ts",
     "./permission": "./src/permission.ts",
     "./prompt-request": "./src/prompt-request.ts",
-    "./repository-connection": "./src/repository-connection.ts",
     "./refinements": "./src/refinements.ts",
     "./runtime-event": "./src/runtime-event.ts",
     "./runtime-control": "./src/runtime-control.ts",

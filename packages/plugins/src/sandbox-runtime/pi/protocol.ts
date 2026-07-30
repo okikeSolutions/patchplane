@@ -6,7 +6,7 @@ export type PiRpcParsedLine =
   | { readonly kind: 'response'; readonly value: PiRpcCommandResponse }
   | { readonly kind: 'event'; readonly value: unknown }
 
-export interface PiRpcParseError {
+interface PiRpcParseError {
   readonly line: string
   readonly error: string
 }

@@ -50,7 +50,7 @@ function selection(input: {
   }
 }
 
-export const envTemplateCommand = Command.make('template', envFlags, (input) =>
+const envTemplateCommand = Command.make('template', envFlags, (input) =>
   Effect.sync(() => envTemplateText(selection(input))).pipe(
     Effect.flatMap((text) => Console.log(text)),
   )
@@ -59,7 +59,7 @@ export const envTemplateCommand = Command.make('template', envFlags, (input) =>
   Command.withShortDescription('Print env template'),
 )
 
-export const envCheckCommand = Command.make('check', envFlags, (input) =>
+const envCheckCommand = Command.make('check', envFlags, (input) =>
   Effect.gen(function* () {
     const envFile = yield* CliEnvFile
     const results = yield* envFile.collectEnvCheck(selection(input))

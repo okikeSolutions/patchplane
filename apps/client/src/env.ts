@@ -10,7 +10,7 @@ interface WorkerVersionMetadata {
   readonly timestamp: string
 }
 
-export interface ClientWorkerEnv {
+interface ClientWorkerEnv {
   SOURCE_CONTROL_WORKER: Fetcher
   PATCHPLANE_EVIDENCE_BUCKET: R2Bucket
   CF_VERSION_METADATA?: WorkerVersionMetadata

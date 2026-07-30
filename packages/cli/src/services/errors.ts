@@ -1,11 +1,11 @@
 import { Console, Effect, Runtime } from 'effect'
 
-export class PatchPlaneCommandError extends Error {
+class PatchPlaneCommandError extends Error {
   override readonly [Runtime.errorExitCode] = 1
   override readonly [Runtime.errorReported] = false
 }
 
-export class PatchPlaneSilentExit extends Error {
+class PatchPlaneSilentExit extends Error {
   override readonly [Runtime.errorExitCode] = 1
   override readonly [Runtime.errorReported] = false
 }

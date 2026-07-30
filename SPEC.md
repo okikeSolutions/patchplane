@@ -189,7 +189,6 @@ packages/
       prompt-request.ts
       workflow-intake.ts
       external-workflow-ref.ts
-      repository-connection.ts
       workflow-run.ts
       runtime-session.ts
       runtime-event.ts

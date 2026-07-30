@@ -24,7 +24,7 @@ export type DiffStatsResult =
         | 'truncated'
     }
 
-export type DiffPreview = {
+type DiffPreview = {
   readonly content: string
   readonly changedFiles: CandidateChangedFilesProjection
   readonly artifactSha256: string
@@ -344,7 +344,7 @@ async function loadDiffPreview(
   }
 }
 
-export function decodeDiffPreviewHeaders(
+function decodeDiffPreviewHeaders(
   response: Pick<Response, 'headers'>,
 ): Omit<DiffPreview, 'changedFiles' | 'content' | 'stats'> | undefined {
   const artifactSha256 = response.headers.get('x-patchplane-artifact-sha256')
@@ -382,7 +382,7 @@ export function decodeDiffPreviewHeaders(
   )
 }
 
-export function decodeDiffStatsHeaders(
+function decodeDiffStatsHeaders(
   response: Pick<Response, 'headers'>,
 ): DiffStatsResult | undefined {
   const status = response.headers.get('x-patchplane-diff-stats')

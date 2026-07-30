@@ -1,0 +1,100 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "ignore": [
+    "vendor/**",
+    "**/dist/**",
+    "**/.alchemy/**",
+    "**/_generated/**",
+    "apps/client/src/paraglide/**",
+    "apps/client/src/routeTree.gen.ts",
+    "apps/client/src/landing/routeTree.gen.ts",
+  ],
+  "ignoreIssues": {
+    "apps/client/src/env.ts": ["unlisted"],
+    "apps/client/tsconfig.json": ["unlisted"],
+    "packages/typescript-config/base.json": ["unlisted"],
+    "packages/domain/src/refinements.ts": ["duplicates"],
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "alchemy.run.ts",
+        "vitest.config.ts",
+        "scripts/**/*.{ts,mjs}",
+        "tests/**/*.{ts,tsx}",
+        "test/**/*.ts",
+      ],
+      "project": [
+        "*.ts",
+        "scripts/**/*.{ts,mjs}",
+        "tests/**/*.{ts,tsx}",
+        "test/**/*.ts",
+      ],
+    },
+    "apps/client": {
+      "entry": [
+        "src/{client,server,start}.{ts,tsx}",
+        "src/landing/{router,start}.{ts,tsx}",
+        "src/routes/**/*.{ts,tsx}",
+        "src/landing/routes/**/*.{ts,tsx}",
+        "src/scripts/**/*.ts",
+        "test/performance/**/*.tsx",
+        "src/components/ui/**/*.tsx",
+        "src/test/cloudflare-workers.ts",
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,js}",
+        "test/**/*.{ts,tsx}",
+        "vite.config.ts",
+      ],
+      "ignoreDependencies": [
+        "@inlang/plugin-m-function-matcher",
+        "@inlang/plugin-message-format",
+      ],
+    },
+    "apps/source-control": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "entry": [
+        "src/{worker,webhook-worker}.ts",
+        "src/scripts/live-convex-sandbox-smoke.ts",
+        "src/scripts/live-trust-loop-smoke.ts",
+        "src/scripts/smoke-preflight-cli.ts",
+      ],
+      "project": ["src/**/*.ts"],
+    },
+    "apps/infra": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "entry": ["alchemy.run.test.ts"],
+      "project": ["*.ts"],
+    },
+    "packages/backend": {
+      "ignoreDependencies": [
+        "@edge-runtime/vm",
+        "@patchplane/typescript-config",
+      ],
+      "entry": [
+        "convex/{auth.config,convex.config,http,schema}.ts",
+        "convex/{auth,connectedRepositories,promptRequests,requests,viewer,workflowRuns,workflowStarts}.ts",
+      ],
+      "project": ["convex/**/*.ts", "src/**/*.ts"],
+    },
+    "packages/cli": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"],
+    },
+    "packages/core": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "project": ["src/**/*.ts"],
+    },
+    "packages/domain": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "project": ["src/**/*.ts"],
+    },
+    "packages/plugins": {
+      "ignoreDependencies": ["@patchplane/typescript-config"],
+      "entry": ["src/daytona/live-rpc-smoke.ts"],
+      "project": ["src/**/*.ts"],
+    },
+  },
+}

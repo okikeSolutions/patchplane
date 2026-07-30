@@ -43,7 +43,7 @@ export function pluginIdsForInitProfile(profile: InitProfile) {
   ])
 }
 
-export function pluginIdsForInitSurface(profile: InitProfile) {
+function pluginIdsForInitSurface(profile: InitProfile) {
   if (profile === 'app') {
     return { app: pluginIdsForInitProfile('app') }
   }
@@ -57,7 +57,7 @@ export function pluginIdsForInitSurface(profile: InitProfile) {
 }
 
 /** Builds the non-secret root `patchplane.config.json` content for an init profile. */
-export function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 'withPi'>) {
+function configForProfile(options: Pick<ResolvedInitOptions, 'profile' | 'withPi'>) {
   return `${JSON.stringify({
     $schema: 'https://unpkg.com/patchplane/schema/patchplane.schema.json',
     plugins: pluginIdsForInitSurface(options.profile),

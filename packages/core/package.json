@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./dev/context": "./src/dev/context.ts",
     "./diff/project-candidate-changed-files": "./src/diff/project-candidate-changed-files.ts",
     "./diff/parse-unified-diff-stats": "./src/diff/parse-unified-diff-stats.ts",
     "./patch-report/assemble-patch-report-v1": "./src/patch-report/assemble-patch-report-v1.ts",

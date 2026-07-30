@@ -318,7 +318,7 @@ TanStack Start server function
 → Convex signed external-ingestion mutation
 ```
 
-Automated checks currently cover the foundation, backend Convex behavior, CLI integration, domain/core/plugin tests, typechecking, linting, and app build.
+Automated checks currently cover the foundation, backend Convex behavior, CLI integration, domain/core/plugin tests, typechecking, linting, Knip dead-code and dependency analysis, and app build.
 
 Remaining manual smoke before external alpha:
 
@@ -599,7 +599,7 @@ Implementation notes:
 
 Completed implementation:
 
-- [x] Added provider-owned repository connection domain schemas in `packages/domain/src/repository-connection.ts`.
+- [x] Added Convex-validated repository connection contracts and provider-owned source-control connection types.
 - [x] Added Convex `connectedRepositoryAccounts`, `connectedRepositories`, and `githubConnectionIntents` tables with indexes for workspace listing, pending install state, and GitHub webhook routing.
 - [x] Added authenticated Convex repository connection mutations/queries plus system-secret webhook route lookup in `packages/backend/convex/connectedRepositories.ts`.
 - [x] Extended `SourceControlService` with installation account and installation repository listing contracts.

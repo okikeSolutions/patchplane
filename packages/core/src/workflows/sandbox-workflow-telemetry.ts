@@ -67,7 +67,7 @@ export function withVerificationTransition<A, E, R>(
   )
 }
 
-export function candidateBreadcrumbStatus(status: CandidatePatchSet['status']) {
+function candidateBreadcrumbStatus(status: CandidatePatchSet['status']) {
   switch (status) {
     case 'captured':
       return criticalPathBreadcrumbStatuses.succeeded

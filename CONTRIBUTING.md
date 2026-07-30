@@ -23,8 +23,8 @@ bun run verify:fast
 bun run verify
 ```
 
-`verify:fast` covers typechecking, linting, tests, and the CLI eval. `verify`
-is the complete non-credentialed gate and additionally validates the production
+`verify:fast` covers typechecking, linting, the Knip dead-code and dependency
+gate, tests, and the CLI eval. `verify` is the complete non-credentialed gate and additionally validates the production
 client and Cloudflare bundle budgets. GitHub runs `verify` on every pull
 request; a passing local run keeps feedback fast.
 

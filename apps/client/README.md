@@ -36,7 +36,6 @@ Current runtime:
 
 - `src/effect/runtime.ts` — the PatchPlane `ManagedRuntime` for app/server route execution.
 - `src/effect/app-layer.ts` — app runtime layer for WorkOS, Convex, telemetry, and web crypto.
-- `src/effect/patchplane-config.ts` — loads non-secret PatchPlane project config.
 
 Server functions and API routes dynamically import the runtime only inside server handlers so server-only SDK code does not enter the browser bundle.
 

@@ -40,6 +40,31 @@ const explicitFrameworkBoundaries: ReadonlyMap<string, string> = new Map([
     'packages/backend/convex/workflowStarts.ts',
     'CONVEX-HANDLER-001: Convex serializes a directly returned Effect',
   ],
+  ...[
+    'candidates',
+    'deliveries',
+    'lifecycle',
+    'readModels',
+    'readModels/publicationFixture',
+    'readModels/recentWorkflows',
+    'readModels/workflowDetail',
+    'reviewPublication',
+    'runtimeEvidence',
+    'shared',
+    'shared/foundation',
+    'shared/integrity',
+    'shared/workflowPersistence',
+    'verification',
+    'verification/executionGroups',
+    'verification/plans',
+    'verification/results',
+  ].map(
+    (module) =>
+      [
+        `packages/backend/convex/workflowStarts/${module}.ts`,
+        'CONVEX-HANDLER-001: Convex serializes a directly returned Effect',
+      ] as const,
+  ),
   [
     'packages/plugins/src/sentry/cloudflare-worker.ts',
     'SENTRY-CF-001: Sentry owns the Promise-returning Worker wrapper',
@@ -142,9 +167,12 @@ describe('Effect-native boundaries', () => {
         expect(webhookEntry).not.toContain('async fetch(')
         expect(webhookEntry).not.toContain('async queue(')
         expect(webhookEntry).not.toContain('async scheduled(')
-        const webhookWorker = yield* fileText(
-          'apps/source-control/src/webhook-worker.ts',
-        )
+        const webhookWorker = (yield* Effect.all([
+          fileText('apps/source-control/src/webhook-worker.ts'),
+          ...(yield* sourceFilesUnder(
+            'apps/source-control/src/webhook-worker',
+          )).map(fileText),
+        ])).join('\n')
         expect(webhookWorker).not.toContain('new Promise')
         expect(webhookWorker).not.toContain('Promise.race')
         expect(webhookWorker).not.toContain('setTimeout(')

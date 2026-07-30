@@ -27,7 +27,7 @@ export function WorkflowTrustStateBadge({
   )
 }
 
-export function workflowRunStatusVariant(
+function workflowRunStatusVariant(
   status: 'queued' | 'running' | 'reviewed' | 'failed',
 ) {
   switch (status) {
@@ -42,7 +42,7 @@ export function workflowRunStatusVariant(
   }
 }
 
-export function workflowTrustStateVariant(state: WorkflowTrustState) {
+function workflowTrustStateVariant(state: WorkflowTrustState) {
   switch (state) {
     case 'approved':
       return 'success' as const

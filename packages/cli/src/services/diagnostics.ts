@@ -4,9 +4,9 @@ import { patchPlanePlugins } from '@patchplane/plugins/registry'
 import { CliConfigFile } from './config-file'
 import { CliEnvFile, type EnvSelection } from './env-file'
 
-export type DiagnosticStatus = 'ok' | 'warning' | 'error'
+type DiagnosticStatus = 'ok' | 'warning' | 'error'
 
-export interface Diagnostic {
+interface Diagnostic {
   readonly code: string
   readonly severity: DiagnosticStatus
   readonly message: string

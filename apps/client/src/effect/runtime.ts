@@ -7,7 +7,7 @@ export const patchPlaneRuntime = ManagedRuntime.make(appLayer, {
   memoMap: patchPlaneMemoMap,
 })
 
-export function disposePatchPlaneRuntime() {
+function disposePatchPlaneRuntime() {
   return patchPlaneRuntime.dispose()
 }
 

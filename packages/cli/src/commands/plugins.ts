@@ -7,7 +7,7 @@ import {
   type PatchPlanePluginMetadata,
 } from '@patchplane/plugins/registry'
 
-export function pluginsListText() {
+function pluginsListText() {
   const lines: string[] = []
   for (const plugin of Object.values(patchPlanePlugins) as readonly PatchPlanePluginMetadata[]) {
     lines.push(`${plugin.id} - ${plugin.name}`)
@@ -24,7 +24,7 @@ function isPluginId(id: string): id is PatchPlanePluginId {
   return getPatchPlanePlugin(id) !== undefined
 }
 
-export function pluginsExplainText(id: PatchPlanePluginId) {
+function pluginsExplainText(id: PatchPlanePluginId) {
   const plugin: PatchPlanePluginMetadata = patchPlanePlugins[id]
   const lines = [
     `${plugin.id} - ${plugin.name}`,
@@ -57,7 +57,7 @@ const pluginIdArgument = Argument.string('id').pipe(
   ),
 )
 
-export const pluginsListCommand = Command.make('list', {
+const pluginsListCommand = Command.make('list', {
   json: Flag.boolean('json').pipe(
     Flag.withDescription('Emit machine-readable JSON to stdout'),
   ),
@@ -70,7 +70,7 @@ export const pluginsListCommand = Command.make('list', {
   Command.withShortDescription('List plugins'),
 )
 
-export const pluginsExplainCommand = Command.make('explain', {
+const pluginsExplainCommand = Command.make('explain', {
   id: pluginIdArgument,
   json: Flag.boolean('json').pipe(
     Flag.withDescription('Emit machine-readable JSON to stdout'),

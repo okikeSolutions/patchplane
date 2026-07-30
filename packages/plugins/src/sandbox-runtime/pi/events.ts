@@ -14,7 +14,7 @@ export function isTransientPiEventType(type: string) {
   return transientPiEventTypes.has(type)
 }
 
-export interface PiRuntimeParseError {
+interface PiRuntimeParseError {
   readonly line: number
   readonly message: string
   readonly raw: string

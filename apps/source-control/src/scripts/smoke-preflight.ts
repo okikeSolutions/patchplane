@@ -1,7 +1,7 @@
 export type SmokePreflightTarget = 'trust-loop' | 'convex-sandbox'
-export type SmokePreflightMode = 'fresh' | 'post-decision'
+type SmokePreflightMode = 'fresh' | 'post-decision'
 
-export interface SmokePreflightCheck {
+interface SmokePreflightCheck {
   readonly id: string
   readonly variables: readonly string[]
   readonly status: 'present' | 'missing' | 'invalid'

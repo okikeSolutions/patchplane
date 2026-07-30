@@ -2,15 +2,6 @@ import { Effect } from 'effect'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { SourceControlService } from '../services/source-control-service'
 
-export interface PreparedRepositoryClone {
-  readonly repositoryUrl: string
-  readonly repositoryFullName: string
-  readonly branch?: string | undefined
-  readonly commitId?: string | undefined
-  readonly gitUsername?: string | undefined
-  readonly gitPassword?: string | undefined
-}
-
 export const PrepareRepositoryClone = Effect.fn(
   '@patchplane/core/repository/PrepareRepositoryClone',
 )(function*(workflowStart: WorkflowStart) {

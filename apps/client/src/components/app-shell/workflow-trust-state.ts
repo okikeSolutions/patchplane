@@ -118,26 +118,3 @@ export function workflowTrustStateLabel(state: WorkflowTrustState) {
       return state
   }
 }
-
-export function workflowTrustStateDetail(state: WorkflowTrustState) {
-  switch (state) {
-    case 'queued':
-      return 'patchplane has accepted the workflow and is waiting for runtime evidence.'
-    case 'running':
-      return 'Runtime work is in progress. Evidence is still being collected.'
-    case 'no-sandbox-run':
-      return 'No sandbox execution has been recorded yet, so this change is not trusted.'
-    case 'sandbox-failed':
-      return 'The sandbox produced a failed command result. Inspect logs before taking action.'
-    case 'needs-review':
-      return 'Sandbox evidence exists. A human review decision is still required.'
-    case 'approved':
-      return 'A reviewer approved this workflow.'
-    case 'rejected':
-      return 'A reviewer rejected this workflow.'
-    case 'changes-requested':
-      return 'A reviewer requested changes before this workflow can be trusted.'
-    default:
-      return 'patchplane has no additional trust-state detail for this workflow yet.'
-  }
-}

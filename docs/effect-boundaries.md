@@ -64,14 +64,15 @@ The following are prohibited outside a registered boundary adapter:
   (`CF-WORKER-001`). It returns the Promise produced by exactly one route
   `ManagedRuntime` bridge, adds only boundary failure capture and disposal
   scheduling, and does not start a second Effect runtime.
-- `src/webhook-worker.ts`: Cloudflare `fetch`, `scheduled`, and `queue` bridges.
-  Webhook verification, R2/Convex/Queue calls, bounded streams, service-binding
+- `src/webhook-worker.ts` and `src/webhook-worker/*.ts`: Cloudflare `fetch`,
+  `scheduled`, and `queue` bridges split across bounded-input, fetch, recovery,
+  primary-delivery, dead-letter, and processing-support modules. Webhook
+  verification, R2/Convex/Queue calls, bounded streams, service-binding
   deadlines, retries, and terminalization are Effect programs.
-- `src/github/routes.ts`: managed-runtime HTTP adapters. The exported route
-  functions return Promises because Cloudflare consumes them, while core
-  workflows, configuration, deadlines, and failures execute in the shared
-  `ManagedRuntime`. This file is the next consolidation point if routing moves
-  to one request-level runtime program.
+- `src/github/routes.ts` and `src/github/routes/*.ts`: managed-runtime HTTP
+  adapters split by endpoint. The exported route functions return Promises
+  because Cloudflare consumes them, while core workflows, configuration,
+  deadlines, and failures execute in the shared `ManagedRuntime`.
 - `src/github/config.ts` and `src/critical-path-telemetry.ts`: native Effect.
 
 No provider SDK implementation belongs in this application directory.
@@ -118,6 +119,23 @@ transaction inventory is explicit:
 - `packages/backend/convex/viewer.ts`
 - `packages/backend/convex/workflowRuns.ts`
 - `packages/backend/convex/workflowStarts.ts`
+- `packages/backend/convex/workflowStarts/candidates.ts`
+- `packages/backend/convex/workflowStarts/deliveries.ts`
+- `packages/backend/convex/workflowStarts/lifecycle.ts`
+- `packages/backend/convex/workflowStarts/readModels.ts`
+- `packages/backend/convex/workflowStarts/readModels/publicationFixture.ts`
+- `packages/backend/convex/workflowStarts/readModels/recentWorkflows.ts`
+- `packages/backend/convex/workflowStarts/readModels/workflowDetail.ts`
+- `packages/backend/convex/workflowStarts/reviewPublication.ts`
+- `packages/backend/convex/workflowStarts/runtimeEvidence.ts`
+- `packages/backend/convex/workflowStarts/shared.ts`
+- `packages/backend/convex/workflowStarts/shared/foundation.ts`
+- `packages/backend/convex/workflowStarts/shared/integrity.ts`
+- `packages/backend/convex/workflowStarts/shared/workflowPersistence.ts`
+- `packages/backend/convex/workflowStarts/verification.ts`
+- `packages/backend/convex/workflowStarts/verification/executionGroups.ts`
+- `packages/backend/convex/workflowStarts/verification/plans.ts`
+- `packages/backend/convex/workflowStarts/verification/results.ts`
 
 Existing transaction handlers remain in this inventory while migration is
 evaluated handler by handler. An Effect migration is valid only when:

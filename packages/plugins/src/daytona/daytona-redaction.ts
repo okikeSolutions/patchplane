@@ -1,5 +1,3 @@
-import { Redacted } from 'effect'
-
 function getStringProperty(value: object, key: string) {
   const property = Reflect.get(value, key)
   return typeof property === 'string' ? property : undefined
@@ -10,16 +8,14 @@ function getNumberProperty(value: object, key: string) {
   return typeof property === 'number' ? property : undefined
 }
 
-export function redactDaytonaSecret(value: string) {
-  return Redacted.make(value)
-}
-
 export function sanitizeDaytonaCause(cause: unknown): Record<string, unknown> {
   if (cause instanceof Error) {
     return {
       name: cause.name,
       message: cause.message,
-      ...(cause.stack === undefined ? {} : { stack: cause.stack.split('\n').slice(0, 8).join('\n') }),
+      ...(cause.stack === undefined
+        ? {}
+        : { stack: cause.stack.split('\n').slice(0, 8).join('\n') }),
     }
   }
 

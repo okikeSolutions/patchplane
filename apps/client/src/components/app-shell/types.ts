@@ -4,7 +4,7 @@ export interface ViewerIdentity {
   email?: string
 }
 
-export interface ExternalWorkflowRefRow {
+interface ExternalWorkflowRefRow {
   provider: string
   deliveryId: string
   eventKind: string
@@ -30,7 +30,7 @@ export interface ExternalWorkflowRefRow {
   senderLogin?: string
 }
 
-export interface PromptRequestRow {
+interface PromptRequestRow {
   id: string
   workspaceId: string
   actorId: string
@@ -42,7 +42,7 @@ export interface PromptRequestRow {
   createdAt: number
 }
 
-export interface WorkflowRunRow {
+interface WorkflowRunRow {
   id: string
   promptRequestId: string
   workspaceId: string
@@ -101,7 +101,7 @@ export interface RuntimeSessionRow {
   completedAt?: number
 }
 
-export interface SandboxPolicyRow {
+interface SandboxPolicyRow {
   lifecycle: {
     ephemeral: boolean
     retainAfterRun: boolean
@@ -121,7 +121,7 @@ export interface SandboxPolicyRow {
   timeoutSeconds?: number
 }
 
-export interface EvidenceArtifactRow {
+interface EvidenceArtifactRow {
   id: string
   workflowRunId: string
   producer?: string
@@ -163,7 +163,7 @@ export interface SandboxExecutionRow {
   completedAt: number
 }
 
-export interface CandidatePatchSetRow {
+interface CandidatePatchSetRow {
   id: string
   workflowRunId: string
   sandboxExecutionId?: string
@@ -183,7 +183,7 @@ export interface CandidatePatchSetRow {
   createdAt: number
 }
 
-export interface ReviewRunRow {
+interface ReviewRunRow {
   id: string
   workflowRunId: string
   sandboxExecutionId?: string
@@ -197,7 +197,7 @@ export interface ReviewRunRow {
   createdAt: number
 }
 
-export interface ReviewFindingRow {
+interface ReviewFindingRow {
   id: string
   workflowRunId: string
   reviewRunId?: string
@@ -211,7 +211,7 @@ export interface ReviewFindingRow {
   createdAt: number
 }
 
-export interface VerificationRequirementRow {
+interface VerificationRequirementRow {
   id: string
   workflowRunId: string
   key: string
@@ -226,7 +226,7 @@ export interface VerificationRequirementRow {
   createdAt: number
 }
 
-export interface VerificationResultRow {
+interface VerificationResultRow {
   id: string
   workflowRunId: string
   requirementId: string
@@ -261,7 +261,7 @@ export interface VerificationResultRow {
   idempotencyKey: string
 }
 
-export interface PolicyDecisionRow {
+interface PolicyDecisionRow {
   id: string
   workflowRunId: string
   reviewRunId?: string
@@ -277,7 +277,7 @@ export interface PolicyDecisionRow {
   createdAt: number
 }
 
-export interface HumanDecisionRow {
+interface HumanDecisionRow {
   id: string
   workflowRunId: string
   sandboxExecutionId?: string
@@ -293,7 +293,7 @@ export interface HumanDecisionRow {
   idempotencyKey?: string
 }
 
-export interface PublicationResultRow {
+interface PublicationResultRow {
   id: string
   workflowRunId: string
   humanDecisionId?: string
@@ -310,7 +310,7 @@ export interface PublicationResultRow {
   idempotencyKey?: string
 }
 
-export interface ProvenanceEventRow {
+interface ProvenanceEventRow {
   id: string
   workflowRunId: string
   traceId: string

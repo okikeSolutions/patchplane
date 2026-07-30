@@ -1,6 +1,6 @@
 import { Config, Effect, Redacted, Schema } from 'effect'
 
-export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
+const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'anthropic': 'ANTHROPIC_API_KEY',
   'ant-ling': 'ANT_LING_API_KEY',
   'openai': 'OPENAI_API_KEY',
@@ -43,7 +43,7 @@ class PiProviderConfigError extends Schema.ErrorClass<PiProviderConfigError>(
   message: Schema.String,
 }) {}
 
-export function piProviderApiKeyEnvName(provider: string) {
+function piProviderApiKeyEnvName(provider: string) {
   return piProviderApiKeyEnvNames[provider]
 }
 

@@ -2,7 +2,7 @@ import { Effect } from 'effect'
 import { Prompt } from 'effect/unstable/cli'
 import { pluginIdsForInitProfile, type InitProfile } from '../services/config-file'
 
-export interface InitPromptAnswers {
+interface InitPromptAnswers {
   readonly profile: InitProfile
   readonly withPi: boolean
   readonly confirmed: boolean

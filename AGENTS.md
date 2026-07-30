@@ -39,7 +39,7 @@ new boundary is introduced; do not paper over a failure by moving an import.
 
 ```sh
 bun install --frozen-lockfile
-bun run verify:fast  # types, lint, unit/integration tests, CLI eval
+bun run verify:fast  # types, lint, Knip dead-code gate, tests, CLI eval
 bun run verify       # fast gate plus production build and Cloudflare bundle budgets
 ```
 

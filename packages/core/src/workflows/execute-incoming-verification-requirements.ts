@@ -1,0 +1,527 @@
+import { Clock, Effect, Option } from 'effect'
+import { SandboxError } from '@patchplane/domain/errors'
+import { type EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
+import {
+  type VerificationExecutionGroup,
+  type VerificationRequirement,
+  type VerificationResult,
+} from '@patchplane/domain/verification'
+import type { WorkflowStart } from '@patchplane/domain/workflow-start'
+import {
+  SandboxService,
+  type SandboxCommandInput,
+  type SandboxCommandResult,
+} from '../services/sandbox-service'
+import { StorageService } from '../services/storage-service'
+import { CaptureEvidenceArtifact } from './capture-evidence-artifact'
+import { CaptureSandboxResultArtifacts } from './capture-sandbox-result-artifacts'
+import type { IncomingPullRequestDispatch } from './freeze-incoming-pull-request-candidate'
+import { type PersistedVerificationPlanV1 } from './persist-sandbox-verification-evidence'
+import {
+  boundedUtf8,
+  invalidProviderEnvelopeCleanupStatus,
+  isTrustedProviderEnvelopeBounded,
+  preview,
+  verificationCandidateIntegrityFailureStatus,
+  verificationCandidateStateMatches,
+  verificationProtectedSourcePolicyMatches,
+} from './incoming-verification-plan-validation'
+
+export interface ClaimedVerificationExecutionGroup {
+  readonly group: VerificationExecutionGroup
+  readonly claimToken: string
+  readonly claimedAt: number
+  readonly commandDigest?: VerificationResult['commandDigest'] | undefined
+  readonly timeoutSeconds: number
+}
+
+export const ExecuteIncomingVerificationRequirements = Effect.fn(
+  '@patchplane/core/workflows/ExecuteIncomingVerificationRequirements',
+)(function* (input: {
+  readonly workflowRun: WorkflowStart['workflowRun']
+  readonly candidate: IncomingPullRequestDispatch['candidatePatchSet']
+  readonly planCapability: PersistedVerificationPlanV1
+  readonly claimedGroups: ReadonlyMap<
+    VerificationRequirement['id'],
+    ClaimedVerificationExecutionGroup
+  >
+  readonly capacityBlocked: boolean
+  readonly clone:
+    | Pick<
+        SandboxCommandInput,
+        | 'repositoryUrl'
+        | 'repositoryFullName'
+        | 'branch'
+        | 'commitId'
+        | 'gitUsername'
+        | 'gitPassword'
+      >
+    | undefined
+}) {
+  const storage = yield* StorageService
+  const sandbox = yield* SandboxService
+  const recordCommand = storage.recordVerificationExecutionCommand
+  const startGroup = storage.startVerificationExecutionGroup
+  if (recordCommand === undefined) {
+    return yield* new SandboxError({
+      operation: 'executeIncomingVerificationRequirements.config',
+      message: 'Verification command storage is unavailable',
+      cause: undefined,
+    })
+  }
+  const {
+    workflowRun,
+    candidate,
+    planCapability,
+    claimedGroups,
+    capacityBlocked,
+    clone,
+  } = input
+  for (const requirement of planCapability.requirements) {
+    const claimed = claimedGroups.get(requirement.id)
+    if (claimed === undefined) continue
+    const { group, claimToken, claimedAt, commandDigest, timeoutSeconds } =
+      claimed
+    const platform = requirement.platform ?? 'linux'
+    const architecture = requirement.architecture ?? 'x86_64'
+    const command = requirement.command
+    let providerProcessIdentity:
+      | {
+          readonly providerSessionId: NonNullable<
+            SandboxCommandResult['sessionId']
+          >
+          readonly providerCommandId: NonNullable<
+            SandboxCommandResult['commandId']
+          >
+        }
+      | undefined
+
+    yield* Effect.gen(function* () {
+      if (capacityBlocked || platform !== 'linux' || command === undefined) {
+        const completedAt = yield* Clock.currentTimeMillis
+        yield* storage.recordVerificationResult({
+          workflowRunId: workflowRun.id,
+          verificationPlanId: planCapability.plan.id,
+          executionGroupId: group.id,
+          executionGroupClaimToken: claimToken,
+          requirementId: requirement.id,
+          candidatePatchSetId: candidate.id,
+          provider: 'daytona',
+          ...(command === undefined ? {} : { command }),
+          ...(commandDigest === undefined ? {} : { commandDigest }),
+          platform,
+          architecture,
+          status: 'blocked',
+          summary: capacityBlocked
+            ? 'Trusted verification plan exceeds the hosted execution capacity bound.'
+            : command === undefined
+              ? 'Trusted requirement has no executable command envelope.'
+              : `Required ${platform} verification is unavailable in the Daytona Linux executor.`,
+          artifactIds: [],
+          producedArtifactKinds: [],
+          stdoutCaptureStatus: 'failed',
+          stderrCaptureStatus: 'failed',
+          cleanupStatus: 'not-started',
+          candidateDigestBefore: candidate.candidateDigest,
+          candidateDigestAfter: candidate.candidateDigest,
+          startedAt: claimedAt,
+          completedAt,
+          idempotencyKey: `${group.id}:result`,
+          traceId: workflowRun.traceId,
+          operation: 'runIncomingVerificationPlan.recordBlockedResult',
+        })
+        return
+      }
+
+      if (clone === undefined) {
+        return yield* new SandboxError({
+          operation: 'runIncomingVerificationPlan.prepareRepository',
+          message: 'Trusted verification repository clone is unavailable',
+          cause: group.id,
+        })
+      }
+      const sandboxResult = yield* sandbox
+        .runRepositoryCommand({
+          ...clone,
+          candidateBaseSha: candidate.baseSha!,
+          command,
+          timeoutSeconds,
+          verificationInvocation: {
+            requirementKey: requirement.key,
+            kind: requirement.kind,
+            command,
+            platform,
+            architecture,
+            timeoutSeconds,
+            requiredArtifactKinds: requirement.requiredArtifactKinds,
+          },
+          forceDeleteAfterUse: true,
+          traceId: workflowRun.traceId,
+          onSandboxStarted: (sandboxId) =>
+            startGroup({
+              workflowRunId: workflowRun.id,
+              executionGroupId: group.id,
+              claimToken,
+              sandboxId,
+              traceId: workflowRun.traceId,
+              operation: 'runIncomingVerificationPlan.startGroup',
+            }).pipe(
+              Effect.filterOrFail(
+                (started) => started,
+                () =>
+                  new SandboxError({
+                    operation: 'runIncomingVerificationPlan.startGroup',
+                    message: 'Verification execution group start was fenced',
+                    cause: group.id,
+                  }),
+              ),
+              Effect.asVoid,
+            ),
+          onVerificationCommandStarted: ({ sandboxId, sessionId, commandId }) =>
+            Effect.gen(function* () {
+              providerProcessIdentity = {
+                providerSessionId: sessionId,
+                providerCommandId: commandId,
+              }
+              const recorded = yield* recordCommand({
+                workflowRunId: workflowRun.id,
+                executionGroupId: group.id,
+                claimToken,
+                sandboxId,
+                providerSessionId: sessionId,
+                providerCommandId: commandId,
+                traceId: workflowRun.traceId,
+                operation:
+                  'runIncomingVerificationPlan.recordVerificationCommand',
+              })
+              if (!recorded) {
+                return yield* new SandboxError({
+                  operation:
+                    'runIncomingVerificationPlan.recordVerificationCommand',
+                  message:
+                    'Verification provider command identity persistence was fenced',
+                  cause: group.id,
+                })
+              }
+            }),
+        })
+        .pipe(
+          Effect.onInterrupt(() =>
+            storage
+              .recordVerificationResult({
+                workflowRunId: workflowRun.id,
+                verificationPlanId: planCapability.plan.id,
+                executionGroupId: group.id,
+                executionGroupClaimToken: claimToken,
+                requirementId: requirement.id,
+                candidatePatchSetId: candidate.id,
+                provider: 'daytona',
+                command,
+                commandDigest,
+                platform,
+                architecture,
+                ...(providerProcessIdentity === undefined
+                  ? {}
+                  : providerProcessIdentity),
+                status: 'cancelled',
+                summary: 'Trusted command execution was interrupted.',
+                artifactIds: [],
+                producedArtifactKinds: [],
+                stdoutCaptureStatus: 'failed',
+                stderrCaptureStatus: 'failed',
+                cleanupStatus: 'failed',
+                candidateDigestBefore: candidate.candidateDigest,
+                startedAt: claimedAt,
+                completedAt: Date.now(),
+                idempotencyKey: `${group.id}:result`,
+                traceId: workflowRun.traceId,
+                operation: 'runIncomingVerificationPlan.cancelGroup',
+              })
+              .pipe(Effect.asVoid),
+          ),
+          Effect.match({
+            onFailure: (error) => ({ ok: false as const, error }),
+            onSuccess: (value) => ({ ok: true as const, value }),
+          }),
+        )
+
+      yield* Effect.logInfo(
+        'Daytona trusted command lifecycle returned to core',
+        {
+          workflowRunId: workflowRun.id,
+          executionGroupId: group.id,
+          succeeded: sandboxResult.ok,
+        },
+      )
+      if (!sandboxResult.ok) {
+        const completedAt = yield* Clock.currentTimeMillis
+        yield* storage.recordVerificationResult({
+          workflowRunId: workflowRun.id,
+          verificationPlanId: planCapability.plan.id,
+          executionGroupId: group.id,
+          executionGroupClaimToken: claimToken,
+          requirementId: requirement.id,
+          candidatePatchSetId: candidate.id,
+          provider: 'daytona',
+          command,
+          commandDigest,
+          platform,
+          architecture,
+          ...(providerProcessIdentity === undefined
+            ? {}
+            : providerProcessIdentity),
+          status: 'error',
+          summary: `Daytona could not complete the trusted command envelope (${sandboxResult.error.operation}).`,
+          artifactIds: [],
+          producedArtifactKinds: [],
+          stdoutCaptureStatus: 'failed',
+          stderrCaptureStatus: 'failed',
+          cleanupStatus: 'failed',
+          candidateDigestBefore: candidate.candidateDigest,
+          startedAt: claimedAt,
+          completedAt,
+          idempotencyKey: `${group.id}:result`,
+          traceId: workflowRun.traceId,
+          operation: 'runIncomingVerificationPlan.recordProviderError',
+        })
+        return
+      }
+
+      const result = sandboxResult.value
+      if (
+        !isTrustedProviderEnvelopeBounded({
+          expectedCommand: command,
+          result,
+        }) ||
+        result.sessionId === undefined ||
+        result.commandId === undefined ||
+        providerProcessIdentity === undefined ||
+        result.sessionId !== providerProcessIdentity.providerSessionId ||
+        result.commandId !== providerProcessIdentity.providerCommandId
+      ) {
+        yield* storage.recordVerificationResult({
+          workflowRunId: workflowRun.id,
+          verificationPlanId: planCapability.plan.id,
+          executionGroupId: group.id,
+          executionGroupClaimToken: claimToken,
+          requirementId: requirement.id,
+          candidatePatchSetId: candidate.id,
+          provider: 'daytona',
+          command,
+          commandDigest,
+          platform,
+          architecture,
+          ...(providerProcessIdentity === undefined
+            ? {}
+            : providerProcessIdentity),
+          status: 'error',
+          summary: 'Daytona returned an invalid or oversized command envelope.',
+          artifactIds: [],
+          producedArtifactKinds: [],
+          stdoutCaptureStatus: 'failed',
+          stderrCaptureStatus: 'failed',
+          cleanupStatus: invalidProviderEnvelopeCleanupStatus(),
+          candidateDigestBefore: candidate.candidateDigest,
+          startedAt: claimedAt,
+          completedAt: yield* Clock.currentTimeMillis,
+          idempotencyKey: `${group.id}:result`,
+          traceId: workflowRun.traceId,
+          operation: 'runIncomingVerificationPlan.recordInvalidEnvelope',
+        })
+        return
+      }
+      const sandboxExecution = yield* storage.recordSandboxExecution({
+        workflowRunId: workflowRun.id,
+        executionGroupId: group.id,
+        executionGroupClaimToken: claimToken,
+        idempotencyKey: `${group.id}:sandbox-execution`,
+        provider: result.provider,
+        sandboxId: result.sandboxId,
+        providerSessionId: result.sessionId,
+        providerCommandId: result.commandId,
+        command: result.command,
+        status: result.exitCode === 0 ? 'succeeded' : 'failed',
+        ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+        stdout: preview(result.stdout),
+        ...(result.stderr === undefined
+          ? {}
+          : { stderr: preview(result.stderr) }),
+        ...(result.policy === undefined ? {} : { policy: result.policy }),
+        startedAt: result.startedAt,
+        completedAt: result.completedAt,
+        traceId: workflowRun.traceId,
+        operation: 'runIncomingVerificationPlan.recordSandboxExecution',
+      })
+      const producer = `sandbox:${requirement.kind}:${result.provider}:${result.sandboxId}:${result.startedAt}`
+      const captureLog = (kind: 'stdout' | 'stderr', value: string) => {
+        const bounded = boundedUtf8(value)
+        return CaptureEvidenceArtifact({
+          workflowRunId: workflowRun.id,
+          traceId: workflowRun.traceId,
+          producer,
+          subjectDigest: candidate.candidateDigest!,
+          kind,
+          label: `${requirement.label} ${kind}`,
+          contentType: 'text/plain; charset=utf-8',
+          body: bounded.body,
+          retentionPolicy: 'alpha-14d',
+          idempotencyKey: `${group.id}:${kind}`,
+        }).pipe(
+          Effect.map((artifact) => ({ artifact, status: bounded.status })),
+          Effect.option,
+        )
+      }
+      const stdoutCapture = yield* captureLog('stdout', result.stdout)
+      const stderrCapture = yield* captureLog('stderr', result.stderr ?? '')
+      const stdout = Option.getOrUndefined(stdoutCapture)
+      const stderr = Option.getOrUndefined(stderrCapture)
+      const evidenceArtifactCapture = yield* CaptureSandboxResultArtifacts({
+        workflowRunId: workflowRun.id,
+        traceId: workflowRun.traceId,
+        result,
+        subjectDigest: candidate.candidateDigest,
+        verificationRequirementKey: requirement.key,
+        verificationRequirementKind: requirement.kind,
+        ...(result.initialCandidateStateDigest === undefined
+          ? {}
+          : {
+              initialCandidateStateDigest: result.initialCandidateStateDigest,
+            }),
+      }).pipe(Effect.option)
+      const evidenceArtifacts =
+        Option.getOrUndefined(evidenceArtifactCapture) ?? []
+      const providerArtifactsCaptured = Option.isSome(evidenceArtifactCapture)
+      const transient = result.verificationResults?.find(
+        (verification) => verification.requirementKey === requirement.key,
+      )
+      const artifacts = [
+        ...evidenceArtifacts,
+        ...(stdout === undefined ? [] : [stdout.artifact]),
+        ...(stderr === undefined ? [] : [stderr.artifact]),
+      ] satisfies ReadonlyArray<EvidenceArtifact>
+      const requiredArtifactsPresent = requirement.requiredArtifactKinds.every(
+        (kind) => artifacts.some((artifact) => artifact.kind === kind),
+      )
+      const candidateUnchanged = verificationCandidateStateMatches({
+        candidateDigest: candidate.candidateDigest!,
+        candidateHeadSha: candidate.headSha!,
+        transientDigestBefore: transient?.candidateDigestBefore,
+        transientDigestAfter: transient?.candidateDigestAfter,
+        initialCandidateStateDigest: result.initialCandidateStateDigest,
+        finalCandidateStateDigest: result.candidateStateDigest,
+        repositoryHeadBefore: result.repositoryHeadBefore,
+        repositoryHeadAfter: result.repositoryHeadAfter,
+        compatibilityBaseSha: result.baseSha,
+      })
+      const logsCaptured =
+        stdout?.status === 'captured' && stderr?.status === 'captured'
+      const environment = result.policy?.environment
+      const effectiveEnvironment =
+        environment !== undefined &&
+        environment.sandboxClass === 'linux-container' &&
+        environment.sandboxClassSource === 'trusted-request' &&
+        environment.operatingSystem === 'Linux' &&
+        environment.architecture === architecture &&
+        environment.providerState === 'started' &&
+        environment.public === false &&
+        environment.linked === false &&
+        environment.volumeCount === 0 &&
+        result.policy?.lifecycle.ephemeral === true &&
+        result.policy.lifecycle.retainAfterRun === false &&
+        result.policy.resources.cpu !== undefined &&
+        result.policy.resources.memoryGb !== undefined &&
+        result.policy.resources.diskGb !== undefined
+      const protectedSourceExecution = verificationProtectedSourcePolicyMatches(
+        result.policy?.protectedExecution,
+      )
+      const integrityFailureStatus =
+        verificationCandidateIntegrityFailureStatus(candidateUnchanged)
+      const status: VerificationResult['status'] =
+        integrityFailureStatus ??
+        (transient === undefined ||
+        transient.command !== command ||
+        transient.platform !== platform ||
+        transient.architecture !== architecture ||
+        transient.exitCode === undefined ||
+        result.cleanupStatus !== 'deleted' ||
+        !effectiveEnvironment ||
+        !protectedSourceExecution ||
+        !providerArtifactsCaptured ||
+        !logsCaptured ||
+        !requiredArtifactsPresent
+          ? 'error'
+          : transient.exitCode === 0 && transient.status === 'succeeded'
+            ? 'passed'
+            : transient.exitCode !== 0
+              ? 'failed'
+              : 'error')
+      yield* storage.recordVerificationResult({
+        workflowRunId: workflowRun.id,
+        verificationPlanId: planCapability.plan.id,
+        executionGroupId: group.id,
+        executionGroupClaimToken: claimToken,
+        requirementId: requirement.id,
+        candidatePatchSetId: candidate.id,
+        sandboxExecutionId: sandboxExecution.id,
+        provider: result.provider,
+        command,
+        commandDigest,
+        platform,
+        architecture,
+        ...(environment?.image === undefined
+          ? {}
+          : { environmentImage: environment.image }),
+        providerSessionId: result.sessionId,
+        providerCommandId: result.commandId,
+        status,
+        ...(transient?.exitCode === undefined
+          ? {}
+          : { exitCode: transient.exitCode }),
+        ...(transient?.message === undefined
+          ? {}
+          : { summary: transient.message }),
+        artifactIds: artifacts.map((artifact) => artifact.id),
+        producedArtifactKinds: artifacts.map((artifact) => artifact.kind),
+        ...(stdout === undefined
+          ? {}
+          : { stdoutArtifactId: stdout.artifact.id }),
+        ...(stderr === undefined
+          ? {}
+          : { stderrArtifactId: stderr.artifact.id }),
+        stdoutCaptureStatus: stdout?.status ?? 'failed',
+        stderrCaptureStatus: stderr?.status ?? 'failed',
+        cleanupStatus: result.cleanupStatus ?? 'failed',
+        ...(candidateUnchanged
+          ? {
+              candidateDigestBefore: candidate.candidateDigest,
+              candidateDigestAfter: candidate.candidateDigest,
+            }
+          : {
+              ...(transient?.candidateDigestBefore === undefined
+                ? {}
+                : { candidateDigestBefore: transient.candidateDigestBefore }),
+              ...(transient?.candidateDigestAfter === undefined
+                ? {}
+                : { candidateDigestAfter: transient.candidateDigestAfter }),
+            }),
+        startedAt: transient?.startedAt ?? result.startedAt,
+        completedAt: transient?.completedAt ?? result.completedAt,
+        idempotencyKey: `${group.id}:result`,
+        traceId: workflowRun.traceId,
+        operation: 'runIncomingVerificationPlan.recordResult',
+      })
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          'Verification execution group persistence failed; delivery recovery must retry or terminalize the claimed group',
+          {
+            workflowRunId: workflowRun.id,
+            executionGroupId: group.id,
+            requirementKey: requirement.key,
+            operation: error.operation,
+          },
+        ),
+      ),
+    )
+  }
+})

@@ -15,11 +15,8 @@
   },
   "dependencies": {
     "@convex-dev/workos-authkit": "^0.2.7",
-    "@daytona/sdk": "^0.200.1",
     "@patchplane/domain": "workspace:*",
-    "convex": "^1.42.3",
-    "effect": "4.0.0-beta.100",
-    "octokit": "^5.0.5"
+    "convex": "^1.42.3"
   },
   "devDependencies": {
     "@convex-dev/eslint-plugin": "^2.0.0",

@@ -17,8 +17,6 @@ import { SandboxService } from '@patchplane/core/services/sandbox-service'
 import type { DaytonaConfig } from './DaytonaConfig'
 import {
   makeDaytonaSandboxLayer,
-  protectedVerificationCommand,
-  readProtectedExecutionPolicy,
   settleDaytonaPromise,
   type DaytonaClientLike,
   type DaytonaSandboxLike,
@@ -27,6 +25,7 @@ import {
   toDaytonaCreateSandboxParams,
   toSandboxPolicy,
 } from './daytona-adapter'
+import { protectedVerificationCommand } from './daytona-scripts'
 import {
   executeSandboxCommand,
   startSandboxSessionCommand,
@@ -213,29 +212,6 @@ describe('Daytona sandbox boundary adapters', () => {
         expect(command).toContain(`'"'"'`)
       }),
   )
-
-  it.effect('rejects inconsistent protected execution readback', () => {
-    const base = fakeSandbox()
-    const sandbox = fakeSandbox({
-      process: {
-        ...base.process,
-        executeCommand: vi.fn(async () => ({
-          exitCode: 0,
-          result: protectedObservation.replace(
-            'effectiveUid=65534',
-            'effectiveUid=0',
-          ),
-          stderr: '',
-        })),
-      },
-    })
-    return Effect.gen(function* () {
-      const exit = yield* readProtectedExecutionPolicy(sandbox, 'trace-1').pipe(
-        Effect.exit,
-      )
-      expect(Exit.isFailure(exit)).toBe(true)
-    })
-  })
 
   it.effect('maps stable Daytona create defaults', () =>
     Effect.sync(() => {

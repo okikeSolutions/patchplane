@@ -31,7 +31,7 @@ export function parsePluginIds(input: {
   return Object.keys(patchPlanePlugins).filter(isPluginId)
 }
 
-export function loadEnvFileContent(content: string, target: Map<string, string>) {
+function loadEnvFileContent(content: string, target: Map<string, string>) {
   for (const rawLine of content.split(/\r?\n/g)) {
     const line = rawLine.trim()
     if (line.length === 0 || line.startsWith('#')) continue
@@ -54,14 +54,14 @@ export interface EnvSelection {
   readonly includeOptional?: boolean | undefined
 }
 
-export function selectedPluginIdsForInit(options: {
+function selectedPluginIdsForInit(options: {
   readonly profile: 'app' | 'githubWebhook' | 'full'
   readonly withPi: boolean
 }) {
   return pluginIdsForInitProfile(options.profile)
 }
 
-export function missingEnvVarsForPlugins(
+function missingEnvVarsForPlugins(
   pluginIds: ReadonlyArray<PatchPlanePluginId>,
   envFileContent: string,
 ) {
@@ -72,7 +72,7 @@ export function missingEnvVarsForPlugins(
   )
 }
 
-export function formatEnvVarsForAppend(vars: readonly PatchPlanePluginEnvVar[]) {
+function formatEnvVarsForAppend(vars: readonly PatchPlanePluginEnvVar[]) {
   if (vars.length === 0) return ''
   const lines: string[] = []
   for (const variable of vars) {
@@ -84,7 +84,7 @@ export function formatEnvVarsForAppend(vars: readonly PatchPlanePluginEnvVar[]) 
   return lines.join('\n')
 }
 
-export function selectedEnvVars(selection: EnvSelection) {
+function selectedEnvVars(selection: EnvSelection) {
   const pluginIds = parsePluginIds(selection)
   return {
     pluginIds,
@@ -114,7 +114,7 @@ export function envTemplateText(selection: EnvSelection) {
   return lines.join('\n')
 }
 
-export interface EnvCheckResult {
+interface EnvCheckResult {
   readonly variable: PatchPlanePluginEnvVar
   readonly present: boolean
   readonly status: 'ok' | 'missing' | 'unset'

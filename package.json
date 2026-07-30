@@ -33,7 +33,8 @@
     "test:automation": "vitest run tests/automation --project default",
     "test:all": "bun run --workspaces --if-present test && bun run test",
     "check:roadmap-acceptance": "bun scripts/check-roadmap-acceptance.ts",
-    "verify:fast": "bun run typecheck && bun run lint && bun run test:all && bun run eval:cli && bun run check:roadmap-acceptance",
+    "check:dead-code": "knip --no-progress --no-config-hints",
+    "verify:fast": "bun run typecheck && bun run lint && bun run check:dead-code && bun run test:all && bun run eval:cli && bun run check:roadmap-acceptance",
     "verify": "bun run verify:fast && bun run build:client && bun run bundle:check:client",
     "eval:cli": "vitest run tests/evals/cli-friendliness.test.ts --project default",
     "smoke:foundation": "bun run --cwd apps/client smoke",
@@ -54,7 +55,6 @@
   "dependencies": {
     "@effect/platform-bun": "4.0.0-beta.100",
     "@effect/platform-node": "4.0.0-beta.100",
-    "@sentry/effect": "10.62.0",
     "alchemy": "2.0.0-beta.63",
     "effect": "4.0.0-beta.100"
   },
@@ -65,6 +65,7 @@
     "@types/node": "^25.9.3",
     "@types/pngjs": "^6.0.5",
     "@typescript/native": "npm:typescript@7.0.2",
+    "knip": "6.29.0",
     "oxfmt": "^0.54.0",
     "oxlint": "1.69.0",
     "playwright": "^1.61.1",

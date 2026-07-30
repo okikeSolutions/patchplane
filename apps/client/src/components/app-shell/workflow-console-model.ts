@@ -1,7 +1,6 @@
 import { getAppLocale } from './app-language'
 import type { WorkflowDetail, WorkflowStartRow } from './types'
 import type { WorkflowTrustState } from './workflow-trust-state'
-import { workflowTrustStateLabel } from './workflow-trust-state'
 
 export type WorkflowFilter =
   | 'all'
@@ -83,37 +82,6 @@ export function trustStateForList(row: WorkflowStartRow): WorkflowTrustState {
   return 'needs-review'
 }
 
-export function sandboxSummary(detail: WorkflowDetail) {
-  if (detail.sandboxExecutions.length === 0) {
-    return 'No sandbox run'
-  }
-
-  const latest = detail.sandboxExecutions.at(-1)
-  if (latest === undefined) {
-    return 'No sandbox run'
-  }
-
-  return `${latest.status} · exit ${latest.exitCode ?? 'unknown'}`
-}
-
-export function logSummary(detail: WorkflowDetail) {
-  const latest = detail.sandboxExecutions.at(-1)
-  if (latest === undefined) {
-    return detail.runtimeEvents.length === 0
-      ? 'No logs recorded'
-      : `${detail.runtimeEvents.length} runtime events`
-  }
-
-  const streams = [
-    latest.stdout.length > 0 ? 'stdout' : undefined,
-    latest.stderr !== undefined && latest.stderr.length > 0
-      ? 'stderr'
-      : undefined,
-  ].filter(Boolean)
-
-  return streams.length === 0 ? 'No command output' : streams.join(' + ')
-}
-
 export function artifactReferences(
   detail: WorkflowDetail,
 ): ReadonlyArray<WorkflowArtifactReference> {
@@ -148,28 +116,6 @@ export function artifactReferences(
   }
 
   return references
-}
-
-export function artifactSummary(detail: WorkflowDetail) {
-  const count = artifactReferences(detail).length
-
-  if (count === 0) {
-    return 'No artifact refs'
-  }
-
-  return count === 1 ? '1 artifact ref' : `${count} artifact refs`
-}
-
-export function decisionSummary(state: WorkflowTrustState) {
-  if (state === 'approved' || state === 'rejected') {
-    return workflowTrustStateLabel(state)
-  }
-
-  if (state === 'needs-review') {
-    return 'Pending review'
-  }
-
-  return 'Untrusted'
 }
 
 export function formatRelative(value: number) {
