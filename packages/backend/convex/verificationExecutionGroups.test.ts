@@ -410,6 +410,19 @@ describe('trusted verification execution groups', () => {
     if (group === null) throw new Error('Expected claimed group')
     const startedAt = Date.now()
     const completedAt = startedAt + 8
+    const protectedExecution = {
+      version: 'linux-v1' as const,
+      effectiveUid: 65_534,
+      effectiveGid: 65_534,
+      noNewPrivileges: true as const,
+      capabilitySetsCleared: true as const,
+      sourceReadOnly: true as const,
+      gitMetadataReadOnly: true as const,
+      privatePidNamespace: true as const,
+      privateNetworkNamespace: true as const,
+      nestedNamespaceCreationBlocked: true as const,
+      descendantsTerminated: true as const,
+    }
     expect(
       await t.mutation(startGroup, {
         systemSecret: 'system_test',
@@ -461,6 +474,7 @@ describe('trusted verification execution groups', () => {
         },
         network: {},
         resources: { cpu: 2, memoryGb: 4, diskGb: 8 },
+        protectedExecution,
         environment: {
           sandboxClass: 'linux-container',
           sandboxClassSource: 'trusted-request',
@@ -504,6 +518,7 @@ describe('trusted verification execution groups', () => {
         },
         network: {},
         resources: { cpu: 2, memoryGb: 4, diskGb: 8 },
+        protectedExecution,
         environment: {
           sandboxClass: 'linux-container',
           sandboxClassSource: 'trusted-request',

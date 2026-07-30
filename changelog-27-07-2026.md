@@ -129,6 +129,22 @@ Validation:
 - Herdr documentation/tracker audit — no actionable findings after PR 150 capability/evidence reconciliation.
 - Herdr code/security review — no actionable findings.
 
+### Protected execution and Effect boundary enforcement
+
+- Experimentally reproduced transient edit/run/restore despite matching endpoint HEAD/digests, then kept Task 6 and `EXEC-002` reopened.
+- Added a trusted Linux launcher that rejects candidate symlinks/hardlinks and tracked writable carve-outs, makes source and `.git` root-owned and non-writable, runs as UID/GID 65534 with a clean environment, `no_new_privs`, zero capabilities, private PID/network namespaces, and inherited seccomp enforcement and direct-syscall nested namespace denial, and requires no surviving descendants before evidence capture.
+- A negative smoke discovered that Daytona's local toolbox listener could launch a separate privileged command despite filesystem DAC and PID isolation. Added and attested a private network namespace; the production-adapter smoke then denied direct source/Git/rename/symlink/`sudo` attacks, credential/socket escape, local toolbox invocation, and a detached writer while preserving exact HEAD/digests and delete-to-not-found cleanup.
+- Persisted PatchPlane-owned protected-execution policy fields through the provider envelope and durable sandbox policy; core and Convex independently reject `passed` without the exact effective policy.
+- Documented Effect-native architecture in `docs/effect-boundaries.md`, including runtime experiments showing Cloudflare rejects direct Effects and Convex serializes them. Added an architecture gate requiring at least 85% eligible-module compliance and explicit documentation for every Promise/framework exception.
+- Migrated the webhook Queue/Worker's signature, R2, Convex, stream, service-binding deadline, retry, DLQ, and terminalization orchestration to Effect programs with typed errors and request-owned Cloudflare Sentry spans. Cloudflare callbacks remain one `Effect.runPromise` bridge; the source-control router reuses its route-owned `ManagedRuntime` without nesting another runtime.
+
+Validation:
+
+- `bun run verify` — passed, including automated tests, 12 CLI evaluations, production builds, architecture checks, and bundle budgets.
+- Final direct protected production-adapter smoke `df240899-6cc9-42c7-b247-026ca1610951` — passed with an inherited seccomp filter and direct `unshare`/`clone`/`clone3` denial; cleanup confirmed.
+- Fresh hosted PR 153 rejected tracked-carve-out candidate `10caee1d4c028b78fe47a1d2b8ec8c6997ae240a` in workflow `ms76mqmrgdp0z0thgyrcm613n98be4xw`. Final PR 154 then passed architecture-guarded candidate `fbd606af3f60b754f5a657adf3293f7f842eea47` in workflow `ms73zdyfd4p62gn8f0vhf4mm6x8bhh6k` with protected policy, direct/x32 namespace, toolbox, privilege, mutation, and detached-process attacks, provider process identity, test-report/stdout/stderr plus frozen-diff artifacts, review/policy, and deletion. Independent R2 downloads matched all four final Convex hashes and Daytona lookups confirmed both sandboxes absent.
+- The hosted run exposed and fixed unreadable UID-65534 report files, artifact symlink following, and Cloudflare Free-plan subrequest exhaustion. Fixed trusted probes now use bounded `O_NOFOLLOW` regular-file reads; compatible provider readbacks are combined, fresh conditional R2 writes avoid a redundant head, and incoming verification reuses its already-frozen diff. Task 6 and `EXEC-002` are closed.
+
 ### Post-review Task 1–6 hardening
 
 - Rejected uppercase and mixed-case Git SHA-1/SHA-256 identifiers at domain, GitHub, Convex, and Daytona boundaries instead of silently canonicalizing them.

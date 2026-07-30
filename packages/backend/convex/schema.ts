@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
+import { historicalProtectedExecutionPolicyValidator } from './protectedExecutionValidator'
 
 const evidenceArtifactKind = v.union(
   v.literal('raw-trace'),
@@ -163,6 +164,8 @@ const provenanceEventStatus = v.union(
   v.literal('blocked'),
 )
 
+const protectedExecutionPolicy = historicalProtectedExecutionPolicyValidator
+
 const sandboxPolicy = v.object({
   lifecycle: v.object({
     ephemeral: v.boolean(),
@@ -180,6 +183,7 @@ const sandboxPolicy = v.object({
     memoryGb: v.optional(v.number()),
     diskGb: v.optional(v.number()),
   }),
+  protectedExecution: v.optional(protectedExecutionPolicy),
   environment: v.optional(
     v.object({
       sandboxClass: v.string(),

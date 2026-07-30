@@ -353,19 +353,7 @@ export function makeR2ArtifactsService(
             ? {}
             : { retentionPolicy: input.retentionPolicy }),
         }
-        const existing =
-          input.idempotencyKey === undefined
-            ? null
-            : yield* Effect.tryPromise({
-                try: () => bucket.head(key),
-                catch: (cause) =>
-                  new ArtifactsError({
-                    operation: 'r2.putArtifact.idempotencyHead',
-                    message: 'Failed to inspect idempotent artifact in R2',
-                    cause,
-                  }),
-              })
-        let createdByRequest = existing === null
+        let createdByRequest = true
         const validateExisting = (object: R2ObjectLike) => {
           const actualMetadata = object.customMetadata ?? {}
           const expectedMetadata = Object.entries(customMetadata)
@@ -388,7 +376,6 @@ export function makeR2ArtifactsService(
         }
         const object = yield* Effect.tryPromise({
           try: async () => {
-            if (existing !== null) return validateExisting(existing)
             const uploaded = await bucket.put(key, bytes, {
               httpMetadata: { contentType: input.contentType },
               customMetadata,
@@ -419,7 +406,8 @@ export function makeR2ArtifactsService(
         if (metadata === undefined || metadata.sha256 !== sha256) {
           return yield* new ArtifactsError({
             operation: 'r2.putArtifact.checksum',
-            message: 'R2 object is missing a matching provider SHA-256 checksum',
+            message:
+              'R2 object is missing a matching provider SHA-256 checksum',
             cause: undefined,
           })
         }

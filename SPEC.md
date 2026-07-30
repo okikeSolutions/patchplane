@@ -163,7 +163,7 @@ PatchPlane integrates with coding agents, sandboxes, Git forges, and observabili
    Build only what makes the trust report more credible, complete, or easier to inspect. Dashboard, plugin, policy, and integration work is secondary to answering: can I trust this patch?
 
 10. **Alpha proves the trust loop**  
-   The alpha is successful when one real AI-generated patch can be sandboxed, evidenced in a Patch Report, reviewed, approved or rejected, and published back to GitHub.
+    The alpha is successful when one real AI-generated patch can be sandboxed, evidenced in a Patch Report, reviewed, approved or rejected, and published back to GitHub.
 
 ---
 
@@ -625,16 +625,16 @@ type EvidenceArtifact = {
   id: string
   workflowRunId: string
   kind:
-    | "raw-trace"
-    | "stdout"
-    | "stderr"
-    | "diff"
-    | "test-report"
-    | "screenshot"
-    | "video"
-    | "policy-result"
-    | "trust-report"
-  storageProvider: "cloudflare-r2"
+    | 'raw-trace'
+    | 'stdout'
+    | 'stderr'
+    | 'diff'
+    | 'test-report'
+    | 'screenshot'
+    | 'video'
+    | 'policy-result'
+    | 'trust-report'
+  storageProvider: 'cloudflare-r2'
   storageKey: string
   contentType: string
   sizeBytes: number
@@ -663,7 +663,7 @@ The Patch Report may be materialized as a read model for the UI and GitHub publi
 - A `WorkflowRun` with `modelVersion: "v1"` is one immutable attempt and must have an authoritative pinned source revision. Intake without one remains outside V1 and cannot enter the V1 execution path. A rerun creates a new child run with `rootWorkflowRunId`, `parentWorkflowRunId`, `attemptNumber`, a required reason, and the same pinned source revision.
 - Orchestration must be atomically claimed. A trusted bounded plan may declare multiple execution groups for supported environments. Each group has a stable identity and idempotent claim; duplicate delivery or rerun dispatch cannot start or persist a duplicate sandbox for the same group.
 - For alpha GitHub PR intake, the candidate is frozen before sandbox or agent execution from the webhook-authenticated `baseSha`, `headSha`, repository/PR identity, exact `baseSha...headSha` diff artifact, and SHA-256 digest of those bytes. PatchPlane observes the candidate record, Convex artifact row, and matching provider-checksummed R2 object immediately before issuing the incoming dispatch claim. Convex and R2 do not provide an atomic guarantee that the object continuously exists through later provider start.
-- The repository is checked out at the exact candidate `headSha`. Trusted Linux verification observes exact HEAD before and after each command and records final-state candidate digests; final HEAD drift or a before/after digest mismatch invalidates the result. Endpoint snapshots do not prove that candidate-controlled code made no transient edit and restored it, so PatchPlane does not claim protected read-only source execution until a provider-attested protected checkout exists. A sandbox-generated diff is a different candidate and cannot verify the incoming PR.
+- The repository is checked out at the exact candidate `headSha`. Before trusted Linux execution, PatchPlane rejects symlinks and hardlinks, removes stale evidence outputs, makes candidate source and `.git` root-owned and non-writable, and creates only bounded writable output/dependency paths. The command runs with a clean environment as UID/GID 65534, `no_new_privs`, zero capability sets, PID 1 in a private PID namespace, and a private network namespace that cannot reach Daytona's privileged toolbox listener. Before candidate bytes run, trusted setup rejects non-x86_64 hosts and `setpriv` installs an inherited seccomp filter. The filter validates `AUDIT_ARCH_X86_64`, kills alternate-architecture/x32 syscall attempts, rejects `unshare`/`clone` when `CLONE_NEWUSER` is present, and returns `ENOSYS` for `clone3` so ordinary runtimes can fall back safely. The launcher then probes direct `unshare`, `clone`, and `clone3` attempts under the restricted identity and fails unless all three nested user-namespace paths are denied; byte-level filter tests cover x32 and alternate architectures, and the immutable filter remains installed for the candidate process. Post-command policy readback must confirm that effective identity, source/Git protection, both namespaces, and descendant termination; missing or inconsistent readback is an error. Exact HEAD and candidate digests before/after remain defense in depth and invalidate persistent mutation or drift. Tracked files are forbidden in writable dependency/evidence carve-outs so no tracked source can be hidden from continuous protection or digesting. Candidate-created report files are read only after termination by a fixed trusted probe using `O_NOFOLLOW`, a regular-file check, and a byte limit; candidate paths cannot select privileged files. The hosted implementation combines compatible fixed readbacks, uses conditional provider-checksummed R2 writes, and reuses the already-frozen incoming diff to stay below Cloudflare Free's 50-subrequest limit without removing durable state checks. Network-dependent verification is unsupported until dependencies can be prepared in a separate trusted phase. A sandbox-generated diff is a different candidate and cannot verify the incoming PR.
 - Verification requirements come from trusted repository/intake configuration and are stored before candidate freeze, repository preparation, or agent execution. Results do not create or weaken requirements; a configured verifier that emits no result remains an explicit incomplete requirement.
 - Review runs, findings, policy decisions, human decisions, publication results, and evidence artifacts are correlated to the same workflow/candidate subject. A record for candidate A cannot justify candidate B.
 - Policy evaluates a coherent evidence snapshot and stores a SHA-256 digest of its normalized inputs, policy version, considered verification results, and missing requirements.
@@ -693,7 +693,7 @@ type ProvenanceEvent = {
   type: string
   operation: string
   pluginName?: string
-  status: "started" | "succeeded" | "failed" | "blocked"
+  status: 'started' | 'succeeded' | 'failed' | 'blocked'
   startedAt: number
   completedAt?: number
   summary?: string
@@ -1202,19 +1202,19 @@ The alpha is successful when:
 
 ## 21. Risks and mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| Architecture expands beyond alpha | Keep alpha scoped to one trusted patch workflow. |
-| Core couples to vendor SDKs | Enforce dependency restrictions and plugin boundaries. |
-| Effect APIs change | Pin versions, localize Effect usage, keep migration notes. |
-| GitHub App flow is complex | Keep GitHub logic at provider edge and normalize to generic intake. |
-| Sandbox integration becomes a sink | Keep `SandboxService` narrow and Daytona-first. |
-| Runtime details leak into product truth | Normalize events; keep runtime sessions as execution state. |
-| Convex becomes overloaded with large artifacts | Store raw artifacts in R2 and only metadata in Convex. |
-| Observability tools become audit trail | Keep provenance in PatchPlane-owned data structures. |
-| Analytics leaks sensitive data | Do not send raw code/diffs/secrets/evidence to analytics by default. |
-| Multi-tenant security is misunderstood | State alpha posture clearly and avoid open SaaS assumptions. |
-| Infra provisioning leaks into runtime | Keep Alchemy isolated in `apps/infra`. |
+| Risk                                                              | Mitigation                                                                                  |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Architecture expands beyond alpha                                 | Keep alpha scoped to one trusted patch workflow.                                            |
+| Core couples to vendor SDKs                                       | Enforce dependency restrictions and plugin boundaries.                                      |
+| Effect APIs change                                                | Pin versions, localize Effect usage, keep migration notes.                                  |
+| GitHub App flow is complex                                        | Keep GitHub logic at provider edge and normalize to generic intake.                         |
+| Sandbox integration becomes a sink                                | Keep `SandboxService` narrow and Daytona-first.                                             |
+| Runtime details leak into product truth                           | Normalize events; keep runtime sessions as execution state.                                 |
+| Convex becomes overloaded with large artifacts                    | Store raw artifacts in R2 and only metadata in Convex.                                      |
+| Observability tools become audit trail                            | Keep provenance in PatchPlane-owned data structures.                                        |
+| Analytics leaks sensitive data                                    | Do not send raw code/diffs/secrets/evidence to analytics by default.                        |
+| Multi-tenant security is misunderstood                            | State alpha posture clearly and avoid open SaaS assumptions.                                |
+| Infra provisioning leaks into runtime                             | Keep Alchemy isolated in `apps/infra`.                                                      |
 | GitHub resource provisioning is confused with runtime integration | Use Alchemy for owned infra only; use GitHub provider plugin for PR/check/comment behavior. |
 
 ---

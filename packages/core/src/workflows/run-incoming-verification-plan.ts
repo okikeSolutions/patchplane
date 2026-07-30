@@ -187,6 +187,26 @@ export function invalidProviderEnvelopeCleanupStatus() {
   return 'failed' as const
 }
 
+export function verificationProtectedSourcePolicyMatches(
+  protectedExecution:
+    | NonNullable<SandboxCommandResult['policy']>['protectedExecution']
+    | undefined,
+) {
+  return (
+    protectedExecution?.version === 'linux-v1' &&
+    protectedExecution.effectiveUid === 65_534 &&
+    protectedExecution.effectiveGid === 65_534 &&
+    protectedExecution.noNewPrivileges === true &&
+    protectedExecution.capabilitySetsCleared === true &&
+    protectedExecution.sourceReadOnly === true &&
+    protectedExecution.gitMetadataReadOnly === true &&
+    protectedExecution.privatePidNamespace === true &&
+    protectedExecution.privateNetworkNamespace === true &&
+    protectedExecution.nestedNamespaceCreationBlocked === true &&
+    protectedExecution.descendantsTerminated === true
+  )
+}
+
 export function verificationCandidateIntegrityFailureStatus(
   candidateStateMatches: boolean,
 ) {
@@ -753,20 +773,24 @@ export const RunIncomingVerificationPlan = Effect.fn(
         result.policy.resources.cpu !== undefined &&
         result.policy.resources.memoryGb !== undefined &&
         result.policy.resources.diskGb !== undefined
+      const protectedSourceExecution = verificationProtectedSourcePolicyMatches(
+        result.policy?.protectedExecution,
+      )
       const integrityFailureStatus =
         verificationCandidateIntegrityFailureStatus(candidateUnchanged)
       const status: VerificationResult['status'] =
         integrityFailureStatus ??
         (transient === undefined ||
-            transient.command !== command ||
-            transient.platform !== platform ||
-            transient.architecture !== architecture ||
-            transient.exitCode === undefined ||
-            result.cleanupStatus !== 'deleted' ||
-            !effectiveEnvironment ||
-            !providerArtifactsCaptured ||
-            !logsCaptured ||
-            !requiredArtifactsPresent
+        transient.command !== command ||
+        transient.platform !== platform ||
+        transient.architecture !== architecture ||
+        transient.exitCode === undefined ||
+        result.cleanupStatus !== 'deleted' ||
+        !effectiveEnvironment ||
+        !protectedSourceExecution ||
+        !providerArtifactsCaptured ||
+        !logsCaptured ||
+        !requiredArtifactsPresent
           ? 'error'
           : transient.exitCode === 0 && transient.status === 'succeeded'
             ? 'passed'

@@ -33,6 +33,7 @@ import {
   isTrustedProviderEnvelopeBounded,
   verificationCandidateIntegrityFailureStatus,
   verificationCandidateStateMatches,
+  verificationProtectedSourcePolicyMatches,
 } from './run-incoming-verification-plan'
 
 const baseSha = 'a'.repeat(40)
@@ -133,6 +134,33 @@ describe('RunIncomingVerificationPlan', () => {
       )
       assert.strictEqual(invalidProviderEnvelopeCleanupStatus(), 'failed')
     }
+  })
+
+  it('requires the exact protected source execution policy', () => {
+    const protectedExecution = {
+      version: 'linux-v1' as const,
+      effectiveUid: 65_534,
+      effectiveGid: 65_534,
+      noNewPrivileges: true as const,
+      capabilitySetsCleared: true as const,
+      sourceReadOnly: true as const,
+      gitMetadataReadOnly: true as const,
+      privatePidNamespace: true as const,
+      privateNetworkNamespace: true as const,
+      nestedNamespaceCreationBlocked: true as const,
+      descendantsTerminated: true as const,
+    }
+    assert.isTrue(verificationProtectedSourcePolicyMatches(protectedExecution))
+    assert.isFalse(
+      verificationProtectedSourcePolicyMatches({
+        ...protectedExecution,
+        effectiveUid: 0,
+      }),
+    )
+    const { nestedNamespaceCreationBlocked: _, ...historicalPolicy } =
+      protectedExecution
+    assert.isFalse(verificationProtectedSourcePolicyMatches(historicalPolicy))
+    assert.isFalse(verificationProtectedSourcePolicyMatches(undefined))
   })
 
   it('requires exact before/after HEAD and frozen candidate digests', () => {

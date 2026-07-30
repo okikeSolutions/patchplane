@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as connectedRepositories from "../connectedRepositories.js";
 import type * as http from "../http.js";
 import type * as promptRequests from "../promptRequests.js";
+import type * as protectedExecutionValidator from "../protectedExecutionValidator.js";
 import type * as requests from "../requests.js";
 import type * as viewer from "../viewer.js";
 import type * as workflowRuns from "../workflowRuns.js";
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   connectedRepositories: typeof connectedRepositories;
   http: typeof http;
   promptRequests: typeof promptRequests;
+  protectedExecutionValidator: typeof protectedExecutionValidator;
   requests: typeof requests;
   viewer: typeof viewer;
   workflowRuns: typeof workflowRuns;

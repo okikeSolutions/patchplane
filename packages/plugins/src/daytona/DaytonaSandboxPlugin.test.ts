@@ -17,6 +17,8 @@ import { SandboxService } from '@patchplane/core/services/sandbox-service'
 import type { DaytonaConfig } from './DaytonaConfig'
 import {
   makeDaytonaSandboxLayer,
+  protectedVerificationCommand,
+  readProtectedExecutionPolicy,
   settleDaytonaPromise,
   type DaytonaClientLike,
   type DaytonaSandboxLike,
@@ -41,6 +43,24 @@ import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
 import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
 
 const repositoryBaseSha = 'a'.repeat(40)
+const protectedObservation = [
+  'effectiveUid=65534',
+  'effectiveGid=65534',
+  'CapInh:=0000000000000000',
+  'CapPrm:=0000000000000000',
+  'CapEff:=0000000000000000',
+  'CapBnd:=0000000000000000',
+  'CapAmb:=0000000000000000',
+  'NoNewPrivs:=1',
+  'Seccomp:=2',
+  'Seccomp_filters:=1',
+  'namespacePid=1',
+  'networkNamespace=1',
+  'nestedNamespaceCreationBlocked=1',
+  'sourceReadOnly=1',
+  'gitMetadataReadOnly=1',
+  'descendantsTerminated=1',
+].join('\n')
 
 function config(overrides: Partial<DaytonaConfig> = {}): DaytonaConfig {
   return {
@@ -182,6 +202,41 @@ const commandInput = {
 }
 
 describe('Daytona sandbox boundary adapters', () => {
+  it.effect(
+    'quotes untrusted commands behind the fixed protected launcher',
+    () =>
+      Effect.sync(() => {
+        const command = protectedVerificationCommand(
+          "printf '%s' malicious; sudo -n true",
+        )
+        expect(command).toContain('/usr/bin/sudo -n /patchplane-runtime/launch')
+        expect(command).toContain(`'"'"'`)
+      }),
+  )
+
+  it.effect('rejects inconsistent protected execution readback', () => {
+    const base = fakeSandbox()
+    const sandbox = fakeSandbox({
+      process: {
+        ...base.process,
+        executeCommand: vi.fn(async () => ({
+          exitCode: 0,
+          result: protectedObservation.replace(
+            'effectiveUid=65534',
+            'effectiveUid=0',
+          ),
+          stderr: '',
+        })),
+      },
+    })
+    return Effect.gen(function* () {
+      const exit = yield* readProtectedExecutionPolicy(sandbox, 'trace-1').pipe(
+        Effect.exit,
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+    })
+  })
+
   it.effect('maps stable Daytona create defaults', () =>
     Effect.sync(() => {
       const params = toDaytonaCreateSandboxParams(config(), {
@@ -439,6 +494,39 @@ describe('Daytona sandbox boundary adapters', () => {
       let changeFinalRepositoryHead = false
       const executeSessionCommand = vi.fn(
         async (_sessionId: string, request: { readonly command: string }) => {
+          if (request.command.includes('PATCHPLANE_PROTECTED_SETUP_V1')) {
+            return {
+              exitCode: 0,
+              stdout: 'PATCHPLANE_PROTECTED_SETUP_V1\n',
+              stderr: '',
+            }
+          }
+          if (request.command.includes('sourceReadOnly=%s')) {
+            if (request.command.includes('__PATCHPLANE_HEAD__=')) {
+              repositoryHeadReads += 1
+              const head =
+                changeFinalRepositoryHead && repositoryHeadReads === 2
+                  ? 'c'.repeat(40)
+                  : repositoryBaseSha
+              return {
+                exitCode: 0,
+                stdout: `${protectedObservation}\n__PATCHPLANE_HEAD__=${head}\n__PATCHPLANE_DIGEST__=${'d'.repeat(64)}  -\n`,
+                stderr: '',
+              }
+            }
+            return { exitCode: 0, stdout: protectedObservation, stderr: '' }
+          }
+          if (
+            request.command.includes('git rev-parse HEAD') &&
+            request.command.includes('sha256sum')
+          ) {
+            repositoryHeadReads += 1
+            return {
+              exitCode: 0,
+              stdout: `${repositoryBaseSha}\n${'d'.repeat(64)}  -`,
+              stderr: '',
+            }
+          }
           if (request.command.includes('git rev-parse HEAD')) {
             repositoryHeadReads += 1
             return {
@@ -458,6 +546,17 @@ describe('Daytona sandbox boundary adapters', () => {
           }
           if (request.command === 'uname -m') {
             return { exitCode: 0, stdout: 'x86_64', stderr: '' }
+          }
+          if (
+            request.command.includes('PATCHPLANE_ARTIFACT_BODY') &&
+            request.command.includes('test-report.json')
+          ) {
+            return {
+              exitCode: 0,
+              stdout:
+                '.patchplane/test-report.json\n---PATCHPLANE_ARTIFACT_BODY---\n{"ok":true}',
+              stderr: '',
+            }
           }
           if (request.command.includes('bun test --reporter=junit')) {
             trustedProviderCommand = request.command
@@ -494,7 +593,7 @@ describe('Daytona sandbox boundary adapters', () => {
             platform: 'linux',
             architecture: 'x86_64',
             timeoutSeconds: 60,
-            requiredArtifactKinds: [],
+            requiredArtifactKinds: ['test-report'],
           },
           forceDeleteAfterUse: true,
         })
@@ -507,6 +606,19 @@ describe('Daytona sandbox boundary adapters', () => {
           stdout: 'tests passed',
           cleanupStatus: 'deleted',
           policy: {
+            protectedExecution: {
+              version: 'linux-v1',
+              effectiveUid: 65_534,
+              effectiveGid: 65_534,
+              noNewPrivileges: true,
+              capabilitySetsCleared: true,
+              sourceReadOnly: true,
+              gitMetadataReadOnly: true,
+              privatePidNamespace: true,
+              privateNetworkNamespace: true,
+              nestedNamespaceCreationBlocked: true,
+              descendantsTerminated: true,
+            },
             environment: {
               sandboxClass: 'linux-container',
               sandboxClassSource: 'trusted-request',
@@ -534,27 +646,145 @@ describe('Daytona sandbox boundary adapters', () => {
             },
           ],
         })
-        expect(
-          executeSessionCommand.mock.calls.filter(([, request]) =>
+        expect(result.evidenceArtifacts).toEqual([
+          expect.objectContaining({
+            kind: 'test-report',
+            body: '{"ok":true}',
+          }),
+        ])
+        const trustedCommands = executeSessionCommand.mock.calls.filter(
+          ([, request]) =>
             request.command.includes('bun test --reporter=junit'),
-          ),
-        ).toHaveLength(1)
+        )
+        expect(trustedCommands).toHaveLength(1)
+        expect(trustedCommands[0]?.[1].command).toContain(
+          '/usr/bin/sudo -n /patchplane-runtime/launch',
+        )
         const digestCommands = executeSessionCommand.mock.calls
           .filter(([, request]) => request.command.includes('sha256sum'))
           .map(([, request]) => request.command)
+        expect(digestCommands).toHaveLength(3)
         expect(
           digestCommands.every((candidateCommand) =>
             candidateCommand.includes('b'.repeat(40)),
           ),
         ).toBe(true)
         expect(
+          digestCommands.filter((candidateCommand) =>
+            candidateCommand.includes('git rev-parse HEAD'),
+          ),
+        ).toHaveLength(2)
+        expect(
           digestCommands.every(
             (candidateCommand) =>
-              candidateCommand.includes(
-                "git add -N . ':(exclude).patchplane/**'",
-              ) && candidateCommand.includes('-- . | sha256sum'),
+              candidateCommand.includes('git add -N .') &&
+              candidateCommand.includes(':(exclude).patchplane/**') &&
+              candidateCommand.includes('-- .') &&
+              candidateCommand.includes('sha256sum'),
           ),
         ).toBe(true)
+        expect(
+          executeSessionCommand.mock.calls.filter(
+            ([, request]) =>
+              request.command.includes('git diff --binary --no-ext-diff') &&
+              !request.command.includes('sha256sum'),
+          ),
+        ).toHaveLength(0)
+        const protectedArtifactProbe = executeSessionCommand.mock.calls.find(
+          ([, request]) =>
+            request.command.includes('PATCHPLANE_ARTIFACT_BODY') &&
+            request.command.includes('test-report.json'),
+        )?.[1].command
+        expect(protectedArtifactProbe).toContain(
+          '/usr/bin/sudo -n /usr/bin/env -i',
+        )
+        expect(protectedArtifactProbe).toContain(
+          '/usr/local/bin/bun --config=/dev/null --no-env-file',
+        )
+        expect(protectedArtifactProbe).toContain('O_NOFOLLOW')
+        const protectedSetupCommand =
+          executeSessionCommand.mock.calls.find(([, request]) =>
+            request.command.includes('PATCHPLANE_PROTECTED_SETUP_V1'),
+          )?.[1].command ?? ''
+        expect(protectedSetupCommand).toContain('libc.syscall(272')
+        expect(protectedSetupCommand).toContain('libc.syscall(435')
+        expect(protectedSetupCommand).toContain('libc.syscall(56')
+        expect(protectedSetupCommand).toContain('[ "$(uname -m)" != x86_64 ]')
+        expect(protectedSetupCommand).toContain(
+          '--seccomp-filter=/patchplane-runtime/seccomp.bpf',
+        )
+        expect(protectedSetupCommand).toContain(
+          'base64 -d | sudo -n tee /patchplane-runtime/seccomp.bpf',
+        )
+        const filterBase64 =
+          protectedSetupCommand.match(/[A-Za-z0-9+/=]{100,}/u)?.[0]
+        expect(filterBase64).toBeDefined()
+        const filter = Buffer.from(filterBase64!, 'base64')
+        const evaluateFilter = (input: {
+          readonly architecture: number
+          readonly syscall: number
+          readonly argument0?: number
+        }) => {
+          let accumulator = 0
+          let instruction = 0
+          while (instruction * 8 < filter.length) {
+            const offset = instruction * 8
+            const code = filter.readUInt16LE(offset)
+            const jumpTrue = filter.readUInt8(offset + 2)
+            const jumpFalse = filter.readUInt8(offset + 3)
+            const value = filter.readUInt32LE(offset + 4)
+            if (code === 0x20) {
+              accumulator =
+                value === 0
+                  ? input.syscall
+                  : value === 4
+                    ? input.architecture
+                    : (input.argument0 ?? 0)
+              instruction += 1
+            } else if (code === 0x15) {
+              instruction += 1 + (accumulator === value ? jumpTrue : jumpFalse)
+            } else if (code === 0x45) {
+              instruction +=
+                1 + ((accumulator & value) !== 0 ? jumpTrue : jumpFalse)
+            } else if (code === 0x06) {
+              return value
+            } else {
+              throw new Error(`Unsupported test BPF instruction ${code}`)
+            }
+          }
+          throw new Error('Seccomp filter did not return a decision')
+        }
+        const x86_64 = 0xc000_003e
+        expect(evaluateFilter({ architecture: 0xc000_00b7, syscall: 97 })).toBe(
+          0x8000_0000,
+        )
+        expect(
+          evaluateFilter({ architecture: x86_64, syscall: 0x4000_0110 }),
+        ).toBe(0x0005_0026)
+        expect(
+          evaluateFilter({
+            architecture: x86_64,
+            syscall: 272,
+            argument0: 0x1000_0000,
+          }),
+        ).toBe(0x0005_0001)
+        expect(
+          evaluateFilter({
+            architecture: x86_64,
+            syscall: 56,
+            argument0: 0x1000_0000,
+          }),
+        ).toBe(0x0005_0001)
+        expect(
+          evaluateFilter({ architecture: x86_64, syscall: 56, argument0: 17 }),
+        ).toBe(0x7fff_0000)
+        expect(evaluateFilter({ architecture: x86_64, syscall: 435 })).toBe(
+          0x0005_0026,
+        )
+        expect(evaluateFilter({ architecture: x86_64, syscall: 1 })).toBe(
+          0x7fff_0000,
+        )
+        expect(protectedSetupCommand).toContain('Seccomp_filters:')
         expect(onVerificationCommandStarted).toHaveBeenCalledWith({
           sandboxId: sandbox.id,
           sessionId: 'patchplane-trace-1-verification-command',
@@ -613,6 +843,81 @@ describe('Daytona sandbox boundary adapters', () => {
       }).pipe(
         Effect.provide(testLayer(client, { DAYTONA_RETAIN_SANDBOXES: 'true' })),
       )
+    },
+  )
+
+  it.effect(
+    'rejects tracked files in writable or evidence carve-outs before candidate execution',
+    () => {
+      const executeSessionCommand = vi.fn(
+        async (_sessionId: string, request: { readonly command: string }) => {
+          if (
+            request.command.includes('git rev-parse HEAD') &&
+            request.command.includes('sha256sum')
+          ) {
+            return {
+              exitCode: 0,
+              stdout: `${repositoryBaseSha}\n${'d'.repeat(64)}  -`,
+              stderr: '',
+            }
+          }
+          if (request.command.includes('PATCHPLANE_PROTECTED_SETUP_V1')) {
+            return {
+              exitCode: 67,
+              stdout: 'PATCHPLANE_PROTECTED_SETUP_V1\n',
+              stderr: 'tracked writable/evidence path is unsupported',
+            }
+          }
+          if (request.command.includes('uname -s')) {
+            return { exitCode: 0, stdout: 'Linux\nx86_64\n', stderr: '' }
+          }
+          return { exitCode: 0, stdout: '', stderr: '' }
+        },
+      )
+      const sandbox = fakeSandbox({
+        autoDeleteInterval: 0,
+        process: {
+          createSession: vi.fn(async () => undefined),
+          executeSessionCommand,
+          deleteSession: vi.fn(async () => undefined),
+        },
+      })
+      const client = fakeClient(sandbox)
+      return Effect.gen(function* () {
+        const service = yield* SandboxService
+        const exit = yield* Effect.exit(
+          service.runRepositoryCommand({
+            ...commandInput,
+            candidateBaseSha: 'b'.repeat(40),
+            verificationInvocation: {
+              requirementKey: 'trusted:test',
+              kind: 'test',
+              command: 'touch .patchplane/tracked.txt',
+              platform: 'linux',
+              architecture: 'x86_64',
+              timeoutSeconds: 60,
+              requiredArtifactKinds: [],
+            },
+            forceDeleteAfterUse: true,
+          }),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        const setupCommand = executeSessionCommand.mock.calls.find(
+          ([, request]) =>
+            request.command.includes('PATCHPLANE_PROTECTED_SETUP_V1'),
+        )?.[1].command
+        expect(setupCommand).toContain('git ls-files -z')
+        expect(setupCommand).toContain('.patchplane/*|node_modules/*')
+        expect(
+          executeSessionCommand.mock.calls.some(
+            ([, request]) =>
+              request.command.includes('/patchplane-runtime/launch') &&
+              !request.command.includes('PATCHPLANE_PROTECTED_SETUP_V1'),
+          ),
+        ).toBe(false)
+        expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
+      }).pipe(Effect.provide(testLayer(client)))
     },
   )
 
@@ -732,9 +1037,9 @@ describe('Daytona sandbox boundary adapters', () => {
     const client = fakeClient(sandbox)
     return Effect.gen(function* () {
       const service = yield* SandboxService
-      const exit = yield* service.runRepositoryCommand(commandInput).pipe(
-        Effect.exit,
-      )
+      const exit = yield* service
+        .runRepositoryCommand(commandInput)
+        .pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
     }).pipe(Effect.provide(testLayer(client)))
@@ -752,7 +1057,11 @@ describe('Daytona sandbox boundary adapters', () => {
             return { exitCode: 0, stdout: 'ok', stderr: '' }
           }
           if (request.command.includes('sha256sum')) {
-            return { exitCode: 0, stdout: `${'a'.repeat(64)}  -\n`, stderr: '' }
+            return {
+              exitCode: 0,
+              stdout: `${'a'.repeat(64)}  -\n`,
+              stderr: '',
+            }
           }
           if (request.command.includes('git diff --binary')) {
             return {
@@ -849,6 +1158,18 @@ describe('Daytona sandbox boundary adapters', () => {
           }),
           expect.any(Number),
         )
+        const artifactProbeCommands = executeSessionCommand.mock.calls
+          .map(([, request]) => request.command)
+          .filter((command) => command.includes('PATCHPLANE_ARTIFACT_BODY'))
+        expect(artifactProbeCommands).toHaveLength(2)
+        expect(
+          artifactProbeCommands.every(
+            (command) =>
+              command.includes("bun --config=/dev/null --no-env-file -e '") &&
+              !command.includes('/usr/bin/sudo') &&
+              command.includes('O_NOFOLLOW'),
+          ),
+        ).toBe(true)
         expect(client.delete).toHaveBeenCalledWith(sandbox, 30)
       }).pipe(Effect.provide(testLayer(client)))
     },

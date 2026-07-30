@@ -3,6 +3,10 @@ import type { Doc, Id } from './_generated/dataModel'
 import { ConvexError, v } from 'convex/values'
 import { internal } from './_generated/api'
 import {
+  historicalProtectedExecutionPolicyValidator,
+  protectedExecutionPolicyValidator,
+} from './protectedExecutionValidator'
+import {
   internalMutation,
   mutation,
   query,
@@ -240,39 +244,51 @@ const workflowStartArgs = {
   prompt: v.string(),
 }
 
-const sandboxPolicyArg = v.object({
-  lifecycle: v.object({
-    ephemeral: v.boolean(),
-    retainAfterRun: v.boolean(),
-    autoStopMinutes: v.optional(v.number()),
-    autoArchiveMinutes: v.optional(v.number()),
-    autoDeleteMinutes: v.optional(v.number()),
-  }),
-  network: v.object({
-    blockAll: v.optional(v.boolean()),
-    allowList: v.optional(v.string()),
-  }),
-  resources: v.object({
-    cpu: v.optional(v.number()),
-    memoryGb: v.optional(v.number()),
-    diskGb: v.optional(v.number()),
-  }),
-  environment: v.optional(
-    v.object({
-      sandboxClass: v.string(),
-      sandboxClassSource: v.literal('trusted-request'),
-      operatingSystem: v.string(),
-      architecture: v.string(),
-      image: v.string(),
-      target: v.string(),
-      providerState: v.string(),
-      public: v.boolean(),
-      linked: v.boolean(),
-      volumeCount: v.number(),
-      observedAt: v.number(),
-    }),
-  ),
+const protectedExecutionPolicyArg = protectedExecutionPolicyValidator
+
+const sandboxLifecyclePolicyValidator = v.object({
+  ephemeral: v.boolean(),
+  retainAfterRun: v.boolean(),
+  autoStopMinutes: v.optional(v.number()),
+  autoArchiveMinutes: v.optional(v.number()),
+  autoDeleteMinutes: v.optional(v.number()),
+})
+const sandboxNetworkPolicyValidator = v.object({
+  blockAll: v.optional(v.boolean()),
+  allowList: v.optional(v.string()),
+})
+const sandboxResourcesPolicyValidator = v.object({
+  cpu: v.optional(v.number()),
+  memoryGb: v.optional(v.number()),
+  diskGb: v.optional(v.number()),
+})
+const sandboxEnvironmentPolicyValidator = v.object({
+  sandboxClass: v.string(),
+  sandboxClassSource: v.literal('trusted-request'),
+  operatingSystem: v.string(),
+  architecture: v.string(),
+  image: v.string(),
+  target: v.string(),
+  providerState: v.string(),
+  public: v.boolean(),
+  linked: v.boolean(),
+  volumeCount: v.number(),
+  observedAt: v.number(),
+})
+const sandboxPolicyFields = {
+  lifecycle: sandboxLifecyclePolicyValidator,
+  network: sandboxNetworkPolicyValidator,
+  resources: sandboxResourcesPolicyValidator,
+  environment: v.optional(sandboxEnvironmentPolicyValidator),
   timeoutSeconds: v.optional(v.number()),
+} as const
+const sandboxPolicyArg = v.object({
+  ...sandboxPolicyFields,
+  protectedExecution: v.optional(protectedExecutionPolicyArg),
+})
+const historicalSandboxPolicyReturn = v.object({
+  ...sandboxPolicyFields,
+  protectedExecution: v.optional(historicalProtectedExecutionPolicyValidator),
 })
 
 function sortedByNumber<A>(
@@ -756,7 +772,7 @@ const sandboxExecutionReturn = v.object({
   exitCode: v.optional(v.number()),
   stdout: v.string(),
   stderr: v.optional(v.string()),
-  policy: v.optional(sandboxPolicyArg),
+  policy: v.optional(historicalSandboxPolicyReturn),
   startedAt: v.number(),
   completedAt: v.number(),
 })
@@ -2749,7 +2765,9 @@ export const expireStartedIncomingDispatch = internalMutation({
       return null
     }
     const completedAt = Date.now()
-    await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      status: 'failed',
+    })
     await insertProvenanceEvent(ctx, {
       workflowRunId: args.workflowRunId,
       traceId: workflowRun.traceId ?? 'legacy',
@@ -3925,7 +3943,9 @@ export const expireIncomingVerificationDispatch = internalMutation({
         })
       }
     }
-    await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      status: 'failed',
+    })
     await insertProvenanceEvent(ctx, {
       workflowRunId: args.workflowRunId,
       traceId: workflowRun.traceId ?? 'legacy',
@@ -4509,6 +4529,28 @@ export const recordVerificationResult = mutation({
             trustedGroup.timeoutSeconds === undefined ||
             sandboxExecution.policy?.timeoutSeconds !==
               trustedGroup.timeoutSeconds ||
+            sandboxExecution.policy.protectedExecution === undefined ||
+            sandboxExecution.policy.protectedExecution.version !== 'linux-v1' ||
+            sandboxExecution.policy.protectedExecution.effectiveUid !==
+              65_534 ||
+            sandboxExecution.policy.protectedExecution.effectiveGid !==
+              65_534 ||
+            sandboxExecution.policy.protectedExecution.noNewPrivileges !==
+              true ||
+            sandboxExecution.policy.protectedExecution.capabilitySetsCleared !==
+              true ||
+            sandboxExecution.policy.protectedExecution.sourceReadOnly !==
+              true ||
+            sandboxExecution.policy.protectedExecution.gitMetadataReadOnly !==
+              true ||
+            sandboxExecution.policy.protectedExecution.privatePidNamespace !==
+              true ||
+            sandboxExecution.policy.protectedExecution
+              .privateNetworkNamespace !== true ||
+            sandboxExecution.policy.protectedExecution
+              .nestedNamespaceCreationBlocked !== true ||
+            sandboxExecution.policy.protectedExecution.descendantsTerminated !==
+              true ||
             sandboxExecution.policy.environment === undefined ||
             sandboxExecution.policy.environment.sandboxClass !==
               'linux-container' ||
@@ -5758,7 +5800,9 @@ export const markWorkflowExecutionFailed = mutation({
       return false
     }
     const completedAt = Date.now()
-    await ctx.db.patch('workflowRuns', args.workflowRunId, { status: 'failed' })
+    await ctx.db.patch('workflowRuns', args.workflowRunId, {
+      status: 'failed',
+    })
     await insertProvenanceEvent(ctx, {
       workflowRunId: args.workflowRunId,
       traceId: workflowRun.traceId ?? 'legacy',
