@@ -29,8 +29,10 @@ client and Cloudflare bundle budgets. GitHub runs `verify` on every pull
 request; a passing local run keeps feedback fast.
 
 Use [docs/philosophy.md](./docs/philosophy.md) for product and developer-experience
-decision principles, [AGENTS.md](./AGENTS.md) for the contribution protocol, and
-[REVIEW.md](./REVIEW.md) for Patchplane-specific trust-boundary checks.
+decision principles, [AGENTS.md](./AGENTS.md) for the contribution protocol,
+[docs/effect-boundaries.md](./docs/effect-boundaries.md) for the enforced
+Effect-native coding convention, and [REVIEW.md](./REVIEW.md) for
+Patchplane-specific trust-boundary checks.
 
 ## Project boundaries
 
@@ -38,6 +40,8 @@ decision principles, [AGENTS.md](./AGENTS.md) for the contribution protocol, and
 - Keep `packages/core` provider-agnostic.
 - Keep user-visible non-secret config in `patchplane.config.json`.
 - Keep generated local state under `.patchplane/`.
+- Keep orchestration Effect-native; register and experimentally verify every
+  unavoidable Promise/framework bridge in `docs/effect-boundaries.md`.
 - Do not add new environment variables unless they are truly required secrets or deployment inputs.
 
 ## Pull requests

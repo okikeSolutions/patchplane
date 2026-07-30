@@ -29,6 +29,8 @@ review are complete.
   evidence artifacts. Telemetry and analytics are never a provenance store.
 - Keep long-lived WorkOS, Convex, GitHub App, and control-plane credentials out
   of sandbox inputs and generated client bundles.
+- Follow `docs/effect-boundaries.md`: orchestration is Effect-native, and every
+  unavoidable Promise/framework bridge is explicit, tested, and enforced.
 
 The architecture suite is the executable form of these rules. Extend it when a
 new boundary is introduced; do not paper over a failure by moving an import.

@@ -189,6 +189,47 @@ describe('GitHub webhook Worker', () => {
     )
   })
 
+  it('deadlines and cancels a stalled webhook request body', async () => {
+    vi.useFakeTimers()
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => undefined),
+      cancel: () => {
+        cancelled = true
+      },
+    })
+    const stalled = new Request('https://example.com/api/github/webhook', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-stalled',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': `sha256=${'0'.repeat(64)}`,
+      },
+      body,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
+
+    try {
+      const observed = worker.fetch(stalled, env()).then(
+        () => undefined,
+        (cause: unknown) => cause,
+      )
+      await vi.advanceTimersByTimeAsync(30_001)
+      const failure = (await observed) as {
+        readonly operation?: string
+        readonly cause?: unknown
+      }
+      assert.strictEqual(
+        failure.operation,
+        'webhook.readBoundedPayload.deadline',
+      )
+      assert.strictEqual(failure.cause, 'Bounded stream read deadline exceeded')
+      assert.strictEqual(cancelled, true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retries incomplete execution and acknowledges only a durable sandbox result', async () => {
     const ack = vi.fn()
     const retry = vi.fn()
@@ -264,11 +305,12 @@ describe('GitHub webhook Worker', () => {
       } as unknown as Parameters<typeof worker.queue>[0],
       env({
         SOURCE_CONTROL_WORKER: {
-          fetch: vi.fn(async () =>
-            new Response(oversized, {
-              status: 202,
-              headers: { 'content-type': 'application/json' },
-            }),
+          fetch: vi.fn(
+            async () =>
+              new Response(oversized, {
+                status: 202,
+                headers: { 'content-type': 'application/json' },
+              }),
           ),
         },
       }),
