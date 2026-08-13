@@ -36,7 +36,7 @@ export const piProviderApiKeyEnvNames: Readonly<Record<string, string>> = {
   'github-copilot': 'COPILOT_GITHUB_TOKEN',
 }
 
-class PiProviderConfigError extends Schema.ErrorClass<PiProviderConfigError>(
+class PiProviderConfigError extends Schema.Error<PiProviderConfigError>(
   'PiProviderConfigError',
 )({
   provider: Schema.String,

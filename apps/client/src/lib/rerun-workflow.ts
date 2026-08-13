@@ -15,7 +15,7 @@ import { effectServerFn } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
 import { loadConfiguredConvexUrl } from './convex-url'
 
-class RerunWorkflowError extends Schema.ErrorClass<RerunWorkflowError>(
+class RerunWorkflowError extends Schema.Error<RerunWorkflowError>(
   'RerunWorkflowError',
 )({
   message: Schema.String,

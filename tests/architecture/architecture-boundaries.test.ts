@@ -651,7 +651,7 @@ describe('architecture boundaries', () => {
           'GitHub webhooks are handled by the dedicated GitHubWebhookWorker',
         )
         expect(infra).toContain('SourceControlWorker')
-        expect(infra).toContain('url: false')
+        expect(infra).toContain('workersDev: false')
         expect(infra).toContain('SOURCE_CONTROL_WORKER: sourceControlWorker')
         expect(infra).toContain(
           'CLOUDFLARE_SENTRY_DSN: sourceControlRuntimeEnv.CLOUDFLARE_SENTRY_DSN',
@@ -919,7 +919,7 @@ describe('architecture boundaries', () => {
           "'@patchplane/core/diff/ParseUnifiedDiffStats'",
         )
         expect(statistics).toContain(
-          'extends Schema.TaggedErrorClass<UnifiedDiffStatsUnavailable>()(',
+          'extends Schema.TaggedError<UnifiedDiffStatsUnavailable>()(',
         )
         expect(statistics).toContain(
           "import { Effect, Match, Schema } from 'effect'",

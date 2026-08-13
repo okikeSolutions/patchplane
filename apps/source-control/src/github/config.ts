@@ -72,7 +72,7 @@ const SourceControlRouteConfigEnvironment = Config.all({
   ),
 })
 
-class SourceControlConfigError extends Schema.ErrorClass<SourceControlConfigError>(
+class SourceControlConfigError extends Schema.Error<SourceControlConfigError>(
   'SourceControlConfigError',
 )({ message: Schema.String }) {}
 

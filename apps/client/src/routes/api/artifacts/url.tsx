@@ -20,7 +20,7 @@ const getEvidenceArtifact = makeFunctionReference<
   unknown
 >('workflowStarts:getEvidenceArtifact')
 
-class ArtifactRouteError extends Schema.TaggedErrorClass<ArtifactRouteError>()(
+class ArtifactRouteError extends Schema.TaggedError<ArtifactRouteError>()(
   'ArtifactRouteError',
   {
     code: Schema.Literals([

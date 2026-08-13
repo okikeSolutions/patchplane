@@ -40,7 +40,7 @@ const upsertGitHubInstallationRepositories = makeFunctionReference<
   ReadonlyArray<unknown>
 >('connectedRepositories:upsertGitHubInstallationRepositories')
 
-class SourceControlWorkerSyncError extends Schema.ErrorClass<SourceControlWorkerSyncError>('SourceControlWorkerSyncError')({
+class SourceControlWorkerSyncError extends Schema.Error<SourceControlWorkerSyncError>('SourceControlWorkerSyncError')({
   message: Schema.String,
 }) {}
 

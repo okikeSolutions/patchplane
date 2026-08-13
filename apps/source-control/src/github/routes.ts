@@ -336,7 +336,7 @@ export function makeSourceControlRuntime(env: WorkerEnv): SourceControlRuntime {
   )
 }
 
-class SourceControlWorkerRequestError extends Schema.ErrorClass<SourceControlWorkerRequestError>(
+class SourceControlWorkerRequestError extends Schema.Error<SourceControlWorkerRequestError>(
   'SourceControlWorkerRequestError',
 )({
   message: Schema.String,

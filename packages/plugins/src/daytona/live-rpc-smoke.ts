@@ -34,7 +34,7 @@ import { DaytonaConfig } from './DaytonaConfig'
 import { toDaytonaClientConfig } from './daytona-adapter'
 import { DaytonaSandboxPlugin } from './DaytonaSandboxPlugin'
 
-class RpcSmokeError extends Schema.TaggedErrorClass<RpcSmokeError>()(
+class RpcSmokeError extends Schema.TaggedError<RpcSmokeError>()(
   'RpcSmokeError',
   {
     message: Schema.String,

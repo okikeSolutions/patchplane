@@ -52,7 +52,7 @@ export type UnifiedDiffStatsUnavailableReason = Schema.Schema.Type<
 >
 
 export class UnifiedDiffStatsUnavailable
-  extends Schema.TaggedErrorClass<UnifiedDiffStatsUnavailable>()(
+  extends Schema.TaggedError<UnifiedDiffStatsUnavailable>()(
     'UnifiedDiffStatsUnavailable',
     {
       reason: UnifiedDiffStatsUnavailableReason,

@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
+export class AuthError extends Schema.TaggedError<AuthError>()(
   'AuthError',
   {
     operation: Schema.String,
@@ -9,7 +9,7 @@ export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
   },
 ) {}
 
-export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
+export class StorageError extends Schema.TaggedError<StorageError>()(
   'StorageError',
   {
     operation: Schema.String,
@@ -18,7 +18,7 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
   },
 ) {}
 
-export class GitHubError extends Schema.TaggedErrorClass<GitHubError>()(
+export class GitHubError extends Schema.TaggedError<GitHubError>()(
   'GitHubError',
   {
     operation: Schema.String,
@@ -28,13 +28,13 @@ export class GitHubError extends Schema.TaggedErrorClass<GitHubError>()(
 ) {}
 
 export class SourceControlError
-  extends Schema.TaggedErrorClass<SourceControlError>()('SourceControlError', {
+  extends Schema.TaggedError<SourceControlError>()('SourceControlError', {
     operation: Schema.String,
     message: Schema.String,
     cause: Schema.Defect(),
   }) {}
 
-export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
+export class SandboxError extends Schema.TaggedError<SandboxError>()(
   'SandboxError',
   {
     operation: Schema.String,
@@ -43,7 +43,7 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
   },
 ) {}
 
-export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
+export class ArtifactsError extends Schema.TaggedError<ArtifactsError>()(
   'ArtifactsError',
   {
     operation: Schema.String,
@@ -52,7 +52,7 @@ export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
   },
 ) {}
 
-export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
+export class TelemetryError extends Schema.TaggedError<TelemetryError>()(
   'TelemetryError',
   {
     operation: Schema.String,
@@ -62,11 +62,11 @@ export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
 ) {}
 
 export class WorkflowStateError
-  extends Schema.TaggedErrorClass<WorkflowStateError>()('WorkflowStateError', {
+  extends Schema.TaggedError<WorkflowStateError>()('WorkflowStateError', {
     message: Schema.String,
   }) {}
 
-export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()(
+export class ValidationError extends Schema.TaggedError<ValidationError>()(
   'ValidationError',
   {
     message: Schema.String,

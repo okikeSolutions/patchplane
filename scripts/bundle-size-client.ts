@@ -52,13 +52,23 @@ const pierreDiffsClientJsGzipAllowanceKiB = 2_048
 // 2,203 raw bytes; keep a narrowly rounded allowance rather than weakening
 // client transfer or largest-chunk limits.
 const providerProcessIdentityServerAllowanceMiB = 0.01
+// Effect 4.0.0-rc.108 increases the measured Cloudflare SSR output to
+// 7.56 MiB. Keep the dependency migration visible as a narrowly rounded
+// server-only allowance; client transfer and largest-chunk guards are unchanged.
+const effectV4RcServerAllowanceMiB = 0.06
 
 function parseOptions(argv: readonly string[]): Options {
   let check = false
   let json = false
   let skipBuild = false
   let top = 10
-  let serverBudgetMiB = 7.5 + providerProcessIdentityServerAllowanceMiB
+  let serverBudgetMiB = Number(
+    (
+      7.5 +
+      providerProcessIdentityServerAllowanceMiB +
+      effectV4RcServerAllowanceMiB
+    ).toFixed(2),
+  )
   let clientBudgetMiB = baseClientBudgetMiB + pierreDiffsClientAllowanceMiB
   let clientJsGzipBudgetKiB =
     baseClientJsGzipBudgetKiB + pierreDiffsClientJsGzipAllowanceKiB
@@ -131,7 +141,7 @@ Options:
   --json                     Print machine-readable JSON
   --skip-build               Measure existing apps/client/dist output
   --top=N                    Number of largest files to show (default: 10)
-  --server-budget-mib=N      Server total budget for --check (default: 7.51)
+  --server-budget-mib=N      Server total budget for --check (default: 7.57)
   --client-budget-mib=N      Client total budget for --check (default: 14)
   --client-js-gzip-budget-kib=N
                              Client JavaScript gzip budget (default: 2810)
@@ -160,7 +170,7 @@ function buildClientDist() {
     'bun',
     [
       '-e',
-      "import * as Effect from 'effect/Effect'; import * as NodeServices from '@effect/platform-node/NodeServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }).pipe(Effect.provide(NodeServices.layer)));",
+      "import * as Effect from 'effect/Effect'; import * as NodeServices from '@effect/platform-node/NodeServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Sources/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }).pipe(Effect.provide(NodeServices.layer)));",
     ],
     clientDir,
   )

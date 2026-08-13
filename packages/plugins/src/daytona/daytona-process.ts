@@ -68,7 +68,7 @@ export interface DaytonaCommandSandbox {
   }
 }
 
-export class DaytonaProcessError extends Schema.TaggedErrorClass<DaytonaProcessError>()(
+export class DaytonaProcessError extends Schema.TaggedError<DaytonaProcessError>()(
   'DaytonaProcessError',
   {
     operation: Schema.String,

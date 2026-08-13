@@ -66,7 +66,7 @@ type SourceControlPublishDecisionResponse = Schema.Schema.Type<
   typeof SourceControlPublishDecisionResponse
 >
 
-class ReviewDecisionError extends Schema.ErrorClass<ReviewDecisionError>(
+class ReviewDecisionError extends Schema.Error<ReviewDecisionError>(
   'ReviewDecisionError',
 )({
   message: Schema.String,

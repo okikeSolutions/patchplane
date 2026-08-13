@@ -42,7 +42,7 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "effect": "4.0.0-beta.100"
+    "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@patchplane/typescript-config": "workspace:*"

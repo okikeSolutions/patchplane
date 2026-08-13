@@ -154,7 +154,7 @@ export default Alchemy.Stack(
           import.meta.dirname,
           'apps/source-control/src/worker.ts',
         ),
-        url: false,
+        workersDev: false,
         compatibility: { flags: ['nodejs_compat'] },
         observability: devWorkerObservability,
         env: {

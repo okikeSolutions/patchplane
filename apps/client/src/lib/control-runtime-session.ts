@@ -26,7 +26,7 @@ const SourceControlRuntimeControlResponse = Schema.Struct({
 
 type SourceControlRuntimeControlResponse = Schema.Schema.Type<typeof SourceControlRuntimeControlResponse>
 
-class RuntimeControlRequestError extends Schema.ErrorClass<RuntimeControlRequestError>('RuntimeControlRequestError')({
+class RuntimeControlRequestError extends Schema.Error<RuntimeControlRequestError>('RuntimeControlRequestError')({
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
