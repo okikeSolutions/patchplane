@@ -154,6 +154,14 @@ function trustLoopChecks(env: Environment, mode: SmokePreflightMode) {
       'PATCHPLANE_SYSTEM_INGESTION_SECRET',
     ),
     required(env, 'github-app-id', 'GITHUB_APP_ID'),
+    required(env, 'github-client-id', 'GITHUB_CLIENT_ID'),
+    required(env, 'github-client-secret', 'GITHUB_CLIENT_SECRET'),
+    required(
+      env,
+      'github-oauth-callback-url',
+      'PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL',
+      urlValidator,
+    ),
     required(env, 'github-private-key', 'GITHUB_PRIVATE_KEY'),
     required(env, 'github-webhook-secret', 'GITHUB_WEBHOOK_SECRET'),
   ]
@@ -171,6 +179,11 @@ function trustLoopChecks(env: Environment, mode: SmokePreflightMode) {
       'repository',
       'PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME',
       repositoryValidator,
+    ),
+    required(
+      env,
+      'verification-command',
+      'PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND',
     ),
   )
 

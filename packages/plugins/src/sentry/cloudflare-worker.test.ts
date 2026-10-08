@@ -52,8 +52,11 @@ describe('withCloudflareSentry', () => {
       cookies: false,
       httpHeaders: { request: false, response: false },
       httpBodies: [],
-      queryParams: false,
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
       genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
       stackFrameVariables: false,
       frameContextLines: 0,
     })

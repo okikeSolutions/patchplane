@@ -176,6 +176,29 @@ describe('GitHub webhook Worker', () => {
     )
   })
 
+  it('deletes a conflicting duplicate envelope after durable rejection', async () => {
+    sentryMocks.convexMutation.mockResolvedValueOnce({ accepted: false })
+    const bindings = env()
+
+    const response = await worker.fetch(await request(), bindings)
+
+    assert.strictEqual(response.status, 500)
+    assert.strictEqual(
+      bindings.PATCHPLANE_EVIDENCE_BUCKET.delete.mock.calls.length,
+      1,
+    )
+    const deletedKey = (
+      bindings.PATCHPLANE_EVIDENCE_BUCKET.delete.mock.calls as unknown as Array<
+        [string]
+      >
+    )[0]?.[0]
+    assert.match(deletedKey ?? '', /webhook-queue\/github\/delivery-1\//)
+    assert.strictEqual(
+      bindings.VERIFICATION_EXECUTION_QUEUE.send.mock.calls.length,
+      0,
+    )
+  })
+
   it('rejects an unauthenticated webhook before queueing', async () => {
     const bindings = env()
     const invalid = await request()
@@ -225,9 +248,46 @@ describe('GitHub webhook Worker', () => {
       )
       assert.strictEqual(failure.cause, 'Bounded stream read deadline exceeded')
       assert.strictEqual(cancelled, true)
+      assert.strictEqual(body.locked, false)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('propagates request cancellation and releases the webhook body reader', async () => {
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => undefined),
+      cancel: () => {
+        cancelled = true
+      },
+    })
+    const controller = new AbortController()
+    const cancelledRequest = new Request(
+      'https://example.com/api/github/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'x-github-delivery': 'delivery-cancelled',
+          'x-github-event': 'pull_request',
+          'x-hub-signature-256': `sha256=${'0'.repeat(64)}`,
+        },
+        body,
+        duplex: 'half',
+        signal: controller.signal,
+      } as RequestInit & { duplex: 'half' },
+    )
+
+    const observed = worker.fetch(cancelledRequest, env())
+    controller.abort()
+
+    const failure = await observed.then(
+      () => undefined,
+      (cause: unknown) => cause,
+    )
+    assert.notStrictEqual(failure, undefined)
+    assert.strictEqual(cancelled, true)
+    assert.strictEqual(body.locked, false)
   })
 
   it('retries incomplete execution and acknowledges only a durable sandbox result', async () => {

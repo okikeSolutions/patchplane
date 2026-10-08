@@ -7,8 +7,7 @@ export type PiRpcParsedLine =
   | { readonly kind: 'event'; readonly value: unknown }
 
 interface PiRpcParseError {
-  readonly line: string
-  readonly error: string
+  readonly error: 'Malformed Pi RPC JSON record'
 }
 
 export interface PiRpcParseResult {
@@ -26,16 +25,15 @@ export function parsePiRpcJsonLines(input: string): PiRpcParseResult {
   const records: PiRpcParsedLine[] = []
   const parseErrors: PiRpcParseError[] = []
 
-  const lines = input.split('\n').map((line) => line.endsWith('\r') ? line.slice(0, -1) : line)
+  const lines = input
+    .split('\n')
+    .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
   for (const line of lines) {
     if (line.length === 0) continue
     try {
       records.push(classifyPiRpcRecord(JSON.parse(line)))
-    } catch (error) {
-      parseErrors.push({
-        line,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    } catch {
+      parseErrors.push({ error: 'Malformed Pi RPC JSON record' })
     }
   }
 

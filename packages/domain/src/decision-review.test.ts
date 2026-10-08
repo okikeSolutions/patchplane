@@ -70,12 +70,60 @@ describe('decision/review domain schemas', () => {
         createdAt: 15,
       })
 
-      expect(patchSet.status).toBe('captured')
-      expect(reviewRun.status).toBe('completed')
-      expect(finding.severity).toBe('error')
-      expect(policyDecision.status).toBe('changes-requested')
-      expect(humanDecision.actorId).toBe('workos:user_123')
-      expect(humanDecision.idempotencyKey).toBe('decision-attempt-1')
-      expect(publication.kind).toBe('check-run')
+      expect(patchSet).toMatchObject({
+        id: 'patch_1',
+        workflowRunId: 'workflow_1',
+        status: 'captured',
+        diffArtifactId: 'artifact_1',
+        stats: { filesChanged: 2, additions: 10, deletions: 3 },
+        createdAt: 10,
+      })
+      expect(reviewRun).toMatchObject({
+        id: 'review_1',
+        workflowRunId: 'workflow_1',
+        kind: 'test',
+        reviewer: 'patchplane:test-reviewer',
+        status: 'completed',
+        startedAt: 11,
+        completedAt: 12,
+      })
+      expect(finding).toMatchObject({
+        id: 'finding_1',
+        workflowRunId: 'workflow_1',
+        reviewRunId: 'review_1',
+        severity: 'error',
+        category: 'test',
+        message: 'Unit test failed',
+        path: 'src/foo.test.ts',
+        startLine: 7,
+        endLine: 8,
+      })
+      expect(policyDecision).toMatchObject({
+        id: 'policy_1',
+        workflowRunId: 'workflow_1',
+        reviewRunId: 'review_1',
+        status: 'changes-requested',
+        summary: 'Tests failed',
+        createdAt: 13,
+      })
+      expect(humanDecision).toMatchObject({
+        id: 'human_1',
+        workflowRunId: 'workflow_1',
+        actorId: 'workos:user_123',
+        status: 'rejected',
+        comment: 'Failing tests need a fix first.',
+        decidedAt: 14,
+        idempotencyKey: 'decision-attempt-1',
+      })
+      expect(publication).toMatchObject({
+        id: 'publication_1',
+        workflowRunId: 'workflow_1',
+        provider: 'github',
+        kind: 'check-run',
+        status: 'published',
+        externalId: '123',
+        url: 'https://github.com/example/repo/runs/123',
+        createdAt: 15,
+      })
     }))
 })

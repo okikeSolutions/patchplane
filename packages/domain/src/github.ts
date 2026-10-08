@@ -34,8 +34,8 @@ export const GitHubRepositoryRef = Schema.Struct({
   owner: Schema.NonEmptyString,
   name: Schema.NonEmptyString,
   fullName: Schema.NonEmptyString,
-  repositoryExternalId: Schema.optional(Schema.NonEmptyString),
-  private: Schema.optional(Schema.Boolean),
+  repositoryExternalId: Schema.NonEmptyString,
+  private: Schema.Boolean,
 })
 export type GitHubRepositoryRef = Schema.Schema.Type<typeof GitHubRepositoryRef>
 export const decodeGitHubRepositoryRef =
@@ -125,3 +125,55 @@ export type GitHubNormalizedWorkflowEvent = Schema.Schema.Type<
 export const decodeGitHubNormalizedWorkflowEvent = Schema.decodeUnknownEffect(
   GitHubNormalizedWorkflowEvent,
 )
+
+export interface GitHubInstallationSyncProofInput {
+  readonly issuedAt: number
+  readonly workspaceId: string
+  readonly account: {
+    readonly provider: 'github'
+    readonly installationId: string
+    readonly accountExternalId: string
+    readonly accountLogin: string
+    readonly accountType?: string | undefined
+  }
+  readonly repositories: ReadonlyArray<{
+    readonly provider: 'github'
+    readonly installationId: string
+    readonly repositoryExternalId: string
+    readonly repositoryOwner: string
+    readonly repositoryName: string
+    readonly repositoryFullName: string
+    readonly private: boolean
+    readonly selected: boolean
+    readonly permissionsJson?: string | undefined
+  }>
+}
+
+/** Canonical bytes authenticated by the trusted source-control Worker. */
+export function canonicalizeGitHubInstallationSyncProof(
+  input: GitHubInstallationSyncProofInput,
+) {
+  return JSON.stringify({
+    version: 1,
+    issuedAt: input.issuedAt,
+    workspaceId: input.workspaceId,
+    account: {
+      provider: input.account.provider,
+      installationId: input.account.installationId,
+      accountExternalId: input.account.accountExternalId,
+      accountLogin: input.account.accountLogin,
+      accountType: input.account.accountType ?? null,
+    },
+    repositories: input.repositories.map((repository) => ({
+      provider: repository.provider,
+      installationId: repository.installationId,
+      repositoryExternalId: repository.repositoryExternalId,
+      repositoryOwner: repository.repositoryOwner,
+      repositoryName: repository.repositoryName,
+      repositoryFullName: repository.repositoryFullName,
+      private: repository.private,
+      selected: repository.selected,
+      permissionsJson: repository.permissionsJson ?? null,
+    })),
+  })
+}

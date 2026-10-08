@@ -2,6 +2,7 @@ import { createPrivateKey } from 'node:crypto'
 import { Option, Redacted } from 'effect'
 import { App, Octokit } from 'octokit'
 import type { GitHubConfig } from './GitHubConfig'
+import { boundedGitHubFetch } from './github-bounded-fetch'
 
 export function normalizeGitHubAppPrivateKey(privateKey: string) {
   const normalized = privateKey.replaceAll('\\n', '\n').trim()
@@ -17,9 +18,11 @@ export function normalizeGitHubAppPrivateKey(privateKey: string) {
 }
 
 export function makeGitHubApp(config: GitHubConfig) {
-  const baseUrl = Option.getOrUndefined(config.baseUrl)
-  const OctokitForApp =
-    baseUrl === undefined ? Octokit : Octokit.defaults({ baseUrl })
+  const baseUrl = Option.getOrUndefined(config.baseUrl)?.replace(/\/+$/, '')
+  const OctokitForApp = Octokit.defaults({
+    ...(baseUrl === undefined ? {} : { baseUrl }),
+    request: { fetch: boundedGitHubFetch(4 * 1_024 * 1_024) },
+  })
 
   return {
     baseUrl,

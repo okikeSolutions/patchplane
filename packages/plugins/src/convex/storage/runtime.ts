@@ -1,5 +1,5 @@
 import { Effect, Option, Redacted } from 'effect'
-import { ConvexHttpClient } from 'convex/browser'
+import { convexMutation, convexQuery } from '../http-client'
 import { StorageError } from '@patchplane/domain/errors'
 import { decodeEvidenceArtifact } from '@patchplane/domain/evidence-artifact'
 import { decodeRuntimeEvents } from '@patchplane/domain/runtime-event'
@@ -50,40 +50,39 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
       })
     }
 
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.mutation(recordRuntimeEventsMutation, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          events: input.map((event) => ({
-            workflowRunId: event.workflowRunId,
-            provider: event.provider,
-            type: event.type,
-            occurredAt: event.occurredAt,
-            ...(event.summary === undefined ? {} : { summary: event.summary }),
-            ...(event.payloadJson === undefined
-              ? {}
-              : { payloadJson: event.payloadJson }),
-            ...(event.idempotencyKey === undefined
-              ? {}
-              : { idempotencyKey: event.idempotencyKey }),
-            ...(event.sourceSessionId === undefined
-              ? {}
-              : { sourceSessionId: event.sourceSessionId }),
-            ...(event.sourceCommandId === undefined
-              ? {}
-              : { sourceCommandId: event.sourceCommandId }),
-            ...(event.sourceStream === undefined
-              ? {}
-              : { sourceStream: event.sourceStream }),
-            ...(event.sourceLine === undefined
-              ? {}
-              : { sourceLine: event.sourceLine }),
-            ...(event.sourceOffset === undefined
-              ? {}
-              : { sourceOffset: event.sourceOffset }),
-          })),
-        })
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordRuntimeEventsMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        events: input.map((event) => ({
+          workflowRunId: event.workflowRunId,
+          provider: event.provider,
+          type: event.type,
+          occurredAt: event.occurredAt,
+          ...(event.summary === undefined ? {} : { summary: event.summary }),
+          ...(event.payloadJson === undefined
+            ? {}
+            : { payloadJson: event.payloadJson }),
+          ...(event.idempotencyKey === undefined
+            ? {}
+            : { idempotencyKey: event.idempotencyKey }),
+          ...(event.sourceSessionId === undefined
+            ? {}
+            : { sourceSessionId: event.sourceSessionId }),
+          ...(event.sourceCommandId === undefined
+            ? {}
+            : { sourceCommandId: event.sourceCommandId }),
+          ...(event.sourceStream === undefined
+            ? {}
+            : { sourceStream: event.sourceStream }),
+          ...(event.sourceLine === undefined
+            ? {}
+            : { sourceLine: event.sourceLine }),
+          ...(event.sourceOffset === undefined
+            ? {}
+            : { sourceOffset: event.sourceOffset }),
+        })),
       },
       catch: (cause) =>
         new StorageError({
@@ -116,18 +115,17 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.mutation(recordRuntimeSessionStartedMutation, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          workflowRunId: input.workflowRunId,
-          provider: input.provider,
-          sandboxId: input.sandboxId,
-          sessionId: input.sessionId,
-          commandId: input.commandId,
-          startedAt: input.startedAt,
-        })
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordRuntimeSessionStartedMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        provider: input.provider,
+        sandboxId: input.sandboxId,
+        sessionId: input.sessionId,
+        commandId: input.commandId,
+        startedAt: input.startedAt,
       },
       catch: (cause) =>
         new StorageError({
@@ -159,17 +157,16 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.mutation(markRuntimeSessionStatusMutation, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          runtimeSessionId: input.runtimeSessionId,
-          status: input.status,
-          ...(input.completedAt === undefined
-            ? {}
-            : { completedAt: input.completedAt }),
-        })
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: markRuntimeSessionStatusMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        runtimeSessionId: input.runtimeSessionId,
+        status: input.status,
+        ...(input.completedAt === undefined
+          ? {}
+          : { completedAt: input.completedAt }),
       },
       catch: (cause) =>
         new StorageError({
@@ -201,13 +198,12 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.query(getActiveRuntimeSessionQuery, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          workflowRunId: input.workflowRunId,
-        })
+    const value = yield* convexQuery({
+      url: convexUrl,
+      reference: getActiveRuntimeSessionQuery,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
       },
       catch: (cause) =>
         new StorageError({
@@ -242,41 +238,50 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
       })
     }
 
-    const client = new ConvexHttpClient(convexUrl)
     const value = yield* settleWithin({
-      promise: client.mutation(recordSandboxExecutionMutation, {
-        systemSecret: Redacted.value(systemIngestionSecret),
-        workflowRunId: input.workflowRunId,
-        ...(input.incomingDispatchToken === undefined
-          ? {}
-          : { incomingDispatchToken: input.incomingDispatchToken }),
-        ...(input.executionGroupId === undefined
-          ? {}
-          : { executionGroupId: input.executionGroupId }),
-        ...(input.executionGroupClaimToken === undefined
-          ? {}
-          : {
-              executionGroupClaimToken: input.executionGroupClaimToken,
-            }),
-        ...(input.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: input.idempotencyKey }),
-        provider: input.provider,
-        sandboxId: input.sandboxId,
-        ...(input.providerSessionId === undefined
-          ? {}
-          : { providerSessionId: input.providerSessionId }),
-        ...(input.providerCommandId === undefined
-          ? {}
-          : { providerCommandId: input.providerCommandId }),
-        command: input.command,
-        status: input.status,
-        ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
-        stdout: input.stdout,
-        ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
-        ...(input.policy === undefined ? {} : { policy: input.policy }),
-        startedAt: input.startedAt,
-        completedAt: input.completedAt,
+      operationEffect: convexMutation({
+        url: convexUrl,
+        reference: recordSandboxExecutionMutation,
+        args: {
+          systemSecret: Redacted.value(systemIngestionSecret),
+          workflowRunId: input.workflowRunId,
+          ...(input.incomingDispatchToken === undefined
+            ? {}
+            : { incomingDispatchToken: input.incomingDispatchToken }),
+          ...(input.executionGroupId === undefined
+            ? {}
+            : { executionGroupId: input.executionGroupId }),
+          ...(input.executionGroupClaimToken === undefined
+            ? {}
+            : {
+                executionGroupClaimToken: input.executionGroupClaimToken,
+              }),
+          ...(input.idempotencyKey === undefined
+            ? {}
+            : { idempotencyKey: input.idempotencyKey }),
+          provider: input.provider,
+          sandboxId: input.sandboxId,
+          ...(input.providerSessionId === undefined
+            ? {}
+            : { providerSessionId: input.providerSessionId }),
+          ...(input.providerCommandId === undefined
+            ? {}
+            : { providerCommandId: input.providerCommandId }),
+          command: input.command,
+          status: input.status,
+          ...(input.exitCode === undefined ? {} : { exitCode: input.exitCode }),
+          stdout: input.stdout,
+          ...(input.stderr === undefined ? {} : { stderr: input.stderr }),
+          ...(input.policy === undefined ? {} : { policy: input.policy }),
+          startedAt: input.startedAt,
+          completedAt: input.completedAt,
+        },
+        catch: (cause) =>
+          new StorageError({
+            operation: 'recordSandboxExecution',
+            message: 'Convex failed to record sandbox execution',
+            cause,
+          }),
       }),
       timeoutMs: 15_000,
       operation: 'recordSandboxExecution',
@@ -306,31 +311,30 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.mutation(recordEvidenceArtifactMutation, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          workflowRunId: input.workflowRunId,
-          ...(input.producer === undefined ? {} : { producer: input.producer }),
-          ...(input.subjectDigest === undefined
-            ? {}
-            : { subjectDigest: input.subjectDigest }),
-          ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
-          kind: input.kind,
-          ...(input.label === undefined ? {} : { label: input.label }),
-          storageProvider: input.storageProvider,
-          storageKey: input.storageKey,
-          contentType: input.contentType,
-          sizeBytes: input.sizeBytes,
-          sha256: input.sha256,
-          ...(input.retentionPolicy === undefined
-            ? {}
-            : { retentionPolicy: input.retentionPolicy }),
-          ...(input.createdAt === undefined
-            ? {}
-            : { createdAt: input.createdAt }),
-        })
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordEvidenceArtifactMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        ...(input.producer === undefined ? {} : { producer: input.producer }),
+        ...(input.subjectDigest === undefined
+          ? {}
+          : { subjectDigest: input.subjectDigest }),
+        ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
+        kind: input.kind,
+        ...(input.label === undefined ? {} : { label: input.label }),
+        storageProvider: input.storageProvider,
+        storageKey: input.storageKey,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        sha256: input.sha256,
+        ...(input.retentionPolicy === undefined
+          ? {}
+          : { retentionPolicy: input.retentionPolicy }),
+        ...(input.createdAt === undefined
+          ? {}
+          : { createdAt: input.createdAt }),
       },
       catch: (cause) =>
         new StorageError({
@@ -362,22 +366,18 @@ export function makeRuntimeStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        if (input.authToken !== undefined) {
-          client.setAuth(input.authToken)
-        }
-        return client.query(getEvidenceArtifactQuery, {
-          artifactId: input.artifactId,
-          ...(input.workflowRunId === undefined
-            ? {}
-            : { workflowRunId: input.workflowRunId }),
-          ...(input.authToken !== undefined ||
-          systemIngestionSecret === undefined
-            ? {}
-            : { systemSecret: Redacted.value(systemIngestionSecret) }),
-        })
+    const value = yield* convexQuery({
+      url: convexUrl,
+      ...(input.authToken === undefined ? {} : { auth: input.authToken }),
+      reference: getEvidenceArtifactQuery,
+      args: {
+        artifactId: input.artifactId,
+        ...(input.workflowRunId === undefined
+          ? {}
+          : { workflowRunId: input.workflowRunId }),
+        ...(input.authToken !== undefined || systemIngestionSecret === undefined
+          ? {}
+          : { systemSecret: Redacted.value(systemIngestionSecret) }),
       },
       catch: (cause) =>
         new StorageError({

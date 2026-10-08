@@ -10,6 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as connectedRepositories from "../connectedRepositories.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as promptRequests from "../promptRequests.js";
 import type * as protectedExecutionValidator from "../protectedExecutionValidator.js";
@@ -47,6 +48,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   connectedRepositories: typeof connectedRepositories;
+  crons: typeof crons;
   http: typeof http;
   promptRequests: typeof promptRequests;
   protectedExecutionValidator: typeof protectedExecutionValidator;

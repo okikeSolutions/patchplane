@@ -9,9 +9,14 @@ const trustLoopEnvironment = {
   CONVEX_URL: 'https://example.convex.cloud',
   PATCHPLANE_SYSTEM_INGESTION_SECRET: 'system-secret-value',
   GITHUB_APP_ID: '1234',
+  GITHUB_CLIENT_ID: 'Iv1.client',
+  GITHUB_CLIENT_SECRET: 'client-secret-value',
+  PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL:
+    'https://patchplane.example/api/github/install/callback',
   GITHUB_PRIVATE_KEY: 'private-key-value',
   GITHUB_WEBHOOK_SECRET: 'webhook-secret-value',
   PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME: 'patchplane/example',
+  PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND: 'git diff --check HEAD^ HEAD',
   PATCHPLANE_TRUST_LOOP_WEBHOOK_URL:
     'https://patchplane.example/api/github/webhook',
 }
@@ -54,6 +59,10 @@ describe('smoke startup preflight', () => {
       PATCHPLANE_SYSTEM_INGESTION_SECRET: 'system-secret-value',
       PATCHPLANE_SMOKE_WORKFLOW_RUN_ID: 'workflow-123',
       GITHUB_APP_ID: '1234',
+      GITHUB_CLIENT_ID: 'Iv1.client',
+      GITHUB_CLIENT_SECRET: 'client-secret-value',
+      PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL:
+        'https://patchplane.example/api/github/install/callback',
       GITHUB_PRIVATE_KEY: 'private-key-value',
       GITHUB_WEBHOOK_SECRET: 'webhook-secret-value',
     })
@@ -65,6 +74,9 @@ describe('smoke startup preflight', () => {
       'convex-url',
       'system-ingestion-secret',
       'github-app-id',
+      'github-client-id',
+      'github-client-secret',
+      'github-oauth-callback-url',
       'github-private-key',
       'github-webhook-secret',
       'workflow-run',

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { Effect } from 'effect'
+import { Effect, type Scope } from 'effect'
 import { App } from 'octokit'
 import nock from 'nock'
 import MockDate from 'mockdate'
@@ -39,33 +39,83 @@ x//0u+zd/R/QRUzLOw4N72/Hu+UG6MNt5iDZFCtapRaKt6OvSBwy8w==
 const webhookSecret = 'secret'
 
 function withGitHubProvider<A, E>(
-  effect: Effect.Effect<A, E, SourceControlService | GitHubWebhookService>,
+  effect: Effect.Effect<
+    A,
+    E,
+    SourceControlService | GitHubWebhookService | Scope.Scope
+  >,
 ) {
   return Effect.runPromise(
-    effect.pipe(Effect.provide(GitHubProviderPlugin.layer)),
+    effect.pipe(Effect.provide(GitHubProviderPlugin.layer), Effect.scoped),
   )
 }
 
-function mockInstallationToken() {
+function mockPublicationToken(
+  permission: 'issues' | 'checks' | 'pull_requests',
+) {
+  const token = `${permission}-publication-token`
   nock('https://api.github.com')
-    .post('/app/installations/123/access_tokens')
-    .reply(200, {
-      token: 'installation-token',
-      expires_at: '2027-01-01T00:00:00.000Z',
-      permissions: { metadata: 'read', issues: 'write' },
+    .post('/app/installations/123/access_tokens', {
+      repositories: ['octokit.js'],
+      permissions: { [permission]: 'write' },
+    })
+    .reply(201, {
+      token,
+      expires_at: '2026-01-01T01:00:00.000Z',
+      permissions: { metadata: 'read', [permission]: 'write' },
+      repository_selection: 'selected',
+      repositories: [{ id: 456, name: 'octokit.js' }],
+    })
+  nock('https://api.github.com')
+    .delete('/installation/token')
+    .matchHeader('authorization', `Bearer ${token}`)
+    .reply(204)
+}
+
+function mockInventoryToken() {
+  nock('https://api.github.com')
+    .post('/app/installations/123/access_tokens', {
+      permissions: { metadata: 'read' },
+    })
+    .reply(201, {
+      token: 'inventory-token',
+      expires_at: '2026-01-01T01:00:00.000Z',
+      permissions: { metadata: 'read' },
       repository_selection: 'all',
     })
+  nock('https://api.github.com')
+    .delete('/installation/token')
+    .matchHeader('authorization', 'Bearer inventory-token')
+    .reply(204)
 }
 
 function mockComparisonResponse(response: Response) {
   const realFetch = globalThis.fetch.bind(globalThis)
-  return vi
-    .spyOn(globalThis, 'fetch')
-    .mockImplementation((input, init) =>
-      String(input).includes('/access_tokens')
-        ? realFetch(input, init)
-        : Promise.resolve(response),
-    )
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    return url.includes('/access_tokens') || url.endsWith('/installation/token')
+      ? realFetch(input, init)
+      : Promise.resolve(response)
+  })
+}
+
+function mockComparisonToken() {
+  nock('https://api.github.com')
+    .post('/app/installations/123/access_tokens', {
+      repositories: ['octokit.js'],
+      permissions: { contents: 'read' },
+    })
+    .reply(201, {
+      token: 'comparison-token',
+      expires_at: '2026-01-01T01:00:00.000Z',
+      permissions: { contents: 'read', metadata: 'read' },
+      repository_selection: 'selected',
+      repositories: [{ id: 456, name: 'octokit.js' }],
+    })
+  nock('https://api.github.com')
+    .delete('/installation/token')
+    .matchHeader('authorization', 'Bearer comparison-token')
+    .reply(204)
 }
 
 function mockScopedInstallationToken() {
@@ -76,16 +126,25 @@ function mockScopedInstallationToken() {
     })
     .reply(201, {
       token: 'scoped-installation-token',
-      expires_at: '2027-01-01T00:00:00.000Z',
-      permissions: { contents: 'read' },
+      expires_at: '2026-01-01T01:00:00.000Z',
+      permissions: { contents: 'read', metadata: 'read' },
       repository_selection: 'selected',
+      repositories: [{ id: 456, name: 'octokit.js' }],
     })
+  nock('https://api.github.com')
+    .delete('/installation/token')
+    .matchHeader('authorization', 'Bearer scoped-installation-token')
+    .reply(204)
 }
 
 beforeEach(() => {
   MockDate.set('2026-01-01T00:00:00.000Z')
   nock.cleanAll()
   process.env.GITHUB_APP_ID = '1'
+  process.env.GITHUB_CLIENT_ID = 'Iv1.client'
+  process.env.GITHUB_CLIENT_SECRET = 'client-secret'
+  process.env.PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL =
+    'https://patchplane.test/api/github/install/callback'
   process.env.GITHUB_PRIVATE_KEY = privateKey
   process.env.GITHUB_WEBHOOK_SECRET = webhookSecret
   delete process.env.GITHUB_BASE_URL
@@ -96,22 +155,47 @@ afterEach(() => {
   nock.cleanAll()
   vi.restoreAllMocks()
   delete process.env.GITHUB_APP_ID
+  delete process.env.GITHUB_CLIENT_ID
+  delete process.env.GITHUB_CLIENT_SECRET
+  delete process.env.PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL
   delete process.env.GITHUB_PRIVATE_KEY
   delete process.env.GITHUB_WEBHOOK_SECRET
   delete process.env.GITHUB_BASE_URL
 })
 
-describe('GitHubProviderPlugin', () => {
-  test('verifies repository access through an installation client', async () => {
-    mockInstallationToken()
+describe.sequential('GitHubProviderPlugin', () => {
+  test.sequential('verifies repository access through an installation client', async () => {
+    process.env.GITHUB_BASE_URL = 'https://api.github.com/'
     nock('https://api.github.com')
-      .get('/repos/octokit/octokit.js')
+      .post('/app/installations/123/access_tokens', {
+        repositories: ['octokit.js'],
+        permissions: { metadata: 'read' },
+      })
+      .reply(201, {
+        token: 'repository-verification-token',
+        expires_at: '2026-01-01T01:00:00.000Z',
+        permissions: { metadata: 'read' },
+        repository_selection: 'selected',
+        repositories: [{ id: 456, name: 'octokit.js' }],
+      })
+    nock('https://api.github.com')
+      .delete('/installation/token')
+      .matchHeader('authorization', 'Bearer repository-verification-token')
+      .reply(204)
+    nock('https://api.github.com')
+      .get('/installation/repositories')
+      .query({ per_page: 100, page: 1 })
       .reply(200, {
-        id: 456,
-        name: 'octokit.js',
-        full_name: 'octokit/octokit.js',
-        private: false,
-        owner: { login: 'octokit' },
+        total_count: 1,
+        repositories: [
+          {
+            id: 456,
+            name: 'octokit.js',
+            full_name: 'octokit/octokit.js',
+            private: false,
+            owner: { login: 'octokit' },
+          },
+        ],
       })
 
     const repository = await withGitHubProvider(
@@ -138,8 +222,46 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('fetches exact immutable comparison diff bytes by explicit SHAs', async () => {
-    mockInstallationToken()
+  test.sequential('revokes repository verification credentials when capability decoding fails', async () => {
+    nock('https://api.github.com')
+      .post('/app/installations/123/access_tokens', {
+        repositories: ['octokit.js'],
+        permissions: { metadata: 'read' },
+      })
+      .reply(201, {
+        token: 'invalid-repository-verification-token',
+        expires_at: '2026-01-01T01:00:00.000Z',
+        permissions: { metadata: 'read', issues: 'write' },
+        repository_selection: 'selected',
+        repositories: [{ id: 456, name: 'octokit.js' }],
+      })
+    nock('https://api.github.com')
+      .delete('/installation/token')
+      .matchHeader(
+        'authorization',
+        'Bearer invalid-repository-verification-token',
+      )
+      .reply(204)
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.verifyRepositoryAccess({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+          })
+        }),
+      ),
+    ).rejects.toThrow()
+
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('fetches exact immutable comparison diff bytes by explicit SHAs', async () => {
+    mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
     const diff =
@@ -185,7 +307,7 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.each([
+  test.sequential.each([
     {
       name: 'HTTP 406',
       status: 406,
@@ -239,7 +361,7 @@ describe('GitHubProviderPlugin', () => {
   ])(
     'fails closed for $name',
     async ({ status, body, contentType, message, maxBytes }) => {
-      mockInstallationToken()
+      mockComparisonToken()
       const baseSha = makeGitCommitSha('a'.repeat(40))
       const headSha = makeGitCommitSha('b'.repeat(40))
       mockComparisonResponse(
@@ -270,8 +392,8 @@ describe('GitHubProviderPlugin', () => {
     15_000,
   )
 
-  test('fails closed when comparison transfer is truncated', async () => {
-    mockInstallationToken()
+  test.sequential('fails closed when comparison transfer is truncated', async () => {
+    mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
     mockComparisonResponse(
@@ -303,22 +425,26 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   }, 15_000)
 
-  test('aborts a stalled comparison body at the configured deadline', async () => {
-    mockInstallationToken()
+  test.sequential('aborts a stalled comparison body at the configured deadline', async () => {
+    mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
     const realFetch = globalThis.fetch.bind(globalThis)
+    let comparisonSignal: AbortSignal | undefined
+    let bodyAbortObserved = false
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      if (String(input).includes('/access_tokens'))
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/access_tokens') || url.endsWith('/installation/token'))
         return realFetch(input, init)
-      const signal = init?.signal
+      comparisonSignal = init?.signal ?? undefined
       return Promise.resolve(
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
-              signal?.addEventListener('abort', () =>
-                controller.error(new Error('aborted comparison body')),
-              )
+              comparisonSignal?.addEventListener('abort', () => {
+                bodyAbortObserved = true
+                controller.error(new Error('aborted comparison body'))
+              })
             },
           }),
           {
@@ -343,15 +469,212 @@ describe('GitHubProviderPlugin', () => {
             baseSha,
             headSha,
             maxBytes: 1024,
-            timeoutMilliseconds: 10,
+            timeoutMilliseconds: 500,
+          })
+        }),
+      ),
+    ).rejects.toThrow('GitHub comparison exceeded the configured deadline')
+    expect(comparisonSignal?.aborted).toBe(true)
+    expect(bodyAbortObserved).toBe(true)
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('propagates Effect interruption to a stalled comparison body', async () => {
+    mockComparisonToken()
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let comparisonSignal: AbortSignal | undefined
+    let comparisonBody: ReadableStream<Uint8Array> | undefined
+    let notifyComparisonStarted: (() => void) | undefined
+    const comparisonStarted = new Promise<void>((resolve) => {
+      notifyComparisonStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/access_tokens') || url.endsWith('/installation/token'))
+        return realFetch(input, init)
+      comparisonSignal = init?.signal ?? undefined
+      notifyComparisonStarted?.()
+      comparisonBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          comparisonSignal?.addEventListener('abort', () =>
+            controller.error(new Error('interrupted comparison body')),
+          )
+        },
+      })
+      return Promise.resolve(
+        new Response(comparisonBody, {
+          status: 200,
+          headers: {
+            'content-type': 'application/vnd.github.v3.diff',
+          },
+        }),
+      )
+    })
+
+    const runtimeAbort = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.fetchImmutableComparison({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          baseSha,
+          headSha,
+          maxBytes: 1024,
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: runtimeAbort.signal },
+    )
+    await comparisonStarted
+    runtimeAbort.abort()
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(comparisonSignal?.aborted).toBe(true)
+    await vi.waitFor(() => expect(comparisonBody?.locked).toBe(false))
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('revokes a comparison token returned during cancellation', async () => {
+    nock('https://api.github.com')
+      .delete('/installation/token')
+      .matchHeader('authorization', 'Bearer cancelled-comparison-token')
+      .reply(204)
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let tokenSignal: AbortSignal | undefined
+    let resolveToken: ((response: Response) => void) | undefined
+    let notifyTokenStarted: (() => void) | undefined
+    const tokenStarted = new Promise<void>((resolve) => {
+      notifyTokenStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!url.includes('/app/installations/125/access_tokens')) {
+        return realFetch(input, init)
+      }
+      tokenSignal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyTokenStarted?.()
+      return new Promise<Response>((resolve) => {
+        resolveToken = resolve
+      })
+    })
+
+    const runtimeAbort = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.fetchImmutableComparison({
+          provider: 'github',
+          installationId: '125',
+          owner: 'octokit',
+          name: 'octokit.js',
+          baseSha: makeGitCommitSha('a'.repeat(40)),
+          headSha: makeGitCommitSha('b'.repeat(40)),
+          maxBytes: 1_024,
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: runtimeAbort.signal },
+    )
+    await tokenStarted
+    runtimeAbort.abort()
+    expect(tokenSignal?.aborted).toBe(false)
+    resolveToken?.(
+      new Response(
+        JSON.stringify({
+          token: 'cancelled-comparison-token',
+          expires_at: '2026-01-01T01:00:00.000Z',
+          permissions: { contents: 'read', metadata: 'read' },
+          repository_selection: 'selected',
+          repositories: [{ id: 456, name: 'octokit.js' }],
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('cleans up the comparison request after an early fetch rejection', async () => {
+    mockComparisonToken()
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let comparisonSignal: AbortSignal | undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/access_tokens') || url.endsWith('/installation/token'))
+        return realFetch(input, init)
+      comparisonSignal = init?.signal ?? undefined
+      return Promise.reject(new Error('early comparison fetch rejection'))
+    })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.fetchImmutableComparison({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+            baseSha,
+            headSha,
+            maxBytes: 1024,
           })
         }),
       ),
     ).rejects.toThrow('failed to fetch the immutable comparison diff')
+    expect(comparisonSignal?.aborted).toBe(true)
     expect(nock.isDone()).toBe(true)
   })
 
-  test('gets GitHub App installation account metadata', async () => {
+  test.sequential('bounds a stalled installation-token request before comparison fetch', async () => {
+    const baseSha = makeGitCommitSha('a'.repeat(40))
+    const headSha = makeGitCommitSha('b'.repeat(40))
+    let authenticationSignal: AbortSignal | undefined
+    let comparisonFetchCalled = false
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/access_tokens')) {
+        authenticationSignal =
+          input instanceof Request ? input.signal : (init?.signal ?? undefined)
+        return new Promise<Response>((_resolve, reject) => {
+          authenticationSignal?.addEventListener('abort', () =>
+            reject(authenticationSignal?.reason),
+          )
+        })
+      }
+      comparisonFetchCalled = true
+      return Promise.reject(new Error('comparison fetch must not run'))
+    })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.fetchImmutableComparison({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+            baseSha,
+            headSha,
+            maxBytes: 1024,
+            timeoutMilliseconds: 25,
+          })
+        }),
+      ),
+    ).rejects.toThrow('GitHub comparison exceeded the configured deadline')
+    expect(comparisonFetchCalled).toBe(false)
+    expect(authenticationSignal?.aborted).toBe(true)
+  })
+
+  test.sequential('gets GitHub App installation account metadata', async () => {
     nock('https://api.github.com')
       .get('/app/installations/123')
       .reply(200, {
@@ -383,11 +706,363 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('lists repositories accessible to an installation', async () => {
-    mockInstallationToken()
+  test.sequential('rejects malformed installation account identity', async () => {
+    nock('https://api.github.com')
+      .get('/app/installations/123')
+      .reply(200, { id: 123, account: { type: 'Organization' } })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.getInstallationAccount({
+            provider: 'github',
+            installationId: '123',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'getInstallationAccount.decode',
+    })
+  })
+
+  test.sequential('verifies organization installation ownership and revokes the temporary user token', async () => {
+    nock('https://github.com')
+      .post('/login/oauth/access_token', {
+        client_id: 'Iv1.client',
+        client_secret: 'client-secret',
+        code: 'authorization-code',
+        code_verifier: 'v'.repeat(64),
+        redirect_uri: 'https://patchplane.test/api/github/install/callback',
+      })
+      .reply(200, {
+        access_token: 'temporary-user-token',
+        token_type: 'bearer',
+        expires_in: 28_800,
+        refresh_token: 'refresh-token',
+        refresh_token_expires_in: 15_811_200,
+      })
+    nock('https://api.github.com').get('/user').reply(200, {
+      id: 321,
+      login: 'installer',
+      type: 'User',
+    })
+    nock('https://api.github.com')
+      .get('/user/installations')
+      .query({ per_page: '100', page: '1' })
+      .reply(200, {
+        total_count: 1,
+        installations: [
+          {
+            id: 123,
+            account: { id: 999, login: 'octokit', type: 'Organization' },
+          },
+        ],
+      })
+    nock('https://api.github.com')
+      .get('/user/memberships/orgs/octokit')
+      .reply(200, { state: 'active', role: 'admin' })
+    nock('https://api.github.com')
+      .delete('/applications/Iv1.client/token', {
+        access_token: 'temporary-user-token',
+      })
+      .reply(204)
+
+    await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        yield* github.verifyGitHubInstallationOwnership({
+          provider: 'github',
+          installationId: '123',
+          authorizationCode: 'authorization-code',
+          pkceVerifier: 'v'.repeat(64),
+        })
+      }),
+    )
+
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('rejects a spoofed installation id and still revokes the temporary user token', async () => {
+    nock('https://github.com')
+      .post('/login/oauth/access_token', {
+        client_id: 'Iv1.client',
+        client_secret: 'client-secret',
+        code: 'spoofed-code',
+        code_verifier: 'v'.repeat(64),
+        redirect_uri: 'https://patchplane.test/api/github/install/callback',
+      })
+      .reply(200, {
+        access_token: 'temporary-user-token',
+        expires_in: 28_800,
+        refresh_token: 'refresh-token',
+        refresh_token_expires_in: 15_811_200,
+      })
+    nock('https://api.github.com').get('/user').reply(200, {
+      id: 321,
+      login: 'collaborator',
+      type: 'User',
+    })
+    nock('https://api.github.com')
+      .get('/user/installations')
+      .query({ per_page: '100', page: '1' })
+      .reply(200, { total_count: 0, installations: [] })
+    nock('https://api.github.com')
+      .delete('/applications/Iv1.client/token', {
+        access_token: 'temporary-user-token',
+      })
+      .reply(204)
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          yield* github.verifyGitHubInstallationOwnership({
+            provider: 'github',
+            installationId: '123',
+            authorizationCode: 'spoofed-code',
+            pkceVerifier: 'v'.repeat(64),
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'verifyGitHubInstallationOwnership.verify',
+    })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('rejects an OAuth error returned with HTTP 200 without exposing a token', async () => {
+    nock('https://github.com')
+      .post('/login/oauth/access_token', {
+        client_id: 'Iv1.client',
+        client_secret: 'client-secret',
+        code: 'expired-code',
+        code_verifier: 'v'.repeat(64),
+        redirect_uri: 'https://patchplane.test/api/github/install/callback',
+      })
+      .reply(200, {
+        error: 'bad_verification_code',
+        error_description: 'The code passed is incorrect or expired.',
+      })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          yield* github.verifyGitHubInstallationOwnership({
+            provider: 'github',
+            installationId: '123',
+            authorizationCode: 'expired-code',
+            pkceVerifier: 'v'.repeat(64),
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'verifyGitHubInstallationOwnership.exchange',
+    })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('rejects an organization member without administrator ownership', async () => {
+    nock('https://github.com')
+      .post('/login/oauth/access_token', {
+        client_id: 'Iv1.client',
+        client_secret: 'client-secret',
+        code: 'member-code',
+        code_verifier: 'v'.repeat(64),
+        redirect_uri: 'https://patchplane.test/api/github/install/callback',
+      })
+      .reply(200, {
+        access_token: 'temporary-user-token',
+        expires_in: 28_800,
+        refresh_token: 'refresh-token',
+        refresh_token_expires_in: 15_811_200,
+      })
+    nock('https://api.github.com').get('/user').reply(200, {
+      id: 321,
+      login: 'member',
+      type: 'User',
+    })
+    nock('https://api.github.com')
+      .get('/user/installations')
+      .query({ per_page: '100', page: '1' })
+      .reply(200, {
+        total_count: 1,
+        installations: [
+          {
+            id: 123,
+            account: { id: 999, login: 'octokit', type: 'Organization' },
+          },
+        ],
+      })
+    nock('https://api.github.com')
+      .get('/user/memberships/orgs/octokit')
+      .reply(200, { state: 'active', role: 'member' })
+    nock('https://api.github.com')
+      .delete('/applications/Iv1.client/token', {
+        access_token: 'temporary-user-token',
+      })
+      .reply(204)
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          yield* github.verifyGitHubInstallationOwnership({
+            provider: 'github',
+            installationId: '123',
+            authorizationCode: 'member-code',
+            pkceVerifier: 'v'.repeat(64),
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'verifyGitHubInstallationOwnership.verify',
+    })
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('revokes a token returned concurrently with cancellation', async () => {
+    nock('https://api.github.com')
+      .delete('/applications/Iv1.client/token', {
+        access_token: 'cancelled-user-token',
+      })
+      .reply(204)
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let exchangeSignal: AbortSignal | undefined
+    let resolveExchange: ((response: Response) => void) | undefined
+    let notifyExchangeStarted: (() => void) | undefined
+    const exchangeStarted = new Promise<void>((resolve) => {
+      notifyExchangeStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      const isCancelledExchange =
+        url.includes('/login/oauth/access_token') &&
+        init?.body instanceof URLSearchParams &&
+        init.body.get('code') === 'cancelled-code'
+      if (!isCancelledExchange) {
+        return realFetch(input, init)
+      }
+      exchangeSignal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyExchangeStarted?.()
+      return new Promise<Response>((resolve) => {
+        resolveExchange = resolve
+      })
+    })
+
+    const runtimeAbort = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        yield* github.verifyGitHubInstallationOwnership({
+          provider: 'github',
+          installationId: '123',
+          authorizationCode: 'cancelled-code',
+          pkceVerifier: 'v'.repeat(64),
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: runtimeAbort.signal },
+    )
+    await exchangeStarted
+    runtimeAbort.abort()
+    expect(exchangeSignal?.aborted).toBe(false)
+    resolveExchange?.(
+      new Response(
+        JSON.stringify({
+          access_token: 'cancelled-user-token',
+          expires_in: 28_800,
+          refresh_token: 'cancelled-refresh-token',
+          refresh_token_expires_in: 15_811_200,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    )
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('revokes the temporary user token when ownership verification is interrupted', async () => {
+    nock('https://github.com')
+      .post('/login/oauth/access_token', {
+        client_id: 'Iv1.client',
+        client_secret: 'client-secret',
+        code: 'interrupt-verification-code',
+        code_verifier: 'v'.repeat(64),
+        redirect_uri: 'https://patchplane.test/api/github/install/callback',
+      })
+      .reply(200, {
+        access_token: 'interrupted-user-token',
+        expires_in: 28_800,
+        refresh_token: 'interrupted-refresh-token',
+        refresh_token_expires_in: 15_811_200,
+      })
+    nock('https://api.github.com')
+      .delete('/applications/Iv1.client/token', {
+        access_token: 'interrupted-user-token',
+      })
+      .reply(204)
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let userSignal: AbortSignal | undefined
+    let notifyUserRequestStarted: (() => void) | undefined
+    const userRequestStarted = new Promise<void>((resolve) => {
+      notifyUserRequestStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const requestUrl = input instanceof Request ? input.url : String(input)
+      const authorization =
+        input instanceof Request
+          ? input.headers.get('authorization')
+          : new Headers(init?.headers).get('authorization')
+      if (
+        new URL(requestUrl).pathname !== '/user' ||
+        authorization?.includes('interrupted-user-token') !== true
+      ) {
+        return realFetch(input, init)
+      }
+      userSignal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyUserRequestStarted?.()
+      return new Promise<Response>((_resolve, reject) => {
+        userSignal?.addEventListener('abort', () => reject(userSignal?.reason))
+      })
+    })
+
+    const runtimeAbort = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        yield* github.verifyGitHubInstallationOwnership({
+          provider: 'github',
+          installationId: '123',
+          authorizationCode: 'interrupt-verification-code',
+          pkceVerifier: 'v'.repeat(64),
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: runtimeAbort.signal },
+    )
+    await userRequestStarted
+    runtimeAbort.abort()
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(userSignal?.aborted).toBe(true)
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('lists repositories accessible to an installation', async () => {
+    mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
-      .query({ per_page: '100' })
+      .query({ per_page: '100', page: '1' })
       .reply(200, {
         total_count: 1,
         repositories: [
@@ -425,11 +1100,98 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('wraps installation repository listing API failures as SourceControlError', async () => {
-    mockInstallationToken()
+  test.sequential('revokes an installation token returned during cancellation', async () => {
+    nock('https://api.github.com')
+      .delete('/installation/token')
+      .matchHeader('authorization', 'Bearer cancelled-installation-token')
+      .reply(204)
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let tokenSignal: AbortSignal | undefined
+    let resolveToken: ((response: Response) => void) | undefined
+    let notifyTokenStarted: (() => void) | undefined
+    const tokenStarted = new Promise<void>((resolve) => {
+      notifyTokenStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!url.includes('/app/installations/124/access_tokens')) {
+        return realFetch(input, init)
+      }
+      tokenSignal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyTokenStarted?.()
+      return new Promise<Response>((resolve) => {
+        resolveToken = resolve
+      })
+    })
+
+    const runtimeAbort = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.listInstallationRepositories({
+          provider: 'github',
+          installationId: '124',
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: runtimeAbort.signal },
+    )
+    await tokenStarted
+    runtimeAbort.abort()
+    expect(tokenSignal?.aborted).toBe(false)
+    resolveToken?.(
+      new Response(
+        JSON.stringify({
+          token: 'cancelled-installation-token',
+          expires_at: '2026-01-01T01:00:00.000Z',
+          permissions: { metadata: 'read' },
+          repository_selection: 'all',
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('rejects repository inventories above the configured bound', async () => {
+    mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
-      .query({ per_page: '100' })
+      .query({ per_page: '100', page: '1' })
+      .reply(200, {
+        total_count: 1_001,
+        repositories: Array.from({ length: 1_001 }, (_, index) => ({
+          id: index + 1,
+          name: `repo-${index + 1}`,
+          full_name: `octokit/repo-${index + 1}`,
+          private: true,
+          owner: { login: 'octokit' },
+        })),
+      })
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.listInstallationRepositories({
+            provider: 'github',
+            installationId: '123',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'listInstallationRepositories.github',
+    })
+  })
+
+  test.sequential('wraps installation repository listing API failures as SourceControlError', async () => {
+    mockInventoryToken()
+    nock('https://api.github.com')
+      .get('/installation/repositories')
+      .query({ per_page: '100', page: '1' })
       .reply(403, { message: 'Resource not accessible by integration' })
 
     await expect(
@@ -448,11 +1210,11 @@ describe('GitHubProviderPlugin', () => {
     })
   })
 
-  test('rejects invalid installation repository metadata from GitHub', async () => {
-    mockInstallationToken()
+  test.sequential('rejects invalid installation repository metadata from GitHub', async () => {
+    mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
-      .query({ per_page: '100' })
+      .query({ per_page: '100', page: '1' })
       .reply(200, {
         total_count: 1,
         repositories: [
@@ -481,8 +1243,8 @@ describe('GitHubProviderPlugin', () => {
     })
   })
 
-  test('creates an issue comment through an installation client', async () => {
-    mockInstallationToken()
+  test.sequential('creates an issue comment through a scoped installation client', async () => {
+    mockPublicationToken('issues')
     nock('https://api.github.com')
       .post('/repos/octokit/octokit.js/issues/1/comments', {
         body: 'Hello from PatchPlane',
@@ -506,14 +1268,135 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('updates the canonical issue comment with the same publication marker', async () => {
-    mockInstallationToken()
+  test.sequential('uses pull-request permission for a pull-request comment', async () => {
+    mockPublicationToken('pull_requests')
+    nock('https://api.github.com')
+      .post('/repos/octokit/octokit.js/issues/1/comments', {
+        body: 'Hello from PatchPlane',
+      })
+      .reply(201, { id: 1 })
+
+    await withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        yield* github.createIssueComment({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          issueNumber: 1,
+          subjectKind: 'pull-request',
+          body: 'Hello from PatchPlane',
+        })
+      }),
+    )
+
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('settles a stalled publication-token acquisition at its owned deadline', async () => {
+    const deadline = new AbortController()
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal)
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let notifyStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!url.includes('/app/installations/123/access_tokens')) {
+        return realFetch(input, init)
+      }
+      const signal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyStarted?.()
+      if (signal?.aborted) return Promise.reject(signal.reason)
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), {
+          once: true,
+        })
+      })
+    })
+    const result = withGitHubProvider(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.createIssueComment({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          issueNumber: 1,
+          body: 'Hello from PatchPlane',
+        })
+      }),
+    )
+
+    await started
+    deadline.abort('publication token deadline exceeded')
+
+    await expect(result).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'publicationToken.acquire',
+    })
+  })
+
+  test.sequential('rejects an over-privileged publication token', async () => {
+    nock('https://api.github.com')
+      .post('/app/installations/123/access_tokens', {
+        repositories: ['octokit.js'],
+        permissions: { issues: 'write' },
+      })
+      .reply(201, {
+        token: 'over-privileged-token',
+        expires_at: '2026-01-01T01:00:00.000Z',
+        permissions: {
+          metadata: 'read',
+          issues: 'write',
+          checks: 'write',
+        },
+        repository_selection: 'selected',
+        repositories: [{ id: 456, name: 'octokit.js' }],
+      })
+    nock('https://api.github.com')
+      .delete('/installation/token')
+      .matchHeader('authorization', 'Bearer over-privileged-token')
+      .reply(204)
+
+    await expect(
+      withGitHubProvider(
+        Effect.gen(function* () {
+          const github = yield* SourceControlService
+          return yield* github.createIssueComment({
+            provider: 'github',
+            installationId: '123',
+            owner: 'octokit',
+            name: 'octokit.js',
+            issueNumber: 1,
+            body: 'Hello from PatchPlane',
+          })
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: 'SourceControlError',
+      operation: 'publicationToken.acquire',
+    })
+  })
+
+  test.sequential('updates the canonical issue comment with the same publication marker', async () => {
+    mockPublicationToken('issues')
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/issues/1/comments')
-      .query({ per_page: '100' })
+      .query({ per_page: '100', page: '1' })
       .reply(200, [
         {
+          id: 41,
+          performed_via_github_app: { id: 2 },
+          body: 'Hostile collision\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
+          html_url: 'https://github.test/comment/41',
+        },
+        {
           id: 42,
+          performed_via_github_app: { id: 1 },
           body: 'Existing result\n\n<!-- patchplane-publication:decision-1%3Aissue-comment -->',
           html_url: 'https://github.test/comment/42',
         },
@@ -549,21 +1432,71 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('reuses a check run with the same external publication id', async () => {
-    mockInstallationToken()
+  test.sequential('aborts issue-comment reconciliation when publication is interrupted', async () => {
+    mockPublicationToken('issues')
+    const realFetch = globalThis.fetch.bind(globalThis)
+    let publicationSignal: AbortSignal | undefined
+    let notifyStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!url.includes('/repos/octokit/octokit.js/issues/1/comments')) {
+        return realFetch(input, init)
+      }
+      publicationSignal =
+        input instanceof Request ? input.signal : (init?.signal ?? undefined)
+      notifyStarted?.()
+      return new Promise<Response>(() => undefined)
+    })
+    const controller = new AbortController()
+    const result = Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* SourceControlService
+        return yield* github.createIssueComment({
+          provider: 'github',
+          installationId: '123',
+          owner: 'octokit',
+          name: 'octokit.js',
+          issueNumber: 1,
+          body: 'Hello from PatchPlane',
+          idempotencyKey: 'decision-1:issue-comment',
+        })
+      }).pipe(Effect.provide(GitHubProviderPlugin.layer)),
+      { signal: controller.signal },
+    )
+    await started
+    controller.abort()
+
+    await expect(result).rejects.toThrow('interrupted')
+    expect(publicationSignal?.aborted).toBe(true)
+    expect(nock.isDone()).toBe(true)
+  })
+
+  test.sequential('adopts a check run with a legacy external publication id', async () => {
+    mockPublicationToken('checks')
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/commits/abc123/check-runs')
       .query({
         check_name: 'PatchPlane Review',
         filter: 'all',
         per_page: '100',
+        page: '1',
       })
       .reply(200, {
-        total_count: 1,
+        total_count: 2,
         check_runs: [
           {
+            id: 83,
+            app: { id: 2 },
+            external_id: 'candidate-1:patch-report-check',
+            html_url: 'https://github.test/check/83',
+          },
+          {
             id: 84,
-            external_id: 'decision-1:check-run',
+            app: { id: 1 },
+            external_id: 'candidate-1:patch-report-check',
             html_url: 'https://github.test/check/84',
           },
         ],
@@ -571,6 +1504,7 @@ describe('GitHubProviderPlugin', () => {
     nock('https://api.github.com')
       .patch('/repos/octokit/octokit.js/check-runs/84', {
         name: 'PatchPlane Review',
+        external_id: 'decision-1:check-run',
         status: 'completed',
         conclusion: 'success',
         output: {
@@ -598,6 +1532,7 @@ describe('GitHubProviderPlugin', () => {
           title: 'Approved',
           summary: 'Approved by PatchPlane',
           idempotencyKey: 'decision-1:check-run',
+          legacyIdempotencyKeys: ['candidate-1:patch-report-check'],
         })
       }),
     )
@@ -609,7 +1544,7 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('creates repository-scoped installation clone credentials for private repository clones', async () => {
+  test.sequential('creates repository-scoped installation clone credentials for private repository clones', async () => {
     mockScopedInstallationToken()
 
     const credentials = await withGitHubProvider(
@@ -632,7 +1567,58 @@ describe('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test('rejects non-positive installation ids', async () => {
+  test.sequential.each([
+    {
+      name: 'additional write permission',
+      permissions: { contents: 'read', metadata: 'read', issues: 'write' },
+      repositories: [{ id: 456, name: 'octokit.js' }],
+    },
+    {
+      name: 'different repository scope',
+      permissions: { contents: 'read', metadata: 'read' },
+      repositories: [{ id: 999, name: 'other-repo' }],
+    },
+  ])(
+    'rejects clone credentials with $name',
+    async ({ permissions, repositories }) => {
+      nock('https://api.github.com')
+        .post('/app/installations/123/access_tokens', {
+          repository_ids: [456],
+          permissions: { contents: 'read' },
+        })
+        .reply(201, {
+          token: 'unsafe-token',
+          expires_at: '2026-01-01T01:00:00.000Z',
+          permissions,
+          repository_selection: 'selected',
+          repositories,
+        })
+      nock('https://api.github.com')
+        .delete('/installation/token')
+        .matchHeader('authorization', 'Bearer unsafe-token')
+        .reply(204)
+
+      await expect(
+        withGitHubProvider(
+          Effect.gen(function* () {
+            const github = yield* SourceControlService
+            return yield* github.createRepositoryCloneCredentials({
+              provider: 'github',
+              installationId: '123',
+              owner: 'octokit',
+              name: 'octokit.js',
+              repositoryExternalId: '456',
+            })
+          }),
+        ),
+      ).rejects.toMatchObject({
+        _tag: 'SourceControlError',
+        operation: 'createRepositoryCloneCredentials.github',
+      })
+    },
+  )
+
+  test.sequential('rejects non-positive installation ids', async () => {
     await expect(
       withGitHubProvider(
         Effect.gen(function* () {
@@ -651,7 +1637,7 @@ describe('GitHubProviderPlugin', () => {
     })
   })
 
-  test('verifies a signed webhook event without dispatching handlers', async () => {
+  test.sequential('verifies a signed webhook event without dispatching handlers', async () => {
     const payload = JSON.stringify({
       action: 'opened',
       installation: { id: 123 },
@@ -682,7 +1668,7 @@ describe('GitHubProviderPlugin', () => {
     expect(event.payload).toMatchObject({ action: 'opened' })
   })
 
-  test('rejects invalid webhook signatures', async () => {
+  test.sequential('rejects invalid webhook signatures', async () => {
     await expect(
       withGitHubProvider(
         Effect.gen(function* () {

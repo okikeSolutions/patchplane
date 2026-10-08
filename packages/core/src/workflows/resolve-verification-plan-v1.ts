@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding, Schema } from 'effect'
+import { Crypto, Effect, Schema } from 'effect'
+import * as Hex from 'effect/encoding/Hex'
 import { WorkflowStateError } from '@patchplane/domain/errors'
 import type { WorkflowRunId } from '@patchplane/domain/ids'
 import {
@@ -188,7 +189,7 @@ export const ResolveVerificationPlanV1 = Effect.fn(
     version: 'verification-plan-v1' as const,
     sources,
     requirements,
-    digest: `sha256:${Encoding.encodeHex(digest)}` as const,
+    digest: `sha256:${Hex.encode(digest)}` as const,
     createdAt: input.createdAt,
   }
 })

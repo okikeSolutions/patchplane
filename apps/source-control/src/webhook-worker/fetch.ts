@@ -1,4 +1,3 @@
-import { ConvexHttpClient } from 'convex/browser'
 import { Effect } from 'effect'
 import {
   type Env,
@@ -9,7 +8,11 @@ import {
   validEnvelope,
   validSignature,
 } from './boundary'
-import { promiseCall, reportFailure } from './processingSupport'
+import {
+  convexMutationCall,
+  promiseCall,
+  reportFailure,
+} from './processingSupport'
 
 export const handleFetch = Effect.fnUntraced(function* (
   request: Request,
@@ -51,24 +54,31 @@ export const handleFetch = Effect.fnUntraced(function* (
         httpMetadata: { contentType: 'application/json' },
       }),
     )
-    const recorded: unknown = yield* promiseCall(
+    const recorded: unknown = yield* convexMutationCall(
+      env,
       'convex.recordQueuedGitHubDelivery',
-      () =>
-        new ConvexHttpClient(env.CONVEX_URL).mutation(
-          recordQueuedDeliveryMutation,
-          {
-            systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-            deliveryId,
-            envelopeStorageKey: envelope.storageKey,
-            envelopeSha256: envelope.digest,
-            deliveryToken,
-          },
-        ),
+      recordQueuedDeliveryMutation,
+      {
+        systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
+        deliveryId,
+        envelopeStorageKey: envelope.storageKey,
+        envelopeSha256: envelope.digest,
+        deliveryToken,
+      },
     )
     const persistedReceipt =
       recorded !== null && typeof recorded === 'object'
         ? (recorded as Record<string, unknown>)
         : undefined
+    if (persistedReceipt?.accepted === false) {
+      yield* promiseCall('r2.deleteRejectedWebhookEnvelope', () =>
+        env.PATCHPLANE_EVIDENCE_BUCKET.delete(envelope.storageKey),
+      )
+      return Response.json(
+        { ok: false, error: 'GitHub webhook receipt was rejected' },
+        { status: 500 },
+      )
+    }
     if (
       persistedReceipt?.accepted !== true ||
       typeof persistedReceipt.deliveryToken !== 'string' ||

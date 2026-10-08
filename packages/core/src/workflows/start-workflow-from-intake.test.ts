@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Layer, Option } from 'effect'
+import { WorkflowStateError } from '@patchplane/domain/errors'
 import {
   makePullRequestExternalId,
   makePullRequestNumber,
@@ -18,6 +19,7 @@ import { TelemetryService } from '../services/telemetry-service'
 import { StartWorkflowFromIntake } from './start-workflow-from-intake'
 
 let verifiedRepository: unknown
+let persistedIntake = false
 let breadcrumbs: Array<{ readonly stage: string; readonly status: string }> = []
 
 const TestStorageLayer = Layer.succeed(
@@ -56,28 +58,31 @@ const TestStorageLayer = Layer.succeed(
     recordProvenanceEvent: () => Effect.die('unused'),
     createWorkflowFromPrompt: () => Effect.die('unused'),
     createWorkflowFromIntake: (input) =>
-      Effect.succeed({
-        promptRequest: {
-          id: makePromptRequestId('prompt-1'),
-          workspaceId: input.workspaceId,
-          actorId: input.actor.id,
-          traceId: input.traceId,
-          source: input.source,
-          prompt: input.prompt,
-          ...(input.externalRef === undefined
-            ? {}
-            : { externalRef: input.externalRef }),
-          status: 'created',
-          createdAt: 1,
-        },
-        workflowRun: {
-          id: makeWorkflowRunId('workflow-1'),
-          promptRequestId: makePromptRequestId('prompt-1'),
-          workspaceId: input.workspaceId,
-          traceId: input.traceId,
-          status: 'queued',
-          createdAt: 1,
-        },
+      Effect.sync(() => {
+        persistedIntake = true
+        return {
+          promptRequest: {
+            id: makePromptRequestId('prompt-1'),
+            workspaceId: input.workspaceId,
+            actorId: input.actor.id,
+            traceId: input.traceId,
+            source: input.source,
+            prompt: input.prompt,
+            ...(input.externalRef === undefined
+              ? {}
+              : { externalRef: input.externalRef }),
+            status: 'created',
+            createdAt: 1,
+          },
+          workflowRun: {
+            id: makeWorkflowRunId('workflow-1'),
+            promptRequestId: makePromptRequestId('prompt-1'),
+            workspaceId: input.workspaceId,
+            traceId: input.traceId,
+            status: 'queued',
+            createdAt: 1,
+          },
+        }
       }),
   }),
 )
@@ -113,6 +118,7 @@ const TestSourceControlLayer = Layer.succeed(
         }
       }),
     getInstallationAccount: () => Effect.die('unused'),
+    verifyGitHubInstallationOwnership: () => Effect.die('unused'),
     listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
     createCheckRun: () => Effect.die('unused'),
@@ -191,6 +197,7 @@ describe('StartWorkflowFromIntake', () => {
     'rejects external intake without an authoritative source revision',
     () =>
       Effect.gen(function* () {
+        persistedIntake = false
         const error = yield* Effect.flip(
           StartWorkflowFromIntake({
             actor: {
@@ -209,9 +216,8 @@ describe('StartWorkflowFromIntake', () => {
           }),
         )
 
-        expect(error.message).toBe(
-          'External workflow intake requires complete GitHub pull request identity with pinned base and head SHAs',
-        )
+        expect(error).toBeInstanceOf(WorkflowStateError)
+        expect(persistedIntake).toBe(false)
       }).pipe(
         Effect.provide(
           Layer.mergeAll(

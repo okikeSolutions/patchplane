@@ -15,6 +15,7 @@ import {
   Option,
   Tracer,
 } from 'effect'
+import { close as closeSentry } from '@sentry/effect/server'
 import { afterEach, vi } from 'vitest'
 import { SentryTelemetryPlugin } from './SentryTelemetryPlugin'
 
@@ -80,8 +81,20 @@ const ConfiguredSentryLayer = SentryTelemetryPlugin.layer.pipe(
       ConfigProvider.fromEnv({
         env: {
           SENTRY_DSN: 'https://username@domain/123',
+          SENTRY_ENABLE_LOGS: 'true',
+        },
+      }),
+    ),
+  ),
+)
+
+const DisabledSentryLogsLayer = SentryTelemetryPlugin.layer.pipe(
+  Layer.provide(
+    ConfigProvider.layer(
+      ConfigProvider.fromEnv({
+        env: {
+          SENTRY_DSN: 'https://username@domain/123',
           SENTRY_ENABLE_LOGS: 'false',
-          SENTRY_ENABLE_METRICS: 'false',
         },
       }),
     ),
@@ -89,7 +102,8 @@ const ConfiguredSentryLayer = SentryTelemetryPlugin.layer.pipe(
 )
 
 describe('SentryTelemetryPlugin', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await closeSentry(2_000)
     sentryMocks.captureException.mockReset()
     sentryMocks.loggerInfo.mockReset()
     sentryMocks.effectLayerOptions.length = 0
@@ -135,6 +149,18 @@ describe('SentryTelemetryPlugin', () => {
     }).pipe(Effect.provide(TestLayer)),
   )
 
+  it.effect('does not forward operational events when Sentry logs are disabled', () =>
+    Effect.gen(function* () {
+      const telemetry = yield* TelemetryService
+      yield* telemetry.recordEvent({
+        name: 'test.event',
+        operation: 'test.recordEvent',
+      })
+
+      assert.strictEqual(sentryMocks.loggerInfo.mock.calls.length, 0)
+    }).pipe(Effect.provide(DisabledSentryLogsLayer)),
+  )
+
   it.effect(
     'configures deny-by-default data collection and bounded breadcrumbs',
     () =>
@@ -147,8 +173,11 @@ describe('SentryTelemetryPlugin', () => {
           cookies: false,
           httpHeaders: { request: false, response: false },
           httpBodies: [],
-          queryParams: false,
+          urlQueryParams: false,
+          graphQL: { document: false, variables: false },
           genAI: { inputs: false, outputs: false },
+          databaseQueryData: false,
+          queues: false,
           stackFrameVariables: false,
           frameContextLines: 0,
         })

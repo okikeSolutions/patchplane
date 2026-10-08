@@ -16,6 +16,7 @@ import {
   sanitizeSentryLog,
   sanitizeSentryMetric,
   sanitizeSentrySpan,
+  sanitizeSentryStreamedSpan,
   sanitizeSentryTransaction,
   sanitizeTelemetryUrl,
   sentryMaxBreadcrumbs,
@@ -51,8 +52,11 @@ describe('Sentry telemetry sanitization', () => {
       cookies: false,
       httpHeaders: { request: false, response: false },
       httpBodies: [],
-      queryParams: false,
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
       genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
       stackFrameVariables: false,
       frameContextLines: 0,
     })
@@ -276,6 +280,7 @@ describe('Sentry telemetry sanitization', () => {
           span_id: sentrySpanId,
           trace_id: sentryTraceId,
           start_timestamp: 1,
+          status: 'ok',
           data: { command: sentinel, operation: sentinel },
         },
       ],
@@ -417,6 +422,7 @@ describe('Sentry telemetry sanitization', () => {
       span_id: sentrySpanId,
       trace_id: sentryTraceId,
       start_timestamp: 1,
+      status: 'ok',
       data: {
         traceId: telemetryTraceId,
         durationMs: 42,
@@ -429,6 +435,7 @@ describe('Sentry telemetry sanitization', () => {
       span_id: sentrySpanId,
       trace_id: sentryTraceId,
       start_timestamp: 1,
+      status: 'unknown',
       data: { traceId: telemetryTraceId, durationMs: 42 },
     })
     assertExcludesSentinel(span)
@@ -438,10 +445,45 @@ describe('Sentry telemetry sanitization', () => {
         span_id: sentrySpanId,
         trace_id: sentryTraceId,
         start_timestamp: 1,
+        status: 'ok',
         data: {},
       }).description,
       'patchplane.operation',
     )
+  })
+
+  it('sanitizes streamed span names, identifiers, timestamps, and attributes', () => {
+    const span = sanitizeSentryStreamedSpan({
+      trace_id: sentryTraceId,
+      span_id: sentrySpanId,
+      parent_span_id: 'fedcba9876543210',
+      name: `GET /private?token=${sentinel}`,
+      start_timestamp: 1,
+      end_timestamp: 2,
+      status: 'error',
+      is_segment: true,
+      attributes: {
+        operation: 'runtime.execute',
+        url: `https://example.com/private?token=${sentinel}`,
+        prompt: sentinel,
+      },
+    })
+
+    assert.deepStrictEqual(span, {
+      trace_id: sentryTraceId,
+      span_id: sentrySpanId,
+      parent_span_id: 'fedcba9876543210',
+      name: 'GET /:path',
+      start_timestamp: 1,
+      end_timestamp: 2,
+      status: 'error',
+      is_segment: true,
+      attributes: {
+        operation: 'patchplane.operation',
+        url: 'https://example.com/:path',
+      },
+    })
+    assertExcludesSentinel(span)
   })
 
   it('removes Sentry attachments before the event reaches transport', () => {
@@ -493,6 +535,7 @@ describe('Sentry telemetry sanitization', () => {
         span_id: sentrySpanId,
         trace_id: sentryTraceId,
         start_timestamp: 1,
+        status: 'ok',
         data: {},
       },
       { get: throwing },
@@ -514,6 +557,7 @@ describe('Sentry telemetry sanitization', () => {
       span_id: '0000000000000000',
       trace_id: '00000000000000000000000000000000',
       start_timestamp: 0,
+      status: 'unknown',
       description: 'patchplane.operation',
       data: {},
     })

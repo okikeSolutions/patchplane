@@ -14,19 +14,24 @@ export const DAYTONA_DEFAULT_START_TIMEOUT_SECONDS = 120
 
 /** Minimal Daytona sandbox configuration; execution tuning uses PatchPlane defaults. */
 export const DaytonaConfig = Config.all({
-  apiKey: Config.redacted('DAYTONA_API_KEY'),
+  apiKey: Config.Redacted('DAYTONA_API_KEY'),
   apiUrl: Config.option(
-    Config.url('DAYTONA_API_URL').pipe(Config.map((url) => url.toString())),
+    Config.URL('DAYTONA_API_URL').pipe(Config.map((url) => url.toString())),
   ),
-  target: Config.option(Config.string('DAYTONA_TARGET')),
-  networkBlockAll: Config.option(Config.boolean('DAYTONA_NETWORK_BLOCK_ALL')),
-  networkAllowList: Config.option(Config.string('DAYTONA_NETWORK_ALLOW_LIST')),
-  resourceCpu: Config.option(Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_CPU')),
-  resourceMemory: Config.option(Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_MEMORY')),
-  resourceDisk: Config.option(Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_DISK')),
-  retainSandboxes: Config.option(Config.boolean('DAYTONA_RETAIN_SANDBOXES')),
+  target: Config.option(Config.String('DAYTONA_TARGET')),
+  networkBlockAll: Config.option(Config.Boolean('DAYTONA_NETWORK_BLOCK_ALL')),
+  networkAllowList: Config.option(Config.String('DAYTONA_NETWORK_ALLOW_LIST')),
+  resourceCpu: Config.option(
+    Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_CPU'),
+  ),
+  resourceMemory: Config.option(
+    Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_MEMORY'),
+  ),
+  resourceDisk: Config.option(
+    Config.schema(PositiveFinite, 'DAYTONA_RESOURCE_DISK'),
+  ),
+  retainSandboxes: Config.option(Config.Boolean('DAYTONA_RETAIN_SANDBOXES')),
 })
 
-export type DaytonaConfig = typeof DaytonaConfig extends Config.Config<infer A>
-  ? A
-  : never
+export type DaytonaConfig =
+  typeof DaytonaConfig extends Config.Config<infer A> ? A : never

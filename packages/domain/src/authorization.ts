@@ -1,8 +1,6 @@
+import { Match } from 'effect'
 import type { WorkspaceRole } from './membership'
-import {
-  patchPlanePermissions,
-  type Permission,
-} from './permission'
+import { patchPlanePermissions, type Permission } from './permission'
 
 export const rolePermissions = {
   owner: [
@@ -52,20 +50,19 @@ export const rolePermissions = {
 
 const permissionSet = new Set<string>(patchPlanePermissions)
 
-export function normalizeWorkspaceRole(role: string | undefined): WorkspaceRole {
-  switch (role) {
-    case 'owner':
-    case 'admin':
-    case 'maintainer':
-    case 'reviewer':
-    case 'operator':
-    case 'viewer':
-      return role
-    case 'member':
-      return 'operator'
-    default:
-      return 'viewer'
-  }
+export function normalizeWorkspaceRole(
+  role: string | undefined,
+): WorkspaceRole {
+  return Match.value(role).pipe(
+    Match.when('owner', () => 'owner' as const),
+    Match.when('admin', () => 'admin' as const),
+    Match.when('maintainer', () => 'maintainer' as const),
+    Match.when('reviewer', () => 'reviewer' as const),
+    Match.when('operator', () => 'operator' as const),
+    Match.when('viewer', () => 'viewer' as const),
+    Match.when('member', () => 'operator' as const),
+    Match.orElse(() => 'viewer' as const),
+  )
 }
 
 export function isPatchPlanePermission(value: string): value is Permission {

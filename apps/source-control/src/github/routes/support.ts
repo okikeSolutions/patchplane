@@ -59,6 +59,7 @@ import {
 } from '@patchplane/domain/verification'
 import { GitCommitSha } from '@patchplane/domain/refinements'
 import { WorkflowStart } from '@patchplane/domain/workflow-start'
+import { readBoundedStream } from '../../webhook-worker/boundary'
 
 export type SandboxExecutionValue = Schema.Schema.Type<typeof SandboxExecution>
 
@@ -68,9 +69,7 @@ export const hostedVerificationCommandLimitSeconds = 30
 
 const internalJsonMaxBytes = 16 * 1024
 
-export async function readBoundedJson(
-  request: Request,
-): Promise<unknown | undefined> {
+export const readBoundedJson = Effect.fnUntraced(function* (request: Request) {
   const declared = request.headers.get('content-length')
   if (declared !== null) {
     const size = Number(declared)
@@ -86,32 +85,20 @@ export async function readBoundedJson(
   if (!/^application\/json(?:\s*;|$)/i.test(contentType)) return undefined
   const reader = request.body?.getReader()
   if (reader === undefined) return undefined
-  const chunks: Array<Uint8Array> = []
-  let size = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > internalJsonMaxBytes) {
-      await reader.cancel().catch(() => undefined)
-      return undefined
-    }
-    chunks.push(value)
-  }
-  const bytes = new Uint8Array(size)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  try {
-    return JSON.parse(
-      new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-    ) as unknown
-  } catch {
-    return undefined
-  }
-}
+  const bytes = yield* readBoundedStream(
+    reader,
+    internalJsonMaxBytes,
+    'sourceControl.readBoundedJson',
+  )
+  if (bytes === undefined) return undefined
+  return yield* Effect.try({
+    try: () =>
+      JSON.parse(
+        new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      ) as unknown,
+    catch: () => undefined,
+  }).pipe(Effect.orElseSucceed(() => undefined))
+})
 
 export const noIncomingDispatch: Effect.Effect<
   IncomingPullRequestDispatch | undefined
@@ -235,7 +222,7 @@ export const lookupGitHubWebhookRoute = makeFunctionReference<
 const MissingR2ArtifactsLayer = Layer.succeed(
   ArtifactsService,
   ArtifactsService.of({
-    putArtifact: () =>
+    putArtifact: Effect.fn('support.putArtifact')(() =>
       Effect.fail(
         new ArtifactsError({
           operation: 'r2.config',
@@ -244,7 +231,8 @@ const MissingR2ArtifactsLayer = Layer.succeed(
           cause: undefined,
         }),
       ),
-    getArtifactMetadata: () =>
+    ),
+    getArtifactMetadata: Effect.fn('support.getArtifactMetadata')(() =>
       Effect.fail(
         new ArtifactsError({
           operation: 'r2.config',
@@ -253,7 +241,8 @@ const MissingR2ArtifactsLayer = Layer.succeed(
           cause: undefined,
         }),
       ),
-    createSignedReadUrl: () =>
+    ),
+    createSignedReadUrl: Effect.fn('support.createSignedReadUrl')(() =>
       Effect.fail(
         new ArtifactsError({
           operation: 'r2.config',
@@ -262,7 +251,8 @@ const MissingR2ArtifactsLayer = Layer.succeed(
           cause: undefined,
         }),
       ),
-    deleteArtifact: () =>
+    ),
+    deleteArtifact: Effect.fn('support.deleteArtifact')(() =>
       Effect.fail(
         new ArtifactsError({
           operation: 'r2.config',
@@ -271,7 +261,8 @@ const MissingR2ArtifactsLayer = Layer.succeed(
           cause: undefined,
         }),
       ),
-    applyRetentionPolicy: () =>
+    ),
+    applyRetentionPolicy: Effect.fn('support.applyRetentionPolicy')(() =>
       Effect.fail(
         new ArtifactsError({
           operation: 'r2.config',
@@ -280,6 +271,7 @@ const MissingR2ArtifactsLayer = Layer.succeed(
           cause: undefined,
         }),
       ),
+    ),
   }),
 )
 
@@ -320,16 +312,21 @@ export function makeSourceControlRuntime(env: WorkerEnv): SourceControlRuntime {
   )
 }
 
-export class SourceControlWorkerRequestError extends Schema.ErrorClass<SourceControlWorkerRequestError>(
+export class SourceControlWorkerRequestError extends Schema.TaggedError<SourceControlWorkerRequestError>()(
   'SourceControlWorkerRequestError',
-)({
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect()),
-}) {}
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export const syncInstallationRequestSchema = Schema.Struct({
-  installationId: Schema.NonEmptyString,
+  installationId: Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,19}$/)),
   workspaceId: WorkspaceId,
+  authorizationCode: Schema.NonEmptyString.check(Schema.isMaxLength(512)),
+  pkceVerifier: Schema.String.check(
+    Schema.isPattern(/^[A-Za-z0-9._~-]{43,128}$/),
+  ),
 })
 
 export const connectedRepositoryRouteSchema = Schema.NullOr(
@@ -345,14 +342,22 @@ export const rerunExecutionRequestSchema = Schema.Struct({
   workflowRunId: WorkflowRunId,
 })
 
+const runtimeControlMessageSchema = Schema.String.check(
+  Schema.makeFilter((message) =>
+    new TextEncoder().encode(message).byteLength <= 4 * 1024
+      ? undefined
+      : 'Runtime control message exceeds 4 KiB',
+  ),
+)
+
 export const runtimeControlRequestSchema = Schema.Struct({
   workflowRunId: WorkflowRunId,
   operation: Schema.Literals(['abort', 'steer', 'followUp', 'terminate']),
-  message: Schema.optional(Schema.String),
+  message: Schema.optional(runtimeControlMessageSchema),
 })
 
 export const publishDecisionRequestSchema = Schema.Struct({
-  traceId: Schema.String,
+  traceId: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
   workflowRunId: Schema.optional(WorkflowRunId),
   humanDecisionId: Schema.optional(HumanDecisionId),
   // Accepted only during the client contract migration. These values are used
@@ -415,7 +420,12 @@ export const terminalizeQueuedGitHubDeliveryMutation = makeFunctionReference<
 
 export const markWorkflowExecutionFailedMutation = makeFunctionReference<
   'mutation',
-  { systemSecret: string; workflowRunId: string; summary: string },
+  {
+    systemSecret: string
+    workflowRunId: string
+    incomingDispatchToken?: string
+    summary: string
+  },
   boolean
 >('workflowStarts:markWorkflowExecutionFailed')
 
@@ -582,14 +592,10 @@ export const loadGitHubWebhookRouteConfig = Effect.fnUntraced(function* (
   })
 })
 
-export async function randomTraceId(runtime: SourceControlRuntime) {
-  return await runtime.runPromise(
-    Effect.gen(function* () {
-      const crypto = yield* Crypto.Crypto
-      return yield* crypto.randomUUIDv4
-    }),
-  )
-}
+export const randomTraceIdEffect = Effect.fnUntraced(function* () {
+  const crypto = yield* Crypto.Crypto
+  return yield* crypto.randomUUIDv4
+})
 
 export function resolveGitHubWebhookWorkspace(input: {
   readonly repositoryFullName: string

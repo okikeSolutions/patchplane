@@ -71,112 +71,127 @@ function annotateScope(
   scope.setContext('patchplane', attributes)
 }
 
-const service = TelemetryService.of({
-  recordEvent: (input) =>
-    Effect.sync(() => {
-      const level = toLevel(input.severity)
-      const log = sanitizeSentryLog({
-        level,
-        message: 'patchplane.operational-event',
-        attributes: {
-          ...safeAttributes(input),
-          telemetryPolicy: sentryTelemetryPolicyMarker,
-        },
-      })
-      if (log === null) return
-      Sentry.withScope((scope) => {
-        annotateScope(scope, input)
-        Sentry.logger[level](log.message, log.attributes, { scope })
-      })
-    }).pipe(Effect.catchDefect(() => Effect.void)),
-  addBreadcrumb: (input) =>
-    BreadcrumbBuffer.pipe(
-      Effect.flatMap((buffer) =>
-        buffer === undefined
-          ? Effect.void
-          : Effect.sync(() => {
-              buffer.items.push(
-                sanitizeSentryBreadcrumb({
-                  category: 'patchplane.critical-path',
-                  level: input.status === 'failed' ? 'error' : 'info',
-                  data: {
-                    ...safeAttributes(input),
-                    criticalPathStage: input.stage,
-                    status: input.status,
-                  },
+function makeService(requestScope: Sentry.Scope) {
+  return TelemetryService.of({
+    recordEvent: Effect.fn('CloudflareTelemetryPlugin.recordEvent')((input) =>
+      Effect.sync(() => {
+        const level = toLevel(input.severity)
+        const log = sanitizeSentryLog({
+          level,
+          message: 'patchplane.operational-event',
+          attributes: {
+            ...safeAttributes(input),
+            telemetryPolicy: sentryTelemetryPolicyMarker,
+          },
+        })
+        if (log === null) return
+        Sentry.withScope(requestScope, (scope) => {
+          annotateScope(scope, input)
+          Sentry.logger[level](log.message, log.attributes, { scope })
+        })
+      }).pipe(Effect.catchDefect(() => Effect.void)),
+    ),
+    addBreadcrumb: Effect.fn('CloudflareTelemetryPlugin.addBreadcrumb')(
+      (input) =>
+        BreadcrumbBuffer.pipe(
+          Effect.flatMap((buffer) =>
+            buffer === undefined
+              ? Effect.void
+              : Effect.sync(() => {
+                  buffer.items.push(
+                    sanitizeSentryBreadcrumb({
+                      category: 'patchplane.critical-path',
+                      level: input.status === 'failed' ? 'error' : 'info',
+                      data: {
+                        ...safeAttributes(input),
+                        criticalPathStage: input.stage,
+                        status: input.status,
+                      },
+                    }),
+                  )
+                  if (buffer.items.length > sentryMaxBreadcrumbs) {
+                    buffer.items.splice(
+                      0,
+                      buffer.items.length - sentryMaxBreadcrumbs,
+                    )
+                  }
                 }),
-              )
-              if (buffer.items.length > sentryMaxBreadcrumbs) {
-                buffer.items.splice(
-                  0,
-                  buffer.items.length - sentryMaxBreadcrumbs,
-                )
-              }
-            }),
-      ),
-      Effect.catchDefect(() => Effect.void),
-    ),
-  withBreadcrumbScope: (effect) =>
-    effect.pipe(Effect.provideService(BreadcrumbBuffer, { items: [] })),
-  captureError: (input) =>
-    BreadcrumbBuffer.pipe(
-      Effect.flatMap((buffer) =>
-        Effect.sync(() => {
-          Sentry.withScope((scope) => {
-            for (const breadcrumb of buffer?.items ?? []) {
-              scope.addBreadcrumb(breadcrumb)
-            }
-            annotateScope(scope, input)
-            scope.setContext('patchplane.error', {
-              message: 'Captured PatchPlane operation failure',
-            })
-            Sentry.captureException(sanitizeSentryException(input.error))
-          })
-        }),
-      ),
-      Effect.catchDefect(() => Effect.void),
-    ),
-  withSpan: (input, effect) => {
-    const attributes = safeAttributes(input)
-    const instrumentedEffect = (sentrySpan: Sentry.Span) =>
-      effect.pipe(
-        Effect.annotateLogs(attributes),
-        Effect.annotateSpans(attributes),
-        Effect.withSpan('patchplane.operation', { attributes }),
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            try {
-              if (Exit.isFailure(exit)) {
-                sentrySpan.setStatus({ code: 2, message: 'internal_error' })
-              }
-            } finally {
-              sentrySpan.end()
-            }
-          }).pipe(Effect.ignoreCause),
+          ),
+          Effect.catchDefect(() => Effect.void),
         ),
-      )
-
-    return Effect.sync(() =>
-      Sentry.startInactiveSpan({
-        name: 'patchplane.operation',
-        op: 'patchplane.operation',
-        attributes: safeSpanAttributes(attributes),
-        forceTransaction: true,
-      }),
-    ).pipe(
-      Effect.map(Option.some),
-      Effect.catchCause(() => Effect.succeed(Option.none())),
-      Effect.flatMap(
-        Option.match({
-          onNone: () => effect,
-          onSome: instrumentedEffect,
-        }),
+    ),
+    withBreadcrumbScope: Effect.fn(
+      'CloudflareTelemetryPlugin.withBreadcrumbScope',
+    )((effect) =>
+      effect.pipe(Effect.provideService(BreadcrumbBuffer, { items: [] })),
+    ),
+    captureError: Effect.fn('CloudflareTelemetryPlugin.captureError')((input) =>
+      BreadcrumbBuffer.pipe(
+        Effect.flatMap((buffer) =>
+          Effect.sync(() => {
+            Sentry.withScope(requestScope, (scope) => {
+              for (const breadcrumb of buffer?.items ?? []) {
+                scope.addBreadcrumb(breadcrumb)
+              }
+              annotateScope(scope, input)
+              scope.setContext('patchplane.error', {
+                message: 'Captured PatchPlane operation failure',
+              })
+              Sentry.captureException(sanitizeSentryException(input.error))
+            })
+          }),
+        ),
+        Effect.catchDefect(() => Effect.void),
       ),
-    )
-  },
-})
+    ),
+    withSpan: Effect.fn('CloudflareTelemetryPlugin.withSpan')(
+      (input, effect) => {
+        const attributes = safeAttributes(input)
+        const instrumentedEffect = (sentrySpan: Sentry.Span) =>
+          effect.pipe(
+            Effect.annotateLogs(attributes),
+            Effect.annotateSpans(attributes),
+            Effect.withSpan('patchplane.operation', { attributes }),
+            Effect.onExit((exit) =>
+              Effect.sync(() => {
+                try {
+                  if (Exit.isFailure(exit)) {
+                    sentrySpan.setStatus({ code: 2, message: 'internal_error' })
+                  }
+                } finally {
+                  sentrySpan.end()
+                }
+              }).pipe(Effect.ignoreCause),
+            ),
+          )
+
+        return Effect.sync(() =>
+          Sentry.startInactiveSpan({
+            name: 'patchplane.operation',
+            op: 'patchplane.operation',
+            attributes: safeSpanAttributes(attributes),
+            forceTransaction: true,
+            scope: requestScope,
+          }),
+        ).pipe(
+          Effect.map(Option.some),
+          Effect.catchCause(() => Effect.succeed(Option.none())),
+          Effect.flatMap(
+            Option.match({
+              onNone: () => effect,
+              onSome: instrumentedEffect,
+            }),
+          ),
+        )
+      },
+    ),
+  })
+}
 
 /** Reuses the request-owned @sentry/cloudflare client without initializing another SDK client. */
 export const CloudflareTelemetryPlugin = {
-  layer: Layer.succeed(TelemetryService, service),
+  layer: Layer.effect(
+    TelemetryService,
+    Effect.sync(() => makeService(Sentry.getIsolationScope())),
+  ),
 } as const

@@ -673,6 +673,73 @@ describe('workflowStarts V1 execution claim', () => {
     expect(failedRun?.status).toBe('failed')
   })
 
+  test('cancellation tombstones an incoming attempt before a late dispatch claim commits', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const result = await t.mutation(createWorkflowStart, createArgs())
+    if (!isWorkflowStartResult(result))
+      throw new Error('Expected workflow start result')
+    const baseSha = 'a'.repeat(40)
+    const headSha = 'b'.repeat(40)
+    const candidateId = await t.run(async (ctx) => {
+      await ctx.db.patch('workflowRuns', result.workflowRun.id, {
+        modelVersion: 'v1',
+        rootWorkflowRunId: result.workflowRun.id,
+        attemptNumber: 1,
+        trigger: 'rerun',
+        candidateIdentityVersion: 'incoming-pr-v1',
+        sourceBaseSha: baseSha,
+        sourceCommitSha: headSha,
+      })
+      return await ctx.db.insert('candidatePatchSets', {
+        workflowRunId: result.workflowRun.id,
+        subject: {
+          kind: 'incoming-pull-request',
+          repositoryProvider: 'github',
+          repositoryExternalId: 'repository-1',
+          repositoryOwner: 'patchplane',
+          repositoryName: 'patchplane',
+          repositoryFullName: 'patchplane/patchplane',
+          pullRequestExternalId: 'pull-request-1',
+          pullRequestNumber: 1,
+          baseSha,
+          headSha,
+          sourceEventProvider: 'github',
+          sourceEventDeliveryId: 'delivery-1',
+          sourceEventKind: 'github.pull_request.opened',
+        },
+        status: 'captured',
+        candidateDigest: `sha256:${'c'.repeat(64)}`,
+        baseSha,
+        headSha,
+        createdAt: 1,
+      })
+    })
+    const dispatchToken = 'prepublished-dispatch-token-123456'
+
+    expect(
+      await t.mutation(markWorkflowExecutionFailed, {
+        systemSecret: 'system_test',
+        workflowRunId: result.workflowRun.id,
+        incomingDispatchToken: dispatchToken,
+        summary: 'Request cancelled while claiming dispatch.',
+      }),
+    ).toBe(true)
+    expect(
+      await t.mutation(claimIncomingDispatch, {
+        systemSecret: 'system_test',
+        workflowRunId: result.workflowRun.id,
+        candidatePatchSetId: candidateId,
+        dispatchToken,
+      }),
+    ).toBe(false)
+    const workflowRun = await t.run((ctx) =>
+      ctx.db.get('workflowRuns', result.workflowRun.id),
+    )
+    expect(workflowRun?.status).toBe('failed')
+    expect(workflowRun?.incomingDispatchToken).toBeUndefined()
+  })
+
   test('fails a V1 attempt closed when no source revision is pinned', async () => {
     const t = authenticatedTest()
     await seedMembership(t)
@@ -2498,6 +2565,18 @@ describe('workflowStarts trusted boundary and authz', () => {
       comment: 'Please fix the failing auth test first.',
       idempotencyKey: 'decision-attempt-1',
     })
+    await expect(
+      t.mutation(recordHumanDecision, {
+        workflowRunId: workflowStart.workflowRun.id,
+        sandboxExecutionId: sandboxExecution.id,
+        candidatePatchSetId: patchSet.id,
+        reviewRunId: reviewRun.id,
+        policyDecisionId: policyDecision.id,
+        status: 'approved',
+        comment: 'Attempt to replace the terminal decision.',
+        idempotencyKey: 'decision-attempt-2',
+      }),
+    ).rejects.toThrow('Human decision already recorded for workflow')
 
     await t.mutation(recordPublicationResult, {
       systemSecret: 'system_test',
@@ -2648,18 +2727,17 @@ describe('workflowStarts trusted boundary and authz', () => {
         createdAt: 20,
       }),
     )
-    await expect(
-      t.mutation(recordHumanDecision, {
-        workflowRunId: workflowStart.workflowRun.id,
-        sandboxExecutionId: sandboxExecution.id,
-        candidatePatchSetId: patchSet.id,
-        reviewRunId: reviewRun.id,
-        policyDecisionId: policyDecision.id,
-        status: 'changes-requested',
-        comment: 'Please fix the failing auth test first.',
-        idempotencyKey: 'decision-attempt-1',
-      }),
-    ).rejects.toThrow('Displayed review projection is stale')
+    const lateReplay = await t.mutation(recordHumanDecision, {
+      workflowRunId: workflowStart.workflowRun.id,
+      sandboxExecutionId: sandboxExecution.id,
+      candidatePatchSetId: patchSet.id,
+      reviewRunId: reviewRun.id,
+      policyDecisionId: policyDecision.id,
+      status: 'changes-requested',
+      comment: 'Please fix the failing auth test first.',
+      idempotencyKey: 'decision-attempt-1',
+    })
+    expect(lateReplay.id).toBe(humanDecision.id)
 
     await expect(
       t.mutation(recordHumanDecision, {
@@ -2672,7 +2750,7 @@ describe('workflowStarts trusted boundary and authz', () => {
         comment: 'Approve the projection I previously saw.',
         idempotencyKey: 'decision-attempt-stale',
       }),
-    ).rejects.toThrow('Displayed review projection is stale')
+    ).rejects.toThrow('Human decision already recorded for workflow')
 
     await t.run((ctx) =>
       ctx.db.patch('workflowRuns', workflowStart.workflowRun.id, {
@@ -2710,6 +2788,7 @@ describe('workflowStarts trusted boundary and authz', () => {
     const workflowStart = await createWorkflowStartForTest(t)
     const records = await t.run(async (ctx) => {
       await ctx.db.patch('workflowRuns', workflowStart.workflowRun.id, {
+        sourceCommitSha: 'base',
         status: 'reviewed',
       })
       const sandboxExecutionId = await ctx.db.insert('sandboxExecutions', {
@@ -2831,6 +2910,7 @@ describe('workflowStarts trusted boundary and authz', () => {
         workflowRunId: workflowStart.workflowRun.id,
         status: 'approved',
         comment: 'Evidence looks good.',
+        idempotencyKey: 'decision-missing-projection',
       }),
     ).rejects.toThrow('Displayed review projection IDs required')
   })

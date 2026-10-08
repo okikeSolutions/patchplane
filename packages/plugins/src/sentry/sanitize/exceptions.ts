@@ -29,19 +29,21 @@ export function sanitizeSentryException(error: unknown): Error {
   safe.name = 'Error'
   safe.stack = 'Error: Captured PatchPlane operation failure'
 
-  const isError = Option.liftThrowable(
-    (value: unknown) => value instanceof Error,
-  )(error)
-  if (Option.isNone(isError) || !isError.value) return safe
+  const safeError = Option.liftThrowable(() =>
+    error instanceof Error ? error : undefined,
+  )()
+  if (Option.isNone(safeError)) return safe
+  const safeErrorValue = safeError.value
+  if (safeErrorValue === undefined) return safe
 
-  const errorName = Option.liftThrowable(() => (error as Error).name)()
+  const errorName = Option.liftThrowable(() => safeErrorValue.name)()
   safe.name = Option.getOrElse(
     Option.flatMap(errorName, decodeSentryExceptionType),
     () => 'Error' as const,
   )
   safe.stack = `${safe.name}: Captured PatchPlane operation failure`
 
-  const stack = Option.liftThrowable(() => (error as Error).stack)()
+  const stack = Option.liftThrowable(() => safeErrorValue.stack)()
   if (Option.isNone(stack) || typeof stack.value !== 'string') return safe
 
   const frames = EffectString.slice(

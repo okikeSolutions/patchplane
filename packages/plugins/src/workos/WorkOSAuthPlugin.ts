@@ -5,6 +5,7 @@ import type { Permission } from '@patchplane/domain/permission'
 import { AuthRequestContext } from '@patchplane/core/services/auth-request-context'
 import { AuthService } from '@patchplane/core/services/auth-service'
 import { WorkOSConfig } from './WorkOSConfig'
+import { fetchWithSignal } from '../http/sdk-fetch-boundary'
 import {
   decodeWorkOSMembershipResponse,
   decodeWorkOSOrganizationResponse,
@@ -23,13 +24,15 @@ export const WorkOSAuthPlugin = {
     Effect.gen(function* () {
       const config = yield* WorkOSConfig
       const apiHostname = Option.getOrUndefined(config.apiHostname)
-      const workos = new WorkOS(Redacted.value(config.apiKey), {
-        clientId: config.clientId,
-        ...(apiHostname === undefined ? {} : { apiHostname }),
-      })
+      const makeWorkOS = (signal?: AbortSignal) =>
+        new WorkOS(Redacted.value(config.apiKey), {
+          clientId: config.clientId,
+          ...(apiHostname === undefined ? {} : { apiHostname }),
+          ...(signal === undefined ? {} : { fetchFn: fetchWithSignal(signal) }),
+        })
 
       yield* Effect.logInfo('Initialized WorkOS auth plugin', {
-        clientId: workos.options.clientId,
+        clientId: config.clientId,
       })
 
       const getCurrentActor = Effect.gen(function* () {
@@ -64,7 +67,8 @@ export const WorkOSAuthPlugin = {
         }
 
         const organization = yield* Effect.tryPromise({
-          try: () => workos.organizations.getOrganization(organizationId),
+          try: (signal) =>
+            makeWorkOS(signal).organizations.getOrganization(organizationId),
           catch: (cause) =>
             new AuthError({
               operation: 'getCurrentWorkspace',
@@ -76,12 +80,13 @@ export const WorkOSAuthPlugin = {
         const decodedOrganization = yield* decodeWorkOSOrganizationResponse(
           organization,
         ).pipe(
-          Effect.mapError((cause) =>
-            new AuthError({
-              operation: 'getCurrentWorkspace.decode',
-              message: 'WorkOS returned an invalid organization',
-              cause,
-            })
+          Effect.mapError(
+            (cause) =>
+              new AuthError({
+                operation: 'getCurrentWorkspace.decode',
+                message: 'WorkOS returned an invalid organization',
+                cause,
+              }),
           ),
         )
 
@@ -109,15 +114,17 @@ export const WorkOSAuthPlugin = {
         }
 
         const activeStatuses: Array<'active'> = ['active']
-        const options = organizationId === undefined
-          ? { userId, statuses: activeStatuses }
-          : { userId, organizationId, statuses: activeStatuses }
+        const options =
+          organizationId === undefined
+            ? { userId, statuses: activeStatuses }
+            : { userId, organizationId, statuses: activeStatuses }
 
         const memberships = yield* Effect.tryPromise({
-          try: async () => {
-            const result = await workos.userManagement.listOrganizationMemberships(
-              options,
-            )
+          try: async (signal) => {
+            const result =
+              await makeWorkOS(
+                signal,
+              ).userManagement.listOrganizationMemberships(options)
             return organizationId === undefined
               ? await result.autoPagination()
               : result.data
@@ -134,12 +141,14 @@ export const WorkOSAuthPlugin = {
           memberships,
           (membership) =>
             decodeWorkOSMembershipResponse(membership).pipe(
-              Effect.mapError((cause) =>
-                new AuthError({
-                  operation: 'listMemberships.decode',
-                  message: 'WorkOS returned an invalid organization membership',
-                  cause,
-                })
+              Effect.mapError(
+                (cause) =>
+                  new AuthError({
+                    operation: 'listMemberships.decode',
+                    message:
+                      'WorkOS returned an invalid organization membership',
+                    cause,
+                  }),
               ),
             ),
         )
@@ -147,54 +156,56 @@ export const WorkOSAuthPlugin = {
         return decodedMemberships.map(mapWorkOSMembershipToMembership)
       })
 
-      const requirePermission = Effect.fnUntraced(function*(
+      const requirePermission = Effect.fnUntraced(function* (
         permission: Permission,
       ) {
-          const request = yield* AuthRequestContext
+        const request = yield* AuthRequestContext
 
-          if (!request.actor) {
-            return yield* new AuthError({
-              operation: 'requirePermission',
-              message: 'No authenticated actor is available for this request',
-              cause: null,
-            })
-          }
+        if (!request.actor) {
+          return yield* new AuthError({
+            operation: 'requirePermission',
+            message: 'No authenticated actor is available for this request',
+            cause: null,
+          })
+        }
 
-          if (!request.workspace) {
-            return yield* new AuthError({
-              operation: 'requirePermission',
-              message: 'No active workspace is available for this request',
-              cause: null,
-            })
-          }
+        if (!request.workspace) {
+          return yield* new AuthError({
+            operation: 'requirePermission',
+            message: 'No active workspace is available for this request',
+            cause: null,
+          })
+        }
 
-          const memberships = yield* listMemberships
-          const activeWorkspaceId = request.workspace.id
-          const hasActiveMembership = memberships.some(
-            (membership) =>
-              membership.workspaceId === activeWorkspaceId &&
-              membership.status === 'active',
-          )
-          const hasMembershipPermission = memberships.some(
-            (membership) =>
-              membership.workspaceId === activeWorkspaceId &&
-              membership.status === 'active' &&
-              membership.permissions.includes(permission),
-          )
-          const hasCanonicalSessionPermission = hasActiveMembership &&
-            (request.explicitPermissions ?? []).includes(permission)
-          const hasPermission = hasMembershipPermission || hasCanonicalSessionPermission
+        const memberships = yield* listMemberships
+        const activeWorkspaceId = request.workspace.id
+        const hasActiveMembership = memberships.some(
+          (membership) =>
+            membership.workspaceId === activeWorkspaceId &&
+            membership.status === 'active',
+        )
+        const hasMembershipPermission = memberships.some(
+          (membership) =>
+            membership.workspaceId === activeWorkspaceId &&
+            membership.status === 'active' &&
+            membership.permissions.includes(permission),
+        )
+        const hasCanonicalSessionPermission =
+          hasActiveMembership &&
+          (request.explicitPermissions ?? []).includes(permission)
+        const hasPermission =
+          hasMembershipPermission || hasCanonicalSessionPermission
 
-          if (!hasPermission) {
-            return yield* new AuthError({
-              operation: 'requirePermission',
-              message: 'The request actor does not include the permission',
-              cause: { permission },
-            })
-          }
+        if (!hasPermission) {
+          return yield* new AuthError({
+            operation: 'requirePermission',
+            message: 'The request actor does not include the permission',
+            cause: { permission },
+          })
+        }
 
-          return undefined
-        })
+        return undefined
+      })
 
       return AuthService.of({
         getCurrentActor,

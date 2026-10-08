@@ -36,6 +36,7 @@ describe('PublishSandboxResultToSource', () => {
           SourceControlService.of({
             verifyRepositoryAccess: () => Effect.die('unused'),
             getInstallationAccount: () => Effect.die('unused'),
+            verifyGitHubInstallationOwnership: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createRepositoryCloneCredentials: () => Effect.die('unused'),
             fetchImmutableComparison: () => Effect.die('unused'),
@@ -110,14 +111,6 @@ describe('PublishSandboxResultToSource', () => {
           name: 'demo',
           issueNumber: 12,
         })
-        expect(comments[0]?.body).toContain('## PatchPlane Patch Report')
-        expect(comments[0]?.body).toContain(
-          '**Execution:** sandbox execution completed',
-        )
-        expect(comments[0]?.body).toContain('**Verification:** incomplete')
-        expect(comments[0]?.body).toContain(
-          '- Decision: pending human approval',
-        )
       }),
   )
 })

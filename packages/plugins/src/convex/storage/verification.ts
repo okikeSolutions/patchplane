@@ -1,5 +1,5 @@
 import { Effect, Redacted, Schema } from 'effect'
-import { ConvexHttpClient } from 'convex/browser'
+import { convexMutation, convexQuery } from '../http-client'
 import { StorageError } from '@patchplane/domain/errors'
 import { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import {
@@ -57,20 +57,18 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          recordVerificationPlanMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            version: input.version,
-            sources: input.sources,
-            requirements: input.requirements,
-            digest: input.digest,
-            createdAt: input.createdAt,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordVerificationPlanMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        version: input.version,
+        sources: input.sources,
+        requirements: input.requirements,
+        digest: input.digest,
+        createdAt: input.createdAt,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'recordVerificationPlan',
@@ -101,35 +99,31 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          recordVerificationRequirementMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            ...(input.verificationPlanId === undefined
-              ? {}
-              : { verificationPlanId: input.verificationPlanId }),
-            key: input.key,
-            label: input.label,
-            kind: input.kind,
-            required: input.required,
-            ...(input.command === undefined ? {} : { command: input.command }),
-            ...(input.platform === undefined
-              ? {}
-              : { platform: input.platform }),
-            ...(input.architecture === undefined
-              ? {}
-              : { architecture: input.architecture }),
-            ...(input.timeoutSeconds === undefined
-              ? {}
-              : { timeoutSeconds: input.timeoutSeconds }),
-            requiredArtifactKinds: input.requiredArtifactKinds,
-            source: input.source,
-            createdAt: input.createdAt,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordVerificationRequirementMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        ...(input.verificationPlanId === undefined
+          ? {}
+          : { verificationPlanId: input.verificationPlanId }),
+        key: input.key,
+        label: input.label,
+        kind: input.kind,
+        required: input.required,
+        ...(input.command === undefined ? {} : { command: input.command }),
+        ...(input.platform === undefined ? {} : { platform: input.platform }),
+        ...(input.architecture === undefined
+          ? {}
+          : { architecture: input.architecture }),
+        ...(input.timeoutSeconds === undefined
+          ? {}
+          : { timeoutSeconds: input.timeoutSeconds }),
+        requiredArtifactKinds: input.requiredArtifactKinds,
+        source: input.source,
+        createdAt: input.createdAt,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'recordVerificationRequirement',
@@ -160,18 +154,16 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          startIncomingVerificationPlanMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            verificationPlanId: input.verificationPlanId,
-            candidatePatchSetId: input.candidatePatchSetId,
-            incomingDispatchToken: input.incomingDispatchToken,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: startIncomingVerificationPlanMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        verificationPlanId: input.verificationPlanId,
+        candidatePatchSetId: input.candidatePatchSetId,
+        incomingDispatchToken: input.incomingDispatchToken,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'startIncomingVerificationPlan',
@@ -202,31 +194,29 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          claimVerificationExecutionGroupMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            verificationPlanId: input.verificationPlanId,
-            requirementId: input.requirementId,
-            candidatePatchSetId: input.candidatePatchSetId,
-            stableKey: input.stableKey,
-            claimToken: input.claimToken,
-            incomingDispatchToken: input.incomingDispatchToken,
-            provider: input.provider,
-            platform: input.platform,
-            architecture: input.architecture,
-            ...(input.commandDigest === undefined
-              ? {}
-              : { commandDigest: input.commandDigest }),
-            ...(input.timeoutSeconds === undefined
-              ? {}
-              : { timeoutSeconds: input.timeoutSeconds }),
-            claimedAt: input.claimedAt,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: claimVerificationExecutionGroupMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        verificationPlanId: input.verificationPlanId,
+        requirementId: input.requirementId,
+        candidatePatchSetId: input.candidatePatchSetId,
+        stableKey: input.stableKey,
+        claimToken: input.claimToken,
+        incomingDispatchToken: input.incomingDispatchToken,
+        provider: input.provider,
+        platform: input.platform,
+        architecture: input.architecture,
+        ...(input.commandDigest === undefined
+          ? {}
+          : { commandDigest: input.commandDigest }),
+        ...(input.timeoutSeconds === undefined
+          ? {}
+          : { timeoutSeconds: input.timeoutSeconds }),
+        claimedAt: input.claimedAt,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'claimVerificationExecutionGroup',
@@ -258,18 +248,16 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          startVerificationExecutionGroupMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            executionGroupId: input.executionGroupId,
-            claimToken: input.claimToken,
-            sandboxId: input.sandboxId,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: startVerificationExecutionGroupMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        executionGroupId: input.executionGroupId,
+        claimToken: input.claimToken,
+        sandboxId: input.sandboxId,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'startVerificationExecutionGroup',
@@ -300,20 +288,18 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          recordVerificationExecutionCommandMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            executionGroupId: input.executionGroupId,
-            claimToken: input.claimToken,
-            sandboxId: input.sandboxId,
-            providerSessionId: input.providerSessionId,
-            providerCommandId: input.providerCommandId,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordVerificationExecutionCommandMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        executionGroupId: input.executionGroupId,
+        claimToken: input.claimToken,
+        sandboxId: input.sandboxId,
+        providerSessionId: input.providerSessionId,
+        providerCommandId: input.providerCommandId,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'recordVerificationExecutionCommand',
@@ -345,19 +331,17 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          failVerificationExecutionGroupMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            executionGroupId: input.executionGroupId,
-            claimToken: input.claimToken,
-            status: input.status,
-            completedAt: input.completedAt,
-          },
-        ),
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: failVerificationExecutionGroupMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        executionGroupId: input.executionGroupId,
+        claimToken: input.claimToken,
+        status: input.status,
+        completedAt: input.completedAt,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'failVerificationExecutionGroup',
@@ -388,17 +372,15 @@ export function makeVerificationStorageOperations(
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).query(
-          getVerificationExecutionStateQuery,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            verificationPlanId: input.verificationPlanId,
-            candidatePatchSetId: input.candidatePatchSetId,
-          },
-        ),
+    const value = yield* convexQuery({
+      url: convexUrl,
+      reference: getVerificationExecutionStateQuery,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        verificationPlanId: input.verificationPlanId,
+        candidatePatchSetId: input.candidatePatchSetId,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'getVerificationExecutionState',
@@ -436,9 +418,10 @@ export function makeVerificationStorageOperations(
       })
     }
     const value = yield* settleWithin({
-      promise: new ConvexHttpClient(convexUrl).mutation(
-        recordVerificationResultMutation,
-        {
+      operationEffect: convexMutation({
+        url: convexUrl,
+        reference: recordVerificationResultMutation,
+        args: {
           systemSecret: Redacted.value(systemIngestionSecret),
           workflowRunId: input.workflowRunId,
           ...(input.verificationPlanId === undefined
@@ -513,7 +496,13 @@ export function makeVerificationStorageOperations(
             : { completedAt: input.completedAt }),
           idempotencyKey: input.idempotencyKey,
         },
-      ),
+        catch: (cause) =>
+          new StorageError({
+            operation: 'recordVerificationResult',
+            message: 'Convex failed to record verification result',
+            cause,
+          }),
+      }),
       timeoutMs: 15_000,
       operation: 'recordVerificationResult',
       message: 'Convex failed to record verification result',

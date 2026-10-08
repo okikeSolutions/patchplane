@@ -1,7 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
 import {
-  _INTERNAL_flushLogsBuffer,
-  _INTERNAL_flushMetricsBuffer,
   type Envelope,
   type Transport,
 } from '@sentry/core'
@@ -15,8 +13,7 @@ import {
   sanitizeSentryEvent,
   sanitizeSentryLog,
   sanitizeSentryMetric,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
   sentryMaxBreadcrumbs,
   sentryTelemetryPolicyMarker,
 } from './sanitize'
@@ -58,23 +55,20 @@ describe('Cloudflare Sentry transport boundary', () => {
       const handler = Sentry.withSentry(
         () => ({
           dsn: 'https://public@example.com/1',
+          cacheClient: false,
           defaultIntegrations: false,
           integrations: [
             Sentry.httpServerIntegration({ maxRequestBodySize: 'none' }),
           ],
           transport: () => collectingTransport(envelopes),
-          sendDefaultPii: false,
           dataCollection: makeSentryDataCollection(),
           maxBreadcrumbs: sentryMaxBreadcrumbs,
-          enableLogs: true,
-          enableMetrics: true,
           tracesSampleRate: 1,
           beforeSend: sanitizeSentryEvent,
-          beforeSendTransaction: sanitizeSentryTransaction,
           beforeBreadcrumb: sanitizeSentryBreadcrumb,
           beforeSendLog: sanitizeSentryLog,
           beforeSendMetric: sanitizeSentryMetric,
-          beforeSendSpan: sanitizeSentrySpan,
+          beforeSendSpan: sanitizeSentryStreamedSpan,
         }),
         {
           fetch: (
@@ -126,6 +120,7 @@ describe('Cloudflare Sentry transport boundary', () => {
               },
               extra: { providerResponseBody: sentinel },
             })
+            assert.ok(Sentry.getClient() !== undefined)
             return Promise.resolve(new Response('ok'))
           },
         },
@@ -148,25 +143,17 @@ describe('Cloudflare Sentry transport boundary', () => {
           passThroughOnException: () => undefined,
         }
 
-        yield* Effect.promise(() => handler.fetch(request, {}, context))
-        yield* Effect.promise(() => Promise.all(pending))
-        yield* Effect.sync(() => {
-          const client = Sentry.getClient()
-          assert.ok(client !== undefined)
-          _INTERNAL_flushLogsBuffer(client)
-          _INTERNAL_flushMetricsBuffer(client)
-        })
-        assert.strictEqual(
-          yield* Effect.promise(() => Sentry.flush(2_000)),
-          true,
+        const response = yield* Effect.promise(() =>
+          handler.fetch(request, {}, context),
         )
-
+        yield* Effect.promise(() => response.text())
+        yield* Effect.promise(() => Promise.all(pending))
         const itemTypes = envelopeItems(envelopes).map(
           ([header]) => header.type,
         )
         assert.ok(itemTypes.includes('event'))
-        assert.ok(itemTypes.includes('log'))
-        assert.ok(itemTypes.includes('trace_metric'))
+        assert.ok(itemTypes.includes('log'), itemTypes.join(', '))
+        assert.ok(itemTypes.includes('trace_metric'), itemTypes.join(', '))
         assert.ok(
           itemTypes.includes('transaction') || itemTypes.includes('span'),
           `expected a span envelope, received: ${itemTypes.join(', ')}`,
@@ -188,13 +175,13 @@ describe('Cloudflare Sentry transport boundary', () => {
       const handler = Sentry.withSentry(
         () => ({
           dsn: 'https://public@example.com/1',
+          cacheClient: false,
           defaultIntegrations: false,
           transport: () => collectingTransport(envelopes),
-          sendDefaultPii: false,
           dataCollection: makeSentryDataCollection(),
           tracesSampleRate: 1,
           beforeSend: sanitizeSentryEvent,
-          beforeSendSpan: sanitizeSentrySpan,
+          beforeSendSpan: sanitizeSentryStreamedSpan,
         }),
         {
           fetch: (
@@ -203,6 +190,7 @@ describe('Cloudflare Sentry transport boundary', () => {
             _context: TestExecutionContext,
           ) =>
             Effect.gen(function* () {
+              assert.ok(Sentry.getClient() !== undefined)
               const telemetry = yield* TelemetryService
               yield* telemetry.withSpan(
                 {
@@ -223,7 +211,7 @@ describe('Cloudflare Sentry transport boundary', () => {
       )
 
       return Effect.gen(function* () {
-        yield* Effect.promise(() =>
+        const response = yield* Effect.promise(() =>
           handler.fetch(
             new Request('https://patchplane.example/handled'),
             {},
@@ -233,6 +221,7 @@ describe('Cloudflare Sentry transport boundary', () => {
             },
           ),
         )
+        yield* Effect.promise(() => response.text())
         yield* Effect.promise(() => Promise.all(pending))
 
         const events = envelopeItems(envelopes).filter(

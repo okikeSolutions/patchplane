@@ -2,6 +2,7 @@
 import { makeFunctionReference } from 'convex/server'
 import { convexTest } from 'convex-test'
 import { describe, expect, test } from 'vitest'
+import { canonicalizeGitHubInstallationSyncProof } from '@patchplane/domain/github'
 import schema from './schema'
 
 const modules = import.meta.glob(['./**/*.ts', '!./**/*.test.ts'])
@@ -12,15 +13,31 @@ const createGitHubConnectionIntent = makeFunctionReference<
     state: string
     workspaceId: string
     returnPathname?: string
-    expiresAt: number
   },
   { state: string }
 >('connectedRepositories:createGitHubConnectionIntent')
 
+const stageGitHubConnectionInstallation = makeFunctionReference<
+  'mutation',
+  {
+    state: string
+    workspaceId: string
+    installationId: string
+    pkceVerifier: string
+  },
+  null
+>('connectedRepositories:stageGitHubConnectionInstallation')
+
 const consumeGitHubConnectionIntent = makeFunctionReference<
   'mutation',
   { state: string; workspaceId: string },
-  { workspaceId: string; actorId: string; returnPathname?: string }
+  {
+    workspaceId: string
+    actorId: string
+    returnPathname?: string
+    installationId: string
+    pkceVerifier: string
+  }
 >('connectedRepositories:consumeGitHubConnectionIntent')
 
 const upsertGitHubInstallationRepositories = makeFunctionReference<
@@ -91,7 +108,9 @@ async function seedMembership(
   )
 }
 
-const connectionArgs = {
+process.env.PATCHPLANE_SYSTEM_INGESTION_SECRET = 'system_test'
+
+const connectionProjection = {
   workspaceId: 'workos:org_123',
   account: {
     provider: 'github',
@@ -110,9 +129,64 @@ const connectionArgs = {
       repositoryFullName: 'octokit/octokit.js',
       private: true,
       selected: true,
-      permissionsJson: JSON.stringify({ contents: 'read', pull_requests: 'read' }),
+      permissionsJson: JSON.stringify({
+        contents: 'read',
+        pull_requests: 'read',
+      }),
     },
   ],
+} as const
+const proofIssuedAt = Date.now()
+const proofKey = await crypto.subtle.importKey(
+  'raw',
+  new TextEncoder().encode('system_test'),
+  { name: 'HMAC', hash: 'SHA-256' },
+  false,
+  ['sign'],
+)
+const proofBytes = await crypto.subtle.sign(
+  'HMAC',
+  proofKey,
+  new TextEncoder().encode(
+    canonicalizeGitHubInstallationSyncProof({
+      issuedAt: proofIssuedAt,
+      ...connectionProjection,
+    }),
+  ),
+)
+const connectionArgs = {
+  ...connectionProjection,
+  proof: {
+    issuedAt: proofIssuedAt,
+    signature: Array.from(new Uint8Array(proofBytes), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join(''),
+  },
+}
+
+async function signedConnectionArgs(
+  repositories: ReadonlyArray<
+    (typeof connectionProjection.repositories)[number]
+  >,
+) {
+  const issuedAt = Date.now()
+  const projection = { ...connectionProjection, repositories }
+  const bytes = await crypto.subtle.sign(
+    'HMAC',
+    proofKey,
+    new TextEncoder().encode(
+      canonicalizeGitHubInstallationSyncProof({ issuedAt, ...projection }),
+    ),
+  )
+  return {
+    ...projection,
+    proof: {
+      issuedAt,
+      signature: Array.from(new Uint8Array(bytes), (byte) =>
+        byte.toString(16).padStart(2, '0'),
+      ).join(''),
+    },
+  }
 }
 
 describe('connectedRepositories', () => {
@@ -120,14 +194,73 @@ describe('connectedRepositories', () => {
     const t = authenticatedTest()
     await seedMembership(t)
 
-    const upserted = await t.mutation(upsertGitHubInstallationRepositories, connectionArgs)
-    const listed = await t.query(listForWorkspace, { workspaceId: 'workos:org_123' })
+    const upserted = await t.mutation(
+      upsertGitHubInstallationRepositories,
+      connectionArgs,
+    )
+    const listed = await t.query(listForWorkspace, {
+      workspaceId: 'workos:org_123',
+    })
 
     expect(upserted).toHaveLength(1)
     expect(upserted[0]?.workspaceId).toBe('workos:org_123')
     expect(listed.map((repository) => repository.repositoryFullName)).toEqual([
       'octokit/octokit.js',
     ])
+  })
+
+  test('marks repositories removed when they disappear from an authoritative installation inventory', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    await t.mutation(upsertGitHubInstallationRepositories, connectionArgs)
+
+    await t.mutation(
+      upsertGitHubInstallationRepositories,
+      await signedConnectionArgs([]),
+    )
+
+    const repository = await t.run((ctx) =>
+      ctx.db
+        .query('connectedRepositories')
+        .withIndex('by_provider_repository', (q) =>
+          q.eq('provider', 'github').eq('repositoryExternalId', '456'),
+        )
+        .unique(),
+    )
+    expect(repository).toMatchObject({ selected: false, status: 'removed' })
+  })
+
+  test('rejects an installation inventory above the transaction bound', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+    const repository = connectionProjection.repositories[0]
+
+    await expect(
+      t.mutation(upsertGitHubInstallationRepositories, {
+        ...connectionArgs,
+        repositories: Array.from({ length: 1_001 }, (_, index) => ({
+          ...repository,
+          repositoryExternalId: String(index + 1),
+          repositoryName: `repository-${index + 1}`,
+          repositoryFullName: `octokit/repository-${index + 1}`,
+        })),
+      }),
+    ).rejects.toThrow('exceeds the synchronization bound')
+  })
+
+  test('rejects caller-supplied repository projections without a matching Worker proof', async () => {
+    const t = authenticatedTest()
+    await seedMembership(t)
+
+    await expect(
+      t.mutation(upsertGitHubInstallationRepositories, {
+        ...connectionArgs,
+        repositories: connectionArgs.repositories.map((repository) => ({
+          ...repository,
+          repositoryExternalId: 'attacker-controlled',
+        })),
+      }),
+    ).rejects.toThrow('proof is invalid')
   })
 
   test('aggregates the latest workspace verification for each connected repository', async () => {
@@ -221,7 +354,9 @@ describe('connectedRepositories', () => {
     })
 
     expect(listed.page).toHaveLength(1)
-    expect(listed.page[0]?.repository.repositoryFullName).toBe('octokit/octokit.js')
+    expect(listed.page[0]?.repository.repositoryFullName).toBe(
+      'octokit/octokit.js',
+    )
     expect(listed.page[0]?.latestVerification).toEqual({
       workflowRunId: seeded.latestWorkflowRunId,
       workflowStatus: 'reviewed',
@@ -383,7 +518,24 @@ describe('connectedRepositories', () => {
       state: 'state_123',
       workspaceId: 'workos:org_123',
       returnPathname: '/app',
-      expiresAt: Date.now() + 60_000,
+    })
+
+    const createdIntent = await t.run((ctx) =>
+      ctx.db
+        .query('githubConnectionIntents')
+        .withIndex('by_state', (q) => q.eq('state', 'state_123'))
+        .unique(),
+    )
+    expect(createdIntent).not.toBeNull()
+    expect(createdIntent?.expiresAt).toBe(
+      (createdIntent?.createdAt ?? 0) + 10 * 60_000,
+    )
+
+    await t.mutation(stageGitHubConnectionInstallation, {
+      state: 'state_123',
+      workspaceId: 'workos:org_123',
+      installationId: '123',
+      pkceVerifier: 'v'.repeat(64),
     })
 
     const intent = await t.mutation(consumeGitHubConnectionIntent, {
@@ -395,7 +547,32 @@ describe('connectedRepositories', () => {
       workspaceId: 'workos:org_123',
       actorId: 'workos:user_123',
       returnPathname: '/app',
+      installationId: '123',
+      pkceVerifier: 'v'.repeat(64),
     })
+    const consumedIntent = await t.run((ctx) =>
+      ctx.db
+        .query('githubConnectionIntents')
+        .withIndex('by_state', (q) => q.eq('state', 'state_123'))
+        .unique(),
+    )
+    expect(consumedIntent?.pkceVerifier).toBeUndefined()
+
+    await expect(
+      t.mutation(consumeGitHubConnectionIntent, {
+        state: 'state_123',
+        workspaceId: 'workos:org_123',
+      }),
+    ).rejects.toThrow('already consumed')
+
+    await expect(
+      t.mutation(stageGitHubConnectionInstallation, {
+        state: 'state_123',
+        workspaceId: 'workos:org_123',
+        installationId: '999',
+        pkceVerifier: 'x'.repeat(64),
+      }),
+    ).rejects.toThrow('invalid')
   })
 
   test('returns null for unknown or wrong-installation webhook routes', async () => {
@@ -403,15 +580,19 @@ describe('connectedRepositories', () => {
     await seedMembership(t)
     await t.mutation(upsertGitHubInstallationRepositories, connectionArgs)
 
-    await expect(t.query(lookupGitHubWebhookRoute, {
-      systemSecret: 'system_test',
-      installationId: '999',
-      repositoryExternalId: '456',
-    })).resolves.toBeNull()
-    await expect(t.query(lookupGitHubWebhookRoute, {
-      systemSecret: 'system_test',
-      installationId: '123',
-      repositoryExternalId: '999',
-    })).resolves.toBeNull()
+    await expect(
+      t.query(lookupGitHubWebhookRoute, {
+        systemSecret: 'system_test',
+        installationId: '999',
+        repositoryExternalId: '456',
+      }),
+    ).resolves.toBeNull()
+    await expect(
+      t.query(lookupGitHubWebhookRoute, {
+        systemSecret: 'system_test',
+        installationId: '123',
+        repositoryExternalId: '999',
+      }),
+    ).resolves.toBeNull()
   })
 })

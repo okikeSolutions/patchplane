@@ -1,5 +1,5 @@
 import { Effect, Option, Redacted, Schema } from 'effect'
-import { ConvexHttpClient } from 'convex/browser'
+import { convexMutation, convexQuery } from '../http-client'
 import { decodeCandidatePatchSet } from '@patchplane/domain/decision-review'
 import { StorageError } from '@patchplane/domain/errors'
 import {
@@ -42,15 +42,13 @@ export function makeCandidatesStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).query(
-          getCandidatePatchSetForWorkflowQuery,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-          },
-        ),
+    const value = yield* convexQuery({
+      url: convexUrl,
+      reference: getCandidatePatchSetForWorkflowQuery,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'getCandidatePatchSetForWorkflow',
@@ -89,13 +87,14 @@ export function makeCandidatesStorageOperations(context: ConvexStorageContext) {
           cause: undefined,
         })
       }
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          new ConvexHttpClient(convexUrl).mutation(mutationRef, {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            leaseToken: input.leaseToken,
-          }),
+      const result = yield* convexMutation({
+        url: convexUrl,
+        reference: mutationRef,
+        args: {
+          systemSecret: Redacted.value(systemIngestionSecret),
+          workflowRunId: input.workflowRunId,
+          leaseToken: input.leaseToken,
+        },
         catch: (cause) =>
           new StorageError({
             operation,
@@ -145,17 +144,15 @@ export function makeCandidatesStorageOperations(context: ConvexStorageContext) {
           cause: undefined,
         })
       }
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          new ConvexHttpClient(convexUrl).mutation(
-            failCandidateFreezeMutation,
-            {
-              systemSecret: Redacted.value(systemIngestionSecret),
-              workflowRunId: input.workflowRunId,
-              leaseToken: input.leaseToken,
-              summary: input.summary,
-            },
-          ),
+      const result = yield* convexMutation({
+        url: convexUrl,
+        reference: failCandidateFreezeMutation,
+        args: {
+          systemSecret: Redacted.value(systemIngestionSecret),
+          workflowRunId: input.workflowRunId,
+          leaseToken: input.leaseToken,
+          summary: input.summary,
+        },
         catch: (cause) =>
           new StorageError({
             operation: 'failCandidateFreeze',
@@ -196,19 +193,20 @@ export function makeCandidatesStorageOperations(context: ConvexStorageContext) {
           cause: undefined,
         })
       }
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          new ConvexHttpClient(convexUrl).mutation(mutationRef, {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            candidatePatchSetId: input.candidatePatchSetId,
-            dispatchToken: input.dispatchToken,
-            ...(operation === 'startIncomingDispatch'
-              ? {
-                  sandboxId: (input as StartIncomingDispatchInput).sandboxId,
-                }
-              : {}),
-          }),
+      const result = yield* convexMutation({
+        url: convexUrl,
+        reference: mutationRef,
+        args: {
+          systemSecret: Redacted.value(systemIngestionSecret),
+          workflowRunId: input.workflowRunId,
+          candidatePatchSetId: input.candidatePatchSetId,
+          dispatchToken: input.dispatchToken,
+          ...(operation === 'startIncomingDispatch' && 'sandboxId' in input
+            ? {
+                sandboxId: input.sandboxId,
+              }
+            : {}),
+        },
         catch: (cause) =>
           new StorageError({
             operation,
@@ -269,37 +267,36 @@ export function makeCandidatesStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-        return client.mutation(recordCandidatePatchSetMutation, {
-          systemSecret: Redacted.value(systemIngestionSecret),
-          workflowRunId: input.workflowRunId,
-          ...(input.sandboxExecutionId === undefined
-            ? {}
-            : { sandboxExecutionId: input.sandboxExecutionId }),
-          ...(input.subject === undefined ? {} : { subject: input.subject }),
-          ...(input.candidateFreezeLeaseToken === undefined
-            ? {}
-            : {
-                candidateFreezeLeaseToken: input.candidateFreezeLeaseToken,
-              }),
-          status: input.status,
-          ...(input.candidateDigest === undefined
-            ? {}
-            : { candidateDigest: input.candidateDigest }),
-          ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
-          ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
-          ...(input.headRef === undefined ? {} : { headRef: input.headRef }),
-          ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
-          ...(input.diffArtifactId === undefined
-            ? {}
-            : { diffArtifactId: input.diffArtifactId }),
-          ...(input.summary === undefined ? {} : { summary: input.summary }),
-          ...(input.stats === undefined ? {} : { stats: input.stats }),
-          idempotencyKey: input.idempotencyKey,
-          createdAt: input.createdAt,
-        })
+    const value = yield* convexMutation({
+      url: convexUrl,
+      reference: recordCandidatePatchSetMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        ...(input.sandboxExecutionId === undefined
+          ? {}
+          : { sandboxExecutionId: input.sandboxExecutionId }),
+        ...(input.subject === undefined ? {} : { subject: input.subject }),
+        ...(input.candidateFreezeLeaseToken === undefined
+          ? {}
+          : {
+              candidateFreezeLeaseToken: input.candidateFreezeLeaseToken,
+            }),
+        status: input.status,
+        ...(input.candidateDigest === undefined
+          ? {}
+          : { candidateDigest: input.candidateDigest }),
+        ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+        ...(input.baseSha === undefined ? {} : { baseSha: input.baseSha }),
+        ...(input.headRef === undefined ? {} : { headRef: input.headRef }),
+        ...(input.headSha === undefined ? {} : { headSha: input.headSha }),
+        ...(input.diffArtifactId === undefined
+          ? {}
+          : { diffArtifactId: input.diffArtifactId }),
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        ...(input.stats === undefined ? {} : { stats: input.stats }),
+        idempotencyKey: input.idempotencyKey,
+        createdAt: input.createdAt,
       },
       catch: (cause) =>
         new StorageError({

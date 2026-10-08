@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
+import { GitHubError } from '@patchplane/domain/errors'
 import { GitHubNormalizedWorkflowEvent } from '@patchplane/domain/github'
 import {
   makeGitHubAppActorId,
@@ -36,8 +37,9 @@ describe('GitHubEventToWorkflowIntake', () => {
         traceId: 'trace-1',
       }).pipe(Effect.flip)
 
-      expect(error.message).toContain(
-        'authoritative pull request base and head SHAs',
+      expect(error).toBeInstanceOf(GitHubError)
+      expect(error.operation).toBe(
+        'GitHubEventToWorkflowIntake.requirePinnedRevision',
       )
     }),
   )

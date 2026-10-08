@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding } from 'effect'
+import { Crypto, Effect } from 'effect'
+import * as Hex from 'effect/encoding/Hex'
 import type { CandidatePatchSet } from '@patchplane/domain/decision-review'
 import { SandboxError } from '@patchplane/domain/errors'
 import type { EvidenceArtifact } from '@patchplane/domain/evidence-artifact'
@@ -100,7 +101,7 @@ export const PersistConfiguredVerificationRequirements = Effect.fn(
   const crypto = yield* Crypto.Crypto
   const policyRevision =
     input.policyRevision ??
-    `sha256:${Encoding.encodeHex(
+    `sha256:${Hex.encode(
       yield* crypto.digest(
         'SHA-256',
         new TextEncoder().encode(

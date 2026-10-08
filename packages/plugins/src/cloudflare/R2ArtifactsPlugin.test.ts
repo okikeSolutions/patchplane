@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { ConfigProvider, Effect, Exit, Layer } from 'effect'
 import { NodeCrypto } from '@effect/platform-node'
+import { ArtifactsError } from '@patchplane/domain/errors'
 import { ArtifactsService } from '@patchplane/core/services/artifacts-service'
 import { makeWorkflowRunId } from '@patchplane/domain/ids'
 import {
@@ -173,7 +174,8 @@ describe('CloudflareR2ArtifactsPlugin', () => {
             idempotencyKey: 'run_123:test-report:report',
           }),
         )
-        expect(conflict.message).toContain('Failed to upload artifact to R2')
+        expect(conflict).toBeInstanceOf(ArtifactsError)
+        expect(conflict.operation).toBe('r2.putArtifact')
         const stored = bucket.objects.get(idempotentFirst.storageKey)
         expect(new TextDecoder().decode(stored?.body)).toBe('{"ok":true}')
         if (stored === undefined) throw new Error('Expected stored artifact')
@@ -188,7 +190,8 @@ describe('CloudflareR2ArtifactsPlugin', () => {
             idempotencyKey: 'run_123:test-report:report',
           }),
         )
-        expect(tampered.message).toContain('Failed to upload artifact to R2')
+        expect(tampered).toBeInstanceOf(ArtifactsError)
+        expect(tampered.operation).toBe('r2.putArtifact')
         expect(first.storageKey).toMatch(
           /^workflows\/run_123\/test-report\/.+-report\.json$/,
         )
@@ -248,17 +251,15 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     () =>
       Effect.gen(function* () {
         const artifacts = yield* ArtifactsService
-        const exit = yield* Effect.exit(
+        const error = yield* Effect.flip(
           artifacts.createSignedReadUrl({
             storageKey: 'workflows/run_123/stdout/log.txt',
             expiresInSeconds: 900,
           }),
         )
 
-        expect(Exit.isFailure(exit)).toBe(true)
-        expect(String(exit)).toContain(
-          'required to create signed artifact URLs',
-        )
+        expect(error).toBeInstanceOf(ArtifactsError)
+        expect(error.operation).toBe('r2.createSignedReadUrl.config')
       }).pipe(
         Effect.provide(
           layer(new FakeBucket(), { includeSigningCredentials: false }),
@@ -271,7 +272,7 @@ describe('CloudflareR2ArtifactsPlugin', () => {
     bucket.failPut = true
     return Effect.gen(function* () {
       const artifacts = yield* ArtifactsService
-      const exit = yield* Effect.exit(
+      const error = yield* Effect.flip(
         artifacts.putArtifact({
           workflowRunId: makeWorkflowRunId('run_123'),
           kind: 'stdout',
@@ -279,7 +280,8 @@ describe('CloudflareR2ArtifactsPlugin', () => {
           body: 'hello',
         }),
       )
-      expect(Exit.isFailure(exit)).toBe(true)
+      expect(error).toBeInstanceOf(ArtifactsError)
+      expect(error.operation).toBe('r2.putArtifact')
     }).pipe(Effect.provide(layer(bucket)))
   })
 })

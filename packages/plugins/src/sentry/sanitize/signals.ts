@@ -1,4 +1,4 @@
-import type { Log, Metric, SpanJSON } from '@sentry/core'
+import type { Log, Metric, SpanJSON, StreamedSpanJSON } from '@sentry/core'
 import {
   decodeSentryLogLevel,
   decodeSentryMetricName,
@@ -59,7 +59,6 @@ export function sanitizeSentryMetric(metric: Metric): Metric | null {
 
 function sanitizeSpan(span: SpanJSON): SpanJSON {
   const operation = safeTelemetryName(span.op)
-  const status = safeTelemetryName(span.status)
   const startTimestamp = safeFiniteNumber(span.start_timestamp) ?? 0
   const endTimestamp = safeFiniteNumber(span.timestamp)
   const exclusiveTime = safeFiniteNumber(span.exclusive_time)
@@ -89,7 +88,7 @@ function sanitizeSpan(span: SpanJSON): SpanJSON {
       : {}),
     ...(operation === undefined ? {} : { op: 'patchplane.operation' }),
     ...(parentSpanId === undefined ? {} : { parent_span_id: parentSpanId }),
-    ...(status === undefined ? {} : { status: 'unknown' }),
+    status: 'unknown',
     ...(endTimestamp === undefined ? {} : { timestamp: endTimestamp }),
     ...(exclusiveTime === undefined ? {} : { exclusive_time: exclusiveTime }),
     ...(typeof span.is_segment === 'boolean'
@@ -103,4 +102,59 @@ const trySanitizeSpan = Option.liftThrowable(sanitizeSpan)
 
 export function sanitizeSentrySpan(span: SpanJSON): SpanJSON {
   return Option.getOrElse(trySanitizeSpan(span), makeSafeSpan)
+}
+
+function makeSafeStreamedSpan(): StreamedSpanJSON {
+  return {
+    trace_id: '00000000000000000000000000000000',
+    span_id: '0000000000000000',
+    name: 'patchplane.operation',
+    start_timestamp: 0,
+    status: 'error',
+    is_segment: false,
+    attributes: {},
+  }
+}
+
+function sanitizeStreamedSpan(span: StreamedSpanJSON): StreamedSpanJSON {
+  const startTimestamp = safeFiniteNumber(span.start_timestamp) ?? 0
+  const endTimestamp = safeFiniteNumber(span.end_timestamp)
+  const spanId = Option.getOrElse(
+    decodeSentrySpanId(span.span_id),
+    () => '0000000000000000',
+  )
+  const traceId = Option.getOrElse(
+    decodeSentryTraceId(span.trace_id),
+    () => '00000000000000000000000000000000',
+  )
+  const parentSpanId = Option.getOrUndefined(
+    decodeSentrySpanId(span.parent_span_id),
+  )
+
+  return {
+    trace_id: traceId,
+    span_id: spanId,
+    name: sanitizeSpanDescription(span.name),
+    start_timestamp: startTimestamp,
+    ...(endTimestamp === undefined ? {} : { end_timestamp: endTimestamp }),
+    status: span.status === 'ok' ? 'ok' : 'error',
+    is_segment: span.is_segment,
+    attributes: sanitizeSentryAttributes(span.attributes),
+    ...(parentSpanId === undefined ? {} : { parent_span_id: parentSpanId }),
+  }
+}
+
+const trySanitizeStreamedSpan = Option.liftThrowable(sanitizeStreamedSpan)
+
+export function sanitizeSentryStreamedSpan(
+  span: StreamedSpanJSON,
+): StreamedSpanJSON {
+  return Option.getOrElse(trySanitizeStreamedSpan(span), makeSafeStreamedSpan)
+}
+
+export function sanitizeSentrySpanName(value: string): string {
+  return Option.getOrElse(
+    Option.liftThrowable(() => sanitizeSpanDescription(value))(),
+    () => 'patchplane.operation',
+  )
 }

@@ -1,15 +1,23 @@
 import { Schema } from 'effect'
-import { Rpc, RpcGroup } from 'effect/unstable/rpc'
+import { Rpc, RpcGroup } from 'effect/rpc'
 
 export const PiRpcCommandResponse = Schema.Struct({
   id: Schema.optional(Schema.String),
   type: Schema.Literal('response'),
-  command: Schema.String,
+  command: Schema.Literals([
+    'get_state',
+    'prompt',
+    'steer',
+    'follow_up',
+    'abort',
+  ]),
   success: Schema.Boolean,
   data: Schema.optional(Schema.Unknown),
   error: Schema.optional(Schema.String),
 })
-export type PiRpcCommandResponse = Schema.Schema.Type<typeof PiRpcCommandResponse>
+export type PiRpcCommandResponse = Schema.Schema.Type<
+  typeof PiRpcCommandResponse
+>
 
 const OptionalIdPayload = { id: Schema.optional(Schema.String) } as const
 const MessagePayload = {

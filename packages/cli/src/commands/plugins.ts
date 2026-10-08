@@ -1,5 +1,5 @@
 import { Console, Effect } from 'effect'
-import { Argument, CliError, Command, Flag } from 'effect/unstable/cli'
+import { Argument, CliError, Command, Flag } from 'effect/cli'
 import {
   getPatchPlanePlugin,
   patchPlanePlugins,
@@ -9,7 +9,9 @@ import {
 
 function pluginsListText() {
   const lines: string[] = []
-  for (const plugin of Object.values(patchPlanePlugins) as readonly PatchPlanePluginMetadata[]) {
+  for (const plugin of Object.values(
+    patchPlanePlugins,
+  ) as readonly PatchPlanePluginMetadata[]) {
     lines.push(`${plugin.id} - ${plugin.name}`)
     lines.push(`  provides: ${plugin.provides.join(', ')}`)
     lines.push(`  surfaces: ${plugin.surfaces.join(', ')}`)
@@ -38,63 +40,86 @@ function pluginsExplainText(id: PatchPlanePluginId) {
   }
   lines.push('env:')
   for (const variable of plugin.env) {
-    lines.push(`  ${variable.required ? 'required' : 'optional'} ${variable.name}${variable.defaultValue ? `=${variable.defaultValue}` : ''}`)
+    lines.push(
+      `  ${variable.required ? 'required' : 'optional'} ${variable.name}${variable.defaultValue ? `=${variable.defaultValue}` : ''}`,
+    )
   }
   return lines.join('\n')
 }
 
-const pluginIdArgument = Argument.string('id').pipe(
+const pluginIdArgument = Argument.String('id').pipe(
   Argument.withDescription('Plugin id to explain'),
   Argument.mapEffect((id) =>
     !isPluginId(id)
-      ? Effect.fail(new CliError.InvalidValue({
-        option: 'id',
-        value: id,
-        expected: 'known plugin id',
-        kind: 'argument',
-      }))
-      : Effect.succeed(id)
+      ? Effect.fail(
+          new CliError.InvalidValue({
+            option: 'id',
+            value: id,
+            expected: 'known plugin id',
+            kind: 'argument',
+          }),
+        )
+      : Effect.succeed(id),
   ),
 )
 
-const pluginsListCommand = Command.make('list', {
-  json: Flag.boolean('json').pipe(
-    Flag.withDescription('Emit machine-readable JSON to stdout'),
-  ),
-}, ({ json }) =>
-  Console.log(json
-    ? JSON.stringify({ plugins: Object.values(patchPlanePlugins) }, null, 2)
-    : pluginsListText())
+const pluginsListCommand = Command.make(
+  'list',
+  {
+    json: Flag.Boolean('json').pipe(
+      Flag.withDefault(false),
+      Flag.withDescription('Emit machine-readable JSON to stdout'),
+    ),
+  },
+  ({ json }) =>
+    Console.log(
+      json
+        ? JSON.stringify({ plugins: Object.values(patchPlanePlugins) }, null, 2)
+        : pluginsListText(),
+    ),
 ).pipe(
   Command.withDescription('List available PatchPlane plugins.'),
   Command.withShortDescription('List plugins'),
 )
 
-const pluginsExplainCommand = Command.make('explain', {
-  id: pluginIdArgument,
-  json: Flag.boolean('json').pipe(
-    Flag.withDescription('Emit machine-readable JSON to stdout'),
+const pluginsExplainCommand = Command.make(
+  'explain',
+  {
+    id: pluginIdArgument,
+    json: Flag.Boolean('json').pipe(
+      Flag.withDefault(false),
+      Flag.withDescription('Emit machine-readable JSON to stdout'),
+    ),
+  },
+  ({ id, json }) => {
+    const plugin = getPatchPlanePlugin(id)
+    return plugin === undefined
+      ? Effect.fail(
+          new CliError.InvalidValue({
+            option: 'id',
+            value: id,
+            expected: 'known plugin id',
+            kind: 'argument',
+          }),
+        )
+      : Console.log(
+          json ? JSON.stringify({ plugin }, null, 2) : pluginsExplainText(id),
+        )
+  },
+).pipe(
+  Command.withDescription(
+    'Explain one PatchPlane plugin and its required environment variables.',
   ),
-}, ({ id, json }) => {
-  const plugin = getPatchPlanePlugin(id)
-  return plugin === undefined
-    ? Effect.fail(new CliError.InvalidValue({
-      option: 'id',
-      value: id,
-      expected: 'known plugin id',
-      kind: 'argument',
-    }))
-    : Console.log(json ? JSON.stringify({ plugin }, null, 2) : pluginsExplainText(id))
-}).pipe(
-  Command.withDescription('Explain one PatchPlane plugin and its required environment variables.'),
   Command.withShortDescription('Explain plugin'),
 )
 
 export const pluginsCommand = Command.make('plugins', {}, () =>
-  Effect.fail(new CliError.ShowHelp({
-    commandPath: ['patchplane', 'plugins'],
-    errors: [new CliError.MissingArgument({ argument: 'subcommand' })],
-  })),
+  Effect.fail(
+    new CliError.ShowHelp({
+      commandPath: ['patchplane', 'plugins'],
+      errors: [new CliError.MissingArgument({ argument: 'subcommand' })],
+    }),
+  ),
 ).pipe(
   Command.withDescription('Discover PatchPlane plugins.'),
   Command.withShortDescription('Inspect plugins'),

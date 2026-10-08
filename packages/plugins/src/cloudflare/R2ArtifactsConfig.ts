@@ -11,18 +11,18 @@ export const R2ArtifactsConfig = Config.all({
     Config.schema(Schema.NonEmptyString, 'PATCHPLANE_EVIDENCE_R2_BUCKET'),
   ),
   s3ApiEndpoint: Config.option(
-    Config.url('CLOUDFLARE_S3_API_ENDPOINT').pipe(
+    Config.URL('CLOUDFLARE_S3_API_ENDPOINT').pipe(
       Config.map((url) => url.toString()),
     ),
   ),
   accessKeyId: Config.option(
-    Config.redacted('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID').pipe(
-      Config.orElse(() => Config.redacted('CLOUDFLARE_ACCESS_KEY_ID')),
+    Config.Redacted('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID').pipe(
+      Config.orElse(() => Config.Redacted('CLOUDFLARE_ACCESS_KEY_ID')),
     ),
   ),
   secretAccessKey: Config.option(
-    Config.redacted('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY').pipe(
-      Config.orElse(() => Config.redacted('CLOUDFLARE_SECRET_ACCESS_KEY')),
+    Config.Redacted('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY').pipe(
+      Config.orElse(() => Config.Redacted('CLOUDFLARE_SECRET_ACCESS_KEY')),
     ),
   ),
   signedUrlExpiresInSeconds: Config.schema(
@@ -35,4 +35,5 @@ export const R2ArtifactsConfig = Config.all({
   ).pipe(Config.withDefault(10 * 1024 * 1024)),
 })
 
-export type R2ArtifactsConfig = typeof R2ArtifactsConfig extends Config.Config<infer A> ? A : never
+export type R2ArtifactsConfig =
+  typeof R2ArtifactsConfig extends Config.Config<infer A> ? A : never

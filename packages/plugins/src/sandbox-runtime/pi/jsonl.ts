@@ -1,4 +1,14 @@
-import { Stream } from 'effect'
+import { Effect, Schema, Stream } from 'effect'
+
+export const maxPiJsonlLineCharacters = 65_536
+
+export class PiJsonlLimitError extends Schema.TaggedError<PiJsonlLimitError>()(
+  'PiJsonlLimitError',
+  {
+    lineNumber: Schema.Finite,
+    message: Schema.String,
+  },
+) {}
 
 function stripTrailingCarriageReturn(line: string) {
   return line.endsWith('\r') ? line.slice(0, -1) : line
@@ -22,7 +32,9 @@ interface JsonlState {
  * generic line splitting helpers that treat standalone `\r`, U+2028, or U+2029
  * as record delimiters.
  */
-export function decodePiJsonlLines<E, R>(chunks: Stream.Stream<string, E, R>): Stream.Stream<PiJsonlLine, E, R> {
+export function decodePiJsonlLines<E, R>(
+  chunks: Stream.Stream<string, E, R>,
+): Stream.Stream<PiJsonlLine, E | PiJsonlLimitError, R> {
   return chunks.pipe(
     Stream.mapAccumArray(
       () => ({ buffer: '', lineNumber: 0, offset: 0 }) satisfies JsonlState,
@@ -30,7 +42,7 @@ export function decodePiJsonlLines<E, R>(chunks: Stream.Stream<string, E, R>): S
         let buffer = state.buffer
         let lineNumber = state.lineNumber
         let offset = state.offset
-        const lines: PiJsonlLine[] = []
+        const lines: Array<PiJsonlLine | PiJsonlLimitError> = []
 
         for (const chunk of chunkGroup) {
           buffer += chunk
@@ -38,14 +50,32 @@ export function decodePiJsonlLines<E, R>(chunks: Stream.Stream<string, E, R>): S
             const newlineAt = buffer.indexOf('\n')
             if (newlineAt === -1) break
             const rawLine = buffer.slice(0, newlineAt)
-            lines.push({
-              line: stripTrailingCarriageReturn(rawLine),
-              lineNumber: lineNumber + 1,
-              sourceOffset: offset,
-            })
+            lines.push(
+              rawLine.length > maxPiJsonlLineCharacters
+                ? new PiJsonlLimitError({
+                    lineNumber: lineNumber + 1,
+                    message: 'Pi JSONL line exceeded its trusted size limit',
+                  })
+                : {
+                    line: stripTrailingCarriageReturn(rawLine),
+                    lineNumber: lineNumber + 1,
+                    sourceOffset: offset,
+                  },
+            )
             lineNumber += 1
             offset += rawLine.length + 1
             buffer = buffer.slice(newlineAt + 1)
+          }
+          if (buffer.length > maxPiJsonlLineCharacters) {
+            lines.push(
+              new PiJsonlLimitError({
+                lineNumber: lineNumber + 1,
+                message: 'Pi JSONL line exceeded its trusted size limit',
+              }),
+            )
+            offset += buffer.length
+            lineNumber += 1
+            buffer = ''
           }
         }
 
@@ -55,12 +85,26 @@ export function decodePiJsonlLines<E, R>(chunks: Stream.Stream<string, E, R>): S
         onHalt: (state) =>
           state.buffer.length === 0
             ? []
-            : [{
-              line: stripTrailingCarriageReturn(state.buffer),
-              lineNumber: state.lineNumber + 1,
-              sourceOffset: state.offset,
-            }],
+            : state.buffer.length > maxPiJsonlLineCharacters
+              ? [
+                  new PiJsonlLimitError({
+                    lineNumber: state.lineNumber + 1,
+                    message: 'Pi JSONL line exceeded its trusted size limit',
+                  }),
+                ]
+              : [
+                  {
+                    line: stripTrailingCarriageReturn(state.buffer),
+                    lineNumber: state.lineNumber + 1,
+                    sourceOffset: state.offset,
+                  },
+                ],
       },
+    ),
+    Stream.mapEffect((line) =>
+      line instanceof PiJsonlLimitError
+        ? Effect.fail(line)
+        : Effect.succeed(line),
     ),
   )
 }

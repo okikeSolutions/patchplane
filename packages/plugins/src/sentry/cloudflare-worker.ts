@@ -6,8 +6,7 @@ import {
   sanitizeSentryLog,
   sanitizeSentryMetric,
   sanitizeSentryException,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
   sentryMaxBreadcrumbs,
 } from './sanitize'
 
@@ -57,13 +56,11 @@ export function withCloudflareSentry<
   },
 >(handler: Handler): Handler
 export function withCloudflareSentry(handler: unknown): unknown {
-  return Sentry.withSentry<CloudflareSentryEnv, unknown, unknown, never>(
+  return Sentry.withSentry<CloudflareSentryEnv>(
     (env: CloudflareSentryEnv | undefined) => ({
       dsn: env?.CLOUDFLARE_SENTRY_DSN,
       environment: 'development',
-      enableLogs: false,
       tracesSampleRate: 1,
-      sendDefaultPii: false,
       dataCollection: makeSentryDataCollection(),
       maxBreadcrumbs: sentryMaxBreadcrumbs,
       integrations: (defaultIntegrations) => [
@@ -73,11 +70,10 @@ export function withCloudflareSentry(handler: unknown): unknown {
         Sentry.httpServerIntegration({ maxRequestBodySize: 'none' }),
       ],
       beforeSend: sanitizeSentryEvent,
-      beforeSendTransaction: sanitizeSentryTransaction,
       beforeBreadcrumb: sanitizeSentryBreadcrumb,
       beforeSendLog: sanitizeSentryLog,
       beforeSendMetric: sanitizeSentryMetric,
-      beforeSendSpan: sanitizeSentrySpan,
+      beforeSendSpan: sanitizeSentryStreamedSpan,
     }),
     // Sentry's Worker globals differ from DOM Request types used by TanStack Start.
     handler as never,

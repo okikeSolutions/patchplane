@@ -5,75 +5,77 @@ import { PolicyService } from './policy-service'
 export const AlphaReviewServiceLayer = Layer.succeed(
   ReviewService,
   ReviewService.of({
-    runReview: (input: ReviewCandidateInput) =>
-      Effect.sync(() => {
-        const findings = []
-        const diffArtifact = input.evidenceArtifacts.find(
-          (artifact) => artifact.kind === 'diff',
-        )
-        const verificationResults = input.verificationResults ?? []
+    runReview: Effect.fn('alpha-review-policy.runReview')(
+      (input: ReviewCandidateInput) =>
+        Effect.sync(() => {
+          const findings = []
+          const diffArtifact = input.evidenceArtifacts.find(
+            (artifact) => artifact.kind === 'diff',
+          )
+          const verificationResults = input.verificationResults ?? []
 
-        if (verificationResults.length === 0) {
-          findings.push({
-            severity: 'warning' as const,
-            category: 'test' as const,
-            message:
-              'No independent verification command was configured; agent completion is not test evidence.',
-          })
-        }
+          if (verificationResults.length === 0) {
+            findings.push({
+              severity: 'warning' as const,
+              category: 'test' as const,
+              message:
+                'No independent verification command was configured; agent completion is not test evidence.',
+            })
+          }
 
-        for (const verification of verificationResults) {
-          if (verification.status === 'passed') continue
-          const failed = verification.status === 'failed'
-          findings.push({
-            severity: failed ? ('error' as const) : ('warning' as const),
-            category: 'test' as const,
-            message:
-              verification.summary ??
-              `Verification ${verification.status} with exit ${verification.exitCode ?? 'unknown'}.`,
-          })
-        }
+          for (const verification of verificationResults) {
+            if (verification.status === 'passed') continue
+            const failed = verification.status === 'failed'
+            findings.push({
+              severity: failed ? ('error' as const) : ('warning' as const),
+              category: 'test' as const,
+              message:
+                verification.summary ??
+                `Verification ${verification.status} with exit ${verification.exitCode ?? 'unknown'}.`,
+            })
+          }
 
-        if (input.sandboxExecution === undefined) {
-          findings.push({
-            severity: 'warning' as const,
-            category: 'unknown' as const,
-            message:
-              'No sandbox execution has been recorded for this workflow.',
-          })
-        } else if (input.sandboxExecution.status === 'failed') {
-          findings.push({
-            severity: 'error' as const,
-            category: 'test' as const,
-            message: `Sandbox command failed with exit ${input.sandboxExecution.exitCode ?? 'unknown'}.`,
-          })
-        }
+          if (input.sandboxExecution === undefined) {
+            findings.push({
+              severity: 'warning' as const,
+              category: 'unknown' as const,
+              message:
+                'No sandbox execution has been recorded for this workflow.',
+            })
+          } else if (input.sandboxExecution.status === 'failed') {
+            findings.push({
+              severity: 'error' as const,
+              category: 'test' as const,
+              message: `Sandbox command failed with exit ${input.sandboxExecution.exitCode ?? 'unknown'}.`,
+            })
+          }
 
-        if (diffArtifact === undefined) {
-          findings.push({
-            severity: 'warning' as const,
-            category: 'quality' as const,
-            message: 'No candidate patch diff artifact was recorded.',
-          })
-        }
+          if (diffArtifact === undefined) {
+            findings.push({
+              severity: 'warning' as const,
+              category: 'quality' as const,
+              message: 'No candidate patch diff artifact was recorded.',
+            })
+          }
 
-        return {
-          kind: 'test' as const,
-          reviewer: 'patchplane:alpha-reviewer',
-          summary:
-            findings.length === 0
-              ? 'Sandbox execution and candidate diff evidence are present.'
-              : `${findings.length} review finding${findings.length === 1 ? '' : 's'} recorded.`,
-          findings,
-        }
-      }),
+          return {
+            kind: 'test' as const,
+            reviewer: 'patchplane:alpha-reviewer',
+            summary:
+              findings.length === 0
+                ? 'Sandbox execution and candidate diff evidence are present.'
+                : `${findings.length} review finding${findings.length === 1 ? '' : 's'} recorded.`,
+            findings,
+          }
+        }),
+    ),
   }),
 )
 
 export const AlphaPolicyServiceLayer = Layer.succeed(
   PolicyService,
   PolicyService.of({
-    evaluatePolicy: (input) =>
+    evaluatePolicy: Effect.fn('alpha-review-policy.evaluatePolicy')((input) =>
       Effect.sync(() => {
         const hasError = input.reviewFindings.some(
           (finding) =>
@@ -122,5 +124,6 @@ export const AlphaPolicyServiceLayer = Layer.succeed(
           reason: 'review:clean',
         }
       }),
+    ),
   }),
 )

@@ -42,6 +42,32 @@ import { piRuntimeEnvironment } from '../sandbox-runtime/pi/config'
 import { parsePiJsonRuntimeEventsEffect } from '../sandbox-runtime/pi/events'
 
 const repositoryBaseSha = 'a'.repeat(40)
+function oversizedSessionCommandLogs(
+  _sessionId: string,
+  _commandId: string,
+): Promise<{ readonly stdout?: string; readonly stderr?: string }>
+function oversizedSessionCommandLogs(
+  _sessionId: string,
+  _commandId: string,
+  onStdout: (chunk: string) => void,
+  onStderr: (chunk: string) => void,
+): Promise<void>
+function oversizedSessionCommandLogs(
+  _sessionId: string,
+  _commandId: string,
+  onStdout?: (chunk: string) => void,
+  _onStderr?: (chunk: string) => void,
+): Promise<void | {
+  readonly stdout?: string
+  readonly stderr?: string
+}> {
+  if (onStdout === undefined) {
+    return Promise.resolve({ stdout: '', stderr: '' })
+  }
+  onStdout('oversized')
+  return Promise.resolve()
+}
+
 const protectedObservation = [
   'effectiveUid=65534',
   'effectiveGid=65534',
@@ -1267,7 +1293,10 @@ describe('Daytona sandbox boundary adapters', () => {
           deleteSession: vi.fn(async () => undefined),
         },
       })
-      const client = fakeClient(sandbox)
+      const create = vi.fn<DaytonaClientLike['create']>(
+        async (_params) => sandbox,
+      )
+      const client = fakeClient(sandbox, { create })
 
       return Effect.gen(function* () {
         const service = yield* SandboxService
@@ -1291,15 +1320,11 @@ describe('Daytona sandbox boundary adapters', () => {
           expect.objectContaining({
             provider: 'pi',
             type: 'pi.tool_execution_start',
-            summary: 'Pi tool started: bash',
+            summary: 'Pi tool started',
           }),
         ])
-        expect(client.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            envVars: { OPENAI_API_KEY: 'openai-key' },
-          }),
-          expect.anything(),
-        )
+        const createInput = create.mock.calls[0]?.[0]
+        expect(createInput?.envVars).toEqual({ OPENAI_API_KEY: 'openai-key' })
       }).pipe(
         Effect.provide(
           Layer.merge(
@@ -1309,6 +1334,11 @@ describe('Daytona sandbox boundary adapters', () => {
                 env: {
                   DAYTONA_API_KEY: 'daytona-key',
                   OPENAI_API_KEY: 'openai-key',
+                  WORKOS_API_KEY: 'control-plane-workos-canary',
+                  CONVEX_URL: 'control-plane-convex-canary',
+                  GITHUB_PRIVATE_KEY: 'control-plane-github-canary',
+                  PATCHPLANE_SYSTEM_INGESTION_SECRET:
+                    'control-plane-ingestion-canary',
                 },
               }),
             ),
@@ -1653,22 +1683,37 @@ describe('Daytona sandbox boundary adapters', () => {
           provider: 'pi',
           type: 'pi.session',
           occurredAt: 1782604800000,
-          summary: 'Pi session session-1',
+          summary: 'Pi session started',
         }),
         expect.objectContaining({
           provider: 'pi',
           type: 'pi.tool_execution_start',
           occurredAt: 123,
-          summary: 'Pi tool started: bash',
+          summary: 'Pi tool started',
         }),
         expect.objectContaining({
           provider: 'pi',
           type: 'pi.message_end',
           occurredAt: 123,
-          summary: 'Pi message: All checks passed.',
+          summary: 'Pi message finished',
         }),
       ])
       expect(parsed.parseErrors).toHaveLength(1)
+      expect(parsed.lineLimitExceeded).toBe(false)
+    }),
+  )
+
+  it.effect('reports non-RPC Pi transcript line overflow', () =>
+    Effect.gen(function* () {
+      const parsed = yield* parsePiJsonRuntimeEventsEffect(
+        Array.from({ length: 1_001 }, () =>
+          JSON.stringify({ type: 'agent_start' }),
+        ).join('\n'),
+        { now: () => 123 },
+      )
+
+      expect(parsed.lineLimitExceeded).toBe(true)
+      expect(parsed.events).toHaveLength(1_000)
     }),
   )
 
@@ -1728,6 +1773,30 @@ describe('Daytona sandbox boundary adapters', () => {
         { stream: 'stdout', chunk: 'start"}\n' },
       ])
     }),
+  )
+
+  it.effect(
+    'fails a streaming log subscription that exceeds its byte bound',
+    () =>
+      Effect.gen(function* () {
+        const sandbox: DaytonaCommandSandbox = {
+          process: {
+            createSession: vi.fn(async () => undefined),
+            executeSessionCommand: vi.fn(async () => ({ cmdId: 'cmd-1' })),
+            getSessionCommandLogs: oversizedSessionCommandLogs,
+            deleteSession: vi.fn(async () => undefined),
+          },
+        }
+
+        const exit = yield* streamSandboxSessionCommandLogs(
+          sandbox,
+          'session-1',
+          'cmd-1',
+          4,
+        ).pipe(Stream.runCollect, Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+      }),
   )
 
   it.effect('starts an async Daytona session command handle', () =>

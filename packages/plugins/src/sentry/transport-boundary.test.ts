@@ -13,8 +13,7 @@ import {
   sanitizeSentryEvent,
   sanitizeSentryLog,
   sanitizeSentryMetric,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
   sentryMaxBreadcrumbs,
   sentryTelemetryPolicyMarker,
 } from './sanitize'
@@ -53,18 +52,14 @@ describe('Sentry transport boundary', () => {
           dsn: 'https://public@example.com/1',
           defaultIntegrations: false,
           transport: () => collectingTransport(envelopes),
-          sendDefaultPii: false,
           dataCollection: makeSentryDataCollection(),
           maxBreadcrumbs: sentryMaxBreadcrumbs,
-          enableLogs: true,
-          enableMetrics: true,
           tracesSampleRate: 1,
           beforeSend: sanitizeSentryEvent,
-          beforeSendTransaction: sanitizeSentryTransaction,
           beforeBreadcrumb: sanitizeSentryBreadcrumb,
           beforeSendLog: sanitizeSentryLog,
           beforeSendMetric: sanitizeSentryMetric,
-          beforeSendSpan: sanitizeSentrySpan,
+          beforeSendSpan: sanitizeSentryStreamedSpan,
         })
 
         for (let index = 0; index < 70; index += 1) {
@@ -94,7 +89,11 @@ describe('Sentry transport boundary', () => {
           attributes: { operation: 'runtime.execute', prompt: sentinel },
         })
         Sentry.startSpan(
-          { name: `runtime span ${sentinel}`, op: 'runtime.execute' },
+          {
+            name: 'patchplane.operation',
+            op: 'runtime.execute',
+            attributes: { prompt: sentinel },
+          },
           () => undefined,
         )
 
@@ -156,7 +155,7 @@ describe('Sentry transport boundary', () => {
         assert.ok(itemTypes.includes('event'))
         assert.ok(itemTypes.includes('log'))
         assert.ok(itemTypes.includes('trace_metric'))
-        assert.ok(itemTypes.includes('transaction'))
+        assert.ok(itemTypes.includes('span'))
 
         const serialized = JSON.stringify(envelopes)
         assert.ok(!serialized.includes(sentinel))

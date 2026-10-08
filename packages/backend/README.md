@@ -62,20 +62,23 @@ Current read paths require WorkOS identity and mirrored membership permissions w
 
 PatchPlane should keep the GitHub App scoped to the minimum currently implemented slice.
 
-Required repository permissions for inbound intake and repository access verification:
+Required permissions for the current incoming-PR path:
 
-- `Metadata: Read-only`
-- `Issues: Read-only`
+- repository `Metadata: Read-only`;
+- repository `Contents: Read-only` for immutable comparison and exact clone;
+- repository `Pull requests: Read and write` for PR intake and decision comments;
+- repository `Checks: Read and write` for exact-head check runs; and
+- organization `Members: Read-only` to prove organization-installation ownership during connection.
 
-Required webhook subscriptions:
-
-- `Issues` for `issues.opened`
-- `Issue comments` for `issue_comment.created`; PR issue comments are normalized as `github.pull_request_comment.created`
+Subscribe to **Pull request** events so `opened` and `synchronize` deliveries enter the hosted execution route. Do not subscribe to Issues or Issue comments for the current alpha path; those normalized event foundations are not routed into hosted execution.
 
 Required app/client server environment for webhook-to-workflow creation:
 
 ```text
 GITHUB_APP_ID
+GITHUB_CLIENT_ID
+GITHUB_CLIENT_SECRET
+PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL
 GITHUB_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 CONVEX_URL or VITE_CONVEX_URL
@@ -84,13 +87,4 @@ PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo
 PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 ```
 
-Outbound issue-comment publication is implemented in the GitHub provider plugin as a generic source-control `createIssueComment` capability. When publication is wired end to end, the GitHub App will additionally need:
-
-- `Issues: Read and write`
-
-Future check/draft PR publication will require:
-
-- `Checks: Read and write`
-- `Pull requests: Read and write`
-
-Do not enable broader repository permissions or extra webhook subscriptions until the matching runtime paths are live.
+Authenticated PR decision publication is wired end to end through the permissions above. PatchPlane mints repository-scoped temporary tokens with only `pull_requests: write` for the PR comment or `checks: write` for the check run and revokes them afterward. The generic issue-comment adapter can use `issues: write`, but that permission is not required by the current incoming-PR route. Do not enable broader permissions or extra webhook subscriptions.

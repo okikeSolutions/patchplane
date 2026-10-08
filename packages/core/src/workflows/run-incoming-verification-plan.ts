@@ -1,4 +1,5 @@
-import { Clock, Crypto, Effect, Encoding } from 'effect'
+import { Clock, Crypto, Effect } from 'effect'
+import * as Hex from 'effect/encoding/Hex'
 import { SandboxError } from '@patchplane/domain/errors'
 import type { SandboxExecution } from '@patchplane/domain/sandbox-execution'
 import type { VerificationRequirement } from '@patchplane/domain/verification'
@@ -115,7 +116,7 @@ export const RunIncomingVerificationPlan = Effect.fn(
     const commandDigest =
       command === undefined
         ? undefined
-        : `sha256:${Encoding.encodeHex(
+        : `sha256:${Hex.encode(
             yield* crypto.digest('SHA-256', new TextEncoder().encode(command)),
           )}`
     const claimToken = hex(yield* crypto.randomBytes(16))

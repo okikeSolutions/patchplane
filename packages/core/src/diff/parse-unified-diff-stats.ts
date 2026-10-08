@@ -51,13 +51,12 @@ export type UnifiedDiffStatsUnavailableReason = Schema.Schema.Type<
   typeof UnifiedDiffStatsUnavailableReason
 >
 
-export class UnifiedDiffStatsUnavailable
-  extends Schema.TaggedErrorClass<UnifiedDiffStatsUnavailable>()(
-    'UnifiedDiffStatsUnavailable',
-    {
-      reason: UnifiedDiffStatsUnavailableReason,
-    },
-  ) {}
+export class UnifiedDiffStatsUnavailable extends Schema.TaggedError<UnifiedDiffStatsUnavailable>()(
+  'UnifiedDiffStatsUnavailable',
+  {
+    reason: UnifiedDiffStatsUnavailableReason,
+  },
+) {}
 
 type UnifiedDiffStatsState = CandidatePatchSetStats & {
   readonly inFile: boolean

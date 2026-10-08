@@ -86,6 +86,7 @@ describe('FreezeIncomingPullRequestCandidate', () => {
       const order: Array<string> = []
       let persistedCandidate: CandidatePatchSetType | undefined
       let persistedArtifact: EvidenceArtifact | undefined
+      let claimedDispatchToken: string | undefined
       let artifactObjectAvailable = true
       let artifactObjectSha256 = digestHex
       const layer = Layer.mergeAll(
@@ -101,6 +102,7 @@ describe('FreezeIncomingPullRequestCandidate', () => {
           SourceControlService.of({
             verifyRepositoryAccess: () => Effect.die('unused'),
             getInstallationAccount: () => Effect.die('unused'),
+            verifyGitHubInstallationOwnership: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createIssueComment: () => Effect.die('unused'),
             createCheckRun: () => Effect.die('unused'),
@@ -202,9 +204,10 @@ describe('FreezeIncomingPullRequestCandidate', () => {
               }),
             releaseCandidateFreeze: () => Effect.succeed(true),
             failCandidateFreeze: () => Effect.succeed(true),
-            claimIncomingDispatch: () =>
+            claimIncomingDispatch: (input) =>
               Effect.sync(() => {
                 order.push('execution-claim')
+                claimedDispatchToken = input.dispatchToken
                 return true
               }),
             startIncomingDispatch: () => Effect.succeed(true),
@@ -263,8 +266,17 @@ describe('FreezeIncomingPullRequestCandidate', () => {
         const dispatch = yield* ClaimIncomingPullRequestDispatch({
           workflowStart,
           candidatePatchSet: candidate,
+          dispatchToken: 'caller-published-dispatch-token',
         })
         assert.isDefined(dispatch)
+        assert.strictEqual(
+          dispatch.dispatchToken,
+          'caller-published-dispatch-token',
+        )
+        assert.strictEqual(
+          claimedDispatchToken,
+          'caller-published-dispatch-token',
+        )
         artifactObjectAvailable = false
         const missingArtifactError = yield* ClaimIncomingPullRequestDispatch({
           workflowStart,
@@ -276,11 +288,12 @@ describe('FreezeIncomingPullRequestCandidate', () => {
         )
         artifactObjectAvailable = true
         artifactObjectSha256 = 'ff'.repeat(32)
-        const mismatchedArtifactError =
-          yield* ClaimIncomingPullRequestDispatch({
+        const mismatchedArtifactError = yield* ClaimIncomingPullRequestDispatch(
+          {
             workflowStart,
             candidatePatchSet: candidate,
-          }).pipe(Effect.flip)
+          },
+        ).pipe(Effect.flip)
         assert.strictEqual(
           mismatchedArtifactError.message,
           'Incoming PR dispatch candidate artifact is missing or inconsistent',

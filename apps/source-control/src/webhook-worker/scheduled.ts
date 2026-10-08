@@ -1,4 +1,3 @@
-import { ConvexHttpClient } from 'convex/browser'
 import { Effect, Option } from 'effect'
 import {
   type Env,
@@ -10,19 +9,18 @@ import {
   validEnvelope,
 } from './boundary'
 import {
+  convexMutationCall,
   promiseCall,
   releaseProcessing,
   reportFailure,
 } from './processingSupport'
 
 export const handleScheduled = Effect.fnUntraced(function* (env: Env) {
-  const client = new ConvexHttpClient(env.CONVEX_URL)
-  const queued: unknown = yield* promiseCall(
+  const queued: unknown = yield* convexMutationCall(
+    env,
     'convex.claimStaleGitHubDeliveries',
-    () =>
-      client.mutation(claimStaleDeliveriesMutation, {
-        systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-      }),
+    claimStaleDeliveriesMutation,
+    { systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET },
   )
   if (!Array.isArray(queued) || queued.length > 32) {
     yield* reportFailure('github-webhook-worker.queue.send')
@@ -60,15 +58,16 @@ export const handleScheduled = Effect.fnUntraced(function* (env: Env) {
       )
       if (!validEnvelope(decoded)) {
         const processingToken = crypto.randomUUID()
-        const claim: unknown = yield* promiseCall(
+        const claim: unknown = yield* convexMutationCall(
+          env,
           'convex.claimDeliveryProcessing',
-          () =>
-            client.mutation(claimDeliveryProcessingMutation, {
-              systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-              deliveryId: receipt.deliveryId as string,
-              deliveryToken: receipt.deliveryToken as string,
-              processingToken,
-            }),
+          claimDeliveryProcessingMutation,
+          {
+            systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
+            deliveryId: receipt.deliveryId as string,
+            deliveryToken: receipt.deliveryToken as string,
+            processingToken,
+          },
         )
         if (claim === 'claimed') {
           const boundedOption =

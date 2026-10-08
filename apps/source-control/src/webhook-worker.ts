@@ -25,6 +25,7 @@ const handleQueue = Effect.fnUntraced(function* (
 function runObservedWorkerEffect<A, E>(
   name: string,
   effect: Effect.Effect<A, E>,
+  signal?: AbortSignal,
 ) {
   return Effect.runPromise(
     TelemetryService.pipe(
@@ -33,6 +34,7 @@ function runObservedWorkerEffect<A, E>(
       ),
       Effect.provide(CloudflareTelemetryPlugin.layer),
     ),
+    signal === undefined ? undefined : { signal },
   )
 }
 
@@ -41,6 +43,7 @@ const handler = {
     return runObservedWorkerEffect(
       'source-control.webhook.fetch',
       handleFetch(request, env),
+      request.signal,
     )
   },
   scheduled(_controller: unknown, env: Env) {

@@ -442,6 +442,7 @@ describe('RunIncomingVerificationPlan', () => {
           SourceControlService.of({
             verifyRepositoryAccess: dieUnused,
             getInstallationAccount: dieUnused,
+            verifyGitHubInstallationOwnership: dieUnused,
             listInstallationRepositories: dieUnused,
             createIssueComment: dieUnused,
             createCheckRun: dieUnused,

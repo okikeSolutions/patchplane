@@ -23,8 +23,11 @@ export function makeSentryDataCollection(): ResolvedDataCollection {
     cookies: false,
     httpHeaders: { request: false, response: false },
     httpBodies: [],
-    queryParams: false,
+    urlQueryParams: false,
+    graphQL: { document: false, variables: false },
     genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
     stackFrameVariables: false,
     frameContextLines: 0,
   }
@@ -331,6 +334,7 @@ export function makeSafeSpan(): SpanJSON {
     span_id: '0000000000000000',
     trace_id: '00000000000000000000000000000000',
     start_timestamp: 0,
+    status: 'unknown',
     description: 'patchplane.operation',
     data: {},
   }

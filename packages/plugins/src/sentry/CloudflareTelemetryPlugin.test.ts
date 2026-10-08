@@ -21,8 +21,13 @@ vi.mock('@sentry/cloudflare', async (importOriginal) => {
     captureException: sentryMocks.captureException,
     init: sentryMocks.init,
     startInactiveSpan: sentryMocks.startInactiveSpan,
-    withScope: (callback: (scope: unknown) => unknown) =>
-      callback({
+    withScope: (
+      scopeOrCallback: unknown,
+      callback?: (scope: unknown) => unknown,
+    ) =>
+      (typeof scopeOrCallback === 'function'
+        ? scopeOrCallback
+        : callback)?.({
         addBreadcrumb: () => undefined,
         setContext: (_name: string, context: unknown) =>
           sentryMocks.contexts.push(context),

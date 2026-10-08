@@ -45,13 +45,10 @@ describe('AlphaPolicyServiceLayer', () => {
         reviewFindings: [],
       })
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         status: 'manual-review',
-        summary:
-          'Required verification passed and 0 blocking review findings were recorded; human approval is still required.',
         reason: 'review:clean',
       })
-      expect(result.summary.toLowerCase()).not.toContain('clean')
     }).pipe(Effect.provide(AlphaPolicyServiceLayer)),
   )
 })

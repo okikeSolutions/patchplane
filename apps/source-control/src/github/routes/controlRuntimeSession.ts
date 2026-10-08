@@ -1,31 +1,21 @@
-import { Cause, Effect, Exit, Schema } from 'effect'
+import { Effect, Exit, Schema } from 'effect'
 import { ControlRuntimeSession } from '@patchplane/core/workflows/control-runtime-session'
 import { withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
-import { publicErrorMessage } from '@patchplane/domain/errors'
 import {
-  type SourceControlRuntime,
-  SourceControlWorkerRequestError,
   runtimeControlRequestSchema,
   jsonResponse,
-  randomTraceId,
+  randomTraceIdEffect,
+  readBoundedJson,
 } from './support'
 
-export async function controlRuntimeSession(
+export const controlRuntimeSession = Effect.fnUntraced(function* (
   request: Request,
-  runtime: SourceControlRuntime,
 ) {
-  const traceId = await randomTraceId(runtime)
+  const traceId = yield* randomTraceIdEffect()
 
-  const inputExit = await runtime.runPromiseExit(
-    Effect.tryPromise({
-      try: () => request.json(),
-      catch: (cause) =>
-        new SourceControlWorkerRequestError({
-          message: `Invalid JSON body: ${String(cause)}`,
-        }),
-    }).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(runtimeControlRequestSchema)),
-    ),
+  const inputExit = yield* readBoundedJson(request).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(runtimeControlRequestSchema)),
+    Effect.exit,
   )
 
   if (Exit.isFailure(inputExit)) {
@@ -36,13 +26,13 @@ export async function controlRuntimeSession(
   }
 
   const input = inputExit.value
-  const controlExit = await runtime.runPromiseExit(
-    ControlRuntimeSession({
-      workflowRunId: input.workflowRunId,
-      operation: input.operation,
-      ...(input.message === undefined ? {} : { message: input.message }),
-      traceId,
-    }).pipe((effect) =>
+  const controlExit = yield* ControlRuntimeSession({
+    workflowRunId: input.workflowRunId,
+    operation: input.operation,
+    ...(input.message === undefined ? {} : { message: input.message }),
+    traceId,
+  }).pipe(
+    (effect) =>
       withTelemetrySpan(
         {
           traceId,
@@ -52,25 +42,20 @@ export async function controlRuntimeSession(
         },
         effect,
       ),
-    ),
+    Effect.exit,
   )
 
   if (Exit.isFailure(controlExit)) {
-    const error = publicErrorMessage(
-      Cause.squash(controlExit.cause),
-      'Runtime control failed',
+    yield* Effect.logError('Runtime control failed', {
+      traceId,
+      workflowRunId: input.workflowRunId,
+      operation: input.operation,
+    })
+    return jsonResponse(
+      { ok: false, traceId, error: 'Runtime control failed' },
+      { status: 500 },
     )
-    await runtime.runPromise(
-      Effect.logError('Runtime control failed', {
-        traceId,
-        workflowRunId: input.workflowRunId,
-        operation: input.operation,
-        cause: Cause.pretty(controlExit.cause),
-        error,
-      }),
-    )
-    return jsonResponse({ ok: false, traceId, error }, { status: 500 })
   }
 
   return jsonResponse({ ok: true, traceId, status: controlExit.value.status })
-}
+})

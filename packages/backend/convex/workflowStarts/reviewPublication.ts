@@ -990,6 +990,40 @@ const recordProvenanceEvent = mutation({
   },
 })
 
+function humanDecisionFromDocument(decision: Doc<'humanDecisions'>) {
+  return {
+    id: decision._id,
+    workflowRunId: decision.workflowRunId,
+    ...(decision.sandboxExecutionId === undefined
+      ? {}
+      : { sandboxExecutionId: decision.sandboxExecutionId }),
+    ...(decision.candidatePatchSetId === undefined
+      ? {}
+      : { candidatePatchSetId: decision.candidatePatchSetId }),
+    ...(decision.reviewRunId === undefined
+      ? {}
+      : { reviewRunId: decision.reviewRunId }),
+    ...(decision.policyDecisionId === undefined
+      ? {}
+      : { policyDecisionId: decision.policyDecisionId }),
+    actorId: decision.actorId,
+    status: decision.status,
+    comment: decision.comment,
+    ...(decision.verificationOverride === undefined
+      ? {}
+      : { verificationOverride: decision.verificationOverride }),
+    ...(decision.verificationOverrideReason === undefined
+      ? {}
+      : {
+          verificationOverrideReason: decision.verificationOverrideReason,
+        }),
+    decidedAt: decision.decidedAt,
+    ...(decision.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: decision.idempotencyKey }),
+  }
+}
+
 const recordHumanDecision = mutation({
   args: {
     workflowRunId: v.id('workflowRuns'),
@@ -1029,6 +1063,13 @@ const recordHumanDecision = mutation({
       args.status === 'approved' ? 'decision:approve' : 'decision:reject',
     )
 
+    if (
+      workflowRun.modelVersion === 'v1' &&
+      args.idempotencyKey === undefined
+    ) {
+      throw new ConvexError('Human decision idempotency key required')
+    }
+
     let existingDecision: Doc<'humanDecisions'> | null = null
     if (args.idempotencyKey !== undefined) {
       existingDecision = await ctx.db
@@ -1052,6 +1093,22 @@ const recordHumanDecision = mutation({
             verificationOverrideReason)
       ) {
         throw new ConvexError('Human decision idempotency key conflict')
+      }
+    }
+
+    if (existingDecision !== null) {
+      return humanDecisionFromDocument(existingDecision)
+    }
+
+    if (existingDecision === null) {
+      const priorDecision = await ctx.db
+        .query('humanDecisions')
+        .withIndex('by_workflow_run', (q) =>
+          q.eq('workflowRunId', args.workflowRunId),
+        )
+        .first()
+      if (priorDecision !== null) {
+        throw new ConvexError('Human decision already recorded for workflow')
       }
     }
 
@@ -1225,10 +1282,37 @@ const recordHumanDecision = mutation({
         'Approval requires successful execution, a captured candidate, completed review, and non-blocking policy',
       )
     }
-    if (candidatePatchSet.createdAt < sandboxExecution.completedAt) {
-      throw new ConvexError(
-        'Candidate patch set predates latest sandbox execution',
-      )
+    const incomingCandidate =
+      workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+    if (incomingCandidate) {
+      if (
+        workflowRun.sourceBaseSha === undefined ||
+        workflowRun.sourceCommitSha === undefined ||
+        candidatePatchSet.subject?.kind !== 'incoming-pull-request' ||
+        candidatePatchSet.baseSha !== workflowRun.sourceBaseSha ||
+        candidatePatchSet.headSha !== workflowRun.sourceCommitSha ||
+        candidatePatchSet.subject.baseSha !== workflowRun.sourceBaseSha ||
+        candidatePatchSet.subject.headSha !== workflowRun.sourceCommitSha
+      ) {
+        throw new ConvexError(
+          'Incoming candidate does not match the workflow base and head revisions',
+        )
+      }
+    } else {
+      if (
+        workflowRun.modelVersion === 'v1' &&
+        (workflowRun.sourceCommitSha === undefined ||
+          candidatePatchSet.baseSha !== workflowRun.sourceCommitSha)
+      ) {
+        throw new ConvexError(
+          'Generated candidate does not match the workflow source revision',
+        )
+      }
+      if (candidatePatchSet.createdAt < sandboxExecution.completedAt) {
+        throw new ConvexError(
+          'Candidate patch set predates latest sandbox execution',
+        )
+      }
     }
     if (
       reviewRun.sandboxExecutionId !== sandboxExecution._id ||
@@ -1290,41 +1374,6 @@ const recordHumanDecision = mutation({
       throw new ConvexError(
         'Approval with incomplete verification requires an explicit override reason',
       )
-    }
-
-    if (existingDecision !== null) {
-      return {
-        id: existingDecision._id,
-        workflowRunId: existingDecision.workflowRunId,
-        ...(existingDecision.sandboxExecutionId === undefined
-          ? {}
-          : { sandboxExecutionId: existingDecision.sandboxExecutionId }),
-        ...(existingDecision.candidatePatchSetId === undefined
-          ? {}
-          : { candidatePatchSetId: existingDecision.candidatePatchSetId }),
-        ...(existingDecision.reviewRunId === undefined
-          ? {}
-          : { reviewRunId: existingDecision.reviewRunId }),
-        ...(existingDecision.policyDecisionId === undefined
-          ? {}
-          : { policyDecisionId: existingDecision.policyDecisionId }),
-        actorId: existingDecision.actorId,
-        status: existingDecision.status,
-        comment: existingDecision.comment,
-        ...(existingDecision.verificationOverride === undefined
-          ? {}
-          : { verificationOverride: existingDecision.verificationOverride }),
-        ...(existingDecision.verificationOverrideReason === undefined
-          ? {}
-          : {
-              verificationOverrideReason:
-                existingDecision.verificationOverrideReason,
-            }),
-        decidedAt: existingDecision.decidedAt,
-        ...(existingDecision.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: existingDecision.idempotencyKey }),
-      }
     }
 
     const decision = {

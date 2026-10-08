@@ -4,7 +4,7 @@ Publishable PatchPlane CLI for interactive OSS onboarding, project config genera
 
 Status: alpha/experimental. The CLI is safe to use for local setup and diagnostics, but command contracts may still evolve before a stable release.
 
-The CLI is built with `effect/unstable/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and PatchPlane-owned Effect services. It is interactive when both stdin and stdout are TTYs, and fully scriptable for CI, automation, and coding agents.
+The CLI is built with `effect/cli`, Effect `Terminal` prompts, `@effect/platform-node`, and PatchPlane-owned Effect services. It is interactive when both stdin and stdout are TTYs, and fully scriptable for CI, automation, and coding agents.
 
 ## Commands
 

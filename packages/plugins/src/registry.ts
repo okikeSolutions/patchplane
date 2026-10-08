@@ -125,6 +125,24 @@ export const patchPlanePlugins = {
         description: 'GitHub App id.',
       },
       {
+        name: 'GITHUB_CLIENT_ID',
+        required: true,
+        description: 'GitHub App OAuth client id.',
+      },
+      {
+        name: 'GITHUB_CLIENT_SECRET',
+        required: true,
+        secret: true,
+        description:
+          'GitHub App OAuth client secret used only for server-side user-token exchange and revocation.',
+      },
+      {
+        name: 'PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL',
+        required: true,
+        description:
+          'Public GitHub App user-authorization callback URL. Must match the configured callback.',
+      },
+      {
         name: 'GITHUB_PRIVATE_KEY',
         required: true,
         secret: true,
@@ -431,13 +449,6 @@ export const patchPlanePlugins = {
         defaultValue: 'true',
         description:
           'Whether Effect spans are registered with the Sentry Effect tracer.',
-      },
-      {
-        name: 'SENTRY_ENABLE_METRICS',
-        required: false,
-        defaultValue: 'false in development, true in production',
-        description:
-          'Whether explicitly allowlisted Sentry metrics are enabled. Routine Effect metrics remain local.',
       },
       {
         name: 'SENTRY_TRACES_SAMPLE_RATE',

@@ -11,11 +11,13 @@ import {
   Config,
   Crypto,
   Effect,
-  Encoding,
   Layer,
+  Match,
   Option,
   Redacted,
+  Stream,
 } from 'effect'
+import * as Hex from 'effect/encoding/Hex'
 import {
   R2ArtifactsConfig,
   type R2ArtifactsConfig as R2ArtifactsConfigType,
@@ -52,61 +54,83 @@ export interface R2BucketLike {
 
 const storageProvider = 'cloudflare-r2' as const
 
-async function normalizeBody(
+function normalizeBody(
   body: ArtifactBody,
   maxBytes: number,
-): Promise<Uint8Array> {
+): Effect.Effect<Uint8Array, ArtifactsError> {
   if (typeof body === 'string') {
     const bytes = new TextEncoder().encode(body)
-    assertMaxBytes(bytes.byteLength, maxBytes)
-    return bytes
+    return ensureMaxBytes(bytes, maxBytes)
   }
 
   if (body instanceof Uint8Array) {
-    assertMaxBytes(body.byteLength, maxBytes)
-    return body
+    return ensureMaxBytes(body, maxBytes)
   }
 
-  const parts: Array<Uint8Array> = []
-  let size = 0
-  for await (const part of body) {
-    size += part.byteLength
-    assertMaxBytes(size, maxBytes)
-    parts.push(part)
-  }
-
-  const bytes = new Uint8Array(size)
-  let offset = 0
-  for (const part of parts) {
-    bytes.set(part, offset)
-    offset += part.byteLength
-  }
-  return bytes
+  return Stream.fromAsyncIterable(
+    body,
+    (cause) =>
+      new ArtifactsError({
+        operation: 'r2.putArtifact.normalize',
+        message: 'Failed to read artifact body stream',
+        cause,
+      }),
+  ).pipe(
+    Stream.runFoldEffect(
+      () => ({ parts: [] as Array<Uint8Array>, size: 0 }),
+      (accumulator, part) => {
+        const size = accumulator.size + part.byteLength
+        return size > maxBytes
+          ? Effect.fail(
+              new ArtifactsError({
+                operation: 'r2.putArtifact.normalize',
+                message: `Artifact exceeds maximum size of ${maxBytes} bytes`,
+                cause: undefined,
+              }),
+            )
+          : Effect.sync(() => {
+              accumulator.parts.push(part)
+              return { parts: accumulator.parts, size }
+            })
+      },
+    ),
+    Effect.map(({ parts, size }) => {
+      const bytes = new Uint8Array(size)
+      let offset = 0
+      for (const part of parts) {
+        bytes.set(part, offset)
+        offset += part.byteLength
+      }
+      return bytes
+    }),
+  )
 }
 
-function assertMaxBytes(size: number, maxBytes: number) {
-  if (size > maxBytes) {
-    throw new Error(`artifact exceeds maximum size of ${maxBytes} bytes`)
-  }
+function ensureMaxBytes(
+  bytes: Uint8Array,
+  maxBytes: number,
+): Effect.Effect<Uint8Array, ArtifactsError> {
+  return bytes.byteLength > maxBytes
+    ? Effect.fail(
+        new ArtifactsError({
+          operation: 'r2.putArtifact.normalize',
+          message: `Artifact exceeds maximum size of ${maxBytes} bytes`,
+          cause: undefined,
+        }),
+      )
+    : Effect.succeed(bytes)
 }
 
 function extensionForContentType(contentType: string) {
-  switch (contentType) {
-    case 'text/plain':
-      return 'txt'
-    case 'text/x-patch':
-      return 'patch'
-    case 'application/json':
-      return 'json'
-    case 'image/png':
-      return 'png'
-    case 'image/jpeg':
-      return 'jpg'
-    case 'video/webm':
-      return 'webm'
-    default:
-      return 'bin'
-  }
+  return Match.value(contentType).pipe(
+    Match.when('text/plain', () => 'txt'),
+    Match.when('text/x-patch', () => 'patch'),
+    Match.when('application/json', () => 'json'),
+    Match.when('image/png', () => 'png'),
+    Match.when('image/jpeg', () => 'jpg'),
+    Match.when('video/webm', () => 'webm'),
+    Match.orElse(() => 'bin'),
+  )
 }
 
 function sanitizePathSegment(value: string) {
@@ -149,7 +173,7 @@ function providerSha256(object: R2ObjectLike) {
   const value = object.checksums?.sha256
   if (value === undefined) return undefined
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
-  return bytes.byteLength === 32 ? Encoding.encodeHex(bytes) : undefined
+  return bytes.byteLength === 32 ? Hex.encode(bytes) : undefined
 }
 
 function metadataFromObject(object: R2ObjectLike) {
@@ -285,7 +309,7 @@ export function makeR2ArtifactsService(
   crypto: Crypto.Crypto,
 ) {
   return ArtifactsService.of({
-    putArtifact: (input) =>
+    putArtifact: Effect.fn('R2ArtifactsPlugin.putArtifact')((input) =>
       Effect.gen(function* () {
         const objectId =
           input.idempotencyKey === undefined
@@ -299,7 +323,7 @@ export function makeR2ArtifactsService(
                     }),
                 ),
               )
-            : `idempotent-${Encoding.encodeHex(
+            : `idempotent-${Hex.encode(
                 yield* crypto
                   .digest(
                     'SHA-256',
@@ -316,15 +340,7 @@ export function makeR2ArtifactsService(
                     ),
                   ),
               )}`
-        const bytes = yield* Effect.tryPromise({
-          try: () => normalizeBody(input.body, config.maxArtifactBytes),
-          catch: (cause) =>
-            new ArtifactsError({
-              operation: 'r2.putArtifact.normalize',
-              message: 'Failed to normalize artifact body',
-              cause,
-            }),
-        })
+        const bytes = yield* normalizeBody(input.body, config.maxArtifactBytes)
         const digest = yield* crypto.digest('SHA-256', bytes).pipe(
           Effect.mapError(
             (cause) =>
@@ -335,7 +351,7 @@ export function makeR2ArtifactsService(
               }),
           ),
         )
-        const sha256 = Encoding.encodeHex(digest)
+        const sha256 = Hex.encode(digest)
         const key = storageKey({
           workflowRunId: input.workflowRunId,
           kind: input.kind,
@@ -413,40 +429,45 @@ export function makeR2ArtifactsService(
         }
         return { ...metadata, createdByRequest }
       }),
+    ),
 
-    getArtifactMetadata: (input) =>
-      Effect.gen(function* () {
-        const object = yield* Effect.tryPromise({
-          try: () => bucket.head(input.storageKey),
-          catch: (cause) =>
-            new ArtifactsError({
-              operation: 'r2.getArtifactMetadata',
-              message: 'Failed to read artifact metadata from R2',
-              cause,
-            }),
-        })
-        if (object === null) {
-          return yield* new ArtifactsError({
-            operation: 'r2.getArtifactMetadata.notFound',
-            message: 'Artifact object not found in R2',
-            cause: undefined,
+    getArtifactMetadata: Effect.fn('R2ArtifactsPlugin.getArtifactMetadata')(
+      (input) =>
+        Effect.gen(function* () {
+          const object = yield* Effect.tryPromise({
+            try: () => bucket.head(input.storageKey),
+            catch: (cause) =>
+              new ArtifactsError({
+                operation: 'r2.getArtifactMetadata',
+                message: 'Failed to read artifact metadata from R2',
+                cause,
+              }),
           })
-        }
-        const metadata = metadataFromObject(object)
-        if (metadata === undefined) {
-          return yield* new ArtifactsError({
-            operation: 'r2.getArtifactMetadata.sha256',
-            message:
-              'Artifact object is missing a matching provider SHA-256 checksum',
-            cause: undefined,
-          })
-        }
-        return metadata
-      }),
+          if (object === null) {
+            return yield* new ArtifactsError({
+              operation: 'r2.getArtifactMetadata.notFound',
+              message: 'Artifact object not found in R2',
+              cause: undefined,
+            })
+          }
+          const metadata = metadataFromObject(object)
+          if (metadata === undefined) {
+            return yield* new ArtifactsError({
+              operation: 'r2.getArtifactMetadata.sha256',
+              message:
+                'Artifact object is missing a matching provider SHA-256 checksum',
+              cause: undefined,
+            })
+          }
+          return metadata
+        }),
+    ),
 
-    createSignedReadUrl: (input) => createR2SignedReadUrl(config, input),
+    createSignedReadUrl: Effect.fn('R2ArtifactsPlugin.createSignedReadUrl')(
+      (input) => createR2SignedReadUrl(config, input),
+    ),
 
-    deleteArtifact: (input) =>
+    deleteArtifact: Effect.fn('R2ArtifactsPlugin.deleteArtifact')((input) =>
       Effect.tryPromise({
         try: () => bucket.delete(input.storageKey),
         catch: (cause) =>
@@ -456,45 +477,48 @@ export function makeR2ArtifactsService(
             cause,
           }),
       }),
+    ),
 
-    applyRetentionPolicy: (input) =>
-      Effect.gen(function* () {
-        yield* Effect.logDebug(
-          'R2 artifact retention policy is enforced by bucket lifecycle rules',
-          {
-            storageKey: input.storageKey,
-            retentionPolicy: input.retentionPolicy,
-            pluginName: 'cloudflare-r2-artifacts',
-            operation: 'r2.applyRetentionPolicy',
-          },
-        )
-        const object = yield* Effect.tryPromise({
-          try: () => bucket.head(input.storageKey),
-          catch: (cause) =>
-            new ArtifactsError({
-              operation: 'r2.applyRetentionPolicy.head',
-              message: 'Failed to read artifact metadata from R2',
-              cause,
-            }),
-        })
-        if (object === null) {
-          return yield* new ArtifactsError({
-            operation: 'r2.applyRetentionPolicy.notFound',
-            message: 'Artifact object not found in R2',
-            cause: undefined,
+    applyRetentionPolicy: Effect.fn('R2ArtifactsPlugin.applyRetentionPolicy')(
+      (input) =>
+        Effect.gen(function* () {
+          yield* Effect.logDebug(
+            'R2 artifact retention policy is enforced by bucket lifecycle rules',
+            {
+              storageKey: input.storageKey,
+              retentionPolicy: input.retentionPolicy,
+              pluginName: 'cloudflare-r2-artifacts',
+              operation: 'r2.applyRetentionPolicy',
+            },
+          )
+          const object = yield* Effect.tryPromise({
+            try: () => bucket.head(input.storageKey),
+            catch: (cause) =>
+              new ArtifactsError({
+                operation: 'r2.applyRetentionPolicy.head',
+                message: 'Failed to read artifact metadata from R2',
+                cause,
+              }),
           })
-        }
-        const metadata = metadataFromObject(object)
-        if (metadata === undefined) {
-          return yield* new ArtifactsError({
-            operation: 'r2.applyRetentionPolicy.sha256',
-            message:
-              'Artifact object is missing a matching provider SHA-256 checksum',
-            cause: undefined,
-          })
-        }
-        return metadata
-      }),
+          if (object === null) {
+            return yield* new ArtifactsError({
+              operation: 'r2.applyRetentionPolicy.notFound',
+              message: 'Artifact object not found in R2',
+              cause: undefined,
+            })
+          }
+          const metadata = metadataFromObject(object)
+          if (metadata === undefined) {
+            return yield* new ArtifactsError({
+              operation: 'r2.applyRetentionPolicy.sha256',
+              message:
+                'Artifact object is missing a matching provider SHA-256 checksum',
+              cause: undefined,
+            })
+          }
+          return metadata
+        }),
+    ),
   })
 }
 

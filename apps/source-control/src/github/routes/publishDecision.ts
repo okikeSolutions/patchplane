@@ -1,13 +1,12 @@
-import { ConvexHttpClient } from 'convex/browser'
-import { Cause, Effect, Exit, Schema } from 'effect'
+import { convexQuery } from '@patchplane/plugins/convex/http-client'
+import { Effect, Exit, Schema } from 'effect'
 import { loadSourceControlRouteConfig, type WorkerEnv } from '../config'
 import { AssemblePatchReportV1 } from '@patchplane/core/patch-report/assemble-patch-report-v1'
 import { PublishDecisionToSource } from '@patchplane/core/workflows/publish-decision-to-source'
 import { withTelemetrySpan } from '@patchplane/core/services/telemetry-service'
-import { publicErrorMessage } from '@patchplane/domain/errors'
+import { HumanDecisionId, WorkflowRunId } from '@patchplane/domain/ids'
 import { withCapturedCriticalPathScope } from '../../critical-path-telemetry'
 import {
-  type SourceControlRuntime,
   SourceControlWorkerRequestError,
   publishDecisionRequestSchema,
   decisionPublicationFixtureSchema,
@@ -16,25 +15,63 @@ import {
   nestedString,
   configuredConvexUrl,
   systemIngestionSecret,
-  randomTraceId,
+  randomTraceIdEffect,
+  readBoundedJson,
 } from './support'
 
-export async function publishDecision(
+const convexOperationTimeoutMilliseconds = 15_000
+
+function decodePublicationIdentity(input: {
+  readonly workflowRunId?: string | undefined
+  readonly humanDecisionId?: string | undefined
+  readonly workflowStart?: unknown
+  readonly humanDecision?: unknown
+}) {
+  return Effect.all({
+    workflowRunId: Schema.decodeUnknownEffect(WorkflowRunId)(
+      input.workflowRunId ??
+        nestedString(input.workflowStart, 'workflowRun', 'id'),
+    ),
+    humanDecisionId: Schema.decodeUnknownEffect(HumanDecisionId)(
+      input.humanDecisionId ?? nestedString(input.humanDecision, 'id'),
+    ),
+  })
+}
+
+function publicPublications(
+  publications: ReadonlyArray<{
+    readonly kind: string
+    readonly status: string
+    readonly externalId?: string | undefined
+    readonly url?: string | undefined
+    readonly summary?: string | undefined
+    readonly idempotencyKey?: string | undefined
+  }>,
+) {
+  return publications.map((publication) => ({
+    kind: publication.kind,
+    status: publication.status,
+    ...(publication.externalId === undefined
+      ? {}
+      : { externalId: publication.externalId }),
+    ...(publication.url === undefined ? {} : { url: publication.url }),
+    ...(publication.summary === undefined
+      ? {}
+      : { summary: publication.summary }),
+    ...(publication.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: publication.idempotencyKey }),
+  }))
+}
+
+export const publishDecision = Effect.fnUntraced(function* (
   request: Request,
   env: WorkerEnv,
-  runtime: SourceControlRuntime,
 ) {
-  const traceId = await randomTraceId(runtime)
-  const inputExit = await runtime.runPromiseExit(
-    Effect.tryPromise({
-      try: () => request.json(),
-      catch: (cause) =>
-        new SourceControlWorkerRequestError({
-          message: `Invalid JSON body: ${String(cause)}`,
-        }),
-    }).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(publishDecisionRequestSchema)),
-    ),
+  const traceId = yield* randomTraceIdEffect()
+  const inputExit = yield* readBoundedJson(request).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(publishDecisionRequestSchema)),
+    Effect.exit,
   )
 
   if (Exit.isFailure(inputExit)) {
@@ -45,20 +82,17 @@ export async function publishDecision(
   }
 
   const input = inputExit.value
-  const workflowRunId =
-    input.workflowRunId ??
-    nestedString(input.workflowStart, 'workflowRun', 'id')
-  const humanDecisionId =
-    input.humanDecisionId ?? nestedString(input.humanDecision, 'id')
-  if (workflowRunId === undefined || humanDecisionId === undefined) {
+  const identityExit = yield* decodePublicationIdentity(input).pipe(Effect.exit)
+  if (Exit.isFailure(identityExit)) {
     return jsonResponse(
       { ok: false, traceId, error: 'Workflow and human decision IDs required' },
       { status: 400 },
     )
   }
+  const { humanDecisionId, workflowRunId } = identityExit.value
 
-  const routeConfigExit = await runtime.runPromiseExit(
-    loadSourceControlRouteConfig(env),
+  const routeConfigExit = yield* loadSourceControlRouteConfig(env).pipe(
+    Effect.exit,
   )
   if (Exit.isFailure(routeConfigExit)) {
     return jsonResponse(
@@ -74,22 +108,37 @@ export async function publishDecision(
       { status: 503 },
     )
   }
-  const fixtureExit = await runtime.runPromiseExit(
-    Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(configuredConvexUrl(routeConfig)).query(
-          getDecisionPublicationFixtureQuery,
-          { systemSecret: secret, workflowRunId, humanDecisionId },
-        ),
-      catch: (cause) =>
-        new SourceControlWorkerRequestError({
-          message: `Unable to load decision publication evidence: ${String(cause)}`,
-        }),
-    }).pipe(
-      Effect.flatMap(
-        Schema.decodeUnknownEffect(decisionPublicationFixtureSchema),
-      ),
+
+  const fixtureExit = yield* convexQuery({
+    url: configuredConvexUrl(routeConfig),
+    reference: getDecisionPublicationFixtureQuery,
+    args: { systemSecret: secret, workflowRunId, humanDecisionId },
+    catch: (cause) =>
+      new SourceControlWorkerRequestError({
+        message: 'Unable to load decision publication evidence',
+        cause,
+      }),
+  }).pipe(
+    Effect.flatMap(
+      Schema.decodeUnknownEffect(decisionPublicationFixtureSchema),
     ),
+    Effect.mapError(
+      (cause) =>
+        new SourceControlWorkerRequestError({
+          message: 'Invalid authoritative decision publication evidence',
+          cause,
+        }),
+    ),
+    Effect.timeoutOrElse({
+      duration: convexOperationTimeoutMilliseconds,
+      orElse: () =>
+        Effect.fail(
+          new SourceControlWorkerRequestError({
+            message: 'Decision publication evidence lookup timed out',
+          }),
+        ),
+    }),
+    Effect.exit,
   )
   if (Exit.isFailure(fixtureExit)) {
     return jsonResponse(
@@ -101,36 +150,35 @@ export async function publishDecision(
       { status: 409 },
     )
   }
+
   const fixture = fixtureExit.value
   const patchReportExit =
     fixture.workflowStart.workflowRun.modelVersion === 'v1'
-      ? await runtime.runPromiseExit(
-          AssemblePatchReportV1({
-            workflowStart: fixture.workflowStart,
-            sandboxExecutions:
-              fixture.sandboxExecution === undefined
-                ? []
-                : [fixture.sandboxExecution],
-            candidatePatchSets:
-              fixture.candidatePatchSet === undefined
-                ? []
-                : [fixture.candidatePatchSet],
-            verificationRequirements: fixture.verificationRequirements,
-            verificationResults: fixture.verificationResults,
-            reviewRuns:
-              fixture.reviewRun === undefined ? [] : [fixture.reviewRun],
-            reviewFindings: fixture.reviewFindings,
-            policyDecisions:
-              fixture.policyDecision === undefined
-                ? []
-                : [fixture.policyDecision],
-            humanDecisions: [fixture.humanDecision],
-            evidenceArtifacts: fixture.evidenceArtifacts,
-            publicationResults: fixture.publicationResults,
-            trustDataTruncated: fixture.trustDataTruncated,
-            evidenceTruncated: fixture.evidenceTruncated,
-          }),
-        )
+      ? yield* AssemblePatchReportV1({
+          workflowStart: fixture.workflowStart,
+          sandboxExecutions:
+            fixture.sandboxExecution === undefined
+              ? []
+              : [fixture.sandboxExecution],
+          candidatePatchSets:
+            fixture.candidatePatchSet === undefined
+              ? []
+              : [fixture.candidatePatchSet],
+          verificationRequirements: fixture.verificationRequirements,
+          verificationResults: fixture.verificationResults,
+          reviewRuns:
+            fixture.reviewRun === undefined ? [] : [fixture.reviewRun],
+          reviewFindings: fixture.reviewFindings,
+          policyDecisions:
+            fixture.policyDecision === undefined
+              ? []
+              : [fixture.policyDecision],
+          humanDecisions: [fixture.humanDecision],
+          evidenceArtifacts: fixture.evidenceArtifacts,
+          publicationResults: fixture.publicationResults,
+          trustDataTruncated: fixture.trustDataTruncated,
+          evidenceTruncated: fixture.evidenceTruncated,
+        }).pipe(Effect.exit)
       : undefined
   if (patchReportExit !== undefined && Exit.isFailure(patchReportExit)) {
     return jsonResponse(
@@ -142,77 +190,71 @@ export async function publishDecision(
     patchReportExit !== undefined && Exit.isSuccess(patchReportExit)
       ? patchReportExit.value
       : undefined
-  const publicationExit = await runtime.runPromiseExit(
-    PublishDecisionToSource({
-      traceId: input.traceId,
-      workflowStart: fixture.workflowStart,
-      humanDecision: fixture.humanDecision,
-      ...(fixture.sandboxExecution === undefined
-        ? {}
-        : { sandboxExecution: fixture.sandboxExecution }),
-      ...(fixture.candidatePatchSet === undefined
-        ? {}
-        : { candidatePatchSet: fixture.candidatePatchSet }),
-      ...(patchReport === undefined ? {} : { patchReport }),
-      verification: fixture.verification,
-      publicationResults: fixture.publicationResults,
-    }).pipe(
-      (effect) =>
-        withTelemetrySpan(
-          {
-            traceId: input.traceId,
-            workflowRunId,
-            operation: 'githubWorker.publishDecision',
-            name: 'githubWorker.publishDecision',
-          },
-          effect,
-        ),
-      (effect) =>
-        withCapturedCriticalPathScope(
-          {
-            traceId: input.traceId,
-            workflowRunId,
-            operation: 'githubWorker.publishDecision',
-            message: 'Decision publication failed',
-          },
-          effect,
-        ),
-    ),
+
+  const publicationExit = yield* PublishDecisionToSource({
+    traceId: input.traceId,
+    workflowStart: fixture.workflowStart,
+    humanDecision: fixture.humanDecision,
+    ...(fixture.sandboxExecution === undefined
+      ? {}
+      : { sandboxExecution: fixture.sandboxExecution }),
+    ...(fixture.candidatePatchSet === undefined
+      ? {}
+      : { candidatePatchSet: fixture.candidatePatchSet }),
+    ...(patchReport === undefined ? {} : { patchReport }),
+    verification: fixture.verification,
+    publicationResults: fixture.publicationResults,
+  }).pipe(
+    (effect) =>
+      withTelemetrySpan(
+        {
+          traceId: input.traceId,
+          workflowRunId,
+          operation: 'githubWorker.publishDecision',
+          name: 'githubWorker.publishDecision',
+        },
+        effect,
+      ),
+    (effect) =>
+      withCapturedCriticalPathScope(
+        {
+          traceId: input.traceId,
+          workflowRunId,
+          operation: 'githubWorker.publishDecision',
+          message: 'Decision publication failed',
+        },
+        effect,
+      ),
+    Effect.exit,
   )
 
   if (Exit.isFailure(publicationExit)) {
-    const error = publicErrorMessage(
-      Cause.squash(publicationExit.cause),
-      'Decision publication failed',
-    )
-    await runtime.runPromise(
-      Effect.logError('Decision publication failed', {
-        traceId: input.traceId,
-        cause: Cause.pretty(publicationExit.cause),
-        error,
-      }),
-    )
-    return jsonResponse(
-      { ok: false, traceId: input.traceId, error },
-      { status: 500 },
-    )
-  }
-
-  const failed = publicationExit.value.publications.filter(
-    (publication) => publication.status === 'failed',
-  )
-  if (failed.length > 0) {
+    yield* Effect.logError('Decision publication failed', {
+      traceId: input.traceId,
+      workflowRunId,
+    })
     return jsonResponse(
       {
         ok: false,
         traceId: input.traceId,
-        publications: publicationExit.value.publications,
-        error: failed
-          .map(
-            (publication) =>
-              publication.error ?? publication.summary ?? publication.kind,
-          )
-          .join('; '),
+        error: 'Decision publication failed',
+      },
+      { status: 500 },
+    )
+  }
+
+  const publications = publicPublications(publicationExit.value.publications)
+  if (
+    publicationExit.value.publications.some(
+      (publication) => publication.status !== 'published',
+    )
+  ) {
+    return jsonResponse(
+      {
+        ok: false,
+        traceId: input.traceId,
+        publications,
+        error: 'Decision publication failed',
       },
       { status: 500 },
     )
@@ -221,6 +263,6 @@ export async function publishDecision(
   return jsonResponse({
     ok: true,
     traceId: input.traceId,
-    publications: publicationExit.value.publications,
+    publications,
   })
-}
+})

@@ -1,17 +1,43 @@
 import { Stream, type Effect } from 'effect'
-import type { RpcClientError } from 'effect/unstable/rpc/RpcClientError'
+import type { RpcClientError } from 'effect/rpc/RpcClientError'
 import { makePiRpcCommandSender } from './transport'
-import { decodePiRpcRuntimeEvents, type PiRpcRuntimeEvent } from './ingestion'
+import {
+  decodePiRpcRuntimeEvents,
+  type PiRpcIngestionError,
+  type PiRpcRuntimeEvent,
+} from './ingestion'
+import type { PiJsonlLimitError } from './jsonl'
 
-export interface PiRuntimeSession<EventError = never, CommandError = never, R = never> {
+export interface PiRuntimeSession<
+  EventError = never,
+  CommandError = never,
+  R = never,
+> {
   readonly sourceSessionId: string
   readonly sourceCommandId: string
-  readonly events: Stream.Stream<PiRpcRuntimeEvent, EventError, R>
-  readonly getState: (input?: { readonly id?: string | undefined }) => Effect.Effect<void, CommandError>
-  readonly prompt: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, CommandError>
-  readonly steer: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, CommandError>
-  readonly followUp: (input: { readonly id?: string | undefined; readonly message: string }) => Effect.Effect<void, CommandError>
-  readonly abort: (input?: { readonly id?: string | undefined }) => Effect.Effect<void, CommandError>
+  readonly events: Stream.Stream<
+    PiRpcRuntimeEvent,
+    EventError | PiJsonlLimitError | PiRpcIngestionError,
+    R
+  >
+  readonly getState: (input?: {
+    readonly id?: string | undefined
+  }) => Effect.Effect<void, CommandError>
+  readonly prompt: (input: {
+    readonly id?: string | undefined
+    readonly message: string
+  }) => Effect.Effect<void, CommandError>
+  readonly steer: (input: {
+    readonly id?: string | undefined
+    readonly message: string
+  }) => Effect.Effect<void, CommandError>
+  readonly followUp: (input: {
+    readonly id?: string | undefined
+    readonly message: string
+  }) => Effect.Effect<void, CommandError>
+  readonly abort: (input?: {
+    readonly id?: string | undefined
+  }) => Effect.Effect<void, CommandError>
 }
 
 export function makePiRuntimeSession<EventError, CommandError, R>(input: {
@@ -25,12 +51,14 @@ export function makePiRuntimeSession<EventError, CommandError, R>(input: {
   return {
     sourceSessionId: input.sessionId,
     sourceCommandId: input.commandId,
-    events: input.stdout.pipe(decodePiRpcRuntimeEvents({
-      sessionId: input.sessionId,
-      commandId: input.commandId,
-      stream: 'stdout',
-      now: input.now,
-    })),
+    events: input.stdout.pipe(
+      decodePiRpcRuntimeEvents({
+        sessionId: input.sessionId,
+        commandId: input.commandId,
+        stream: 'stdout',
+        now: input.now,
+      }),
+    ),
     getState: sender.getState,
     prompt: sender.prompt,
     steer: sender.steer,

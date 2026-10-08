@@ -4,7 +4,17 @@ import {
   type UserIdentity,
 } from 'convex/server'
 import { ConvexError, v } from 'convex/values'
-import { mutation, query, type MutationCtx, type QueryCtx } from './_generated/server'
+import { canonicalizeGitHubInstallationSyncProof } from '@patchplane/domain/github'
+import { internal } from './_generated/api'
+import {
+  internalMutation,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from './_generated/server'
+
+const maximumSynchronizedGitHubRepositories = 1_000
 
 function workOSOrganizationId(identity: UserIdentity) {
   const value =
@@ -21,6 +31,50 @@ function requireSystemIngestionSecret(secret: string) {
 
   if (expected === undefined || expected.length === 0 || secret !== expected) {
     throw new ConvexError('System ingestion secret required')
+  }
+}
+
+async function verifyGitHubInstallationSyncProof(input: {
+  readonly issuedAt: number
+  readonly signature: string
+  readonly workspaceId: string
+  readonly account: Parameters<
+    typeof canonicalizeGitHubInstallationSyncProof
+  >[0]['account']
+  readonly repositories: Parameters<
+    typeof canonicalizeGitHubInstallationSyncProof
+  >[0]['repositories']
+}) {
+  const secret = process.env.PATCHPLANE_SYSTEM_INGESTION_SECRET
+  const now = Date.now()
+  if (
+    secret === undefined ||
+    secret.length === 0 ||
+    !Number.isSafeInteger(input.issuedAt) ||
+    Math.abs(now - input.issuedAt) > 5 * 60_000 ||
+    !/^[0-9a-f]{64}$/.test(input.signature)
+  ) {
+    throw new ConvexError('GitHub installation sync proof is invalid')
+  }
+  const signature = Uint8Array.from(
+    input.signature.match(/.{2}/g) ?? [],
+    (byte) => Number.parseInt(byte, 16),
+  )
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  )
+  const verified = await crypto.subtle.verify(
+    'HMAC',
+    key,
+    signature,
+    new TextEncoder().encode(canonicalizeGitHubInstallationSyncProof(input)),
+  )
+  if (!verified) {
+    throw new ConvexError('GitHub installation sync proof is invalid')
   }
 }
 
@@ -153,25 +207,23 @@ const connectedRepositoryInput = v.object({
   permissionsJson: v.optional(v.string()),
 })
 
-function toConnectedRepositoryReturn(
-  repository: {
-    readonly _id: string
-    readonly provider: string
-    readonly workspaceId: string
-    readonly installationId: string
-    readonly repositoryExternalId: string
-    readonly repositoryOwner: string
-    readonly repositoryName: string
-    readonly repositoryFullName: string
-    readonly private: boolean
-    readonly selected: boolean
-    readonly permissionsJson?: string
-    readonly status: 'active' | 'suspended' | 'removed' | 'reconnect_required'
-    readonly connectedByActorId: string
-    readonly createdAt: number
-    readonly updatedAt: number
-  },
-) {
+function toConnectedRepositoryReturn(repository: {
+  readonly _id: string
+  readonly provider: string
+  readonly workspaceId: string
+  readonly installationId: string
+  readonly repositoryExternalId: string
+  readonly repositoryOwner: string
+  readonly repositoryName: string
+  readonly repositoryFullName: string
+  readonly private: boolean
+  readonly selected: boolean
+  readonly permissionsJson?: string
+  readonly status: 'active' | 'suspended' | 'removed' | 'reconnect_required'
+  readonly connectedByActorId: string
+  readonly createdAt: number
+  readonly updatedAt: number
+}) {
   return {
     id: repository['_id'],
     provider: repository.provider,
@@ -196,7 +248,6 @@ export const createGitHubConnectionIntent = mutation({
     state: v.string(),
     workspaceId: v.string(),
     returnPathname: v.optional(v.string()),
-    expiresAt: v.number(),
   },
   returns: v.object({ state: v.string() }),
   handler: async (ctx, args) => {
@@ -209,16 +260,74 @@ export const createGitHubConnectionIntent = mutation({
       'repo:connect',
     )
 
+    const now = Date.now()
+    const expiredIntents = await ctx.db
+      .query('githubConnectionIntents')
+      .withIndex('by_expires_at', (q) => q.lt('expiresAt', now))
+      .take(100)
+    for (const intent of expiredIntents) {
+      await ctx.db.delete('githubConnectionIntents', intent['_id'])
+    }
+
     await ctx.db.insert('githubConnectionIntents', {
       state: args.state,
       workspaceId: args.workspaceId,
       actorId: `workos:${identity.subject}`,
       returnPathname: args.returnPathname,
-      expiresAt: args.expiresAt,
-      createdAt: Date.now(),
+      expiresAt: now + 10 * 60_000,
+      createdAt: now,
     })
 
     return { state: args.state }
+  },
+})
+
+export const stageGitHubConnectionInstallation = mutation({
+  args: {
+    state: v.string(),
+    workspaceId: v.string(),
+    installationId: v.string(),
+    pkceVerifier: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const identity = await requireWorkOSIdentity(ctx)
+    requireWorkOSWorkspace(identity, args.workspaceId)
+    await requireMembershipPermission(
+      ctx,
+      identity,
+      args.workspaceId,
+      'repo:connect',
+    )
+
+    const intent = await ctx.db
+      .query('githubConnectionIntents')
+      .withIndex('by_state', (q) => q.eq('state', args.state))
+      .unique()
+    if (
+      intent === null ||
+      intent.workspaceId !== args.workspaceId ||
+      intent.actorId !== `workos:${identity.subject}` ||
+      intent.consumedAt !== undefined ||
+      intent.expiresAt <= Date.now()
+    ) {
+      throw new ConvexError('GitHub connection state is invalid')
+    }
+    if (intent.installationId !== undefined) {
+      throw new ConvexError('GitHub connection installation already staged')
+    }
+    if (
+      !/^[1-9][0-9]{0,19}$/.test(args.installationId) ||
+      !/^[A-Za-z0-9._~-]{43,128}$/.test(args.pkceVerifier)
+    ) {
+      throw new ConvexError('GitHub connection installation proof is invalid')
+    }
+
+    await ctx.db.patch('githubConnectionIntents', intent['_id'], {
+      installationId: args.installationId,
+      pkceVerifier: args.pkceVerifier,
+    })
+    return null
   },
 })
 
@@ -231,6 +340,8 @@ export const consumeGitHubConnectionIntent = mutation({
     workspaceId: v.string(),
     actorId: v.string(),
     returnPathname: v.optional(v.string()),
+    installationId: v.string(),
+    pkceVerifier: v.string(),
   }),
   handler: async (ctx, args) => {
     const identity = await requireWorkOSIdentity(ctx)
@@ -267,21 +378,54 @@ export const consumeGitHubConnectionIntent = mutation({
       throw new ConvexError('GitHub connection state expired')
     }
 
+    if (
+      intent.installationId === undefined ||
+      intent.pkceVerifier === undefined
+    ) {
+      throw new ConvexError('GitHub connection installation is not staged')
+    }
+
     await ctx.db.patch('githubConnectionIntents', intent['_id'], {
       consumedAt: Date.now(),
+      pkceVerifier: undefined,
     })
 
     return {
       workspaceId: intent.workspaceId,
       actorId: intent.actorId,
       returnPathname: intent.returnPathname,
+      installationId: intent.installationId,
+      pkceVerifier: intent.pkceVerifier,
     }
+  },
+})
+
+export const cleanupExpiredGitHubConnectionIntents = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const expiredIntents = await ctx.db
+      .query('githubConnectionIntents')
+      .withIndex('by_expires_at', (q) => q.lt('expiresAt', Date.now()))
+      .take(100)
+    for (const intent of expiredIntents) {
+      await ctx.db.delete('githubConnectionIntents', intent['_id'])
+    }
+    if (expiredIntents.length === 100) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.connectedRepositories.cleanupExpiredGitHubConnectionIntents,
+        {},
+      )
+    }
+    return expiredIntents.length
   },
 })
 
 export const upsertGitHubInstallationRepositories = mutation({
   args: {
     workspaceId: v.string(),
+    proof: v.object({ issuedAt: v.number(), signature: v.string() }),
     account: connectedAccountInput,
     repositories: v.array(connectedRepositoryInput),
   },
@@ -295,6 +439,17 @@ export const upsertGitHubInstallationRepositories = mutation({
       args.workspaceId,
       'repo:connect',
     )
+    if (args.repositories.length > maximumSynchronizedGitHubRepositories) {
+      throw new ConvexError(
+        'GitHub installation repository inventory exceeds the synchronization bound',
+      )
+    }
+    await verifyGitHubInstallationSyncProof({
+      ...args.proof,
+      workspaceId: args.workspaceId,
+      account: args.account,
+      repositories: args.repositories,
+    })
 
     const now = Date.now()
     const connectedByActorId = `workos:${identity.subject}`
@@ -318,18 +473,27 @@ export const upsertGitHubInstallationRepositories = mutation({
       })
     } else {
       if (existingAccount.workspaceId !== args.workspaceId) {
-        throw new ConvexError('GitHub installation is connected to another workspace')
+        throw new ConvexError(
+          'GitHub installation is connected to another workspace',
+        )
       }
 
-      await ctx.db.patch('connectedRepositoryAccounts', existingAccount['_id'], {
-        accountExternalId: args.account.accountExternalId,
-        accountLogin: args.account.accountLogin,
-        accountType: args.account.accountType,
-        status: 'active',
-        updatedAt: now,
-      })
+      await ctx.db.patch(
+        'connectedRepositoryAccounts',
+        existingAccount['_id'],
+        {
+          accountExternalId: args.account.accountExternalId,
+          accountLogin: args.account.accountLogin,
+          accountType: args.account.accountType,
+          status: 'active',
+          updatedAt: now,
+        },
+      )
     }
 
+    const synchronizedRepositoryExternalIds = new Set(
+      args.repositories.map((repository) => repository.repositoryExternalId),
+    )
     const upsertedIds = []
     for (const repository of args.repositories) {
       const existingRepository = await ctx.db
@@ -353,7 +517,9 @@ export const upsertGitHubInstallationRepositories = mutation({
         upsertedIds.push(id)
       } else {
         if (existingRepository.workspaceId !== args.workspaceId) {
-          throw new ConvexError('GitHub repository is connected to another workspace')
+          throw new ConvexError(
+            'GitHub repository is connected to another workspace',
+          )
         }
 
         await ctx.db.patch('connectedRepositories', existingRepository['_id'], {
@@ -368,6 +534,39 @@ export const upsertGitHubInstallationRepositories = mutation({
           updatedAt: now,
         })
         upsertedIds.push(existingRepository['_id'])
+      }
+    }
+
+    const activeInstallationRepositories = await ctx.db
+      .query('connectedRepositories')
+      .withIndex('by_provider_installation_status', (q) =>
+        q
+          .eq('provider', args.account.provider)
+          .eq('installationId', args.account.installationId)
+          .eq('status', 'active'),
+      )
+      .take(maximumSynchronizedGitHubRepositories + 1)
+    if (
+      activeInstallationRepositories.length >
+      maximumSynchronizedGitHubRepositories
+    ) {
+      throw new ConvexError(
+        'Active GitHub installation repository inventory exceeds the synchronization bound',
+      )
+    }
+    for (const repository of activeInstallationRepositories) {
+      if (
+        repository.workspaceId === args.workspaceId &&
+        !synchronizedRepositoryExternalIds.has(
+          repository.repositoryExternalId,
+        ) &&
+        repository.status !== 'removed'
+      ) {
+        await ctx.db.patch('connectedRepositories', repository['_id'], {
+          selected: false,
+          status: 'removed',
+          updatedAt: now,
+        })
       }
     }
 
@@ -408,10 +607,12 @@ export const listForWorkspaceWithLatestVerification = query({
     workspaceId: v.string(),
     paginationOpts: paginationOptsValidator,
   },
-  returns: paginationResultValidator(v.object({
-    repository: connectedRepositoryReturn,
-    latestVerification: v.optional(latestRepositoryVerificationReturn),
-  })),
+  returns: paginationResultValidator(
+    v.object({
+      repository: connectedRepositoryReturn,
+      latestVerification: v.optional(latestRepositoryVerificationReturn),
+    }),
+  ),
   handler: async (ctx, args) => {
     const identity = await requireWorkOSIdentity(ctx)
     requireWorkOSWorkspace(identity, args.workspaceId)
@@ -430,120 +631,143 @@ export const listForWorkspaceWithLatestVerification = query({
       .withIndex('by_workspace', (q) => q.eq('workspaceId', args.workspaceId))
       .paginate(args.paginationOpts)
 
-    const page = await Promise.all(repositories.page.map(async (repository) => {
-      const indexedExternalRef = await ctx.db
-        .query('externalWorkflowRefs')
-        .withIndex('by_workspace_id_and_provider_and_repository_external_id', (q) =>
-          q
-            .eq('workspaceId', args.workspaceId)
-            .eq('provider', repository.provider)
-            .eq('repositoryExternalId', repository.repositoryExternalId),
-        )
-        .order('desc')
-        .first()
-      // Transitional fallback for references written before workspaceId was
-      // denormalized. It scans only the legacy index partition, remains
-      // bounded, and verifies each workflow workspace before returning data.
-      const legacyExternalRefs = indexedExternalRef === null
-        ? await ctx.db
-            .query('externalWorkflowRefs')
-            .withIndex('by_workspace_id_and_provider_and_repository_external_id', (q) =>
+    const page = await Promise.all(
+      repositories.page.map(async (repository) => {
+        const indexedExternalRef = await ctx.db
+          .query('externalWorkflowRefs')
+          .withIndex(
+            'by_workspace_id_and_provider_and_repository_external_id',
+            (q) =>
               q
-                .eq('workspaceId', undefined)
+                .eq('workspaceId', args.workspaceId)
                 .eq('provider', repository.provider)
                 .eq('repositoryExternalId', repository.repositoryExternalId),
-            )
-            .order('desc')
-            .take(32)
-        : []
-      let externalRef = indexedExternalRef ?? undefined
-      let workflowRun = externalRef === undefined
-        ? null
-        : await ctx.db.get('workflowRuns', externalRef.workflowRunId)
-      if (externalRef === undefined) {
-        for (const legacyExternalRef of legacyExternalRefs) {
-          const legacyWorkflowRun = await ctx.db.get(
-            'workflowRuns',
-            legacyExternalRef.workflowRunId,
           )
-          if (legacyWorkflowRun?.workspaceId === args.workspaceId) {
-            externalRef = legacyExternalRef
-            workflowRun = legacyWorkflowRun
-            break
+          .order('desc')
+          .first()
+        // Transitional fallback for references written before workspaceId was
+        // denormalized. It scans only the legacy index partition, remains
+        // bounded, and verifies each workflow workspace before returning data.
+        const legacyExternalRefs =
+          indexedExternalRef === null
+            ? await ctx.db
+                .query('externalWorkflowRefs')
+                .withIndex(
+                  'by_workspace_id_and_provider_and_repository_external_id',
+                  (q) =>
+                    q
+                      .eq('workspaceId', undefined)
+                      .eq('provider', repository.provider)
+                      .eq(
+                        'repositoryExternalId',
+                        repository.repositoryExternalId,
+                      ),
+                )
+                .order('desc')
+                .take(32)
+            : []
+        let externalRef = indexedExternalRef ?? undefined
+        let workflowRun =
+          externalRef === undefined
+            ? null
+            : await ctx.db.get('workflowRuns', externalRef.workflowRunId)
+        if (externalRef === undefined) {
+          for (const legacyExternalRef of legacyExternalRefs) {
+            const legacyWorkflowRun = await ctx.db.get(
+              'workflowRuns',
+              legacyExternalRef.workflowRunId,
+            )
+            if (legacyWorkflowRun?.workspaceId === args.workspaceId) {
+              externalRef = legacyExternalRef
+              workflowRun = legacyWorkflowRun
+              break
+            }
           }
         }
-      }
-      if (
-        externalRef === undefined ||
-        workflowRun === null ||
-        workflowRun.workspaceId !== args.workspaceId
-      ) {
-        if (legacyExternalRefs.length === 32) {
-          throw new ConvexError(
-            'Legacy repository verification references require workspace backfill',
-          )
+        if (
+          externalRef === undefined ||
+          workflowRun === null ||
+          workflowRun.workspaceId !== args.workspaceId
+        ) {
+          if (legacyExternalRefs.length === 32) {
+            throw new ConvexError(
+              'Legacy repository verification references require workspace backfill',
+            )
+          }
+          return { repository: toConnectedRepositoryReturn(repository) }
         }
-        return { repository: toConnectedRepositoryReturn(repository) }
-      }
 
-      const [humanDecision, policyDecision, reviewRun] = await Promise.all([
-        ctx.db
-          .query('humanDecisions')
-          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
-          .order('desc')
-          .first(),
-        ctx.db
-          .query('policyDecisions')
-          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
-          .order('desc')
-          .first(),
-        ctx.db
-          .query('reviewRuns')
-          .withIndex('by_workflow_run', (q) => q.eq('workflowRunId', workflowRun._id))
-          .order('desc')
-          .first(),
-      ])
-      const coherentPolicyDecision =
-        reviewRun !== null && policyDecision?.reviewRunId === reviewRun._id
-          ? policyDecision
-          : null
-      const coherentHumanDecision =
-        coherentPolicyDecision !== null &&
-        humanDecision !== null &&
-        humanDecision.reviewRunId === reviewRun?._id &&
-        humanDecision.policyDecisionId === coherentPolicyDecision._id
-          ? humanDecision
-          : null
-      const verificationStatus:
-        | 'queued'
-        | 'running'
-        | 'reviewed'
-        | 'approved'
-        | 'rejected'
-        | 'changes-requested'
-        | 'manual-review'
-        | 'failed' = workflowRun.status !== 'reviewed'
-        ? workflowRun.status
-        : coherentHumanDecision?.status ?? coherentPolicyDecision?.status ?? 'reviewed'
-      const updatedAt = workflowRun.status !== 'reviewed'
-        ? workflowRun.createdAt
-        : coherentHumanDecision?.decidedAt ?? coherentPolicyDecision?.createdAt ?? workflowRun.createdAt
+        const [humanDecision, policyDecision, reviewRun] = await Promise.all([
+          ctx.db
+            .query('humanDecisions')
+            .withIndex('by_workflow_run', (q) =>
+              q.eq('workflowRunId', workflowRun._id),
+            )
+            .order('desc')
+            .first(),
+          ctx.db
+            .query('policyDecisions')
+            .withIndex('by_workflow_run', (q) =>
+              q.eq('workflowRunId', workflowRun._id),
+            )
+            .order('desc')
+            .first(),
+          ctx.db
+            .query('reviewRuns')
+            .withIndex('by_workflow_run', (q) =>
+              q.eq('workflowRunId', workflowRun._id),
+            )
+            .order('desc')
+            .first(),
+        ])
+        const coherentPolicyDecision =
+          reviewRun !== null && policyDecision?.reviewRunId === reviewRun._id
+            ? policyDecision
+            : null
+        const coherentHumanDecision =
+          coherentPolicyDecision !== null &&
+          humanDecision !== null &&
+          humanDecision.reviewRunId === reviewRun?._id &&
+          humanDecision.policyDecisionId === coherentPolicyDecision._id
+            ? humanDecision
+            : null
+        const verificationStatus:
+          | 'queued'
+          | 'running'
+          | 'reviewed'
+          | 'approved'
+          | 'rejected'
+          | 'changes-requested'
+          | 'manual-review'
+          | 'failed' =
+          workflowRun.status !== 'reviewed'
+            ? workflowRun.status
+            : (coherentHumanDecision?.status ??
+              coherentPolicyDecision?.status ??
+              'reviewed')
+        const updatedAt =
+          workflowRun.status !== 'reviewed'
+            ? workflowRun.createdAt
+            : (coherentHumanDecision?.decidedAt ??
+              coherentPolicyDecision?.createdAt ??
+              workflowRun.createdAt)
 
-      return {
-        repository: toConnectedRepositoryReturn(repository),
-        latestVerification: {
-          workflowRunId: workflowRun._id,
-          workflowStatus: workflowRun.status,
-          verificationStatus,
-          ...(externalRef.pullRequestNumber === undefined
-            ? {}
-            : { pullRequestNumber: externalRef.pullRequestNumber }),
-          ...(externalRef.url === undefined ? {} : { url: externalRef.url }),
-          createdAt: workflowRun.createdAt,
-          updatedAt,
-        },
-      }
-    }))
+        return {
+          repository: toConnectedRepositoryReturn(repository),
+          latestVerification: {
+            workflowRunId: workflowRun._id,
+            workflowStatus: workflowRun.status,
+            verificationStatus,
+            ...(externalRef.pullRequestNumber === undefined
+              ? {}
+              : { pullRequestNumber: externalRef.pullRequestNumber }),
+            ...(externalRef.url === undefined ? {} : { url: externalRef.url }),
+            createdAt: workflowRun.createdAt,
+            updatedAt,
+          },
+        }
+      }),
+    )
 
     return { ...repositories, page }
   },

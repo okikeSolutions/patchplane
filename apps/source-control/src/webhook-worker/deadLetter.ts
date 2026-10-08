@@ -1,4 +1,3 @@
-import { ConvexHttpClient } from 'convex/browser'
 import { Effect } from 'effect'
 import {
   type Env,
@@ -12,6 +11,8 @@ import {
   validSignature,
 } from './boundary'
 import {
+  convexMutationCall,
+  convexQueryCall,
   promiseCall,
   releaseProcessing,
   reportFailure,
@@ -40,14 +41,14 @@ export const processDeadLetterMessage = Effect.fnUntraced(function* (
   let processingClaimed = false
   yield* Effect.gen(function* () {
     const envelope = yield* envelopeIdentity(body)
-    const client = new ConvexHttpClient(env.CONVEX_URL)
-    const receipt: unknown = yield* promiseCall(
+    const receipt: unknown = yield* convexQueryCall(
+      env,
       'convex.getDeliveryReceipt',
-      () =>
-        client.query(getDeliveryReceiptQuery, {
-          systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-          deliveryId: body.deliveryId,
-        }),
+      getDeliveryReceiptQuery,
+      {
+        systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
+        deliveryId: body.deliveryId,
+      },
     )
     if (receipt === null || typeof receipt !== 'object') {
       message.ack()
@@ -69,15 +70,16 @@ export const processDeadLetterMessage = Effect.fnUntraced(function* (
       message.ack()
       return
     }
-    const claim: unknown = yield* promiseCall(
+    const claim: unknown = yield* convexMutationCall(
+      env,
       'convex.claimDeliveryProcessing',
-      () =>
-        client.mutation(claimDeliveryProcessingMutation, {
-          systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-          deliveryId: body.deliveryId,
-          deliveryToken: body.deliveryToken,
-          processingToken,
-        }),
+      claimDeliveryProcessingMutation,
+      {
+        systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
+        deliveryId: body.deliveryId,
+        deliveryToken: body.deliveryToken,
+        processingToken,
+      },
     )
     if (claim === 'busy') {
       message.retry({ delaySeconds: deadLetterRetryDelaySeconds })

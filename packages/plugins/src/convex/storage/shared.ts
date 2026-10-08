@@ -17,20 +17,12 @@ import {
 } from '@patchplane/core/services/storage-service'
 
 export function settleWithin<T>(input: {
-  readonly promise: Promise<T>
+  readonly operationEffect: Effect.Effect<T, StorageError>
   readonly timeoutMs: number
   readonly operation: string
   readonly message: string
 }) {
-  return Effect.tryPromise({
-    try: () => input.promise,
-    catch: (cause) =>
-      new StorageError({
-        operation: input.operation,
-        message: input.message,
-        cause,
-      }),
-  }).pipe(
+  return input.operationEffect.pipe(
     Effect.timeout(input.timeoutMs),
     Effect.mapError(
       (cause) =>

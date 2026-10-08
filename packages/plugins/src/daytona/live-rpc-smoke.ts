@@ -34,7 +34,7 @@ import { DaytonaConfig } from './DaytonaConfig'
 import { toDaytonaClientConfig } from './daytona-adapter'
 import { DaytonaSandboxPlugin } from './DaytonaSandboxPlugin'
 
-class RpcSmokeError extends Schema.TaggedErrorClass<RpcSmokeError>()(
+class RpcSmokeError extends Schema.TaggedError<RpcSmokeError>()(
   'RpcSmokeError',
   {
     message: Schema.String,
@@ -171,7 +171,8 @@ const smokeArtifactStorageLayer = Layer.succeed(
     recordRuntimeSessionStarted: () => Effect.die('unused'),
     markRuntimeSessionStatus: () => Effect.die('unused'),
     getActiveRuntimeSession: () => Effect.succeed(Option.none()),
-    recordEvidenceArtifact: (input) =>
+    recordEvidenceArtifact: Effect.fn('liveRpcSmoke.recordEvidenceArtifact')(
+      (input) =>
       Effect.gen(function* () {
         return {
           id: makeEvidenceArtifactId(`smoke-artifact:${input.storageKey}`),
@@ -179,6 +180,7 @@ const smokeArtifactStorageLayer = Layer.succeed(
           createdAt: input.createdAt ?? (yield* Clock.currentTimeMillis),
         }
       }),
+    ),
     getEvidenceArtifact: () => Effect.succeed(Option.none()),
     getCandidatePatchSetForWorkflow: () => Effect.succeed(Option.none()),
     claimCandidateFreeze: () => Effect.succeed(false),
@@ -218,6 +220,9 @@ const program = Effect.gen(function* () {
   const r2 = captureArtifacts ? makeS3R2Harness() : undefined
   const deleteSandboxAfterSmoke =
     process.env.PATCHPLANE_SMOKE_DELETE_SANDBOX !== 'false'
+  let steerSent = false
+  let followUpSent = false
+  let abortSent = false
 
   const summary = yield* Effect.acquireUseRelease(
     sandbox.runRepositoryAgent({
@@ -234,9 +239,45 @@ const program = Effect.gen(function* () {
       ),
       traceId,
       onRuntimeSessionStarted: (session) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           console.log(
             JSON.stringify({ type: 'runtime_session_started', ...session }),
+          )
+          const controlInput = {
+            sandboxId: session.sandboxId,
+            sessionId: session.sessionId,
+            commandId: session.commandId,
+            traceId,
+          }
+          yield* sleep(
+            Number(process.env.PATCHPLANE_SMOKE_AFTER_PROMPT_WAIT_MS ?? 5_000),
+          )
+          const steer = yield* sandbox.steerRuntimeSession({
+            ...controlInput,
+            message:
+              process.env.PATCHPLANE_SMOKE_STEER_MESSAGE ??
+              'Keep the answer short and report what you are doing.',
+          })
+          steerSent = steer.status === 'sent'
+          yield* sleep(
+            Number(process.env.PATCHPLANE_SMOKE_AFTER_STEER_WAIT_MS ?? 2_000),
+          )
+          const followUp = yield* sandbox.followUpRuntimeSession({
+            ...controlInput,
+            message:
+              process.env.PATCHPLANE_SMOKE_FOLLOW_UP_MESSAGE ??
+              'After the current turn, summarize the repository in one sentence.',
+          })
+          followUpSent = followUp.status === 'sent'
+          yield* sleep(
+            Number(
+              process.env.PATCHPLANE_SMOKE_AFTER_FOLLOW_UP_WAIT_MS ?? 2_000,
+            ),
+          )
+          const abort = yield* sandbox.abortRuntimeSession(controlInput)
+          abortSent = abort.status === 'sent'
+          yield* sleep(
+            Number(process.env.PATCHPLANE_SMOKE_AFTER_ABORT_WAIT_MS ?? 2_000),
           )
         }),
       onRuntimeEvents: (events) =>
@@ -382,35 +423,6 @@ const program = Effect.gen(function* () {
           traceId,
         }
 
-        yield* sleep(
-          Number(process.env.PATCHPLANE_SMOKE_AFTER_PROMPT_WAIT_MS ?? 5_000),
-        )
-
-        const steer = yield* sandbox.steerRuntimeSession({
-          ...controlInput,
-          message:
-            process.env.PATCHPLANE_SMOKE_STEER_MESSAGE ??
-            'Keep the answer short and report what you are doing.',
-        })
-        yield* sleep(
-          Number(process.env.PATCHPLANE_SMOKE_AFTER_STEER_WAIT_MS ?? 2_000),
-        )
-
-        const followUp = yield* sandbox.followUpRuntimeSession({
-          ...controlInput,
-          message:
-            process.env.PATCHPLANE_SMOKE_FOLLOW_UP_MESSAGE ??
-            'After the current turn, summarize the repository in one sentence.',
-        })
-        yield* sleep(
-          Number(process.env.PATCHPLANE_SMOKE_AFTER_FOLLOW_UP_WAIT_MS ?? 2_000),
-        )
-
-        const abort = yield* sandbox.abortRuntimeSession(controlInput)
-        yield* sleep(
-          Number(process.env.PATCHPLANE_SMOKE_AFTER_ABORT_WAIT_MS ?? 2_000),
-        )
-
         const terminate = yield* sandbox.terminateRuntimeSession(controlInput)
         yield* sleep(
           Number(process.env.PATCHPLANE_SMOKE_AFTER_TERMINATE_WAIT_MS ?? 1_000),
@@ -438,15 +450,15 @@ const program = Effect.gen(function* () {
           hasRuntimeEvents: combinedEvents.some(
             (event) => !event.type.startsWith('pi.rpc.response.'),
           ),
-          steerSent: steer.status === 'sent',
+          steerSent,
           steerResponse: combinedEvents.some(
             (event) => event.type === 'pi.rpc.response.steer.success',
           ),
-          followUpSent: followUp.status === 'sent',
+          followUpSent,
           followUpResponse: combinedEvents.some(
             (event) => event.type === 'pi.rpc.response.follow_up.success',
           ),
-          abortSent: abort.status === 'sent',
+          abortSent,
           abortResponse: combinedEvents.some(
             (event) => event.type === 'pi.rpc.response.abort.success',
           ),

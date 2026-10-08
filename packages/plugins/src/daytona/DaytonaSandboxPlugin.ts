@@ -53,6 +53,64 @@ import {
   captureCandidateStateDigest,
   collectSandboxEvidenceArtifacts,
 } from './daytona-evidence'
+const maximumPiRuntimeEventsPerSession = 1_000
+
+function projectPiRuntimeTranscript(
+  events: ReadonlyArray<{
+    readonly type: string
+    readonly occurredAt: number
+    readonly summary?: string | undefined
+    readonly payloadJson?: string | undefined
+  }>,
+) {
+  return events
+    .map((event) =>
+      JSON.stringify({
+        type: event.type,
+        occurredAt: event.occurredAt,
+        summary: event.summary,
+        payloadJson: event.payloadJson,
+      }),
+    )
+    .join('\n')
+}
+
+const cloneRepository = (
+  sandbox: DaytonaSandboxLike,
+  input: {
+    readonly repositoryUrl: string
+    readonly branch?: string | undefined
+    readonly commitId?: string | undefined
+    readonly gitUsername?: string | undefined
+    readonly gitPassword?: string | undefined
+  },
+) =>
+  Effect.tryPromise({
+    try: () =>
+      sandbox.git.clone(
+        input.repositoryUrl,
+        'workspace/repo',
+        input.branch,
+        input.commitId,
+        input.gitUsername,
+        input.gitPassword,
+      ),
+    catch: sandboxBoundaryError(
+      'daytona.git.clone',
+      'Daytona failed to clone repository',
+    ),
+  })
+
+const sendPiCommand = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.mapError(
+      sandboxBoundaryError(
+        'daytona.pi.rpc.send',
+        'Daytona failed to deliver a Pi RPC command',
+      ),
+    ),
+  )
+
 export { settleDaytonaPromise } from './daytona-policy'
 export type { DaytonaClientLike, DaytonaSandboxLike } from './daytona-types'
 
@@ -246,34 +304,10 @@ export function makeDaytonaSandboxLayer(
           )
         })
 
-      const cloneRepository = (
-        sandbox: DaytonaSandboxLike,
-        input: {
-          readonly repositoryUrl: string
-          readonly branch?: string | undefined
-          readonly commitId?: string | undefined
-          readonly gitUsername?: string | undefined
-          readonly gitPassword?: string | undefined
-        },
-      ) =>
-        Effect.tryPromise({
-          try: () =>
-            sandbox.git.clone(
-              input.repositoryUrl,
-              'workspace/repo',
-              input.branch,
-              input.commitId,
-              input.gitUsername,
-              input.gitPassword,
-            ),
-          catch: sandboxBoundaryError(
-            'daytona.git.clone',
-            'Daytona failed to clone repository',
-          ),
-        })
-
       return SandboxService.of({
-        runRepositoryAgent: (input) =>
+        runRepositoryAgent: Effect.fn(
+          'DaytonaSandboxPlugin.runRepositoryAgent',
+        )((input) =>
           Effect.gen(function* () {
             const clock = yield* Clock.Clock
             const startedAt = clock.currentTimeMillisUnsafe()
@@ -324,32 +358,67 @@ export function makeDaytonaSandboxLayer(
                           traceId: input.traceId,
                         },
                       )
-                      if (input.onRuntimeSessionStarted !== undefined) {
-                        yield* input.onRuntimeSessionStarted({
-                          provider: 'daytona:pi-rpc',
-                          sandboxId: sandbox.id,
-                          sessionId: handle.sessionId,
-                          commandId: handle.commandId,
-                          startedAt,
-                        })
-                      }
+                      const observedRuntimeEventKeys = new Set<string>()
+                      const confirmedRuntimeEventKeys = new Set<string>()
                       const persistRuntimeEvents = (
                         events: ReadonlyArray<PiRpcRuntimeEvent>,
-                      ) =>
-                        events.length === 0 ||
-                        input.onRuntimeEvents === undefined
-                          ? Effect.void
-                          : input.onRuntimeEvents(events).pipe(
-                              Effect.catch((error) =>
-                                Effect.logWarning(
-                                  'Failed to persist incremental Pi RPC runtime events',
-                                  {
-                                    traceId: input.traceId,
-                                    error: String(error),
+                      ) => {
+                        for (const event of events) {
+                          observedRuntimeEventKeys.add(event.idempotencyKey)
+                        }
+                        if (
+                          observedRuntimeEventKeys.size >
+                          maximumPiRuntimeEventsPerSession
+                        ) {
+                          return handle.deleteSession.pipe(
+                            Effect.ignore,
+                            Effect.andThen(
+                              Effect.fail(
+                                new SandboxError({
+                                  operation: 'daytona.pi.rpc.events.limit',
+                                  message:
+                                    'Pi RPC runtime event count exceeded its trusted bound',
+                                  cause: {
+                                    maximumPiRuntimeEventsPerSession,
                                   },
-                                ),
+                                }),
                               ),
-                            )
+                            ),
+                          )
+                        }
+                        const unconfirmedEvents = events.filter(
+                          (event) =>
+                            !confirmedRuntimeEventKeys.has(
+                              event.idempotencyKey,
+                            ),
+                        )
+                        if (
+                          unconfirmedEvents.length === 0 ||
+                          input.onRuntimeEvents === undefined
+                        ) {
+                          return Effect.void
+                        }
+                        return input.onRuntimeEvents(unconfirmedEvents).pipe(
+                          Effect.tap(() =>
+                            Effect.sync(() => {
+                              for (const event of unconfirmedEvents) {
+                                confirmedRuntimeEventKeys.add(
+                                  event.idempotencyKey,
+                                )
+                              }
+                            }),
+                          ),
+                          Effect.catch((error) =>
+                            Effect.logWarning(
+                              'Failed to persist incremental Pi RPC runtime events',
+                              {
+                                traceId: input.traceId,
+                                error: String(error),
+                              },
+                            ),
+                          ),
+                        )
+                      }
 
                       const pi = makePiRuntimeSession({
                         sessionId: handle.sessionId,
@@ -360,6 +429,7 @@ export function makeDaytonaSandboxLayer(
                           sandbox,
                           handle.sessionId,
                           handle.commandId,
+                          maxVerificationCommandOutputBytes,
                         ).pipe(
                           Stream.filter((chunk) => chunk.stream === 'stdout'),
                           Stream.map((chunk) => chunk.chunk),
@@ -371,12 +441,17 @@ export function makeDaytonaSandboxLayer(
                           persistRuntimeEvents([event]),
                         ),
                         Effect.tapError((error) =>
-                          Effect.logWarning(
-                            'Pi RPC log stream ended with error; reconciling from buffered logs',
-                            {
-                              traceId: input.traceId,
-                              error: error.message,
-                            },
+                          handle.deleteSession.pipe(
+                            Effect.ignore,
+                            Effect.andThen(
+                              Effect.logWarning(
+                                'Pi RPC log stream ended with error; terminated session before bounded reconciliation',
+                                {
+                                  traceId: input.traceId,
+                                  error: error.message,
+                                },
+                              ),
+                            ),
                           ),
                         ),
                         Effect.ignore,
@@ -396,6 +471,7 @@ export function makeDaytonaSandboxLayer(
                                 stream: 'stdout',
                                 now: () => clock.currentTimeMillisUnsafe(),
                               }),
+                              Stream.take(maximumPiRuntimeEventsPerSession + 1),
                               Stream.runCollect,
                               Effect.map((events) => Array.from(events)),
                             )
@@ -405,17 +481,6 @@ export function makeDaytonaSandboxLayer(
                         Effect.forkScoped,
                       )
 
-                      const sendPiCommand = <A, E, R>(
-                        effect: Effect.Effect<A, E, R>,
-                      ) =>
-                        effect.pipe(
-                          Effect.mapError(
-                            sandboxBoundaryError(
-                              'daytona.pi.rpc.send',
-                              'Daytona failed to deliver a Pi RPC command',
-                            ),
-                          ),
-                        )
                       yield* sendPiCommand(
                         pi.getState({ id: `${input.traceId}:get-state` }),
                       )
@@ -425,6 +490,15 @@ export function makeDaytonaSandboxLayer(
                           message: input.prompt,
                         }),
                       )
+                      if (input.onRuntimeSessionStarted !== undefined) {
+                        yield* input.onRuntimeSessionStarted({
+                          provider: 'daytona:pi-rpc',
+                          sandboxId: sandbox.id,
+                          sessionId: handle.sessionId,
+                          commandId: handle.commandId,
+                          startedAt,
+                        })
+                      }
                       const logs = yield* handle.getLogs(
                         maxVerificationCommandOutputBytes,
                       )
@@ -438,9 +512,49 @@ export function makeDaytonaSandboxLayer(
                           stream: 'stdout',
                           now: () => clock.currentTimeMillisUnsafe(),
                         }),
+                        Stream.take(maximumPiRuntimeEventsPerSession + 1),
                         Stream.runCollect,
                         Effect.map((events) => Array.from(events)),
                       )
+                      if (
+                        parsedRuntimeEvents.length >
+                        maximumPiRuntimeEventsPerSession
+                      ) {
+                        yield* handle.deleteSession.pipe(Effect.ignore)
+                        return yield* new SandboxError({
+                          operation: 'daytona.pi.rpc.events.snapshotLimit',
+                          message:
+                            'Pi RPC runtime event snapshot exceeded its trusted bound',
+                          cause: { maximumPiRuntimeEventsPerSession },
+                        })
+                      }
+                      if (input.onRuntimeEvents !== undefined) {
+                        const unconfirmedSnapshotEvents =
+                          parsedRuntimeEvents.filter(
+                            (event) =>
+                              !confirmedRuntimeEventKeys.has(
+                                event.idempotencyKey,
+                              ),
+                          )
+                        if (unconfirmedSnapshotEvents.length > 0) {
+                          yield* input
+                            .onRuntimeEvents(unconfirmedSnapshotEvents)
+                            .pipe(
+                              Effect.mapError(
+                                (cause) =>
+                                  new SandboxError({
+                                    operation:
+                                      'daytona.pi.rpc.events.finalPersistence',
+                                    message:
+                                      'Pi RPC final runtime event persistence failed',
+                                    cause,
+                                  }),
+                              ),
+                            )
+                        }
+                      }
+                      const projectedTranscript =
+                        projectPiRuntimeTranscript(parsedRuntimeEvents)
                       const {
                         artifacts: evidenceArtifacts,
                         verificationResults,
@@ -464,8 +578,8 @@ export function makeDaytonaSandboxLayer(
                           }),
                         ),
                         exitCode: commandStatus.exitCode,
-                        stdout: logs.stdout,
-                        stderr: logs.stderr,
+                        stdout: projectedTranscript,
+                        stderr: '',
                         policy: toSandboxPolicy(config, { timeoutSeconds }),
                         runtimeEvents: parsedRuntimeEvents,
                         evidenceArtifacts,
@@ -493,11 +607,21 @@ export function makeDaytonaSandboxLayer(
                       command,
                       timeoutSeconds,
                       traceId: input.traceId,
+                      maxOutputBytes: maxVerificationCommandOutputBytes,
                     })
                     const parsedRuntimeEvents =
                       yield* parsePiJsonRuntimeEventsEffect(response.stdout, {
                         now: () => clock.currentTimeMillisUnsafe(),
                       })
+
+                    if (parsedRuntimeEvents.lineLimitExceeded) {
+                      return yield* new SandboxError({
+                        operation: 'daytona.pi.json.events.lineLimit',
+                        message:
+                          'Pi JSON event transcript exceeded its trusted line bound',
+                        cause: { maximumLines: 1_000 },
+                      })
+                    }
 
                     if (parsedRuntimeEvents.parseErrors.length > 0) {
                       yield* Effect.logWarning(
@@ -530,8 +654,10 @@ export function makeDaytonaSandboxLayer(
                         }),
                       ),
                       exitCode: response.exitCode,
-                      stdout: response.stdout,
-                      stderr: response.stderr,
+                      stdout: projectPiRuntimeTranscript(
+                        parsedRuntimeEvents.events,
+                      ),
+                      stderr: '',
                       policy: toSandboxPolicy(config, { timeoutSeconds }),
                       runtimeEvents: parsedRuntimeEvents.events,
                       evidenceArtifacts,
@@ -558,7 +684,10 @@ export function makeDaytonaSandboxLayer(
                 }),
             ),
           ),
-        abortRuntimeSession: (input) =>
+        ),
+        abortRuntimeSession: Effect.fn(
+          'DaytonaSandboxPlugin.abortRuntimeSession',
+        )((input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
@@ -609,7 +738,10 @@ export function makeDaytonaSandboxLayer(
               }
             }),
           ),
-        steerRuntimeSession: (input) =>
+        ),
+        steerRuntimeSession: Effect.fn(
+          'DaytonaSandboxPlugin.steerRuntimeSession',
+        )((input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
@@ -660,7 +792,10 @@ export function makeDaytonaSandboxLayer(
               }
             }),
           ),
-        followUpRuntimeSession: (input) =>
+        ),
+        followUpRuntimeSession: Effect.fn(
+          'DaytonaSandboxPlugin.followUpRuntimeSession',
+        )((input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
@@ -714,7 +849,10 @@ export function makeDaytonaSandboxLayer(
               }
             }),
           ),
-        terminateRuntimeSession: (input) =>
+        ),
+        terminateRuntimeSession: Effect.fn(
+          'DaytonaSandboxPlugin.terminateRuntimeSession',
+        )((input) =>
           withDaytonaClient((daytona) =>
             Effect.gen(function* () {
               const sandbox = yield* Effect.tryPromise({
@@ -762,7 +900,10 @@ export function makeDaytonaSandboxLayer(
               }
             }),
           ),
-        runRepositoryCommand: (input) =>
+        ),
+        runRepositoryCommand: Effect.fn(
+          'DaytonaSandboxPlugin.runRepositoryCommand',
+        )((input) =>
           Effect.gen(function* () {
             const startedAt = yield* Clock.currentTimeMillis
             let cleanupStatus:
@@ -914,6 +1055,7 @@ export function makeDaytonaSandboxLayer(
                 }),
             ),
           ),
+        ),
       })
     }),
   )

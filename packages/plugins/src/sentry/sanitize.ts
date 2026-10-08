@@ -17,4 +17,6 @@ export {
   sanitizeSentryLog,
   sanitizeSentryMetric,
   sanitizeSentrySpan,
+  sanitizeSentryStreamedSpan,
+  sanitizeSentrySpanName,
 } from './sanitize/signals'

@@ -58,24 +58,25 @@ const createFromExternalIntake = mutation({
   handler: async (ctx, args) => {
     requireSystemIngestionSecret(args.systemSecret)
 
-    requireIncomingPullRequestIdentity(args.externalRef)
+    const incomingIdentity = requireIncomingPullRequestIdentity(
+      args.externalRef,
+    )
     const externalRef = {
       ...args.externalRef,
-      pullRequestBaseSha: args.externalRef.pullRequestBaseSha!,
-      pullRequestHeadSha: args.externalRef.pullRequestHeadSha!,
-      ...(args.externalRef.pullRequestPreviousHeadSha === undefined
+      ...incomingIdentity,
+      ...(incomingIdentity.pullRequestPreviousHeadSha === undefined
         ? {}
         : {
             pullRequestPreviousHeadSha:
-              args.externalRef.pullRequestPreviousHeadSha,
+              incomingIdentity.pullRequestPreviousHeadSha,
           }),
     }
 
     const lineageParent = await latestPullRequestLineage(ctx, {
       provider: externalRef.provider,
       workspaceId: args.workspaceId,
-      repositoryExternalId: externalRef.repositoryExternalId!,
-      issueExternalId: externalRef.issueExternalId!,
+      repositoryExternalId: externalRef.repositoryExternalId,
+      issueExternalId: externalRef.issueExternalId,
     })
     const advancesCurrentHead =
       lineageParent !== undefined &&
@@ -90,11 +91,11 @@ const createFromExternalIntake = mutation({
         lineageParent.sourceCommitSha &&
       externalRef.pullRequestHeadSha === lineageParent.sourceCommitSha &&
       externalRef.pullRequestBaseSha !== lineageParent.sourceBaseSha &&
-      externalRef.pullRequestUpdatedAt! > lineageParent.pullRequestUpdatedAt
+      externalRef.pullRequestUpdatedAt > lineageParent.pullRequestUpdatedAt
     const permitRepeatedCandidatePair =
       advancesCurrentBase ||
       (advancesCurrentHead &&
-        externalRef.pullRequestUpdatedAt! >= lineageParent.pullRequestUpdatedAt)
+        externalRef.pullRequestUpdatedAt >= lineageParent.pullRequestUpdatedAt)
     const existing = await existingExternalWorkflowRef(
       ctx,
       args.workspaceId,
@@ -111,7 +112,7 @@ const createFromExternalIntake = mutation({
 
     if (
       lineageParent !== undefined &&
-      (externalRef.pullRequestUpdatedAt! < lineageParent.pullRequestUpdatedAt ||
+      (externalRef.pullRequestUpdatedAt < lineageParent.pullRequestUpdatedAt ||
         (externalRef.pullRequestUpdatedAt ===
           lineageParent.pullRequestUpdatedAt &&
           !advancesCurrentHead))
@@ -434,10 +435,17 @@ const markWorkflowExecutionFailed = mutation({
     requireSystemIngestionSecret(args.systemSecret)
     const workflowRun = await requireWorkflowRun(ctx, args.workflowRunId)
     if (workflowRun.status === 'failed') return true
+    const cancelsUnclaimedIncomingDispatch =
+      workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+      workflowRun.status === 'queued' &&
+      workflowRun.incomingDispatchToken === undefined &&
+      args.incomingDispatchToken !== undefined &&
+      args.incomingDispatchToken.trim().length >= 16
     if (
-      workflowRun.status !== 'running' ||
-      (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
-        workflowRun.incomingDispatchToken !== args.incomingDispatchToken)
+      !cancelsUnclaimedIncomingDispatch &&
+      (workflowRun.status !== 'running' ||
+        (workflowRun.candidateIdentityVersion === 'incoming-pr-v1' &&
+          workflowRun.incomingDispatchToken !== args.incomingDispatchToken))
     ) {
       return false
     }

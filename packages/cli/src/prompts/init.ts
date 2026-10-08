@@ -1,6 +1,9 @@
 import { Effect } from 'effect'
-import { Prompt } from 'effect/unstable/cli'
-import { pluginIdsForInitProfile, type InitProfile } from '../services/config-file'
+import { Prompt } from 'effect/cli'
+import {
+  pluginIdsForInitProfile,
+  type InitProfile,
+} from '../services/config-file'
 
 interface InitPromptAnswers {
   readonly profile: InitProfile
@@ -8,7 +11,7 @@ interface InitPromptAnswers {
   readonly confirmed: boolean
 }
 
-export const promptForInitOptions = Effect.fnUntraced(function*(defaults: {
+export const promptForInitOptions = Effect.fnUntraced(function* (defaults: {
   readonly profile?: InitProfile | undefined
   readonly withPi?: boolean | undefined
 }) {
@@ -21,22 +24,33 @@ export const promptForInitOptions = Effect.fnUntraced(function*(defaults: {
     description: pluginIdsForInitProfile(choice.value).join(', '),
   }))
 
-  const profile = defaults.profile ?? (yield* Prompt.run(Prompt.select({
-    message: 'What do you want to set up?',
-    choices: profileChoices,
-  })))
+  const profile =
+    defaults.profile ??
+    (yield* Prompt.run(
+      Prompt.Select({
+        message: 'What do you want to set up?',
+        choices: profileChoices,
+      }),
+    ))
 
-  const withPi = profile === 'app'
-    ? false
-    : defaults.withPi ?? (yield* Prompt.run(Prompt.confirm({
-      message: 'Enable Daytona Pi execution?',
-      initial: false,
-    })))
+  const withPi =
+    profile === 'app'
+      ? false
+      : (defaults.withPi ??
+        (yield* Prompt.run(
+          Prompt.Confirm({
+            message: 'Enable Daytona Pi execution?',
+            initial: false,
+          }),
+        )))
 
-  const confirmed = yield* Prompt.run(Prompt.confirm({
-    message: 'Write patchplane.config.json, update .env.local, and create .patchplane state directories?',
-    initial: true,
-  }))
+  const confirmed = yield* Prompt.run(
+    Prompt.Confirm({
+      message:
+        'Write patchplane.config.json, update .env.local, and create .patchplane state directories?',
+      initial: true,
+    }),
+  )
 
   return { profile, withPi, confirmed } satisfies InitPromptAnswers
 })

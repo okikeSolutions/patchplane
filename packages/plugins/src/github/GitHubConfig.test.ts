@@ -3,6 +3,10 @@ import { ConfigProvider, Effect, Redacted, Result } from 'effect'
 import { GitHubConfig } from './GitHubConfig'
 
 const baseEnv = {
+  GITHUB_CLIENT_ID: 'Iv1.client',
+  GITHUB_CLIENT_SECRET: 'client-secret',
+  PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL:
+    'https://patchplane.test/api/github/install/callback',
   GITHUB_PRIVATE_KEY: 'private-key',
   GITHUB_WEBHOOK_SECRET: 'webhook-secret',
 }

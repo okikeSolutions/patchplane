@@ -721,12 +721,15 @@ export default defineSchema({
     workspaceId: v.string(),
     actorId: v.string(),
     returnPathname: v.optional(v.string()),
+    installationId: v.optional(v.string()),
+    pkceVerifier: v.optional(v.string()),
     expiresAt: v.number(),
     consumedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index('by_state', ['state'])
-    .index('by_workspace', ['workspaceId']),
+    .index('by_workspace', ['workspaceId'])
+    .index('by_expires_at', ['expiresAt']),
 
   connectedRepositoryAccounts: defineTable({
     provider: v.string(),
@@ -773,6 +776,11 @@ export default defineSchema({
     .index('by_workspace', ['workspaceId'])
     .index('by_provider_repository', ['provider', 'repositoryExternalId'])
     .index('by_provider_installation', ['provider', 'installationId'])
+    .index('by_provider_installation_status', [
+      'provider',
+      'installationId',
+      'status',
+    ])
     .index('by_workspace_full_name', ['workspaceId', 'repositoryFullName']),
 
   workflowRerunRequests: defineTable({

@@ -11,6 +11,7 @@ import {
   Effect,
   Exit,
   Layer,
+  Match,
   Option,
   Redacted,
   References,
@@ -24,8 +25,7 @@ import {
   sanitizeSentryException,
   sanitizeSentryLog,
   sanitizeSentryMetric,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
   sentryMaxBreadcrumbs,
   sentryTelemetryPolicyMarker,
 } from './sanitize'
@@ -119,21 +119,16 @@ function safeMergedAttributes(
 function toSentryLevel(
   severity: TelemetrySeverity | undefined,
 ): SentryLogLevel {
-  switch (severity) {
-    case 'trace':
-    case 'debug':
-    case 'info':
-    case 'error':
-    case 'fatal':
-      return severity
-    case 'warning':
-      return 'warn'
-    case undefined:
-      return 'info'
-    default:
-      severity satisfies never
-      return 'info'
-  }
+  return Match.value(severity).pipe(
+    Match.when('trace', () => 'trace' as const),
+    Match.when('debug', () => 'debug' as const),
+    Match.when('info', () => 'info' as const),
+    Match.when('error', () => 'error' as const),
+    Match.when('fatal', () => 'fatal' as const),
+    Match.when('warning', () => 'warn' as const),
+    Match.when(undefined, () => 'info' as const),
+    Match.exhaustive,
+  )
 }
 
 function annotateScope(
@@ -168,34 +163,37 @@ const NoopTelemetryLayer = Layer.succeed(
   }),
 )
 
-function makeTelemetryService() {
+function makeTelemetryService(enableLogs: boolean) {
   return TelemetryService.of({
-    recordEvent: (input) =>
-      Effect.sync(() => {
-        const level = toSentryLevel(input.severity)
-        const log = sanitizeSentryLog({
-          level,
-          message: 'patchplane.operational-event',
-          attributes: {
-            ...safeMergedAttributes(input),
-            telemetryPolicy: sentryTelemetryPolicyMarker,
-          },
-        })
-        if (log === null) return
-        Sentry.withScope((scope) => {
-          annotateScope(input)(scope)
-          Sentry.logger[level](log.message, log.attributes, { scope })
-        })
-      }).pipe(
-        Effect.catchDefect(() =>
-          Effect.logDebug('Sentry telemetry event capture failed', {
-            pluginName,
-            operation: 'sentry.recordEvent',
-            errorCategory: 'telemetry_capture_failed',
-          }),
-        ),
-      ),
-    addBreadcrumb: (input) =>
+    recordEvent: enableLogs
+      ? Effect.fn('SentryTelemetryPlugin.recordEvent')((input) =>
+          Effect.sync(() => {
+            const level = toSentryLevel(input.severity)
+            const log = sanitizeSentryLog({
+              level,
+              message: 'patchplane.operational-event',
+              attributes: {
+                ...safeMergedAttributes(input),
+                telemetryPolicy: sentryTelemetryPolicyMarker,
+              },
+            })
+            if (log === null) return
+            Sentry.withScope((scope) => {
+              annotateScope(input)(scope)
+              Sentry.logger[level](log.message, log.attributes, { scope })
+            })
+          }).pipe(
+            Effect.catchDefect(() =>
+              Effect.logDebug('Sentry telemetry event capture failed', {
+                pluginName,
+                operation: 'sentry.recordEvent',
+                errorCategory: 'telemetry_capture_failed',
+              }),
+            ),
+          ),
+        )
+      : Effect.fn('SentryTelemetryPlugin.recordEvent')(() => Effect.void),
+    addBreadcrumb: Effect.fn('SentryTelemetryPlugin.addBreadcrumb')((input) =>
       BreadcrumbBuffer.pipe(
         Effect.flatMap((buffer) =>
           buffer === undefined
@@ -228,9 +226,12 @@ function makeTelemetryService() {
           }),
         ),
       ),
-    withBreadcrumbScope: (effect) =>
-      effect.pipe(Effect.provideService(BreadcrumbBuffer, { items: [] })),
-    captureError: (input) =>
+    ),
+    withBreadcrumbScope: Effect.fn('SentryTelemetryPlugin.withBreadcrumbScope')(
+      (effect) =>
+        effect.pipe(Effect.provideService(BreadcrumbBuffer, { items: [] })),
+    ),
+    captureError: Effect.fn('SentryTelemetryPlugin.captureError')((input) =>
       BreadcrumbBuffer.pipe(
         Effect.flatMap((buffer) =>
           Effect.sync(() => {
@@ -256,21 +257,20 @@ function makeTelemetryService() {
           }),
         ),
       ),
-    withSpan: (input, effect) => {
+    ),
+    withSpan: Effect.fn('SentryTelemetryPlugin.withSpan')((input, effect) => {
       const attributes = safeMergedAttributes(input)
       return effect.pipe(
         Effect.annotateLogs(attributes),
         Effect.annotateSpans(attributes),
         Effect.withSpan('patchplane.operation', { attributes }),
       )
-    },
+    }),
   })
 }
 
-const SentryTelemetryServiceLayer = Layer.succeed(
-  TelemetryService,
-  makeTelemetryService(),
-)
+const sentryTelemetryServiceLayer = (enableLogs: boolean) =>
+  Layer.succeed(TelemetryService, makeTelemetryService(enableLogs))
 
 export const SentryTelemetryPlugin = {
   layer: Layer.unwrap(
@@ -290,9 +290,6 @@ export const SentryTelemetryPlugin = {
           dsn: Redacted.value(config.dsn.value),
           environment: config.environment,
           tracesSampleRate: config.enableTracing ? config.tracesSampleRate : 0,
-          enableLogs: config.enableLogs,
-          enableMetrics: config.enableMetrics,
-          sendDefaultPii: false,
           dataCollection: makeSentryDataCollection(),
           maxBreadcrumbs: sentryMaxBreadcrumbs,
           integrations: (defaultIntegrations) => [
@@ -302,17 +299,16 @@ export const SentryTelemetryPlugin = {
             Sentry.httpIntegration({ maxRequestBodySize: 'none' }),
           ],
           beforeSend: sanitizeSentryEvent,
-          beforeSendTransaction: sanitizeSentryTransaction,
           beforeBreadcrumb: sanitizeSentryBreadcrumb,
           beforeSendLog: sanitizeSentryLog,
           beforeSendMetric: sanitizeSentryMetric,
-          beforeSendSpan: sanitizeSentrySpan,
+          beforeSendSpan: sanitizeSentryStreamedSpan,
         }),
         observabilityControlsLayer,
         config.enableTracing
           ? Layer.succeed(Tracer.Tracer, SanitizingSentryTracer)
           : Layer.empty,
-        SentryTelemetryServiceLayer,
+        sentryTelemetryServiceLayer(config.enableLogs),
       )
 
       return sentryBaseLayer

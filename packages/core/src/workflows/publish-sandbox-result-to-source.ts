@@ -6,7 +6,7 @@ import { SourceControlService } from '../services/source-control-service'
 
 export const PublishSandboxResultToSource = Effect.fn(
   '@patchplane/core/workflows/PublishSandboxResultToSource',
-)(function*(input: {
+)(function* (input: {
   readonly workflowStart: WorkflowStart
   readonly sandboxExecution: SandboxExecution | undefined
 }) {
@@ -37,7 +37,9 @@ export const PublishSandboxResultToSource = Effect.fn(
     owner: ref.repositoryOwner,
     name: ref.repositoryName,
     issueNumber: ref.issueNumber,
+    subjectKind: ref.pullRequestNumber === undefined ? 'issue' : 'pull-request',
     body,
+    idempotencyKey: `sandbox-report:${input.workflowStart.workflowRun.rootWorkflowRunId ?? input.workflowStart.workflowRun.id}`,
   })
 
   return { provider: ref.repositoryProvider, issueNumber: ref.issueNumber }

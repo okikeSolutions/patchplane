@@ -54,7 +54,8 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     traceId: input.workflowStart.workflowRun.traceId,
     workflowRunId: input.workflowStart.workflowRun.id,
   } as const
-  const frozenCandidate = input.incomingDispatch?.candidatePatchSet
+  const incomingDispatch = input.incomingDispatch
+  const frozenCandidate = incomingDispatch?.candidatePatchSet
   const workflowRun = input.workflowStart.workflowRun
   const suppliedPlan = input.verificationPlan
   if (
@@ -111,7 +112,7 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
   }
   if (
     workflowRun.candidateIdentityVersion !== 'incoming-pr-v1' &&
-    input.incomingDispatch !== undefined
+    incomingDispatch !== undefined
   ) {
     return yield* new SandboxError({
       operation: 'runSandboxCommandForWorkflow.validateDispatch',
@@ -120,24 +121,32 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
       cause: undefined,
     })
   }
-  if (
-    input.incomingDispatch !== undefined &&
-    !(yield* storage.validateIncomingDispatch({
+  if (incomingDispatch !== undefined) {
+    const candidate = frozenCandidate
+    if (candidate === undefined) {
+      return yield* new SandboxError({
+        operation: 'runSandboxCommandForWorkflow.validateDispatch',
+        message: 'Incoming candidate dispatch is missing its frozen candidate',
+        cause: undefined,
+      })
+    }
+    const dispatchIsActive = yield* storage.validateIncomingDispatch({
       workflowRunId: workflowRun.id,
-      candidatePatchSetId: frozenCandidate!.id,
-      dispatchToken: input.incomingDispatch.dispatchToken,
+      candidatePatchSetId: candidate.id,
+      dispatchToken: incomingDispatch.dispatchToken,
       traceId: workflowRun.traceId,
       operation: 'runSandboxCommandForWorkflow.validateDispatchLease',
-    }))
-  ) {
-    return yield* new SandboxError({
-      operation: 'runSandboxCommandForWorkflow.validateDispatchLease',
-      message: 'Incoming candidate dispatch lease is not active',
-      cause: undefined,
     })
+    if (!dispatchIsActive) {
+      return yield* new SandboxError({
+        operation: 'runSandboxCommandForWorkflow.validateDispatchLease',
+        message: 'Incoming candidate dispatch lease is not active',
+        cause: undefined,
+      })
+    }
   }
   const claimed =
-    input.incomingDispatch !== undefined
+    incomingDispatch !== undefined
       ? true
       : yield* withAttemptClaimTransition(
           {
@@ -226,16 +235,15 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
         evidenceTestReportCommand: runnableTestCommand,
         evidenceBrowserScreenshotCommand: runnableBrowserCommand,
         traceId: input.workflowStart.workflowRun.traceId,
-        ...(input.incomingDispatch === undefined
+        ...(incomingDispatch === undefined
           ? {}
           : {
               onSandboxStarted: (sandboxId: string) =>
                 storage
                   .startIncomingDispatch({
                     workflowRunId: input.workflowStart.workflowRun.id,
-                    candidatePatchSetId:
-                      input.incomingDispatch!.candidatePatchSet.id,
-                    dispatchToken: input.incomingDispatch!.dispatchToken,
+                    candidatePatchSetId: incomingDispatch.candidatePatchSet.id,
+                    dispatchToken: incomingDispatch.dispatchToken,
                     sandboxId,
                     traceId: input.workflowStart.workflowRun.traceId,
                     operation:
@@ -261,9 +269,9 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
 
     const sandboxExecution = yield* storage.recordSandboxExecution({
       workflowRunId: input.workflowStart.workflowRun.id,
-      ...(input.incomingDispatch === undefined
+      ...(incomingDispatch === undefined
         ? {}
-        : { incomingDispatchToken: input.incomingDispatch.dispatchToken }),
+        : { incomingDispatchToken: incomingDispatch.dispatchToken }),
       provider: result.provider,
       sandboxId: result.sandboxId,
       command: result.command,
@@ -290,14 +298,14 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
       })
     }
 
-    if (shouldCaptureAsArtifact(result.stderr)) {
+    if (result.stderr !== undefined && shouldCaptureAsArtifact(result.stderr)) {
       yield* CaptureEvidenceArtifact({
         workflowRunId: input.workflowStart.workflowRun.id,
         traceId: input.workflowStart.workflowRun.traceId,
         kind: 'stderr',
         label: 'Sandbox stderr',
         contentType: 'text/plain',
-        body: result.stderr!,
+        body: result.stderr,
         retentionPolicy: 'alpha-14d',
       })
     }
@@ -396,9 +404,9 @@ export const RunSandboxCommandForWorkflow = Effect.fn(
     Effect.tapCause(() =>
       storage.markWorkflowExecutionFailed({
         workflowRunId: input.workflowStart.workflowRun.id,
-        ...(input.incomingDispatch === undefined
+        ...(incomingDispatch === undefined
           ? {}
-          : { incomingDispatchToken: input.incomingDispatch.dispatchToken }),
+          : { incomingDispatchToken: incomingDispatch.dispatchToken }),
         summary: 'Workflow execution failed after the attempt was claimed.',
         traceId: input.workflowStart.workflowRun.traceId,
         operation: 'runSandboxCommandForWorkflow.markExecutionFailed',

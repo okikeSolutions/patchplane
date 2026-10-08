@@ -28,7 +28,9 @@ export const ConvexStoragePlugin = {
       }
       const workflow = makeWorkflowStorageOperations(context)
       return StorageService.of({
-        createWorkflowFromIntake: workflow.createWorkflowFromPrompt,
+        createWorkflowFromIntake: Effect.fn(
+          'ConvexStoragePlugin.createWorkflowFromIntake',
+        )(workflow.createWorkflowFromPrompt),
         ...workflow,
         ...makeRuntimeStorageOperations(context),
         ...makeCandidatesStorageOperations(context),

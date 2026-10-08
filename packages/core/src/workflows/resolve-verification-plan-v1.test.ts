@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { NodeCrypto } from '@effect/platform-node'
-import { describe, expect, it } from 'vitest'
+import { WorkflowStateError } from '@patchplane/domain/errors'
+import { describe, expect, it } from '@effect/vitest'
 import { makeWorkflowRunId, makeWorkspaceId } from '@patchplane/domain/ids'
 import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { ResolveVerificationPlanV1 } from './resolve-verification-plan-v1'
@@ -17,60 +18,63 @@ const requirement = (key: string, command: string) => ({
 })
 
 describe('ResolveVerificationPlanV1', () => {
-  it('keeps system requirements non-negotiable and applies workspace before repository precedence', async () => {
-    const plan = await Effect.runPromise(
-      ResolveVerificationPlanV1({
-        workflowRunId: makeWorkflowRunId('run_plan'),
-        system: {
-          source: { kind: 'deployment-system', revision: 'system-v1' },
-          requirements: [requirement('test', 'bun test')],
-        },
-        workspace: {
-          source: {
-            kind: 'workspace-policy',
-            workspaceId: makeWorkspaceId('workos:org_123'),
-            revision: 'workspace-v2',
+  it.effect(
+    'keeps system requirements non-negotiable and applies workspace before repository precedence',
+    () =>
+      Effect.gen(function* () {
+        const plan = yield* ResolveVerificationPlanV1({
+          workflowRunId: makeWorkflowRunId('run_plan'),
+          system: {
+            source: { kind: 'deployment-system', revision: 'system-v1' },
+            requirements: [requirement('test', 'bun test')],
           },
-          requirements: [
-            requirement('test', 'attacker override'),
-            requirement('lint', 'bun lint'),
-          ],
-        },
-        baseRepository: {
-          source: {
-            kind: 'base-repository-policy',
-            repositoryFullName: 'octo/demo',
-            baseSha: makeGitCommitSha('a'.repeat(40)),
-            revision: 'base:abc123',
+          workspace: {
+            source: {
+              kind: 'workspace-policy',
+              workspaceId: makeWorkspaceId('workos:org_123'),
+              revision: 'workspace-v2',
+            },
+            requirements: [
+              requirement('test', 'attacker override'),
+              requirement('lint', 'bun lint'),
+            ],
           },
-          requirements: [
-            requirement('lint', 'weaker lint'),
-            requirement('build', 'bun build'),
-          ],
-        },
-        createdAt: 1,
+          baseRepository: {
+            source: {
+              kind: 'base-repository-policy',
+              repositoryFullName: 'octo/demo',
+              baseSha: makeGitCommitSha('a'.repeat(40)),
+              revision: 'base:abc123',
+            },
+            requirements: [
+              requirement('lint', 'weaker lint'),
+              requirement('build', 'bun build'),
+            ],
+          },
+          createdAt: 1,
+        })
+
+        expect(
+          plan.requirements.map(({ key, command }) => ({ key, command })),
+        ).toEqual([
+          { key: 'test', command: 'bun test' },
+          { key: 'lint', command: 'bun lint' },
+          { key: 'build', command: 'bun build' },
+        ])
+        expect(plan.digest).toMatch(/^sha256:[0-9a-f]{64}$/)
+        expect(plan.sources.map((source) => source.kind)).toEqual([
+          'deployment-system',
+          'workspace-policy',
+          'base-repository-policy',
+        ])
       }).pipe(Effect.provide(NodeCrypto.layer)),
-    )
+  )
 
-    expect(
-      plan.requirements.map(({ key, command }) => ({ key, command })),
-    ).toEqual([
-      { key: 'test', command: 'bun test' },
-      { key: 'lint', command: 'bun lint' },
-      { key: 'build', command: 'bun build' },
-    ])
-    expect(plan.digest).toMatch(/^sha256:[0-9a-f]{64}$/)
-    expect(plan.sources.map((source) => source.kind)).toEqual([
-      'deployment-system',
-      'workspace-policy',
-      'base-repository-policy',
-    ])
-  })
-
-  it('rejects duplicates within a source and plans over the bounded maximum', async () => {
-    await expect(
-      Effect.runPromise(
-        ResolveVerificationPlanV1({
+  it.effect(
+    'rejects duplicates within a source and plans over the bounded maximum',
+    () =>
+      Effect.gen(function* () {
+        const duplicateError = yield* ResolveVerificationPlanV1({
           workflowRunId: makeWorkflowRunId('run_duplicate'),
           system: {
             source: { kind: 'deployment-system', revision: 'system-v1' },
@@ -80,13 +84,10 @@ describe('ResolveVerificationPlanV1', () => {
             ],
           },
           createdAt: 1,
-        }).pipe(Effect.provide(NodeCrypto.layer)),
-      ),
-    ).rejects.toThrow('Trusted verification plan is invalid')
+        }).pipe(Effect.flip)
+        expect(duplicateError).toBeInstanceOf(WorkflowStateError)
 
-    await expect(
-      Effect.runPromise(
-        ResolveVerificationPlanV1({
+        const limitError = yield* ResolveVerificationPlanV1({
           workflowRunId: makeWorkflowRunId('run_too_many'),
           system: {
             source: { kind: 'deployment-system', revision: 'system-v1' },
@@ -95,8 +96,8 @@ describe('ResolveVerificationPlanV1', () => {
             ),
           },
           createdAt: 1,
-        }).pipe(Effect.provide(NodeCrypto.layer)),
-      ),
-    ).rejects.toThrow('exceeds pre-decode limits')
-  })
+        }).pipe(Effect.flip)
+        expect(limitError).toBeInstanceOf(WorkflowStateError)
+      }).pipe(Effect.provide(NodeCrypto.layer)),
+  )
 })

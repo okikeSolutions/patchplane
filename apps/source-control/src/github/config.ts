@@ -15,20 +15,20 @@ const PATCHPLANE_DEFAULT_AGENT_THINKING = 'low'
 
 const SourceControlRouteConfigEnvironment = Config.all({
   convexUrl: Config.all({
-    canonical: Config.option(Config.url('CONVEX_URL')),
-    legacy: Config.option(Config.url('VITE_CONVEX_URL')),
+    canonical: Config.option(Config.URL('CONVEX_URL')),
+    legacy: Config.option(Config.URL('VITE_CONVEX_URL')),
   }),
-  systemIngestionSecret: Config.redacted(
+  systemIngestionSecret: Config.Redacted(
     'PATCHPLANE_SYSTEM_INGESTION_SECRET',
   ).pipe(Config.withDefault(Redacted.make(''))),
-  repositoryAllowlist: Config.string('PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES'),
-  githubWorkspaceId: Config.string('PATCHPLANE_GITHUB_WORKSPACE_ID').pipe(
+  repositoryAllowlist: Config.String('PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES'),
+  githubWorkspaceId: Config.String('PATCHPLANE_GITHUB_WORKSPACE_ID').pipe(
     Config.withDefault(''),
   ),
-  workosOrganizationId: Config.string('PATCHPLANE_WORKOS_ORGANIZATION_ID').pipe(
+  workosOrganizationId: Config.String('PATCHPLANE_WORKOS_ORGANIZATION_ID').pipe(
     Config.withDefault(''),
   ),
-  piProvider: Config.string('PATCHPLANE_PI_PROVIDER').pipe(
+  piProvider: Config.String('PATCHPLANE_PI_PROVIDER').pipe(
     Config.withDefault(''),
   ),
   piModel: Config.schema(Schema.NonEmptyString, 'PATCHPLANE_PI_MODEL').pipe(
@@ -38,42 +38,43 @@ const SourceControlRouteConfigEnvironment = Config.all({
     Schema.NonEmptyString,
     'PATCHPLANE_PI_THINKING',
   ).pipe(Config.withDefault(PATCHPLANE_DEFAULT_AGENT_THINKING)),
-  piMode: Config.literals(['json', 'rpc'], 'PATCHPLANE_PI_MODE').pipe(
+  piMode: Config.Literals(['json', 'rpc'], 'PATCHPLANE_PI_MODE').pipe(
     Config.withDefault('json'),
   ),
-  webhookExecution: Config.literals(
+  webhookExecution: Config.Literals(
     ['daytona-command', 'daytona-pi'],
     'PATCHPLANE_GITHUB_WEBHOOK_EXECUTION',
   ).pipe(Config.withDefault('daytona-pi')),
-  evidenceTestReportCommand: Config.string(
+  evidenceTestReportCommand: Config.String(
     'PATCHPLANE_EVIDENCE_TEST_REPORT_COMMAND',
   ).pipe(Config.withDefault('')),
-  evidenceTestPlatform: Config.literals(
+  evidenceTestPlatform: Config.Literals(
     ['linux', 'macos', 'windows'],
     'PATCHPLANE_EVIDENCE_TEST_PLATFORM',
   ).pipe(Config.withDefault('linux')),
-  evidenceBrowserScreenshotCommand: Config.string(
+  evidenceBrowserScreenshotCommand: Config.String(
     'PATCHPLANE_EVIDENCE_BROWSER_SCREENSHOT_COMMAND',
   ).pipe(Config.withDefault('')),
-  workspaceVerificationPolicyJson: Config.string(
+  workspaceVerificationPolicyJson: Config.String(
     'PATCHPLANE_WORKSPACE_VERIFICATION_POLICY_JSON',
   ).pipe(Config.withDefault('')),
-  baseRepositoryVerificationPolicyJson: Config.string(
+  baseRepositoryVerificationPolicyJson: Config.String(
     'PATCHPLANE_BASE_REPOSITORY_VERIFICATION_POLICY_JSON',
   ).pipe(Config.withDefault('')),
-  cloudflareApiKey: Config.option(Config.redacted('CLOUDFLARE_API_KEY')),
-  cloudflareAccountId: Config.string('CLOUDFLARE_ACCOUNT_ID').pipe(
+  cloudflareApiKey: Config.option(Config.Redacted('CLOUDFLARE_API_KEY')),
+  cloudflareAccountId: Config.String('CLOUDFLARE_ACCOUNT_ID').pipe(
     Config.withDefault(''),
   ),
-  cloudflareGatewayId: Config.string('CLOUDFLARE_GATEWAY_ID').pipe(
-    Config.orElse(() => Config.string('PATCHPLANE_AI_GATEWAY_ID')),
+  cloudflareGatewayId: Config.String('CLOUDFLARE_GATEWAY_ID').pipe(
+    Config.orElse(() => Config.String('PATCHPLANE_AI_GATEWAY_ID')),
     Config.withDefault(''),
   ),
 })
 
-class SourceControlConfigError extends Schema.ErrorClass<SourceControlConfigError>(
+class SourceControlConfigError extends Schema.TaggedError<SourceControlConfigError>()(
   'SourceControlConfigError',
-)({ message: Schema.String }) {}
+  { message: Schema.String },
+) {}
 
 function configEnv(env: WorkerEnv) {
   return Object.fromEntries(
@@ -115,8 +116,8 @@ export const loadSourceControlRouteConfig = Effect.fnUntraced(function* (
 export type SourceControlRouteConfig =
   ReturnType<typeof loadSourceControlRouteConfig> extends Effect.Effect<
     infer A,
-    any,
-    any
+    infer _Error,
+    infer _Services
   >
     ? A
     : never

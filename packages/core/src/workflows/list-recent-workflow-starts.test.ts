@@ -9,6 +9,10 @@ import { Effect, Layer, Option } from 'effect'
 import { StorageService } from '../services/storage-service'
 import { ListRecentWorkflowStarts } from './list-recent-workflow-starts'
 
+let storageInput:
+  | { readonly workspaceId: string; readonly limit?: number | undefined }
+  | undefined
+
 const TestStorageLayer = Layer.succeed(
   StorageService,
   StorageService.of({
@@ -45,39 +49,45 @@ const TestStorageLayer = Layer.succeed(
     recordPublicationResult: () => Effect.die('unused'),
     recordProvenanceEvent: () => Effect.die('unused'),
     listRecentWorkflowStarts: (input) =>
-      Effect.succeed([
-        {
-          promptRequest: {
-            id: makePromptRequestId('prompt-1'),
-            workspaceId: input.workspaceId,
-            actorId: makeSystemActorId('actor-1'),
-            traceId: 'trace-1',
-            source: 'dev',
-            prompt: 'Fix the bug',
-            status: 'created',
-            createdAt: 1,
+      Effect.sync(() => {
+        storageInput = input
+        return [
+          {
+            promptRequest: {
+              id: makePromptRequestId('prompt-1'),
+              workspaceId: input.workspaceId,
+              actorId: makeSystemActorId('actor-1'),
+              traceId: 'trace-1',
+              source: 'dev',
+              prompt: 'Fix the bug',
+              status: 'created',
+              createdAt: 1,
+            },
+            workflowRun: {
+              id: makeWorkflowRunId('workflow-1'),
+              promptRequestId: makePromptRequestId('prompt-1'),
+              workspaceId: input.workspaceId,
+              traceId: 'trace-1',
+              status: 'queued',
+              createdAt: 1,
+            },
           },
-          workflowRun: {
-            id: makeWorkflowRunId('workflow-1'),
-            promptRequestId: makePromptRequestId('prompt-1'),
-            workspaceId: input.workspaceId,
-            traceId: 'trace-1',
-            status: 'queued',
-            createdAt: 1,
-          },
-        },
-      ]),
+        ]
+      }),
   }),
 )
 
 describe('ListRecentWorkflowStarts', () => {
   it.effect('reads recent workflow starts through StorageService', () =>
     Effect.gen(function* () {
+      storageInput = undefined
+      const workspaceId = makeSystemWorkspaceId('workspace-1')
       const result = yield* ListRecentWorkflowStarts({
-        workspaceId: makeSystemWorkspaceId('workspace-1'),
+        workspaceId,
         limit: 5,
       })
 
+      expect(storageInput).toEqual({ workspaceId, limit: 5 })
       expect(result).toHaveLength(1)
       expect(result[0]?.promptRequest.id).toBe('prompt-1')
       expect(result[0]?.workflowRun.status).toBe('queued')

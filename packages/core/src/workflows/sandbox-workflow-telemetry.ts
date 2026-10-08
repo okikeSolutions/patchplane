@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import type { CandidatePatchSet } from '@patchplane/domain/decision-review'
 import type { TelemetryContextFields } from '../services/telemetry-service'
 import {
@@ -68,14 +68,10 @@ export function withVerificationTransition<A, E, R>(
 }
 
 function candidateBreadcrumbStatus(status: CandidatePatchSet['status']) {
-  switch (status) {
-    case 'captured':
-      return criticalPathBreadcrumbStatuses.succeeded
-    case 'empty':
-      return criticalPathBreadcrumbStatuses.blocked
-    case 'failed':
-      return criticalPathBreadcrumbStatuses.failed
-    default:
-      return status satisfies never
-  }
+  return Match.value(status).pipe(
+    Match.when('captured', () => criticalPathBreadcrumbStatuses.succeeded),
+    Match.when('empty', () => criticalPathBreadcrumbStatuses.blocked),
+    Match.when('failed', () => criticalPathBreadcrumbStatuses.failed),
+    Match.exhaustive,
+  )
 }

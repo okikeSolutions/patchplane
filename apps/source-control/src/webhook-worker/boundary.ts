@@ -161,12 +161,13 @@ function hex(bytes: Uint8Array) {
   )
 }
 
-class WebhookWorkerBoundaryError extends Schema.ErrorClass<WebhookWorkerBoundaryError>(
+class WebhookWorkerBoundaryError extends Schema.TaggedError<WebhookWorkerBoundaryError>()(
   'WebhookWorkerBoundaryError',
-)({
-  operation: Schema.String,
-  cause: Schema.Defect(),
-}) {}
+  {
+    operation: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
 export const boundaryError = (operation: string, cause: unknown) =>
   new WebhookWorkerBoundaryError({ operation, cause })
@@ -226,7 +227,7 @@ function timingSafeEqual(left: Uint8Array, right: Uint8Array) {
 
 const streamReadDeadlineMs = 30_000
 
-const readBoundedStream = Effect.fnUntraced(function* (
+export const readBoundedStream = Effect.fnUntraced(function* (
   reader: ReadableStreamDefaultReader<Uint8Array>,
   limit: number,
   operation: string,
@@ -270,7 +271,14 @@ const readBoundedStream = Effect.fnUntraced(function* (
       ),
     (ownedReader) =>
       Effect.sync(() => {
-        void ownedReader.cancel().catch(() => undefined)
+        // A native cancel may wait on a pull that never settles; finalization must stay bounded.
+        let cancellation: Promise<void> | undefined
+        try {
+          cancellation = ownedReader.cancel()
+        } finally {
+          ownedReader.releaseLock()
+        }
+        void cancellation?.catch(() => undefined)
       }),
   )
 })

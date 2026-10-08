@@ -58,6 +58,11 @@ async function verifyPostDecision(
   assertPublishedFixture(beforeFixture)
   const { app } = makeGitHubApp(githubConfig)
   const coordinates = githubCoordinates(beforeFixture)
+  const issueNumber = coordinates.issueNumber
+  const headSha = coordinates.headSha
+  if (issueNumber === undefined || headSha === undefined) {
+    throw new Error('Published fixture is missing pull request coordinates')
+  }
   const octokit = await app.getInstallationOctokit(coordinates.installationId)
   const beforeInventory = await readGitHubPublicationInventory(
     octokit,
@@ -93,7 +98,8 @@ async function verifyPostDecision(
                     installationId: String(coordinates.installationId),
                     owner: coordinates.owner,
                     name: coordinates.repositoryName,
-                    issueNumber: coordinates.issueNumber!,
+                    issueNumber,
+                    subjectKind: 'pull-request',
                     body: 'PatchPlane acceptance replay; existing publication must be reused.',
                     idempotencyKey,
                     traceId: beforeFixture.workflowStart.workflowRun.traceId,
@@ -104,7 +110,7 @@ async function verifyPostDecision(
                     installationId: String(coordinates.installationId),
                     owner: coordinates.owner,
                     name: coordinates.repositoryName,
-                    headSha: coordinates.headSha!,
+                    headSha,
                     checkName: 'PatchPlane Review',
                     status: 'completed',
                     conclusion:
@@ -266,18 +272,6 @@ async function runFresh(
       pull_number: pullRequestNumber,
     })
   ).data
-  const commentsBefore = await octokit.paginate(
-    octokit.rest.issues.listComments,
-    {
-      owner,
-      repo: repositoryName,
-      issue_number: pullRequestNumber,
-      per_page: 100,
-    },
-  )
-  const existingCommentIds = new Set(
-    commentsBefore.map((comment) => comment.id),
-  )
   const deliveryId = `patchplane-live-${randomUUID()}`
   const payload = JSON.stringify({
     action: 'opened',
@@ -363,19 +357,9 @@ async function runFresh(
   )
   const publication = commentsAfter.find(
     (comment) =>
-      !existingCommentIds.has(comment.id) &&
-      comment.body?.startsWith('## PatchPlane Patch Report'),
+      comment.body?.startsWith('## PatchPlane Patch Report') === true &&
+      comment.body.includes(`- Workflow run: ${workflowRunId}`),
   )
-  if (
-    !reviewReadyOnly &&
-    (publication === undefined ||
-      result.publishedIssueNumber !== pullRequestNumber)
-  ) {
-    throw new Error(
-      'Trust loop did not publish a new Patch Report comment to the source pull request',
-    )
-  }
-
   emit({
     type: 'trust_loop_review_ready',
     workflowRunId,

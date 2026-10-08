@@ -1,4 +1,4 @@
-import { Clock, Effect, Queue, Schedule, Schema, Stream } from 'effect'
+import { Cause, Clock, Effect, Queue, Schedule, Schema, Stream } from 'effect'
 import { SandboxError } from '@patchplane/domain/errors'
 import { ProviderProcessId } from '@patchplane/domain/refinements'
 import { sanitizeDaytonaCause } from './daytona-redaction'
@@ -68,7 +68,7 @@ export interface DaytonaCommandSandbox {
   }
 }
 
-export class DaytonaProcessError extends Schema.TaggedErrorClass<DaytonaProcessError>()(
+export class DaytonaProcessError extends Schema.TaggedError<DaytonaProcessError>()(
   'DaytonaProcessError',
   {
     operation: Schema.String,
@@ -145,29 +145,78 @@ export function streamSandboxSessionCommandLogs(
   sandbox: DaytonaCommandSandbox,
   sessionId: string,
   commandId: string,
+  maxOutputBytes = 1_048_576,
 ): Stream.Stream<DaytonaLogChunk, DaytonaProcessError> {
-  return Stream.callback<DaytonaLogChunk, DaytonaProcessError>((queue) =>
-    Effect.tryPromise({
-      try: () =>
-        settleWithin(
-          sandbox.process.getSessionCommandLogs?.(
-            sessionId,
-            commandId,
-            (chunk) => Queue.offerUnsafe(queue, { stream: 'stdout', chunk }),
-            (chunk) => Queue.offerUnsafe(queue, { stream: 'stderr', chunk }),
-          ) ??
-            Promise.reject(
-              new Error(
-                'Daytona getSessionCommandLogs streaming is unavailable',
-              ),
+  return Stream.callback<DaytonaLogChunk, DaytonaProcessError>(
+    (queue) => {
+      const encoder = new TextEncoder()
+      let streamedBytes = 0
+      let ended = false
+      const offer = (stream: 'stdout' | 'stderr', chunk: string) => {
+        if (ended) return
+        const remainingBytes = maxOutputBytes - streamedBytes
+        if (chunk.length > remainingBytes) {
+          ended = true
+          Queue.failCauseUnsafe(
+            queue,
+            Cause.fail(
+              new DaytonaProcessError({
+                operation: 'daytona.getSessionCommandLogs.stream.limit',
+                message: 'Daytona streaming logs exceeded their trusted bound',
+                cause: { maxOutputBytes },
+              }),
             ),
-          30_000,
+          )
+          return
+        }
+        streamedBytes += encoder.encode(chunk).byteLength
+        if (
+          streamedBytes > maxOutputBytes ||
+          !Queue.offerUnsafe(queue, { stream, chunk })
+        ) {
+          ended = true
+          Queue.failCauseUnsafe(
+            queue,
+            Cause.fail(
+              new DaytonaProcessError({
+                operation: 'daytona.getSessionCommandLogs.stream.limit',
+                message: 'Daytona streaming logs exceeded their trusted bound',
+                cause: { maxOutputBytes },
+              }),
+            ),
+          )
+        }
+      }
+      return Effect.tryPromise({
+        try: () =>
+          settleWithin(
+            sandbox.process.getSessionCommandLogs?.(
+              sessionId,
+              commandId,
+              (chunk) => offer('stdout', chunk),
+              (chunk) => offer('stderr', chunk),
+            ) ??
+              Promise.reject(
+                new Error(
+                  'Daytona getSessionCommandLogs streaming is unavailable',
+                ),
+              ),
+            30_000,
+          ),
+        catch: processError(
+          'daytona.getSessionCommandLogs.stream',
+          'Daytona failed to stream async command logs',
         ),
-      catch: processError(
-        'daytona.getSessionCommandLogs.stream',
-        'Daytona failed to stream async command logs',
-      ),
-    }).pipe(Effect.ensuring(Effect.sync(() => Queue.endUnsafe(queue)))),
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            ended = true
+            Queue.endUnsafe(queue)
+          }),
+        ),
+      )
+    },
+    { bufferSize: 256, strategy: 'dropping' },
   )
 }
 

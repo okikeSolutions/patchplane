@@ -7,18 +7,23 @@ export function formatSandboxResultComment(input: {
   readonly maxOutputLength?: number
 }) {
   const execution = input.sandboxExecution
-  const status = execution.status === 'succeeded' ? 'sandbox execution completed' : 'sandbox execution failed'
+  const status =
+    execution.status === 'succeeded'
+      ? 'sandbox execution completed'
+      : 'sandbox execution failed'
   const maxOutputLength = input.maxOutputLength ?? 5000
-  const truncatedOutput = execution.stdout.length <= maxOutputLength
-    ? execution.stdout
-    : `${execution.stdout.slice(0, maxOutputLength)}\n\n…truncated…`
+  const truncatedOutput =
+    execution.stdout.length <= maxOutputLength
+      ? execution.stdout
+      : `${execution.stdout.slice(0, maxOutputLength)}\n\n…truncated…`
   const externalRef = input.workflowStart.promptRequest.externalRef
   const repository = externalRef?.repositoryFullName ?? 'unknown'
-  const sourceRef = externalRef?.pullRequestNumber !== undefined
-    ? `PR #${externalRef.pullRequestNumber}`
-    : externalRef?.issueNumber !== undefined
-    ? `Issue #${externalRef.issueNumber}`
-    : 'unknown'
+  const sourceRef =
+    externalRef?.pullRequestNumber !== undefined
+      ? `PR #${externalRef.pullRequestNumber}`
+      : externalRef?.issueNumber !== undefined
+        ? `Issue #${externalRef.issueNumber}`
+        : 'unknown'
 
   return [
     '## PatchPlane Patch Report',

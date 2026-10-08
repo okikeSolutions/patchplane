@@ -99,6 +99,7 @@ export const ClaimIncomingPullRequestDispatch = Effect.fn(
 )(function* (input: {
   readonly workflowStart: WorkflowStart
   readonly candidatePatchSet: CandidatePatchSet
+  readonly dispatchToken?: string | undefined
 }) {
   if (!candidateMatchesWorkflow(input.workflowStart, input.candidatePatchSet)) {
     return yield* new WorkflowStateError({
@@ -135,7 +136,8 @@ export const ClaimIncomingPullRequestDispatch = Effect.fn(
   })
   if (Option.isNone(evidence)) {
     return yield* new WorkflowStateError({
-      message: 'Incoming PR dispatch candidate artifact is not durably persisted',
+      message:
+        'Incoming PR dispatch candidate artifact is not durably persisted',
     })
   }
   const artifact = evidence.value
@@ -148,7 +150,12 @@ export const ClaimIncomingPullRequestDispatch = Effect.fn(
       operation: 'claimIncomingPullRequestDispatch.getArtifactMetadata',
     })
     .pipe(Effect.option)
-  const expectedDigest = durableCandidate.value.candidateDigest!
+  const expectedDigest = durableCandidate.value.candidateDigest
+  if (expectedDigest === undefined) {
+    return yield* new WorkflowStateError({
+      message: 'Incoming PR dispatch candidate has no frozen digest',
+    })
+  }
   if (
     artifact.id !== artifactId ||
     artifact.workflowRunId !== workflowRun.id ||
@@ -168,8 +175,10 @@ export const ClaimIncomingPullRequestDispatch = Effect.fn(
         'Incoming PR dispatch candidate artifact is missing or inconsistent',
     })
   }
+
   const crypto = yield* Crypto.Crypto
-  const dispatchToken = hex(yield* crypto.randomBytes(16))
+  const dispatchToken =
+    input.dispatchToken ?? hex(yield* crypto.randomBytes(16))
   const claimed = yield* withAttemptClaimTransition(
     {
       traceId: workflowRun.traceId,
@@ -217,6 +226,12 @@ export const FreezeIncomingPullRequestCandidate = Effect.fn(
         'Incoming pull request candidate freeze requires complete immutable workflow identity',
     })
   }
+
+  const installationId = externalRef.repositoryInstallationId
+  const owner = externalRef.repositoryOwner
+  const name = externalRef.repositoryName
+  const baseSha = workflowRun.sourceBaseSha
+  const headSha = workflowRun.sourceCommitSha
 
   const storage = yield* StorageService
   const existing = yield* storage.getCandidatePatchSetForWorkflow({
@@ -274,11 +289,11 @@ export const FreezeIncomingPullRequestCandidate = Effect.fn(
     const sourceControl = yield* SourceControlService
     const comparison = yield* sourceControl.fetchImmutableComparison({
       provider: 'github',
-      installationId: externalRef.repositoryInstallationId!,
-      owner: externalRef.repositoryOwner!,
-      name: externalRef.repositoryName!,
-      baseSha: workflowRun.sourceBaseSha!,
-      headSha: workflowRun.sourceCommitSha!,
+      installationId,
+      owner,
+      name,
+      baseSha,
+      headSha,
       maxBytes: incomingPullRequestComparisonMaxBytes,
       timeoutMilliseconds: 30_000,
       traceId: workflowRun.traceId,

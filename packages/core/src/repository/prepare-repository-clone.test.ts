@@ -16,6 +16,7 @@ const SourceControlTestLayer = Layer.succeed(
   SourceControlService.of({
     verifyRepositoryAccess: () => Effect.die('unused'),
     getInstallationAccount: () => Effect.die('unused'),
+    verifyGitHubInstallationOwnership: () => Effect.die('unused'),
     listInstallationRepositories: () => Effect.die('unused'),
     createIssueComment: () => Effect.die('unused'),
     createCheckRun: () => Effect.die('unused'),

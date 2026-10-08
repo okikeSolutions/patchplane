@@ -1,15 +1,12 @@
 import { Schema } from 'effect'
 
-export class AuthError extends Schema.TaggedErrorClass<AuthError>()(
-  'AuthError',
-  {
-    operation: Schema.String,
-    message: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {}
+export class AuthError extends Schema.TaggedError<AuthError>()('AuthError', {
+  operation: Schema.String,
+  message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
 
-export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
+export class StorageError extends Schema.TaggedError<StorageError>()(
   'StorageError',
   {
     operation: Schema.String,
@@ -18,7 +15,7 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
   },
 ) {}
 
-export class GitHubError extends Schema.TaggedErrorClass<GitHubError>()(
+export class GitHubError extends Schema.TaggedError<GitHubError>()(
   'GitHubError',
   {
     operation: Schema.String,
@@ -27,14 +24,16 @@ export class GitHubError extends Schema.TaggedErrorClass<GitHubError>()(
   },
 ) {}
 
-export class SourceControlError
-  extends Schema.TaggedErrorClass<SourceControlError>()('SourceControlError', {
+export class SourceControlError extends Schema.TaggedError<SourceControlError>()(
+  'SourceControlError',
+  {
     operation: Schema.String,
     message: Schema.String,
     cause: Schema.Defect(),
-  }) {}
+  },
+) {}
 
-export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
+export class SandboxError extends Schema.TaggedError<SandboxError>()(
   'SandboxError',
   {
     operation: Schema.String,
@@ -43,7 +42,7 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
   },
 ) {}
 
-export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
+export class ArtifactsError extends Schema.TaggedError<ArtifactsError>()(
   'ArtifactsError',
   {
     operation: Schema.String,
@@ -52,7 +51,7 @@ export class ArtifactsError extends Schema.TaggedErrorClass<ArtifactsError>()(
   },
 ) {}
 
-export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
+export class TelemetryError extends Schema.TaggedError<TelemetryError>()(
   'TelemetryError',
   {
     operation: Schema.String,
@@ -61,12 +60,14 @@ export class TelemetryError extends Schema.TaggedErrorClass<TelemetryError>()(
   },
 ) {}
 
-export class WorkflowStateError
-  extends Schema.TaggedErrorClass<WorkflowStateError>()('WorkflowStateError', {
+export class WorkflowStateError extends Schema.TaggedError<WorkflowStateError>()(
+  'WorkflowStateError',
+  {
     message: Schema.String,
-  }) {}
+  },
+) {}
 
-export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()(
+export class ValidationError extends Schema.TaggedError<ValidationError>()(
   'ValidationError',
   {
     message: Schema.String,
@@ -86,28 +87,34 @@ export function publicErrorMessage(
     seen.add(cause)
   }
 
-  const messageValue: unknown = typeof cause === 'object' && cause !== null
-    ? Reflect.get(cause, 'message')
-    : undefined
-  const nameValue: unknown = typeof cause === 'object' && cause !== null
-    ? Reflect.get(cause, 'name')
-    : undefined
-  const tagValue: unknown = typeof cause === 'object' && cause !== null
-    ? Reflect.get(cause, '_tag')
-    : undefined
-  const nestedCause: unknown = typeof cause === 'object' && cause !== null
-    ? Reflect.get(cause, 'cause')
-    : undefined
-  const message = cause instanceof Error
-    ? cause.message
-    : typeof messageValue === 'string'
-    ? messageValue
-    : undefined
+  const messageValue: unknown =
+    typeof cause === 'object' && cause !== null
+      ? Reflect.get(cause, 'message')
+      : undefined
+  const nameValue: unknown =
+    typeof cause === 'object' && cause !== null
+      ? Reflect.get(cause, 'name')
+      : undefined
+  const tagValue: unknown =
+    typeof cause === 'object' && cause !== null
+      ? Reflect.get(cause, '_tag')
+      : undefined
+  const nestedCause: unknown =
+    typeof cause === 'object' && cause !== null
+      ? Reflect.get(cause, 'cause')
+      : undefined
+  const message =
+    cause instanceof Error
+      ? cause.message
+      : typeof messageValue === 'string'
+        ? messageValue
+        : undefined
   const name = typeof nameValue === 'string' ? nameValue : undefined
   const tag = typeof tagValue === 'string' ? tagValue : undefined
-  const nestedMessage = nestedCause === undefined
-    ? undefined
-    : publicErrorMessage(nestedCause, fallback, seen)
+  const nestedMessage =
+    nestedCause === undefined
+      ? undefined
+      : publicErrorMessage(nestedCause, fallback, seen)
 
   if (tag === 'ConfigError') {
     return 'PatchPlane server configuration is incomplete. Check CONVEX_URL or VITE_CONVEX_URL and WorkOS server environment variables.'

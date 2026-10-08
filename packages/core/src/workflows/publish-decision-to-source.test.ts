@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Layer, Option } from 'effect'
+import { Crypto, Deferred, Effect, Fiber, Layer, Option } from 'effect'
 import { makePullRequestNumber } from '@patchplane/domain/candidate-subject'
 import {
   makeCandidatePatchSetId,
@@ -18,7 +18,18 @@ import { makeGitCommitSha } from '@patchplane/domain/refinements'
 import { SourceControlService } from '../services/source-control-service'
 import { StorageService } from '../services/storage-service'
 import { TelemetryService } from '../services/telemetry-service'
-import { PublishDecisionToSource } from './publish-decision-to-source'
+import {
+  makePublicationDispatchToken,
+  PublishDecisionToSource,
+} from './publish-decision-to-source'
+
+const cryptoLayer = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => new Uint8Array(size).fill(0xab),
+    digest: () => Effect.succeed(new Uint8Array(32)),
+  }),
+)
 
 const workflowRunId = makeWorkflowRunId('run-1')
 const baseSha = makeGitCommitSha('a'.repeat(40))
@@ -107,6 +118,81 @@ const humanDecision = {
 
 describe('PublishDecisionToSource', () => {
   it.effect(
+    'preserves the same pending fence when cancellation interrupts a claimed provider call',
+    () => {
+      const pendingTokens: string[] = []
+      return Effect.gen(function* () {
+        const providerStarted = yield* Deferred.make<void>()
+        const sourceControlLayer = Layer.mock(SourceControlService, {
+          createIssueComment: () =>
+            Effect.andThen(
+              Deferred.succeed(providerStarted, undefined),
+              Effect.never,
+            ),
+        })
+        const storageLayer = Layer.mock(StorageService, {
+          recordPublicationResult: (input) =>
+            Effect.sync(() => {
+              if (
+                input.status === 'pending' &&
+                input.dispatchToken !== undefined
+              ) {
+                pendingTokens.push(input.dispatchToken)
+              }
+              return {
+                id: makePublicationResultId(
+                  `publication-${pendingTokens.length}`,
+                ),
+                ...input,
+                createdAt: input.createdAt ?? 1,
+              }
+            }),
+        })
+        const fiber = yield* Effect.forkChild(
+          PublishDecisionToSource({
+            traceId: 'trace-cancelled-publication',
+            workflowStart,
+            humanDecision,
+          }).pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                sourceControlLayer,
+                storageLayer,
+                telemetryLayer,
+                cryptoLayer,
+              ),
+            ),
+          ),
+        )
+
+        yield* Deferred.await(providerStarted)
+        yield* Fiber.interrupt(fiber)
+
+        expect(pendingTokens).toHaveLength(2)
+        expect(pendingTokens[0]).toBe(pendingTokens[1])
+      })
+    },
+  )
+
+  it.effect(
+    'generates a unique fenced token for each publication attempt',
+    () => {
+      let next = 0
+      const crypto = Crypto.make({
+        randomBytes: (size) => new Uint8Array(size).fill(++next),
+        digest: () => Effect.succeed(new Uint8Array(32)),
+      })
+      return Effect.gen(function* () {
+        const first = yield* makePublicationDispatchToken()
+        const second = yield* makePublicationDispatchToken()
+        assert.notStrictEqual(first, second)
+        assert.strictEqual(first.length, 32)
+        assert.strictEqual(second.length, 32)
+      }).pipe(Effect.provideService(Crypto.Crypto, crypto))
+    },
+  )
+
+  it.effect(
     'publishes a decision comment and check run, then records publication provenance',
     () =>
       Effect.gen(function* () {
@@ -126,6 +212,7 @@ describe('PublishDecisionToSource', () => {
           SourceControlService.of({
             verifyRepositoryAccess: () => Effect.die('unused'),
             getInstallationAccount: () => Effect.die('unused'),
+            verifyGitHubInstallationOwnership: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createRepositoryCloneCredentials: () => Effect.die('unused'),
             fetchImmutableComparison: () => Effect.die('unused'),
@@ -289,7 +376,12 @@ describe('PublishDecisionToSource', () => {
           candidatePatchSet,
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(sourceControlLayer, storageLayer, telemetryLayer),
+            Layer.mergeAll(
+              sourceControlLayer,
+              storageLayer,
+              telemetryLayer,
+              cryptoLayer,
+            ),
           ),
         )
 
@@ -368,6 +460,7 @@ describe('PublishDecisionToSource', () => {
         SourceControlService.of({
           verifyRepositoryAccess: () => Effect.die('unused'),
           getInstallationAccount: () => Effect.die('unused'),
+          verifyGitHubInstallationOwnership: () => Effect.die('unused'),
           listInstallationRepositories: () => Effect.die('unused'),
           createRepositoryCloneCredentials: () => Effect.die('unused'),
           fetchImmutableComparison: () => Effect.die('unused'),
@@ -556,7 +649,12 @@ describe('PublishDecisionToSource', () => {
         candidatePatchSet,
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(sourceControlLayer, storageLayer, telemetryLayer),
+          Layer.mergeAll(
+            sourceControlLayer,
+            storageLayer,
+            telemetryLayer,
+            cryptoLayer,
+          ),
         ),
       )
 
@@ -596,7 +694,12 @@ describe('PublishDecisionToSource', () => {
           })),
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(sourceControlLayer, storageLayer, telemetryLayer),
+          Layer.mergeAll(
+            sourceControlLayer,
+            storageLayer,
+            telemetryLayer,
+            cryptoLayer,
+          ),
         ),
       )
 
@@ -631,7 +734,12 @@ describe('PublishDecisionToSource', () => {
         candidatePatchSet,
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(sourceControlLayer, storageLayer, telemetryLayer),
+          Layer.mergeAll(
+            sourceControlLayer,
+            storageLayer,
+            telemetryLayer,
+            cryptoLayer,
+          ),
         ),
       )
 
@@ -655,6 +763,7 @@ describe('PublishDecisionToSource', () => {
           SourceControlService.of({
             verifyRepositoryAccess: () => Effect.die('unused'),
             getInstallationAccount: () => Effect.die('unused'),
+            verifyGitHubInstallationOwnership: () => Effect.die('unused'),
             listInstallationRepositories: () => Effect.die('unused'),
             createRepositoryCloneCredentials: () => Effect.die('unused'),
             fetchImmutableComparison: () => Effect.die('unused'),
@@ -831,7 +940,12 @@ describe('PublishDecisionToSource', () => {
           ],
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(sourceControlLayer, storageLayer, telemetryLayer),
+            Layer.mergeAll(
+              sourceControlLayer,
+              storageLayer,
+              telemetryLayer,
+              cryptoLayer,
+            ),
           ),
         )
 

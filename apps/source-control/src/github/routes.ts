@@ -1,4 +1,7 @@
-export { makeSourceControlRuntime } from './routes/support'
+export {
+  makeSourceControlRuntime,
+  type SourceControlRuntime,
+} from './routes/support'
 export { markQueuedDeliveryExhausted } from './routes/markQueuedDeliveryExhausted'
 export { syncGitHubInstallation } from './routes/syncGitHubInstallation'
 export { controlRuntimeSession } from './routes/controlRuntimeSession'

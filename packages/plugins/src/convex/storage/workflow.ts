@@ -1,5 +1,5 @@
 import { Effect, Redacted, Schema } from 'effect'
-import { ConvexHttpClient } from 'convex/browser'
+import { convexMutation, convexQuery } from '../http-client'
 import { StorageError } from '@patchplane/domain/errors'
 import {
   decodeWorkflowStart,
@@ -26,6 +26,13 @@ export interface ConvexStorageContext {
     | undefined
 }
 
+const mapCreateError = (cause: unknown) =>
+  new StorageError({
+    operation: 'createWorkflowFromPrompt',
+    message: 'Convex failed to create workflow from prompt',
+    cause,
+  })
+
 export function makeWorkflowStorageOperations(context: ConvexStorageContext) {
   const { convexUrl, systemIngestionSecret } = context
 
@@ -42,58 +49,48 @@ export function makeWorkflowStorageOperations(context: ConvexStorageContext) {
       'Calling authenticated Convex workflow start mutation',
     )
 
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-
-        if (input.externalRef !== undefined) {
-          if (systemIngestionSecret === undefined) {
-            throw new Error(
+    const value = yield* input.externalRef !== undefined
+      ? systemIngestionSecret === undefined
+        ? Effect.fail(
+            mapCreateError(
               'PATCHPLANE_SYSTEM_INGESTION_SECRET is required for external workflow ingestion',
-            )
-          }
-
-          if (input.source !== 'external') {
-            throw new Error(
-              'External workflow ingestion requires the external prompt source',
-            )
-          }
-
-          return client.mutation(
-            createWorkflowStartFromExternalIntakeMutation,
-            {
-              systemSecret: Redacted.value(systemIngestionSecret),
-              workspaceId: input.workspaceId,
-              actorId: input.actor.id,
-              actorDisplayName: input.actor.displayName,
-              source: input.source,
-              traceId: input.traceId,
-              prompt: input.prompt,
-              externalRef: input.externalRef,
-            },
+            ),
           )
-        }
-
-        if (input.authToken !== undefined) {
-          client.setAuth(input.authToken)
-        }
-
-        return client.mutation(createWorkflowStartMutation, {
-          workspaceId: input.workspaceId,
-          actorId: input.actor.id,
-          actorDisplayName: input.actor.displayName,
-          source: input.source,
-          traceId: input.traceId,
-          prompt: input.prompt,
+        : input.source !== 'external'
+          ? Effect.fail(
+              mapCreateError(
+                'External workflow ingestion requires the external prompt source',
+              ),
+            )
+          : convexMutation({
+              url: convexUrl,
+              reference: createWorkflowStartFromExternalIntakeMutation,
+              args: {
+                systemSecret: Redacted.value(systemIngestionSecret),
+                workspaceId: input.workspaceId,
+                actorId: input.actor.id,
+                actorDisplayName: input.actor.displayName,
+                source: input.source,
+                traceId: input.traceId,
+                prompt: input.prompt,
+                externalRef: input.externalRef,
+              },
+              catch: mapCreateError,
+            })
+      : convexMutation({
+          url: convexUrl,
+          ...(input.authToken === undefined ? {} : { auth: input.authToken }),
+          reference: createWorkflowStartMutation,
+          args: {
+            workspaceId: input.workspaceId,
+            actorId: input.actor.id,
+            actorDisplayName: input.actor.displayName,
+            source: input.source,
+            traceId: input.traceId,
+            prompt: input.prompt,
+          },
+          catch: mapCreateError,
         })
-      },
-      catch: (cause) =>
-        new StorageError({
-          operation: 'createWorkflowFromPrompt',
-          message: 'Convex failed to create workflow from prompt',
-          cause,
-        }),
-    })
 
     const workflowStart = yield* decodeWorkflowStart(value).pipe(
       Effect.mapError(
@@ -129,16 +126,11 @@ export function makeWorkflowStorageOperations(context: ConvexStorageContext) {
         ? { workspaceId: input.workspaceId }
         : { workspaceId: input.workspaceId, limit: input.limit }
 
-    const value = yield* Effect.tryPromise({
-      try: () => {
-        const client = new ConvexHttpClient(convexUrl)
-
-        if (input.authToken !== undefined) {
-          client.setAuth(input.authToken)
-        }
-
-        return client.query(listRecentWorkflowStartsQuery, queryArgs)
-      },
+    const value = yield* convexQuery({
+      url: convexUrl,
+      ...(input.authToken === undefined ? {} : { auth: input.authToken }),
+      reference: listRecentWorkflowStartsQuery,
+      args: queryArgs,
       catch: (cause) =>
         new StorageError({
           operation: 'listRecentWorkflowStarts',
@@ -176,15 +168,13 @@ export function makeWorkflowStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          claimWorkflowExecutionMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-          },
-        ),
+    const result = yield* convexMutation({
+      url: convexUrl,
+      reference: claimWorkflowExecutionMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'claimWorkflowExecution',
@@ -216,19 +206,17 @@ export function makeWorkflowStorageOperations(context: ConvexStorageContext) {
         cause: undefined,
       })
     }
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        new ConvexHttpClient(convexUrl).mutation(
-          markWorkflowExecutionFailedMutation,
-          {
-            systemSecret: Redacted.value(systemIngestionSecret),
-            workflowRunId: input.workflowRunId,
-            ...(input.incomingDispatchToken === undefined
-              ? {}
-              : { incomingDispatchToken: input.incomingDispatchToken }),
-            summary: input.summary,
-          },
-        ),
+    const result = yield* convexMutation({
+      url: convexUrl,
+      reference: markWorkflowExecutionFailedMutation,
+      args: {
+        systemSecret: Redacted.value(systemIngestionSecret),
+        workflowRunId: input.workflowRunId,
+        ...(input.incomingDispatchToken === undefined
+          ? {}
+          : { incomingDispatchToken: input.incomingDispatchToken }),
+        summary: input.summary,
+      },
       catch: (cause) =>
         new StorageError({
           operation: 'markWorkflowExecutionFailed',

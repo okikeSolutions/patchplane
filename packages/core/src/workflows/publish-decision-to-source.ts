@@ -1,4 +1,4 @@
-import { Clock, Effect, Exit } from 'effect'
+import { Clock, Crypto, Effect, Exit } from 'effect'
 import type {
   CandidatePatchSet,
   HumanDecision,
@@ -24,6 +24,13 @@ import {
   type TelemetryContextFields,
   withCriticalPathTransitionOutcome,
 } from '../services/telemetry-service'
+
+export const makePublicationDispatchToken = Effect.fnUntraced(function* () {
+  const crypto = yield* Crypto.Crypto
+  return Array.from(yield* crypto.randomBytes(16), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+})
 
 export interface PublishDecisionToSourceInput extends TelemetryContextFields {
   readonly workflowStart: WorkflowStart
@@ -93,8 +100,13 @@ export const PublishDecisionToSource = Effect.fn(
         owner,
         name,
         issueNumber: ref.issueNumber,
+        subjectKind:
+          ref.pullRequestNumber === undefined ? 'issue' : 'pull-request',
         body,
-        idempotencyKey: `${input.workflowStart.workflowRun.rootWorkflowRunId ?? input.workflowStart.workflowRun.id}:patch-report`,
+        idempotencyKey: `${input.humanDecision.id}:issue-comment`,
+        legacyIdempotencyKeys: [
+          `${input.workflowStart.workflowRun.rootWorkflowRunId ?? input.workflowStart.workflowRun.id}:patch-report`,
+        ],
         traceId,
         ...(input.pluginName === undefined
           ? {}
@@ -124,7 +136,10 @@ export const PublishDecisionToSource = Effect.fn(
         title: `PatchPlane: ${input.humanDecision.status}`,
         summary: body,
         ...(ref?.url === undefined ? {} : { detailsUrl: ref.url }),
-        idempotencyKey: `${input.candidatePatchSet?.id ?? input.workflowStart.workflowRun.id}:patch-report-check`,
+        idempotencyKey: `${input.humanDecision.id}:check-run`,
+        legacyIdempotencyKeys: [
+          `${input.candidatePatchSet?.id ?? input.workflowStart.workflowRun.id}:patch-report-check`,
+        ],
         traceId,
         ...(input.pluginName === undefined
           ? {}
@@ -159,111 +174,111 @@ export const PublishDecisionToSource = Effect.fn(
             ? { targetSha: headSha }
             : {}),
         }
-        const dispatchToken = `${traceId}:${publication.key}`
+        const dispatchToken = yield* makePublicationDispatchToken()
         const transitionContext = {
           traceId,
           workflowRunId: input.workflowStart.workflowRun.id,
           pluginName: input.pluginName,
         } as const
-        const pending = yield* withCriticalPathTransitionOutcome(
-          {
-            ...transitionContext,
-            operation: 'publishDecisionToSource.claimPublicationResult',
-            stage: criticalPathStages.publicationClaim,
-          },
-          storage.recordPublicationResult({
-            ...evidenceRefs,
-            workflowRunId: input.workflowStart.workflowRun.id,
-            provider,
-            kind: publication.kind,
-            status: 'pending',
-            summary: publication.summary,
-            dispatchToken,
-            createdAt: yield* Clock.currentTimeMillis,
-            idempotencyKey: publication.key,
-            traceId,
-            ...(input.pluginName === undefined
-              ? {}
-              : { pluginName: input.pluginName }),
-            operation: 'publishDecisionToSource.claimPublicationResult',
-          }),
-          (claim) =>
-            claim.status === 'pending' && claim.dispatchToken === dispatchToken
-              ? criticalPathBreadcrumbStatuses.succeeded
-              : criticalPathBreadcrumbStatuses.blocked,
-        )
-        if (
-          pending.status === 'published' ||
-          pending.dispatchToken !== dispatchToken
-        ) {
-          return pending
-        }
+        let claimOwned = false
+        const pendingInput = (createdAt: number) => ({
+          ...evidenceRefs,
+          workflowRunId: input.workflowStart.workflowRun.id,
+          provider,
+          kind: publication.kind,
+          status: 'pending' as const,
+          summary: publication.summary,
+          dispatchToken,
+          createdAt,
+          idempotencyKey: publication.key,
+          traceId,
+          ...(input.pluginName === undefined
+            ? {}
+            : { pluginName: input.pluginName }),
+          operation: 'publishDecisionToSource.claimPublicationResult',
+        })
+        const preserveAmbiguousClaim = Effect.gen(function* () {
+          if (!claimOwned) return
+          yield* storage
+            .recordPublicationResult(
+              pendingInput(yield* Clock.currentTimeMillis),
+            )
+            .pipe(Effect.ignoreCause)
+        })
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const pending = yield* withCriticalPathTransitionOutcome(
+              {
+                ...transitionContext,
+                operation: 'publishDecisionToSource.claimPublicationResult',
+                stage: criticalPathStages.publicationClaim,
+              },
+              storage.recordPublicationResult(
+                pendingInput(yield* Clock.currentTimeMillis),
+              ),
+              (claim) =>
+                claim.status === 'pending' &&
+                claim.dispatchToken === dispatchToken
+                  ? criticalPathBreadcrumbStatuses.succeeded
+                  : criticalPathBreadcrumbStatuses.blocked,
+            )
+            if (
+              pending.status === 'published' ||
+              pending.dispatchToken !== dispatchToken
+            ) {
+              return pending
+            }
+            claimOwned = true
 
-        yield* addCriticalPathBreadcrumb({
-          ...transitionContext,
-          operation: 'publishDecisionToSource.publishResult',
-          stage: criticalPathStages.publicationResult,
-          status: criticalPathBreadcrumbStatuses.started,
-        })
-        const published = yield* publication.publish.pipe(Effect.exit)
-        const result = yield* (
-          Exit.isSuccess(published)
-            ? storage.recordPublicationResult({
-                ...evidenceRefs,
-                workflowRunId: input.workflowStart.workflowRun.id,
-                provider,
-                kind: publication.kind,
-                status: 'published',
-                externalId: published.value.externalId,
-                url: published.value.url,
-                summary: publication.summary,
-                dispatchToken,
-                createdAt: yield* Clock.currentTimeMillis,
-                idempotencyKey: publication.key,
-                traceId,
-                ...(input.pluginName === undefined
-                  ? {}
-                  : { pluginName: input.pluginName }),
-                operation: 'publishDecisionToSource.recordPublicationResult',
+            yield* addCriticalPathBreadcrumb({
+              ...transitionContext,
+              operation: 'publishDecisionToSource.publishResult',
+              stage: criticalPathStages.publicationResult,
+              status: criticalPathBreadcrumbStatuses.started,
+            })
+            const published = yield* restore(publication.publish).pipe(
+              Effect.exit,
+            )
+            if (Exit.isFailure(published)) {
+              yield* storage.recordPublicationResult(
+                pendingInput(yield* Clock.currentTimeMillis),
+              )
+              yield* addCriticalPathBreadcrumb({
+                ...transitionContext,
+                operation: 'publishDecisionToSource.publishResult',
+                stage: criticalPathStages.publicationResult,
+                status: criticalPathBreadcrumbStatuses.failed,
               })
-            : storage.recordPublicationResult({
-                ...evidenceRefs,
-                workflowRunId: input.workflowStart.workflowRun.id,
-                provider,
-                kind: publication.kind,
-                status: 'failed',
-                error: errorMessage(published.cause),
-                summary: publication.summary,
-                dispatchToken,
-                createdAt: yield* Clock.currentTimeMillis,
-                idempotencyKey: publication.key,
-                traceId,
-                ...(input.pluginName === undefined
-                  ? {}
-                  : { pluginName: input.pluginName }),
-                operation: 'publishDecisionToSource.recordPublicationFailure',
-              })
-        ).pipe(
-          Effect.onExit((exit) =>
-            Exit.isFailure(exit)
-              ? addCriticalPathBreadcrumb({
-                  ...transitionContext,
-                  operation: 'publishDecisionToSource.publishResult',
-                  stage: criticalPathStages.publicationResult,
-                  status: criticalPathBreadcrumbStatuses.failed,
-                })
-              : Effect.void,
-          ),
+              return pending
+            }
+            const result = yield* storage.recordPublicationResult({
+              ...evidenceRefs,
+              workflowRunId: input.workflowStart.workflowRun.id,
+              provider,
+              kind: publication.kind,
+              status: 'published',
+              externalId: published.value.externalId,
+              url: published.value.url,
+              summary: publication.summary,
+              dispatchToken,
+              createdAt: yield* Clock.currentTimeMillis,
+              idempotencyKey: publication.key,
+              traceId,
+              ...(input.pluginName === undefined
+                ? {}
+                : { pluginName: input.pluginName }),
+              operation: 'publishDecisionToSource.recordPublicationResult',
+            })
+            claimOwned = false
+            yield* addCriticalPathBreadcrumb({
+              ...transitionContext,
+              operation: 'publishDecisionToSource.publishResult',
+              stage: criticalPathStages.publicationResult,
+              status: criticalPathBreadcrumbStatuses.succeeded,
+            })
+            return result
+          }).pipe(Effect.onInterrupt(() => preserveAmbiguousClaim)),
         )
-        yield* addCriticalPathBreadcrumb({
-          ...transitionContext,
-          operation: 'publishDecisionToSource.publishResult',
-          stage: criticalPathStages.publicationResult,
-          status: Exit.isSuccess(published)
-            ? criticalPathBreadcrumbStatuses.succeeded
-            : criticalPathBreadcrumbStatuses.failed,
-        })
-        return result
       }),
   )
 
@@ -300,10 +315,6 @@ export const PublishDecisionToSource = Effect.fn(
 
   return { publications, provenanceEvent }
 })
-
-function errorMessage(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
 
 function mergePublicationState(
   existing: ReadonlyArray<PublicationResult>,

@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Effect, Scope } from 'effect'
 import type { SourceControlError } from '@patchplane/domain/errors'
 import type { GitCommitSha } from '@patchplane/domain/refinements'
 import type { TelemetryContextFields } from './telemetry-service'
@@ -38,14 +38,23 @@ export interface ListInstallationRepositoriesInput extends TelemetryContextField
   readonly installationId?: string
 }
 
+export interface VerifyGitHubInstallationOwnershipInput extends TelemetryContextFields {
+  readonly provider: 'github'
+  readonly installationId: string
+  readonly authorizationCode: string
+  readonly pkceVerifier: string
+}
+
 export interface CreateIssueCommentInput extends TelemetryContextFields {
   readonly provider: string
   readonly installationId?: string
   readonly owner: string
   readonly name: string
   readonly issueNumber: number
+  readonly subjectKind?: 'issue' | 'pull-request' | undefined
   readonly body: string
   readonly idempotencyKey?: string | undefined
+  readonly legacyIdempotencyKeys?: ReadonlyArray<string> | undefined
 }
 
 export interface SourcePublicationRef {
@@ -74,6 +83,7 @@ export interface CreateCheckRunInput extends TelemetryContextFields {
   readonly text?: string | undefined
   readonly detailsUrl?: string | undefined
   readonly idempotencyKey?: string | undefined
+  readonly legacyIdempotencyKeys?: ReadonlyArray<string> | undefined
 }
 
 export interface CreateDraftPullRequestInput extends TelemetryContextFields {
@@ -131,6 +141,9 @@ export class SourceControlService extends Context.Service<
     readonly listInstallationRepositories: (
       input: ListInstallationRepositoriesInput,
     ) => Effect.Effect<ReadonlyArray<RepositoryRef>, SourceControlError>
+    readonly verifyGitHubInstallationOwnership: (
+      input: VerifyGitHubInstallationOwnershipInput,
+    ) => Effect.Effect<void, SourceControlError>
     readonly createIssueComment: (
       input: CreateIssueCommentInput,
     ) => Effect.Effect<SourcePublicationRef, SourceControlError>
@@ -142,7 +155,11 @@ export class SourceControlService extends Context.Service<
     ) => Effect.Effect<SourcePublicationRef, SourceControlError>
     readonly createRepositoryCloneCredentials: (
       input: CreateRepositoryCloneCredentialsInput,
-    ) => Effect.Effect<RepositoryCloneCredentials, SourceControlError>
+    ) => Effect.Effect<
+      RepositoryCloneCredentials,
+      SourceControlError,
+      Scope.Scope
+    >
     readonly fetchImmutableComparison: (
       input: FetchImmutableComparisonInput,
     ) => Effect.Effect<ImmutableComparison, SourceControlError>

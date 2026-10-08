@@ -1,5 +1,9 @@
-import { ConvexHttpClient } from 'convex/browser'
+import type { FunctionArgs, FunctionReference } from 'convex/server'
 import { Effect } from 'effect'
+import {
+  convexMutation,
+  convexQuery,
+} from '@patchplane/plugins/convex/http-client'
 import { captureCloudflareRequestFailure } from '@patchplane/plugins/sentry/cloudflare-worker'
 import {
   type Env,
@@ -17,6 +21,34 @@ export const promiseCall = <A>(operation: string, call: () => Promise<A>) =>
     catch: (cause) => boundaryError(operation, cause),
   })
 
+export const convexMutationCall = <
+  Reference extends FunctionReference<'mutation'>,
+>(
+  env: Env,
+  operation: string,
+  reference: Reference,
+  args: FunctionArgs<Reference>,
+) =>
+  convexMutation({
+    url: env.CONVEX_URL,
+    reference,
+    args,
+    catch: (cause) => boundaryError(operation, cause),
+  })
+
+export const convexQueryCall = <Reference extends FunctionReference<'query'>>(
+  env: Env,
+  operation: string,
+  reference: Reference,
+  args: FunctionArgs<Reference>,
+) =>
+  convexQuery({
+    url: env.CONVEX_URL,
+    reference,
+    args,
+    catch: (cause) => boundaryError(operation, cause),
+  })
+
 export const releaseProcessing = (
   env: Env,
   input: {
@@ -25,12 +57,12 @@ export const releaseProcessing = (
     readonly processingToken: string
   },
 ) =>
-  promiseCall('convex.releaseDeliveryProcessing', () =>
-    new ConvexHttpClient(env.CONVEX_URL).mutation(
-      releaseDeliveryProcessingMutation,
-      {
-        systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
-        ...input,
-      },
-    ),
+  convexMutationCall(
+    env,
+    'convex.releaseDeliveryProcessing',
+    releaseDeliveryProcessingMutation,
+    {
+      systemSecret: env.PATCHPLANE_SYSTEM_INGESTION_SECRET,
+      ...input,
+    },
   )

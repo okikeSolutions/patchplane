@@ -208,7 +208,7 @@ export function required(name: string) {
 }
 
 export function requiredSecret(name: string) {
-  return Redacted.value(Effect.runSync(Config.redacted(name)))
+  return Redacted.value(Effect.runSync(Config.Redacted(name)))
 }
 
 export function convexClient() {
@@ -224,14 +224,15 @@ export async function resolveWebhookUrl() {
   const accountId = required('CLOUDFLARE_ACCOUNT_ID')
   const apiToken = requiredSecret('CLOUDFLARE_API_TOKEN')
   const headers = { authorization: `Bearer ${apiToken}` }
+  const signal = AbortSignal.timeout(30_000)
   const [scriptsResponse, subdomainResponse] = await Promise.all([
     fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts`,
-      { headers },
+      { headers, signal },
     ),
     fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
-      { headers },
+      { headers, signal },
     ),
   ])
   if (!scriptsResponse.ok || !subdomainResponse.ok) {

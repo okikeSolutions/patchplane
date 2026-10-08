@@ -3,7 +3,7 @@ import { EpochMillis } from './refinements'
 import { SandboxPolicy } from './sandbox-policy'
 
 const boundedNonEmpty = (maximum: number) =>
-  Schema.String.check(Schema.isLengthBetween(1, maximum))
+  Schema.String.check(Schema.isBetweenLength(1, maximum))
 
 /** Provider settings read back after the sandbox reached its running state. */
 export const SandboxEnvironmentIdentity = Schema.Struct({
