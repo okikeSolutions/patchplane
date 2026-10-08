@@ -70,7 +70,7 @@ export default Alchemy.Stack(
         readStaticAsset('_redirects'),
       ])
       const configuredProductionDomain = yield* Config.option(
-        Config.string('PATCHPLANE_PRODUCTION_DOMAIN'),
+        Config.String('PATCHPLANE_PRODUCTION_DOMAIN'),
       )
       const productionDomain =
         Option.getOrUndefined(configuredProductionDomain)?.trim() || undefined
@@ -154,7 +154,7 @@ export default Alchemy.Stack(
           import.meta.dirname,
           'apps/source-control/src/worker.ts',
         ),
-        url: false,
+        workersDev: false,
         compatibility: { flags: ['nodejs_compat'] },
         observability: devWorkerObservability,
         env: {

@@ -1,16 +1,29 @@
 {
   "name": "patchplane",
   "version": "0.0.1",
-  "description": "PatchPlane CLI for OSS onboarding, config, plugin discovery, env checks, and diagnostics",
   "private": false,
-  "type": "module",
+  "description": "PatchPlane CLI for OSS onboarding, config, plugin discovery, env checks, and diagnostics",
+  "keywords": [
+    "ai",
+    "change-control",
+    "cli",
+    "convex",
+    "github",
+    "patchplane",
+    "sandbox"
+  ],
+  "homepage": "https://github.com/okikeSolutions/patchplane#readme",
+  "bugs": {
+    "url": "https://github.com/okikeSolutions/patchplane/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/okikeSolutions/patchplane.git",
+    "directory": "packages/cli"
+  },
   "bin": {
     "patchplane": "dist/main.js"
-  },
-  "main": "./dist/main.js",
-  "exports": {
-    ".": "./dist/main.js",
-    "./schema/patchplane.schema.json": "./schema/patchplane.schema.json"
   },
   "files": [
     "dist",
@@ -19,45 +32,32 @@
     "CONTRACT.md",
     "LICENSE"
   ],
+  "type": "module",
+  "main": "./dist/main.js",
+  "exports": {
+    ".": "./dist/main.js",
+    "./schema/patchplane.schema.json": "./schema/patchplane.schema.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "rm -rf dist && bun build src/main.ts --target=node --outfile=dist/main.js && chmod +x dist/main.js",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "prepublishOnly": "bun run test && bun run typecheck && bun run build"
   },
-  "keywords": [
-    "patchplane",
-    "cli",
-    "ai",
-    "change-control",
-    "sandbox",
-    "github",
-    "convex"
-  ],
-  "license": "Apache-2.0",
-  "homepage": "https://github.com/okikeSolutions/patchplane#readme",
-  "bugs": {
-    "url": "https://github.com/okikeSolutions/patchplane/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/okikeSolutions/patchplane.git",
-    "directory": "packages/cli"
-  },
-  "engines": {
-    "node": ">=22.19.0"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.100",
-    "@effect/vitest": "4.0.0-beta.100",
+    "@effect/platform-node": "4.0.2",
+    "@effect/vitest": "4.0.2",
     "@patchplane/plugins": "workspace:*",
     "@patchplane/typescript-config": "workspace:*",
     "@types/node": "^25.9.3",
-    "effect": "4.0.0-beta.100",
+    "effect": "4.0.2",
     "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }
