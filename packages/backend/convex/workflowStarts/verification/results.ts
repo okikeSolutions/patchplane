@@ -10,6 +10,7 @@ import {
   verificationResultReturn,
   requireSystemIngestionSecret,
   requireWorkflowRun,
+  sha256Digest,
 } from '../shared'
 
 const recordVerificationResult = mutation({
@@ -146,17 +147,7 @@ const recordVerificationResult = mutation({
       throw new ConvexError('Verification artifact does not belong to workflow')
     }
     const computedCommandDigest =
-      args.command === undefined
-        ? undefined
-        : `sha256:${Array.from(
-            new Uint8Array(
-              await crypto.subtle.digest(
-                'SHA-256',
-                new TextEncoder().encode(args.command),
-              ),
-            ),
-            (byte) => byte.toString(16).padStart(2, '0'),
-          ).join('')}`
+      args.command === undefined ? undefined : await sha256Digest(args.command)
     const existing = await ctx.db
       .query('verificationResults')
       .withIndex('by_workflow_run_and_idempotency_key', (q) =>

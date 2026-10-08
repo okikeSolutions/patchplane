@@ -1,8 +1,24 @@
-import { Stream } from 'effect'
+import { Effect, Schema, Stream } from 'effect'
 import type { SandboxRuntimeEvent } from '@patchplane/core/services/sandbox-service'
-import { decodePiJsonlLines, type PiJsonlLine } from './jsonl'
+import {
+  decodePiJsonlLines,
+  type PiJsonlLimitError,
+  type PiJsonlLine,
+} from './jsonl'
 import { parsePiRpcJsonLines, type PiRpcParsedLine } from './protocol'
-import { isTransientPiEventType, summarizePiEvent } from './events'
+import {
+  isPersistedPiEventType,
+  isTransientPiEventType,
+  summarizePiEvent,
+} from './events'
+
+export class PiRpcIngestionError extends Schema.TaggedError<PiRpcIngestionError>()(
+  'PiRpcIngestionError',
+  {
+    lineNumber: Schema.Finite,
+    message: Schema.String,
+  },
+) {}
 
 export interface PiRpcRuntimeEvent extends SandboxRuntimeEvent {
   readonly idempotencyKey: string
@@ -30,7 +46,11 @@ function eventTimestamp(event: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function rpcRecordToRuntimeEvent(record: PiRpcParsedLine, line: string, now: () => number): SandboxRuntimeEvent | undefined {
+function rpcRecordToRuntimeEvent(
+  record: PiRpcParsedLine,
+  line: string,
+  now: () => number,
+): SandboxRuntimeEvent | undefined {
   if (record.kind === 'response') {
     return {
       provider: 'pi',
@@ -39,13 +59,21 @@ function rpcRecordToRuntimeEvent(record: PiRpcParsedLine, line: string, now: () 
       summary: record.value.success
         ? `Pi RPC ${record.value.command} accepted`
         : `Pi RPC ${record.value.command} failed`,
-      payloadJson: JSON.stringify(record.value),
+      payloadJson: JSON.stringify({
+        command: record.value.command,
+        success: record.value.success,
+      }),
     }
   }
 
-  if (typeof record.value !== 'object' || record.value === null) return undefined
+  if (typeof record.value !== 'object' || record.value === null)
+    return undefined
   const eventType = Reflect.get(record.value, 'type')
-  if (typeof eventType !== 'string' || isTransientPiEventType(eventType)) {
+  if (
+    typeof eventType !== 'string' ||
+    isTransientPiEventType(eventType) ||
+    !isPersistedPiEventType(eventType)
+  ) {
     return undefined
   }
 
@@ -54,7 +82,7 @@ function rpcRecordToRuntimeEvent(record: PiRpcParsedLine, line: string, now: () 
     type: `pi.${eventType}`,
     occurredAt: eventTimestamp(record.value, now()),
     summary: summarizePiEvent(record.value),
-    payloadJson: line,
+    payloadJson: JSON.stringify({ type: eventType }),
   }
 }
 
@@ -64,13 +92,25 @@ function lineToRuntimeEvents(input: {
   readonly stream: 'stdout' | 'stderr'
   readonly now: () => number
   readonly line: PiJsonlLine
-}): ReadonlyArray<PiRpcRuntimeEvent> {
-  if (input.line.line.length === 0) return []
+}): Effect.Effect<ReadonlyArray<PiRpcRuntimeEvent>, PiRpcIngestionError> {
+  if (input.line.line.length === 0) return Effect.succeed([])
   const parsed = parsePiRpcJsonLines(`${input.line.line}\n`)
+  if (parsed.parseErrors.length > 0) {
+    return Effect.fail(
+      new PiRpcIngestionError({
+        lineNumber: input.line.lineNumber,
+        message: 'Malformed Pi RPC JSON record',
+      }),
+    )
+  }
   const events: PiRpcRuntimeEvent[] = []
 
   for (const record of parsed.records) {
-    const runtimeEvent = rpcRecordToRuntimeEvent(record, input.line.line, input.now)
+    const runtimeEvent = rpcRecordToRuntimeEvent(
+      record,
+      input.line.line,
+      input.now,
+    )
     if (runtimeEvent === undefined) continue
     events.push({
       ...runtimeEvent,
@@ -83,7 +123,7 @@ function lineToRuntimeEvents(input: {
     })
   }
 
-  return events
+  return Effect.succeed(events)
 }
 
 export function decodePiRpcRuntimeEvents(input: {
@@ -94,18 +134,24 @@ export function decodePiRpcRuntimeEvents(input: {
 }) {
   const streamName = input.stream ?? 'stdout'
   const now = input.now
-  return <E, R>(chunks: Stream.Stream<string, E, R>): Stream.Stream<PiRpcRuntimeEvent, E, R> =>
+  return <E, R>(
+    chunks: Stream.Stream<string, E, R>,
+  ): Stream.Stream<
+    PiRpcRuntimeEvent,
+    E | PiJsonlLimitError | PiRpcIngestionError,
+    R
+  > =>
     chunks.pipe(
       decodePiJsonlLines,
-      Stream.mapAccumArray(
-        () => undefined,
-        (_, lines) => [undefined, lines.flatMap((line) => lineToRuntimeEvents({
+      Stream.mapEffect((line) =>
+        lineToRuntimeEvents({
           sessionId: input.sessionId,
           commandId: input.commandId,
           stream: streamName,
           now,
           line,
-        }))],
+        }),
       ),
+      Stream.flatMap(Stream.fromIterable),
     )
 }

@@ -15,6 +15,7 @@ import {
   verificationExecutionGroupValue,
   verificationResultValue,
   sandboxExecutionValue,
+  sha256Digest,
 } from '../shared'
 
 const claimVerificationExecutionGroup = mutation({
@@ -66,15 +67,7 @@ const claimVerificationExecutionGroup = mutation({
     const expectedCommandDigest =
       requirement?.command === undefined
         ? undefined
-        : `sha256:${Array.from(
-            new Uint8Array(
-              await crypto.subtle.digest(
-                'SHA-256',
-                new TextEncoder().encode(requirement.command),
-              ),
-            ),
-            (byte) => byte.toString(16).padStart(2, '0'),
-          ).join('')}`
+        : await sha256Digest(requirement.command)
     const establishedPlanDispatch =
       workflowRun.incomingVerificationPlanId === args.verificationPlanId &&
       workflowRun.incomingVerificationDispatchToken ===

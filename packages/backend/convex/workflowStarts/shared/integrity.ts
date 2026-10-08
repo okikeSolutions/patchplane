@@ -2,6 +2,17 @@ import type { Doc, Id } from '../../_generated/dataModel'
 import { ConvexError } from 'convex/values'
 import type { MutationCtx, QueryCtx } from '../../_generated/server'
 
+export async function sha256Digest(value: string) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(value),
+  )
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+  return `sha256:${hex}`
+}
+
 export function isGitCommitSha(value: string) {
   return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)
 }
@@ -22,23 +33,24 @@ export function requireIncomingPullRequestIdentity(externalRef: {
   pullRequestHeadSha?: string
   pullRequestPreviousHeadSha?: string
 }) {
-  const requiredStrings = [
-    externalRef.repositoryExternalId,
-    externalRef.repositoryOwner,
-    externalRef.repositoryName,
-    externalRef.repositoryFullName,
-    externalRef.issueExternalId,
-    externalRef.pullRequestExternalId,
-  ]
   if (
     externalRef.provider !== 'github' ||
     externalRef.repositoryProvider !== 'github' ||
     !['github.pull_request.opened', 'github.pull_request.synchronize'].includes(
       externalRef.eventKind,
     ) ||
-    requiredStrings.some(
-      (value) => value === undefined || value.trim().length === 0,
-    ) ||
+    externalRef.repositoryExternalId === undefined ||
+    externalRef.repositoryExternalId.trim().length === 0 ||
+    externalRef.repositoryOwner === undefined ||
+    externalRef.repositoryOwner.trim().length === 0 ||
+    externalRef.repositoryName === undefined ||
+    externalRef.repositoryName.trim().length === 0 ||
+    externalRef.repositoryFullName === undefined ||
+    externalRef.repositoryFullName.trim().length === 0 ||
+    externalRef.issueExternalId === undefined ||
+    externalRef.issueExternalId.trim().length === 0 ||
+    externalRef.pullRequestExternalId === undefined ||
+    externalRef.pullRequestExternalId.trim().length === 0 ||
     externalRef.repositoryFullName !==
       `${externalRef.repositoryOwner}/${externalRef.repositoryName}` ||
     externalRef.issueExternalId !== externalRef.pullRequestExternalId ||
@@ -60,6 +72,24 @@ export function requireIncomingPullRequestIdentity(externalRef: {
     throw new ConvexError(
       'External workflow intake requires complete valid GitHub pull request identity',
     )
+  }
+  return {
+    provider: externalRef.provider,
+    eventKind: externalRef.eventKind,
+    repositoryProvider: externalRef.repositoryProvider,
+    repositoryExternalId: externalRef.repositoryExternalId,
+    repositoryOwner: externalRef.repositoryOwner,
+    repositoryName: externalRef.repositoryName,
+    repositoryFullName: externalRef.repositoryFullName,
+    issueExternalId: externalRef.issueExternalId,
+    pullRequestExternalId: externalRef.pullRequestExternalId,
+    pullRequestNumber: externalRef.pullRequestNumber,
+    pullRequestUpdatedAt: externalRef.pullRequestUpdatedAt,
+    pullRequestBaseSha: externalRef.pullRequestBaseSha,
+    pullRequestHeadSha: externalRef.pullRequestHeadSha,
+    ...(externalRef.pullRequestPreviousHeadSha === undefined
+      ? {}
+      : { pullRequestPreviousHeadSha: externalRef.pullRequestPreviousHeadSha }),
   }
 }
 

@@ -16,6 +16,7 @@ import {
   requireSystemIngestionSecret,
   requireWorkflowRun,
   insertProvenanceEvent,
+  sha256Digest,
 } from './shared'
 
 const recordQueuedGitHubDelivery = mutation({
@@ -457,15 +458,7 @@ const terminalizeQueuedGitHubDelivery = mutation({
         const commandDigest =
           requirement.command === undefined
             ? undefined
-            : `sha256:${Array.from(
-                new Uint8Array(
-                  await crypto.subtle.digest(
-                    'SHA-256',
-                    new TextEncoder().encode(requirement.command),
-                  ),
-                ),
-                (byte) => byte.toString(16).padStart(2, '0'),
-              ).join('')}`
+            : await sha256Digest(requirement.command)
         const groupId = await ctx.db.insert('verificationExecutionGroups', {
           workflowRunId: workflowRun._id,
           verificationPlanId: workflowRun.incomingVerificationPlanId,

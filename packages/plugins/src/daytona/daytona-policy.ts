@@ -353,10 +353,10 @@ export const confirmSandboxDeleted = Effect.fnUntraced(function* (input: {
   readonly sandboxId: string
   readonly traceId: string
 }) {
-  const cleanupDeadline = Date.now() + 120_000
+  const cleanupDeadline = (yield* Clock.currentTimeMillis) + 120_000
   let consecutiveReadFailures = 0
   for (let attempt = 1; attempt <= 120; attempt += 1) {
-    const remainingMs = cleanupDeadline - Date.now()
+    const remainingMs = cleanupDeadline - (yield* Clock.currentTimeMillis)
     if (remainingMs <= 0) break
     const readback = yield* Effect.raceFirst(
       Effect.tryPromise({
@@ -387,7 +387,10 @@ export const confirmSandboxDeleted = Effect.fnUntraced(function* (input: {
     }
     consecutiveReadFailures = 0
     if (attempt < 120) {
-      const sleepMs = Math.min(1_000, cleanupDeadline - Date.now())
+      const sleepMs = Math.min(
+        1_000,
+        cleanupDeadline - (yield* Clock.currentTimeMillis),
+      )
       if (sleepMs > 0) yield* Effect.sleep(sleepMs)
     }
   }

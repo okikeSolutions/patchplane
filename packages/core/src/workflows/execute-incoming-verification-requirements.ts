@@ -140,10 +140,24 @@ export const ExecuteIncomingVerificationRequirements = Effect.fn(
           cause: group.id,
         })
       }
+      const candidateBaseSha = candidate.baseSha
+      const candidateDigest = candidate.candidateDigest
+      const candidateHeadSha = candidate.headSha
+      if (
+        candidateBaseSha === undefined ||
+        candidateDigest === undefined ||
+        candidateHeadSha === undefined
+      ) {
+        return yield* new SandboxError({
+          operation: 'runIncomingVerificationPlan.requireFrozenCandidate',
+          message: 'Frozen verification candidate is incomplete',
+          cause: candidate.id,
+        })
+      }
       const sandboxResult = yield* sandbox
         .runRepositoryCommand({
           ...clone,
-          candidateBaseSha: candidate.baseSha!,
+          candidateBaseSha,
           command,
           timeoutSeconds,
           verificationInvocation: {
@@ -207,37 +221,40 @@ export const ExecuteIncomingVerificationRequirements = Effect.fn(
         })
         .pipe(
           Effect.onInterrupt(() =>
-            storage
-              .recordVerificationResult({
-                workflowRunId: workflowRun.id,
-                verificationPlanId: planCapability.plan.id,
-                executionGroupId: group.id,
-                executionGroupClaimToken: claimToken,
-                requirementId: requirement.id,
-                candidatePatchSetId: candidate.id,
-                provider: 'daytona',
-                command,
-                commandDigest,
-                platform,
-                architecture,
-                ...(providerProcessIdentity === undefined
-                  ? {}
-                  : providerProcessIdentity),
-                status: 'cancelled',
-                summary: 'Trusted command execution was interrupted.',
-                artifactIds: [],
-                producedArtifactKinds: [],
-                stdoutCaptureStatus: 'failed',
-                stderrCaptureStatus: 'failed',
-                cleanupStatus: 'failed',
-                candidateDigestBefore: candidate.candidateDigest,
-                startedAt: claimedAt,
-                completedAt: Date.now(),
-                idempotencyKey: `${group.id}:result`,
-                traceId: workflowRun.traceId,
-                operation: 'runIncomingVerificationPlan.cancelGroup',
-              })
-              .pipe(Effect.asVoid),
+            Clock.currentTimeMillis.pipe(
+              Effect.flatMap((completedAt) =>
+                storage.recordVerificationResult({
+                  workflowRunId: workflowRun.id,
+                  verificationPlanId: planCapability.plan.id,
+                  executionGroupId: group.id,
+                  executionGroupClaimToken: claimToken,
+                  requirementId: requirement.id,
+                  candidatePatchSetId: candidate.id,
+                  provider: 'daytona',
+                  command,
+                  commandDigest,
+                  platform,
+                  architecture,
+                  ...(providerProcessIdentity === undefined
+                    ? {}
+                    : providerProcessIdentity),
+                  status: 'cancelled',
+                  summary: 'Trusted command execution was interrupted.',
+                  artifactIds: [],
+                  producedArtifactKinds: [],
+                  stdoutCaptureStatus: 'failed',
+                  stderrCaptureStatus: 'failed',
+                  cleanupStatus: 'failed',
+                  candidateDigestBefore: candidate.candidateDigest,
+                  startedAt: claimedAt,
+                  completedAt,
+                  idempotencyKey: `${group.id}:result`,
+                  traceId: workflowRun.traceId,
+                  operation: 'runIncomingVerificationPlan.cancelGroup',
+                }),
+              ),
+              Effect.asVoid,
+            ),
           ),
           Effect.match({
             onFailure: (error) => ({ ok: false as const, error }),
@@ -359,7 +376,7 @@ export const ExecuteIncomingVerificationRequirements = Effect.fn(
           workflowRunId: workflowRun.id,
           traceId: workflowRun.traceId,
           producer,
-          subjectDigest: candidate.candidateDigest!,
+          subjectDigest: candidateDigest,
           kind,
           label: `${requirement.label} ${kind}`,
           contentType: 'text/plain; charset=utf-8',
@@ -403,8 +420,8 @@ export const ExecuteIncomingVerificationRequirements = Effect.fn(
         (kind) => artifacts.some((artifact) => artifact.kind === kind),
       )
       const candidateUnchanged = verificationCandidateStateMatches({
-        candidateDigest: candidate.candidateDigest!,
-        candidateHeadSha: candidate.headSha!,
+        candidateDigest,
+        candidateHeadSha,
         transientDigestBefore: transient?.candidateDigestBefore,
         transientDigestAfter: transient?.candidateDigestAfter,
         initialCandidateStateDigest: result.initialCandidateStateDigest,
