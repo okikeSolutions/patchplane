@@ -35,9 +35,9 @@ claimed as passing.
 | Domain                            |    11 |                                          33 | Passed                              | Complete                                                             |
 | Core                              |    26 |               77 declarations; 8 table rows | Passed                              | Complete: 83 audited claims/scenarios; package suite passed 83 tests |
 | Backend / Convex                  |     4 |                                          65 | Passed                              | Complete: 65 audited transaction scenarios; package suite passed     |
-| Plugins                           |    25 |         158 declarations; 9 table scenarios | Passed                              | Complete: ledger reconciled; final package suite passed 167 tests    |
+| Plugins                           |    25 |         159 declarations; 9 table scenarios | Passed                              | Complete: ledger reconciled; final package suite passed 168 tests    |
 | CLI                               |     1 |                                          19 | Passed                              | Complete: ledger reconciled; package suite passed 19 tests           |
-| Client                            |    48 |        186 declarations; 59 table scenarios | Passed                              | Complete: claim ledger reconciled; final package suite passed 238 tests |
+| Client                            |    48 |        186 declarations; 59 table scenarios | Passed                              | Complete: claim ledger reconciled; final package suite passed 240 tests |
 | Source-control Worker             |     9 |                                          66 | Passed                              | Complete: 66 claims reconciled; package suite passed                 |
 | Infrastructure                    |     3 |                                           7 | Six passed, one opt-in test skipped | Local lane complete; live deploy remains unverified                  |
 | Repository verification and evals |     6 | 33 declarations, 69 baseline lint fixtures, 12 evals | Passed                        | Complete: root policy tests 107; CLI evals 12 passed                 |
@@ -190,9 +190,9 @@ builds above Vite's unchanged 500 KiB warning boundary. Its adversarial Vite
 fixture proves a generated oversized chunk fails the build. Package test lanes
 also run sequentially to comply with the repository resource rule.
 
-The final `bun run verify` passed with 798 test cases, one opt-in live Alchemy
+The final `bun run verify` passed with 799 test cases, one opt-in live Alchemy
 deploy test skipped, 107 root architecture/automation tests, and 12 CLI evals.
-All workspace tests passed: domain 33, core 83, backend 65, plugins 167, CLI
+All workspace tests passed: domain 33, core 83, backend 65, plugins 168, CLI
 19, client 240, source-control Worker 66, infrastructure 6. Roadmap acceptance
 consistency, typechecks, lint, Knip, standalone client build, emitted runtime
 boundary checks, and the Alchemy bundle gate passed. `bun install
@@ -910,7 +910,8 @@ Every declaration owned by `packages/plugins` has one primary claim here. Parame
 | F    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:64`          | drops transient token and tool progress updates                                        | Converted to an Effect-aware stream test so the stream is evaluated inside the Effect test runtime.                                                                  |
 | F    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:82`          | fails closed on malformed RPC JSON without retaining its content                       | Uses Effect.flip under it.effect and explicitly asserts that malformed secret content is not retained.                                                               |
 | F    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:97`          | drops unknown provider event types and forged RPC commands                             | Converted to an Effect-aware stream test; retains forged-command exclusion.                                                                                          |
-| F    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:112`          | uses strict LF JSONL framing                                                           | Converted to an Effect-aware stream test; retains the CR/LF split framing case.                                                                                      |
+| R    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:112`          | distinguishes idempotency keys for different records with identical redacted payloads | A different Pi record with the same event type and source location cannot be silently suppressed as a duplicate.                                                    |
+| F    | `packages/plugins/src/sandbox-runtime/pi/ingestion.test.ts:128`          | uses strict LF JSONL framing                                                           | Converted to an Effect-aware stream test; retains the CR/LF split framing case.                                                                                      |
 | R    | `packages/plugins/src/sandbox-runtime/pi/jsonl.test.ts:6`               | frames strict LF records across arbitrary chunks                                       | Provider wire framing, command serialization, event identity, or typed failure changes incompatibly.                                                                 |
 | R    | `packages/plugins/src/sandbox-runtime/pi/jsonl.test.ts:22`              | fails before an unterminated line can grow without bound                               | Provider wire framing, command serialization, event identity, or typed failure changes incompatibly.                                                                 |
 | R    | `packages/plugins/src/sandbox-runtime/pi/jsonl.test.ts:32`              | does not split on standalone carriage returns or unicode separators                    | Provider wire framing, command serialization, event identity, or typed failure changes incompatibly.                                                                 |
@@ -1070,3 +1071,9 @@ No live command was started in this campaign. The workspace contains provider cr
 | Deployed Sentry capture/readback                     | Acceptance matrix M7.5 rows                               | Missing in product matrix; no result claimed | Provide a deployed Sentry test project and a cleanup/readback procedure.                                                                                                           |
 
 The opt-in Cloudflare test requires deliberate stage selection and cleanup planning because its default keeps deployed resources. Existing `Historical` rows remain historical. A skipped, unstarted, or missing scenario is never counted as passing evidence.
+
+## Final code review and revalidation
+
+The final review compared the repository against the recorded Effect and test-audit standards and the applicable `SPEC.md` requirements. The Standards review found two actionable items: two Effect workflows read wall-clock time with `Date.now()`, and Convex repeated the same SHA-256 encoding. Both are fixed: the workflows use `Clock.currentTimeMillis`, and Convex uses the shared `sha256Digest` helper. The Spec review found that redacted Pi payloads also supplied the idempotency hash, allowing distinct source records to collide. The key now hashes the source line while stored payloads remain redacted. An adversarial test proves different records with the same event type, line, and redacted payload receive different keys. The test inventory hash and claim ledger include this final test change.
+
+After those fixes and integration of the fetched `origin/main`, `bun run verify` passed on 2026-10-08: 799 tests passed and one opt-in live Alchemy test was skipped; typechecks, lint, Knip, all workspace and root suites, 12 CLI evals, acceptance consistency, standalone production build, and the Alchemy bundle check passed. Package counts were domain 33, core 83, backend 65, plugins 168, CLI 19, client 240, source-control Worker 66, and infrastructure 6 passed. `bun install --frozen-lockfile` completed with no dependency changes. Current Alchemy measurements are 2.20 MiB server and 5.71 MiB client, 1.06 MiB client JavaScript gzip, and 343 KiB largest client chunk; each remains within its enforced budget. No Vite chunk-size advisory or browser `node:*` externalization appeared in the production builds. No credentialed or deployed acceptance is claimed; the acceptance matrix continues to identify those outstanding scenarios.
