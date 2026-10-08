@@ -78,3 +78,24 @@ PRs should state the commands run, their results, and why any relevant live
 check was not run. A failed automation is a release blocker until it is fixed,
 explicitly quarantined with an owner and expiry, or removed because the policy
 it enforced is obsolete.
+
+### 2026-08-01 hosted trust-loop validation
+
+- `bun run verify`: passed, including the production build, exact server-function
+  manifest gate, and client/server bundle budgets.
+- `oxfmt --check` passed for all changed/untracked files. The repository-wide
+  `bun run format:check` remains red on 233 pre-existing unrelated files,
+  including vendored template sources; this closeout did not rewrite that
+  unrelated baseline.
+- Focused client, backend, core, plugin, architecture, typecheck, and lint gates
+  passed while fixing the live findings.
+- Dev Convex functions and the matching Alchemy `dev` stack were deployed.
+- Workflow `ms72wz64cez5rvasvwqgh06f998bmqk1` on temporary PR 162 reached
+  `reviewed` with exact incoming base/head evidence. A real WorkOS session
+  recorded approved decision `qs73pz54xp5rz6f6f02qhe1k9x8bm9mp`.
+- Post-decision smoke read back exactly one issue comment (`5153551846`) and
+  exact-head check run (`91422122247`). Provider replay preserved both IDs and
+  reported `externalIdsUnchanged: true`; the operator confirmed the final
+  Approved/2-published UI state.
+- This evidence closes authenticated decision/publication acceptance only. A
+  live authenticated rerun and multi-environment acceptance remain open.

@@ -11,7 +11,7 @@ The suite intentionally uses Effect's Node platform services:
 - `@effect/platform-node/NodeChildProcessSpawner`
 - `@effect/platform-node/NodeFileSystem`
 - `@effect/platform-node/NodePath`
-- `effect/unstable/process/ChildProcess`
+- `effect/process` (`ChildProcess` and `ChildProcessSpawner`)
 
 This keeps process execution, filesystem access, paths, and cleanup inside Effect services while still testing the real packaged CLI entrypoint:
 

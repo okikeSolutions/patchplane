@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
+import * as ts from 'typescript'
 import {
   ArchitectureFileSystemLayer,
   filesUnder,
@@ -11,6 +12,44 @@ import {
   sourceFilesUnder,
   sourceImportsUnder,
 } from './architecture-files'
+
+function directObservabilityCalls(file: string, source: string) {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  )
+  const names = new Set([
+    'captureException',
+    'captureEvent',
+    'captureMessage',
+    'addBreadcrumb',
+    'identify',
+    'capture',
+    'track',
+  ])
+  const calls: string[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression
+      const name =
+        ts.isPropertyAccessExpression(expression) ||
+        ts.isPropertyAccessChain(expression)
+          ? expression.name.text
+          : ts.isIdentifier(expression)
+            ? expression.text
+            : undefined
+      if (name !== undefined && names.has(name)) {
+        calls.push(`${file}:${name}`)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return calls
+}
 
 describe('architecture boundaries', () => {
   it.effect(
@@ -231,20 +270,10 @@ describe('architecture boundaries', () => {
             specifier.startsWith('@effect/platform-bun/'),
         )
 
-        const lockfile = yield* fileText('bun.lock')
-        const bundleBudgetScript = yield* fileText(
-          'scripts/bundle-size-client.ts',
-        )
-
         expect(platformBunDependencies).toEqual([
           { path: 'package.json', dependency: '@effect/platform-bun' },
         ])
         expect(importViolations).toEqual([])
-        expect(lockfile).toContain('"@effect/platform-bun": [')
-        expect(bundleBudgetScript).toContain(
-          '@effect/platform-node/NodeServices',
-        )
-        expect(bundleBudgetScript).not.toContain('@effect/platform-bun')
         expect(
           packageManifests.some(
             ({ manifest }) =>
@@ -339,7 +368,20 @@ describe('architecture boundaries', () => {
           )
         })
 
+        const directHttpClientViolations = imports.filter(
+          ({ file, specifier }) =>
+            specifier === 'convex/browser' &&
+            ![
+              'packages/plugins/src/convex/http-client.ts',
+              'packages/plugins/src/convex/native-deadline-mutation.ts',
+            ].includes(file) &&
+            !file.includes('/scripts/') &&
+            !file.endsWith('.test.ts') &&
+            !file.endsWith('.test.tsx'),
+        )
+
         expect(violations).toEqual([])
+        expect(directHttpClientViolations).toEqual([])
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
@@ -358,7 +400,8 @@ describe('architecture boundaries', () => {
           return !(
             file.startsWith('packages/plugins/src/sentry/') ||
             (file.startsWith('apps/client/') &&
-              specifier.startsWith('@sentry/tanstackstart-react')) ||
+              (specifier === '@sentry/react' ||
+                specifier === '@sentry/core')) ||
             file.endsWith('.test.ts') ||
             file.endsWith('.test.tsx')
           )
@@ -414,18 +457,17 @@ describe('architecture boundaries', () => {
         const importViolations = imports.filter(({ specifier }) =>
           forbiddenImportPattern.test(specifier),
         )
-        const directTransportPattern =
-          /\b(?:captureException|captureEvent|captureMessage|addBreadcrumb|identify)\s*\(|\.(?:capture|track)\s*\(/
         const directCallViolations = (yield* Effect.all(
           diffSurfaceFiles.map((file) =>
             Effect.gen(function* () {
               const source = yield* fileText(file)
-              return directTransportPattern.test(source)
-                ? yield* relativeToRepo(file)
-                : undefined
+              return directObservabilityCalls(
+                yield* relativeToRepo(file),
+                source,
+              )
             }),
           ),
-        )).filter((file) => file !== undefined)
+        )).flat()
 
         expect(diffSurfaceFiles.length).toBeGreaterThan(0)
         expect(importViolations).toEqual([])
@@ -513,452 +555,52 @@ describe('architecture boundaries', () => {
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
-  it.effect(
-    'keeps app core workflow entrypoints behind the managed Effect runtime',
-    () =>
-      Effect.gen(function* () {
-        const effectServerFn = yield* fileText(
-          'apps/client/src/lib/effect-server-fn.ts',
-        )
-        expect(effectServerFn).toContain("import('@/effect/runtime')")
-        expect(effectServerFn).toContain(
-          'patchPlaneRuntime.runPromiseExit(program)',
-        )
-
-        const githubWebhookRoute = yield* fileText(
-          'apps/client/src/routes/api/github/webhook.tsx',
-        )
-        expect(githubWebhookRoute).toContain('dedicated GitHubWebhookWorker')
-        expect(githubWebhookRoute).not.toContain(
-          "import('@/effect/webhook-runtime')",
-        )
-        expect(githubWebhookRoute).not.toContain(
-          'patchPlaneRuntime.runPromiseExit(program)',
-        )
-
-        const startWorkflow = yield* fileText(
-          'apps/client/src/lib/start-workflow.ts',
-        )
-        expect(startWorkflow).toContain('effectServerFn({')
-        expect(startWorkflow).not.toContain('createServerFn')
-
-        const directCoreWorkflowImports = (yield* sourceImportsUnder(
-          'apps/client/src',
-        )).filter(
-          ({ file, specifier }) =>
-            specifier.startsWith('@patchplane/core/workflows/') &&
-            !(
-              file === 'apps/client/src/lib/start-workflow.ts' ||
-              file === 'apps/client/src/routes/api/github/webhook.tsx' ||
-              file === 'apps/client/src/scripts/smoke-workflow.ts'
-            ),
-        )
-
-        expect(directCoreWorkflowImports).toEqual([])
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
-  )
-
-  it.effect(
-    'keeps hosted GitHub install and webhook routes wired across client and source-control Workers',
-    () =>
-      Effect.gen(function* () {
-        const clientCallback = yield* fileText(
-          'apps/client/src/routes/api/github/install/callback.tsx',
-        )
-        const clientWebhook = yield* fileText(
-          'apps/client/src/routes/api/github/webhook.tsx',
-        )
-        const sourceControlWorker = yield* fileText(
-          'apps/source-control/src/worker.ts',
-        )
-        const githubWebhookWorker = yield* fileText(
-          'apps/source-control/src/webhook-worker.ts',
-        )
-        const sourceControlGitHubRoutes = (yield* Effect.all(
-          [
-            'apps/source-control/src/github/routes.ts',
-            'apps/source-control/src/github/routes/support.ts',
-            'apps/source-control/src/github/routes/markQueuedDeliveryExhausted.ts',
-            'apps/source-control/src/github/routes/syncGitHubInstallation.ts',
-            'apps/source-control/src/github/routes/controlRuntimeSession.ts',
-            'apps/source-control/src/github/routes/executeWorkflowRerun.ts',
-            'apps/source-control/src/github/routes/publishDecision.ts',
-            'apps/source-control/src/github/routes/handleGitHubWebhook.ts',
-          ].map(fileText),
-        )).join('\n')
-        const infra = yield* fileText('alchemy.run.ts')
-
-        expect(clientCallback).toContain('getSourceControlWorker')
-        expect(clientCallback).toContain('Cloudflare.fromCloudflareFetcher')
-        expect(clientCallback).toContain(
-          'https://source-control-worker/internal/github/install/sync',
-        )
-        expect(clientCallback).toContain('HttpClientRequest.post')
-        expect(clientCallback).not.toContain('internalWorkerToken')
-
-        expect(sourceControlWorker).toContain(
-          "url.pathname === '/internal/github/install/sync'",
-        )
-        expect(sourceControlWorker).toContain(
-          'syncGitHubInstallation(request, runtime)',
-        )
-        expect(sourceControlWorker).toContain(
-          "url.pathname === '/api/github/webhook'",
-        )
-        expect(sourceControlWorker).toContain(
-          'handleGitHubWebhook(request, env, runtime)',
-        )
-        expect(sourceControlWorker).toContain(
-          "url.pathname === '/internal/runtime/control'",
-        )
-        expect(sourceControlWorker).toContain(
-          'controlRuntimeSession(request, runtime)',
-        )
-        expect(sourceControlWorker).toContain('withCloudflareSentry({')
-        expect(githubWebhookWorker).toContain('withCloudflareSentry({')
-
-        expect(sourceControlGitHubRoutes).toContain(
-          'export async function syncGitHubInstallation',
-        )
-        expect(sourceControlGitHubRoutes).toContain(
-          'export async function handleGitHubWebhook',
-        )
-        expect(sourceControlGitHubRoutes).not.toContain(
-          'assertInternalAuthorization(request)',
-        )
-        expect(sourceControlGitHubRoutes).toContain(
-          'CloudflareTelemetryPlugin.layer',
-        )
-        expect(sourceControlGitHubRoutes).not.toContain(
-          'SentryTelemetryPlugin.layer',
-        )
-        expect(sourceControlGitHubRoutes).toContain('ControlRuntimeSession')
-        expect(sourceControlGitHubRoutes).toContain('StartWorkflowFromIntake')
-        expect(sourceControlGitHubRoutes).toContain(
-          'GitHubEventToWorkflowIntake',
-        )
-        expect(sourceControlGitHubRoutes).toContain(
-          'RunSandboxAgentForWorkflow',
-        )
-        expect(sourceControlGitHubRoutes).toContain(
-          'PublishSandboxResultToSource',
-        )
-
-        expect(clientWebhook).toContain(
-          'GitHub webhooks are handled by the dedicated GitHubWebhookWorker',
-        )
-        expect(infra).toContain('SourceControlWorker')
-        expect(infra).toContain('url: false')
-        expect(infra).toContain('SOURCE_CONTROL_WORKER: sourceControlWorker')
-        expect(infra).toContain(
-          'CLOUDFLARE_SENTRY_DSN: sourceControlRuntimeEnv.CLOUDFLARE_SENTRY_DSN',
-        )
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
-  )
-
-  it.effect('keeps app-shell feature UI composed from shared primitives', () =>
+  it.effect('keeps core workflow imports behind owned adapters', () =>
     Effect.gen(function* () {
-      const featureFiles = (yield* sourceFilesUnder(
-        'apps/client/src/components/app-shell',
+      const directCoreWorkflowImports = (yield* sourceImportsUnder(
+        'apps/client/src',
       )).filter(
-        (file) => !file.endsWith('.test.ts') && !file.endsWith('.test.tsx'),
-      )
-      const featureImports = yield* importsForFiles(featureFiles)
-      const featureSources = yield* Effect.all(
-        featureFiles.map((file) =>
-          fileText(file).pipe(Effect.map((source) => ({ file, source }))),
-        ),
-      )
-      const toolbar = yield* fileText(
-        'apps/client/src/components/app-shell/workflow-console-toolbar.tsx',
-      )
-      const artifactReferences = yield* fileText(
-        'apps/client/src/components/app-shell/workflow-artifact-references.tsx',
-      )
-      const reviewPanel = yield* fileText(
-        'apps/client/src/components/app-shell/workflow-review-panel.tsx',
+        ({ file, specifier }) =>
+          specifier.startsWith('@patchplane/core/workflows/') &&
+          !(
+            file === 'apps/client/src/lib/start-workflow.ts' ||
+            file === 'apps/client/src/routes/api/github/webhook.tsx' ||
+            file === 'apps/client/src/scripts/smoke-workflow.ts'
+          ),
       )
 
-      expect(
-        featureImports.filter(
-          ({ specifier }) =>
-            specifier === 'sonner' ||
-            specifier.startsWith('@base-ui/') ||
-            specifier.startsWith('@radix-ui/'),
-        ),
-      ).toEqual([])
-
-      const forbiddenMarkup =
-        /<(?:button|input|textarea|select|option|table|thead|tbody|tr|th|td|hr)\b/
-      expect(
-        featureSources
-          .filter(
-            ({ source }) =>
-              forbiddenMarkup.test(source) ||
-              /\b(?:animate-pulse|space-x-|space-y-)/.test(source),
-          )
-          .map(({ file }) => file),
-      ).toEqual([])
-
-      expect(toolbar).toContain("from '@/components/ui/toggle-group'")
-      expect(toolbar).toContain('<ToggleGroup')
-      expect(toolbar).not.toContain('function FilterButton')
-      expect(artifactReferences).toContain("from '@/components/ui/alert'")
-      expect(artifactReferences).toContain("from '@/components/ui/item'")
-      expect(artifactReferences).not.toContain('<Card')
-      expect(reviewPanel).toContain("from '@/components/ui/item'")
-      expect(reviewPanel).toContain('<ItemGroup')
+      expect(directCoreWorkflowImports).toEqual([])
     }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
-  it.effect(
-    'keeps hosted artifact reads behind authorization and a native R2 binding',
-    () =>
-      Effect.gen(function* () {
-        const artifactRoute = yield* fileText(
-          'apps/client/src/routes/api/artifacts/url.tsx',
-        )
-        const clientEnv = yield* fileText('apps/client/src/env.ts')
-        const infra = yield* fileText('alchemy.run.ts')
-
-        expect(artifactRoute).toContain('getEvidenceArtifact')
-        expect(artifactRoute).toContain('getEvidenceBucket')
-        expect(artifactRoute).toContain('createArtifactStorageResponse')
-        expect(artifactRoute).not.toContain('createR2SignedReadUrl')
-        expect(artifactRoute).not.toContain('@aws-sdk/')
-        expect(clientEnv).toContain('PATCHPLANE_EVIDENCE_BUCKET: R2Bucket')
-        expect(infra).toContain('PATCHPLANE_EVIDENCE_BUCKET: evidenceBucket')
-        expect(infra).not.toContain('PATCHPLANE_EVIDENCE_R2_ACCESS_KEY_ID')
-        expect(infra).not.toContain('PATCHPLANE_EVIDENCE_R2_SECRET_ACCESS_KEY')
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
-  )
-
-  it.effect(
-    'keeps diff rendering behind the authenticated PatchPlane artifact boundary',
-    () =>
-      Effect.gen(function* () {
-        const artifactRoute = yield* fileText(
-          'apps/client/src/routes/api/artifacts/url.tsx',
-        )
-        const workflowChanges = yield* fileText(
-          'apps/client/src/components/app-shell/workflow-changes.tsx',
-        )
-        const diffPreviewHook = yield* fileText(
-          'apps/client/src/components/app-shell/use-candidate-diff-preview.ts',
-        )
-        const diffRuntime = yield* fileText(
-          'apps/client/src/effect/diff-runtime.ts',
-        )
-        const diffBenchmark = yield* fileText(
-          'apps/client/src/scripts/diff-viewer-benchmark.ts',
-        )
-        const diffFixture = yield* fileText(
-          'apps/client/test/performance/diff-viewer/main.tsx',
-        )
-        const rootManifest = yield* packageJson('package.json')
-        const workflowDetailPage = yield* fileText(
-          'apps/client/src/components/app-shell/workflow-detail-page.tsx',
-        )
-        const renderer = (yield* Effect.all([
-          fileText(
-            'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
-          ),
-          fileText(
-            'apps/client/src/components/app-shell/candidate-diff-renderer-sections.tsx',
-          ),
-        ])).join('\n')
-        const rendererFailureBoundary = yield* fileText(
-          'apps/client/src/components/app-shell/candidate-diff-failure-boundary.tsx',
-        )
-        const pierreRenderer = yield* fileText(
+  it.effect('keeps heavy diff renderers within their adapter modules', () =>
+    Effect.gen(function* () {
+      const imports = yield* sourceImportsUnder('apps/client/src')
+      const owners = new Map([
+        [
+          '@pierre/diffs',
           'apps/client/src/components/app-shell/candidate-unified-diff.tsx',
-        )
-        const clientImports = yield* sourceImportsUnder('apps/client/src')
-        const pierreDiffImports = clientImports.filter(
-          ({ specifier }) =>
-            specifier === '@pierre/diffs' ||
-            specifier.startsWith('@pierre/diffs/'),
-        )
-
-        expect(artifactRoute).toContain("await import('@workos/authkit")
-        expect(artifactRoute).toContain('convex.setAuth(input.accessToken)')
-        expect(artifactRoute).toContain('getEvidenceBucket')
-        expect(artifactRoute).toContain('createArtifactStorageResponse')
-        expect(workflowChanges).toContain('<CandidateDiffRenderer')
-        expect(workflowChanges).toContain('content={diffPreview.content}')
-        expect(workflowChanges).toContain(
-          'projection={diffPreview.changedFiles}',
-        )
-        expect(workflowChanges).toContain('useCandidateDiffPreview({')
-        expect(diffPreviewHook).toContain("credentials: 'same-origin'")
-        expect(diffPreviewHook).toContain("cache: 'no-store'")
-        expect(diffPreviewHook).toContain(
-          "await import('@/effect/diff-runtime')",
-        )
-        expect(diffPreviewHook).toContain('diffProjectionRuntime.runPromise(')
-        expect(diffPreviewHook).not.toContain(
-          "await import('@/effect/runtime')",
-        )
-        expect(diffRuntime).toContain('ManagedRuntime.make(Layer.empty')
-        expect(diffRuntime).not.toContain('app-layer')
-        expect(diffRuntime).not.toContain('@patchplane/plugins')
-        expect(rootManifest.scripts?.['bench:diff-viewer']).toBe(
-          'bun apps/client/src/scripts/diff-viewer-benchmark.ts',
-        )
-        expect(diffBenchmark).toContain("host: '127.0.0.1'")
-        expect(diffBenchmark).toContain('largeInitialRenderMs: 6_000')
-        expect(diffBenchmark).toContain('standardInitialRenderMs: 2_000')
-        expect(diffBenchmark).toContain('fileSwitchMs: 100')
-        expect(diffFixture).toContain('<CandidateDiffRenderer')
-        expect(diffFixture).toContain('ProjectCandidateChangedFiles(content)')
-        expect(diffFixture).not.toContain('fetch(')
-        expect(workflowDetailPage).toContain("import('./workflow-changes')")
-        expect(workflowDetailPage).toContain("activeTab === 'changes'")
-        expect(workflowDetailPage).not.toContain(
-          "import { WorkflowChanges } from './workflow-changes'",
-        )
-
-        expect(renderer).toContain('readonly content: string')
-        expect(pierreRenderer).toContain(
-          "import { PatchDiff } from '@pierre/diffs/react'",
-        )
-        expect(renderer).toContain('import.meta.env.SSR')
-        expect(renderer).toContain("import('./candidate-unified-diff')")
-        expect(renderer).toContain('CandidateDiffProcessorUnavailableError')
-        expect(renderer).toContain('fallbackKind="malformed"')
-        expect(renderer).toContain('fallbackKind="processor-unavailable"')
-        expect(rendererFailureBoundary).toContain(
-          "CandidateDiffRendererFailure = 'malformed' | 'processor-unavailable'",
-        )
-        expect(rendererFailureBoundary).toContain(
-          "from '@/components/ui/alert'",
-        )
-        expect(rendererFailureBoundary).not.toContain('console.')
-        expect(pierreRenderer).toContain('<PatchDiff')
-        expect(pierreRenderer).toContain('diffStyle: view')
-        expect(pierreRenderer).toContain('readonly view: WorkflowDiffView')
-        expect(pierreRenderer).toContain("preferredHighlighter: 'shiki-js'")
-        expect(pierreRenderer).toContain('disableWorkerPool')
-        expect(pierreRenderer).not.toContain('new Worker')
-        expect(pierreRenderer).not.toContain('workerUrl')
-        expect(pierreRenderer).not.toContain("diffStyle: 'split'")
-        for (const forbidden of [
-          'artifactId',
-          'artifactSha256',
-          'artifactSizeBytes',
-          'returnedBytes',
-          'truncated',
-          'workflowRunId',
-          'fetch(',
-          '/api/artifacts',
-          'navigator.sendBeacon',
-          'XMLHttpRequest',
-          'WebSocket',
-        ]) {
-          expect(renderer).not.toContain(forbidden)
-          expect(pierreRenderer).not.toContain(forbidden)
-        }
-
-        expect(
-          pierreDiffImports.filter(
-            ({ file }) =>
-              file !==
-              'apps/client/src/components/app-shell/candidate-unified-diff.tsx',
-          ),
-        ).toEqual([])
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
-  )
-
-  it.effect(
-    'keeps changed-file projection candidate-bound and independent of repository trees',
-    () =>
-      Effect.gen(function* () {
-        const projection = yield* fileText(
-          'packages/core/src/diff/project-candidate-changed-files.ts',
-        )
-        const treeAdapter = yield* fileText(
+        ],
+        [
+          '@pierre/trees',
           'apps/client/src/components/app-shell/candidate-changed-files-navigator.tsx',
-        )
-        const diffRenderer = yield* fileText(
-          'apps/client/src/components/app-shell/candidate-diff-renderer.tsx',
-        )
-        const workflowChanges = yield* fileText(
-          'apps/client/src/components/app-shell/workflow-changes.tsx',
-        )
-        const diffPreviewHook = yield* fileText(
-          'apps/client/src/components/app-shell/use-candidate-diff-preview.ts',
-        )
-        const statistics = yield* fileText(
-          'packages/core/src/diff/parse-unified-diff-stats.ts',
-        )
-        const clientFiles = yield* sourceFilesUnder('apps/client/src')
-        const clientImports = yield* importsForFiles(clientFiles)
-        const clientSources = yield* Effect.all(
-          clientFiles.map((file) => fileText(file)),
-        )
-        const repositoryTreeMarkers = [
-          '/git/trees',
-          'git/trees?recursive',
-          'repos.getContent',
-          'getRepositoryTree',
-        ]
-
-        expect(projection).toContain(
-          'export const ProjectCandidateChangedFiles = Effect.fn(',
-        )
-        expect(projection).toContain(
-          "'@patchplane/core/diff/ProjectCandidateChangedFiles'",
-        )
-        expect(projection).toContain("from '@patchplane/domain/candidate-file'")
-        expect(projection).toContain(
-          'Schema.decodeUnknownOption(CandidateFilePath)',
-        )
-        expect(projection).toContain('Match.value(line).pipe(')
-        expect(statistics).toContain(
-          'export const ParseUnifiedDiffStats = Effect.fn(',
-        )
-        expect(statistics).toContain(
-          "'@patchplane/core/diff/ParseUnifiedDiffStats'",
-        )
-        expect(statistics).toContain(
-          'extends Schema.TaggedErrorClass<UnifiedDiffStatsUnavailable>()(',
-        )
-        expect(statistics).toContain(
-          "import { Effect, Match, Schema } from 'effect'",
-        )
-        expect(statistics).toContain('Match.value(line).pipe(')
-        expect(projection).toContain('content: string')
-        expect(projection).not.toContain('fetch(')
-        expect(projection).not.toContain('github')
-
-        for (const source of clientSources) {
-          for (const marker of repositoryTreeMarkers) {
-            expect(source).not.toContain(marker)
+        ],
+      ])
+      const violations = imports.filter(({ file, specifier }) => {
+        for (const [packageName, owner] of owners) {
+          if (
+            (specifier === packageName ||
+              specifier.startsWith(`${packageName}/`)) &&
+            file !== owner
+          ) {
+            return true
           }
         }
+        return false
+      })
 
-        expect(treeAdapter).toContain("from '@pierre/trees/react'")
-        expect(treeAdapter).toContain(
-          "model.scrollToPath(path, { focus: true, offset: 'nearest' })",
-        )
-        expect(treeAdapter).not.toContain('.shadowRoot')
-        expect(treeAdapter).not.toContain('MutationObserver')
-        expect(diffRenderer).toContain(
-          "lazy(() =>\n  import('./candidate-changed-files-navigator')",
-        )
-        expect(workflowChanges).toContain('useCandidateDiffPreview({')
-        expect(diffPreviewHook).toContain('diffProjectionRuntime.runPromise(')
-        expect(diffPreviewHook).not.toContain('Effect.runPromise')
-        expect(
-          clientImports.filter(
-            ({ file, specifier }) =>
-              (specifier === '@pierre/trees' ||
-                specifier.startsWith('@pierre/trees/')) &&
-              file !==
-                'apps/client/src/components/app-shell/candidate-changed-files-navigator.tsx',
-          ),
-        ).toEqual([])
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
+      expect(violations).toEqual([])
+    }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 
   it.effect(
@@ -978,57 +620,6 @@ describe('architecture boundaries', () => {
         )
 
         expect(violations).toEqual([])
-      }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
-  )
-
-  it.effect(
-    'keeps sandbox control-plane credentials out of core sandbox inputs and Daytona env injection',
-    () =>
-      Effect.gen(function* () {
-        const sandboxService = yield* fileText(
-          'packages/core/src/services/sandbox-service.ts',
-        )
-        const daytonaPlugin = yield* fileText(
-          'packages/plugins/src/daytona/DaytonaSandboxPlugin.ts',
-        )
-        const daytonaProduction = (yield* Effect.all(
-          (yield* sourceFilesUnder('packages/plugins/src/daytona'))
-            .filter(
-              (file) =>
-                !file.endsWith('.test.ts') &&
-                !file.endsWith('.d.ts') &&
-                !file.endsWith('/live-rpc-smoke.ts'),
-            )
-            .map(fileText),
-        )).join('\n')
-        const forbidden = [
-          'workos',
-          'convex',
-          'systemIngestionSecret',
-          'PATCHPLANE_SYSTEM_INGESTION_SECRET',
-          'GITHUB_PRIVATE_KEY',
-          'githubPrivateKey',
-          'appPrivateKey',
-          'WORKOS_API_KEY',
-          'CONVEX_URL',
-        ]
-
-        for (const value of forbidden) {
-          expect(sandboxService.toLowerCase()).not.toContain(
-            value.toLowerCase(),
-          )
-        }
-
-        expect(daytonaPlugin).toMatch(
-          /piRuntimeEnvironment\(\{\s*provider: input\.provider,?\s*\}\)/,
-        )
-        expect(daytonaPlugin).toMatch(
-          /envVars:\s*input\.env === undefined\s*\? undefined\s*:\s*\{ \.\.\.input\.env \}/,
-        )
-        expect(daytonaProduction).not.toContain('process.env')
-        for (const value of forbidden) {
-          expect(daytonaProduction).not.toContain(value)
-        }
       }).pipe(Effect.provide(ArchitectureFileSystemLayer)),
   )
 

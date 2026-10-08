@@ -41,7 +41,7 @@ A human decision is valid only for the displayed execution/candidate/review/poli
 
 Patch Report V1 is a deterministic projection over durable normalized records plus immutable artifact metadata. Legacy workflows are not silently projected as V1. Trust-critical truncation makes the report incomplete.
 
-PatchPlane retains immutable attempts, evidence, decisions, publication rows, and provenance. External GitHub publication is canonical: one stable issue-comment identity per root workflow, updated on replay, and one candidate-commit-bound check identity attached only to the exact candidate `headSha`. Publication dispatch uses an atomic, leased claim to prevent concurrent duplicate side effects while permitting recovery.
+PatchPlane retains immutable attempts, evidence, decisions, publication rows, and provenance. External GitHub publication is canonical for the terminal human decision: the issue-comment marker and exact-candidate `headSha` check `external_id` are both derived from `<humanDecisionId>:<kind>`. Exact replay updates or adopts only objects owned by the configured GitHub App and preserves their external IDs. Publication dispatch uses atomic leased claims to prevent concurrent duplicate side effects while permitting recovery.
 
 ### Supersession
 

@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "runtimeBridges": [
+    {
+      "id": "CLIENT-UI-DIFF-001",
+      "file": "apps/client/src/components/app-shell/use-candidate-diff-preview.ts",
+      "owner": "useCandidateDiffPreview",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 1,
+      "status": "approved",
+      "evidence": "apps/client/src/components/app-shell/workflow-changes.test.tsx"
+    },
+    {
+      "id": "CLIENT-RUNTIME-001",
+      "file": "apps/client/src/effect/runtime.ts",
+      "owner": "runPatchPlaneEffect",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/effect/diff-runtime.test.ts"
+    },
+    {
+      "id": "CF-SOURCE-CONTROL-WORKER-001",
+      "file": "apps/source-control/src/worker.ts",
+      "owner": "runSourceControlEffect",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/source-control/src/worker.test.ts"
+    },
+    {
+      "id": "CF-WORKER-001",
+      "file": "apps/source-control/src/webhook-worker.ts",
+      "owner": "Cloudflare webhook Worker callbacks",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/source-control/src/webhook-worker.test.ts"
+    },
+    {
+      "id": "CLIENT-ARTIFACT-ROUTE-001",
+      "file": "apps/client/src/routes/api/artifacts/url.tsx",
+      "owner": "artifact URL route",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/routes/api/artifacts/-url.test.ts"
+    },
+    {
+      "id": "CLIENT-SERVER-FN-001",
+      "file": "apps/client/src/lib/effect-server-fn.ts",
+      "owner": "effectServerFn",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 3,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/lib/effect-server-fn.test.ts"
+    },
+    {
+      "id": "CLIENT-SIGNIN-001",
+      "file": "apps/client/src/routes/api/auth/sign-in.tsx",
+      "owner": "sign-in route",
+      "kind": "multiple-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/routes/api/auth/-sign-in.test.ts"
+    },
+    {
+      "id": "CLIENT-INSTALL-CALLBACK-001",
+      "file": "apps/client/src/routes/api/github/install/callback.tsx",
+      "owner": "GitHub install callback",
+      "kind": "multiple-runtime-debt",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/routes/api/github/install/-install-flow.test.ts"
+    },
+    {
+      "id": "CLIENT-INSTALL-START-001",
+      "file": "apps/client/src/routes/api/github/install/start.tsx",
+      "owner": "GitHub install start",
+      "kind": "multiple-runtime-debt",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/routes/api/github/install/-install-flow.test.ts"
+    },
+    {
+      "id": "CLIENT-STARTUP-001",
+      "file": "apps/client/src/start.ts",
+      "owner": "TanStack application startup",
+      "kind": "process-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/lib/server-function-request-bound.test.ts"
+    },
+    {
+      "id": "CLIENT-THEME-001",
+      "file": "apps/client/src/lib/theme.ts",
+      "owner": "theme server functions",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 2,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/components/theme-provider.test.tsx"
+    },
+    {
+      "id": "CLIENT-WORKOS-INITIAL-001",
+      "file": "apps/client/src/lib/workos-initial-auth.ts",
+      "owner": "WorkOS initial auth server function",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/lib/workos-initial-auth.test.ts"
+    },
+    {
+      "id": "CLIENT-AUTH-CALLBACK-001",
+      "file": "apps/client/src/routes/api/auth/callback.tsx",
+      "owner": "WorkOS callback route",
+      "kind": "framework-runtime-bridge",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 0,
+      "status": "approved",
+      "evidence": "apps/client/src/routes/api/auth/-callback.test.ts"
+    },
+    {
+      "id": "CLIENT-ARTIFACT-OPEN-001",
+      "file": "apps/client/src/components/app-shell/workflow-artifact-references.tsx",
+      "owner": "openArtifact",
+      "kind": "framework-runtime",
+      "expectedCalls": 1,
+      "expectedAsyncFunctions": 1,
+      "status": "approved",
+      "evidence": "apps/client/src/components/app-shell/workflow-artifact-references.test.ts"
+    }
+  ],
+  "asyncOrchestrationExceptions": [],
+  "nativeDeadlineExceptions": [
+    {
+      "id": "NATIVE-DEADLINE-CONVEX-MUTATION-001",
+      "file": "packages/plugins/src/convex/storage/bounded-native-promise.ts",
+      "owner": "settleConvexMutation",
+      "expectedPrimitives": 2,
+      "expectedAsyncFunctions": 0,
+      "evidence": "packages/plugins/src/convex/storage/bounded-native-promise.test.ts"
+    },
+    {
+      "id": "NATIVE-DEADLINE-DAYTONA-001",
+      "file": "packages/plugins/src/daytona/daytona-process.ts",
+      "owner": "settleWithin",
+      "expectedPrimitives": 3,
+      "expectedAsyncFunctions": 1,
+      "evidence": "packages/plugins/src/daytona/DaytonaSandboxPlugin.test.ts"
+    },
+    {
+      "id": "NATIVE-DEADLINE-DAYTONA-POLICY-001",
+      "file": "packages/plugins/src/daytona/daytona-policy.ts",
+      "owner": "withNativeDeadline",
+      "expectedPrimitives": 3,
+      "expectedAsyncFunctions": 1,
+      "evidence": "packages/plugins/src/daytona/DaytonaSandboxPlugin.test.ts"
+    },
+    {
+      "id": "NATIVE-DEADLINE-DAYTONA-DELETE-001",
+      "file": "packages/plugins/src/daytona/DaytonaSandboxPlugin.ts",
+      "owner": "sandbox delete release",
+      "expectedPrimitives": 3,
+      "expectedAsyncFunctions": 0,
+      "evidence": "packages/plugins/src/daytona/DaytonaSandboxPlugin.test.ts"
+    },
+    {
+      "id": "NATIVE-DEADLINE-GITHUB-PROVIDER-001",
+      "file": "packages/plugins/src/github/github-provider-deadline.ts",
+      "owner": "githubProviderDeadlineSignal",
+      "expectedPrimitives": 1,
+      "expectedAsyncFunctions": 0,
+      "evidence": "packages/plugins/src/github/github-provider-deadline.test.ts"
+    }
+  ],
+  "patternMatchingSwitchDebt": []
+}

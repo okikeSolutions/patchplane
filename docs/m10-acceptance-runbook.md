@@ -9,13 +9,12 @@ The ordered product and release stages are summarized in
 [`critical-path.md`](./critical-path.md). This runbook supplies their concrete
 credentialed acceptance procedure.
 
-The current smoke automates the historical sandbox-generated plumbing path. It
-does **not** freeze or verify the exact incoming PR candidate and therefore
-cannot satisfy M10/M11 alpha acceptance or support a promotional “verification
-passed” claim. This runbook remains the target release procedure; the smoke must
-be upgraded to exact base/head candidate intake before it can produce current
-acceptance evidence. It also does **not** authenticate as a WorkOS user or
-choose a decision.
+The current smoke freezes and verifies the webhook-authenticated incoming PR
+base/head candidate, then pauses before decision. It does **not** authenticate
+as a WorkOS user or choose a decision: the maintainer must inspect the deployed
+Patch Report and cross the WorkOS authorization boundary in the browser. A
+post-decision mode verifies durable publication and an opt-in replay proves
+provider idempotency.
 
 ## Safety and evidence handling
 
@@ -42,8 +41,13 @@ configuration. The operator needs:
 - a valid WorkOS session in the deployed client for the workflow workspace;
 - `workspace:view` plus `decision:approve` for approval, or `decision:reject`
   for rejection and request-changes;
-- local GitHub App configuration (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, and
-  `GITHUB_WEBHOOK_SECRET`);
+- local GitHub App configuration (`GITHUB_APP_ID`, `GITHUB_CLIENT_ID`,
+  `GITHUB_CLIENT_SECRET`, `PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL`,
+  `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET`), with repository
+  `Metadata: read`, `Contents: read`, `Pull requests: write`, and
+  `Checks: write`, plus organization `Members: read`, enabled and approved on
+  the installation; subscribe to Pull request events for `opened` and
+  `synchronize` deliveries;
 - `CONVEX_URL` or `VITE_CONVEX_URL` and
   `PATCHPLANE_SYSTEM_INGESTION_SECRET`;
 - `PATCHPLANE_SMOKE_REPOSITORY_FULL_NAME` and, when needed,
@@ -114,7 +118,7 @@ requires interactive human pauses, and never accepts credentials as arguments.
 It is release evidence only after the operator completes the real provider
 screens; it is not part of ordinary CI.
 
-## 3. Start the deployed trust loop (blocked on exact PR candidate support)
+## 3. Start the deployed exact-candidate trust loop
 
 Create a local evidence transcript without exposing the environment:
 
@@ -125,12 +129,11 @@ bun --env-file=.env.local run smoke:trust-loop \
   | tee .patchplane/logs/m10-trust-loop-pre-decision.jsonl
 ```
 
-The existing smoke sends a signed synthetic `pull_request.synchronize` delivery
-for the real test PR, then asks Pi to create a different sandbox-only patch.
-That behavior is plumbing evidence only and must not be used for alpha release
-acceptance. The upgraded smoke must instead persist the webhook-authenticated
-PR base/head identity, freeze and hash the exact incoming diff before dispatch,
-and check out that exact head in Daytona without allowing Pi to rewrite it.
+The smoke sends a signed synthetic `pull_request.synchronize` delivery for the
+real test PR. The deployed path persists the webhook-authenticated PR base/head
+identity, freezes and hashes the exact incoming diff before dispatch, and checks
+out that exact head in Daytona. Pi review is read-only after freeze and cannot
+rewrite the candidate or satisfy deterministic verification.
 
 Expected structured states, in order:
 
@@ -146,10 +149,11 @@ Expected structured states, in order:
    - at least one policy decision;
    - provenance events; and
    - a non-empty `diff` artifact with a lowercase 64-character SHA-256.
-4. GitHub contains one canonical comment beginning `## PatchPlane Patch Report`, updated rather than duplicated for the root workflow.
+4. No preliminary GitHub report is required before the authenticated human decision; review occurs in the deployed client against durable evidence.
 5. `trust_loop_review_ready` reports the `workflowRunId`, `sandboxStatus`,
-   `hasRuntimeEvents: true`, a positive `artifactCount`,
-   `hasProvenanceEvents: true`, and the Patch Report `publicationUrl`.
+   `hasRuntimeEvents: true`, a positive `artifactCount`, and
+   `hasProvenanceEvents: true`. After the human decision, GitHub must contain
+   exactly one canonical comment beginning `## PatchPlane Patch Report`.
 
 Save the `workflowRunId`. Before a human decision, the command intentionally
 emits `trust_loop_human_decision_required`, followed by a
@@ -202,10 +206,12 @@ preliminary or decision report. Its conclusion is:
 | changes requested           | `action_required`         |
 | rejected                    | `failure`                 |
 
-Do not click a second decision button to test retry: that creates a new
-idempotency key and therefore a new durable decision. The replay command in
-section 6 reuses the existing durable decision without bypassing this human
-authentication boundary.
+A workflow attempt has one terminal human decision. After it is recorded, the
+three decision controls disappear and the backend rejects a distinct second
+decision. If an expected publication target is incomplete, the UI exposes a
+separate **Retry publication** action that reuses the persisted decision and
+idempotency key. The replay command in section 6 exercises the same durable
+identity without bypassing this human authentication boundary.
 
 ## 5. Verify the decision
 
@@ -298,7 +304,7 @@ readback only and must not be cited as replay evidence.
 | Candidate patch not `captured` or diff empty/hash invalid      | Agent/diff/evidence path            | Inspect the untrusted sandbox logs and prompt result; verify R2 binding and clone-base diff capture. Do not approve.                                                         |
 | Review not `completed` or policy absent                        | Review/policy persistence           | Inspect Convex/Worker logs by workflow/trace ID. Do not create a human decision by direct database mutation.                                                                 |
 | Decision control disabled or authorization error               | WorkOS identity/membership          | Verify the browser session, selected organization, mirrored membership, and required decision permission. Do not use the system-ingestion secret.                            |
-| UI records a decision but publication fails                    | GitHub access or publication path   | Preserve the same browser request/idempotency key and replay it after correcting access. Do not click a fresh decision button.                                               |
+| UI records a decision but publication fails                    | GitHub access or publication path   | Correct access, then use **Retry publication**, which reuses the persisted decision/idempotency key. The backend rejects a distinct second decision.                         |
 | Verifier says no correlated durable publication                | Decision/publication persistence    | Inspect `humanDecisionId`, `humanDecisionStatus`, and `publicationResults` in the structured verifier output; require a published external ID keyed by the same decision ID. |
 | Replay changes external IDs or creates duplicate GitHub output | Idempotency regression              | Mark M10 failed, retain evidence, and stop release acceptance.                                                                                                               |
 
@@ -343,6 +349,19 @@ rm -f \
   .patchplane/logs/m10-trust-loop-post-decision.jsonl \
   .patchplane/logs/m10-trust-loop-replay.jsonl
 ```
+
+### Latest hosted acceptance evidence
+
+On 2026-08-01, temporary PR `okikeSolutions/guerillaglass#162` completed the
+exact incoming-candidate path for workflow
+`ms72wz64cez5rvasvwqgh06f998bmqk1`. An authenticated WorkOS user approved the
+coherent report in the deployed UI. Durable decision
+`qs73pz54xp5rz6f6f02qhe1k9x8bm9mp` published issue comment `5153551846` and
+exact-head check run `91422122247`; provider readback found exactly one of each.
+Replay retained both external IDs with `externalIdsUnchanged: true`, and the
+operator confirmed the final Approved/2-published UI state. The temporary PR
+was then closed. This closes the authenticated decision/publication row, but it
+does not close the separate live-rerun or multi-environment acceptance gaps.
 
 M10 passes only when the complete gate is green, the review-ready pause was
 observed, an authenticated human decision was persisted, GitHub publication

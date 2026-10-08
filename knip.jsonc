@@ -38,6 +38,8 @@
         "src/routes/**/*.{ts,tsx}",
         "src/landing/routes/**/*.{ts,tsx}",
         "src/scripts/**/*.ts",
+        "src/lib/diff-shiki.ts",
+        "src/lib/diff-shiki-wasm.ts",
         "test/performance/**/*.tsx",
         "src/components/ui/**/*.tsx",
         "src/test/cloudflare-workers.ts",
