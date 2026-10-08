@@ -42,10 +42,20 @@ export function assessWorkflowReportCoherence(
     issues.add('superseded-attempt')
   }
 
+  const incomingCandidate =
+    detail.workflowRun.candidateIdentityVersion === 'incoming-pr-v1'
+  const expectedCandidateBaseSha = incomingCandidate
+    ? detail.workflowRun.sourceBaseSha
+    : detail.workflowRun.sourceCommitSha
   if (
-    candidate?.baseSha !== undefined &&
-    detail.workflowRun.sourceCommitSha !== undefined &&
-    candidate.baseSha !== detail.workflowRun.sourceCommitSha
+    candidate !== undefined &&
+    (candidate.baseSha === undefined ||
+      expectedCandidateBaseSha === undefined ||
+      candidate.baseSha !== expectedCandidateBaseSha ||
+      (incomingCandidate &&
+        (candidate.headSha === undefined ||
+          detail.workflowRun.sourceCommitSha === undefined ||
+          candidate.headSha !== detail.workflowRun.sourceCommitSha)))
   ) {
     issues.add('candidate-stale')
   }

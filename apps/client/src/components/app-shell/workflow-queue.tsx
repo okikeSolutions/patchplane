@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
@@ -257,18 +258,18 @@ function workflowQueueColumns(
 }
 
 function columnClassName(columnId: string, isCell = false) {
-  switch (columnId) {
-    case 'workflow':
-      return isCell ? 'py-3 pl-4 lg:pl-6' : 'pl-4 lg:pl-6'
-    case 'status':
-      return 'hidden overflow-hidden sm:table-cell'
-    case 'trust':
-      return 'hidden overflow-hidden md:table-cell'
-    case 'updated':
-      return 'hidden text-right text-sm text-muted-foreground lg:table-cell'
-    default:
-      return undefined
-  }
+  return Match.value(columnId).pipe(
+    Match.when('workflow', () =>
+      isCell ? 'py-3 pl-4 lg:pl-6' : 'pl-4 lg:pl-6',
+    ),
+    Match.when('status', () => 'hidden overflow-hidden sm:table-cell'),
+    Match.when('trust', () => 'hidden overflow-hidden md:table-cell'),
+    Match.when(
+      'updated',
+      () => 'hidden text-right text-sm text-muted-foreground lg:table-cell',
+    ),
+    Match.orElse(() => undefined),
+  )
 }
 
 function WorkflowQueueSkeleton() {

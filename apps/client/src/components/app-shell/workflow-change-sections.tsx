@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { CircleAlertIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -11,19 +12,15 @@ import {
 
 export function previewProblem(result: DiffStatsResult) {
   if (result.status === 'parsed') return undefined
-  switch (result.reason) {
-    case 'binary':
-      return diffEvidenceProblem('binary')
-    case 'empty':
-      return diffEvidenceProblem('empty')
-    case 'malformed':
-      return diffEvidenceProblem('malformed')
-    case 'oversized':
-      return diffEvidenceProblem('oversized')
-    case 'missing':
-    case 'truncated':
-      return undefined
-  }
+  return Match.value(result.reason).pipe(
+    Match.when('binary', () => diffEvidenceProblem('binary')),
+    Match.when('empty', () => diffEvidenceProblem('empty')),
+    Match.when('malformed', () => diffEvidenceProblem('malformed')),
+    Match.when('oversized', () => diffEvidenceProblem('oversized')),
+    Match.when('missing', () => undefined),
+    Match.when('truncated', () => undefined),
+    Match.exhaustive,
+  )
 }
 
 export function DiffEvidenceProblemView({
@@ -92,98 +89,84 @@ export function DiffEvidenceProblemView({
 }
 
 function diffEvidenceProblemCopy(kind: DiffEvidenceProblem['kind']) {
-  switch (kind) {
-    case 'authentication':
-      return {
-        title: m.app_changes_problem_authentication_title(),
-        reason: m.app_changes_problem_authentication_reason(),
-        consequence: m.app_changes_problem_authentication_consequence(),
-      }
-    case 'authorization':
-      return {
-        title: m.app_changes_problem_authorization_title(),
-        reason: m.app_changes_problem_authorization_reason(),
-        consequence: m.app_changes_problem_authorization_consequence(),
-      }
-    case 'binary':
-      return {
-        title: m.app_changes_problem_binary_title(),
-        reason: m.app_changes_problem_binary_reason(),
-        consequence: m.app_changes_problem_binary_consequence(),
-      }
-    case 'empty':
-      return {
-        title: m.app_changes_problem_empty_title(),
-        reason: m.app_changes_problem_empty_reason(),
-        consequence: m.app_changes_problem_empty_consequence(),
-      }
-    case 'expired':
-      return {
-        title: m.app_changes_problem_expired_title(),
-        reason: m.app_changes_problem_expired_reason(),
-        consequence: m.app_changes_problem_expired_consequence(),
-      }
-    case 'integrity':
-      return {
-        title: m.app_changes_problem_integrity_title(),
-        reason: m.app_changes_problem_integrity_reason(),
-        consequence: m.app_changes_problem_integrity_consequence(),
-      }
-    case 'invalid-text':
-      return {
-        title: m.app_changes_problem_invalid_text_title(),
-        reason: m.app_changes_problem_invalid_text_reason(),
-        consequence: m.app_changes_problem_invalid_text_consequence(),
-      }
-    case 'malformed':
-      return {
-        title: m.app_changes_problem_malformed_title(),
-        reason: m.app_changes_problem_malformed_reason(),
-        consequence: m.app_changes_problem_malformed_consequence(),
-      }
-    case 'metadata-missing':
-      return {
-        title: m.app_changes_problem_metadata_missing_title(),
-        reason: m.app_changes_problem_metadata_missing_reason(),
-        consequence: m.app_changes_problem_metadata_missing_consequence(),
-      }
-    case 'missing':
-      return {
-        title: m.app_changes_problem_missing_title(),
-        reason: m.app_changes_problem_missing_reason(),
-        consequence: m.app_changes_problem_missing_consequence(),
-      }
-    case 'missing-reference':
-      return {
-        title: m.app_changes_problem_missing_reference_title(),
-        reason: m.app_changes_problem_missing_reference_reason(),
-        consequence: m.app_changes_problem_missing_reference_consequence(),
-      }
-    case 'oversized':
-      return {
-        title: m.app_changes_problem_oversized_title(),
-        reason: m.app_changes_problem_oversized_reason(),
-        consequence: m.app_changes_problem_oversized_consequence(),
-      }
-    case 'processor-unavailable':
-      return {
-        title: m.app_changes_problem_processor_unavailable_title(),
-        reason: m.app_changes_problem_processor_unavailable_reason(),
-        consequence: m.app_changes_problem_processor_unavailable_consequence(),
-      }
-    case 'projection-failed':
-      return {
-        title: m.app_changes_problem_projection_failed_title(),
-        reason: m.app_changes_problem_projection_failed_reason(),
-        consequence: m.app_changes_problem_projection_failed_consequence(),
-      }
-    case 'unavailable':
-      return {
-        title: m.app_changes_problem_unavailable_title(),
-        reason: m.app_changes_problem_unavailable_reason(),
-        consequence: m.app_changes_problem_unavailable_consequence(),
-      }
-  }
+  return Match.value(kind).pipe(
+    Match.when('authentication', () => ({
+      title: m.app_changes_problem_authentication_title(),
+      reason: m.app_changes_problem_authentication_reason(),
+      consequence: m.app_changes_problem_authentication_consequence(),
+    })),
+    Match.when('authorization', () => ({
+      title: m.app_changes_problem_authorization_title(),
+      reason: m.app_changes_problem_authorization_reason(),
+      consequence: m.app_changes_problem_authorization_consequence(),
+    })),
+    Match.when('binary', () => ({
+      title: m.app_changes_problem_binary_title(),
+      reason: m.app_changes_problem_binary_reason(),
+      consequence: m.app_changes_problem_binary_consequence(),
+    })),
+    Match.when('empty', () => ({
+      title: m.app_changes_problem_empty_title(),
+      reason: m.app_changes_problem_empty_reason(),
+      consequence: m.app_changes_problem_empty_consequence(),
+    })),
+    Match.when('expired', () => ({
+      title: m.app_changes_problem_expired_title(),
+      reason: m.app_changes_problem_expired_reason(),
+      consequence: m.app_changes_problem_expired_consequence(),
+    })),
+    Match.when('integrity', () => ({
+      title: m.app_changes_problem_integrity_title(),
+      reason: m.app_changes_problem_integrity_reason(),
+      consequence: m.app_changes_problem_integrity_consequence(),
+    })),
+    Match.when('invalid-text', () => ({
+      title: m.app_changes_problem_invalid_text_title(),
+      reason: m.app_changes_problem_invalid_text_reason(),
+      consequence: m.app_changes_problem_invalid_text_consequence(),
+    })),
+    Match.when('malformed', () => ({
+      title: m.app_changes_problem_malformed_title(),
+      reason: m.app_changes_problem_malformed_reason(),
+      consequence: m.app_changes_problem_malformed_consequence(),
+    })),
+    Match.when('metadata-missing', () => ({
+      title: m.app_changes_problem_metadata_missing_title(),
+      reason: m.app_changes_problem_metadata_missing_reason(),
+      consequence: m.app_changes_problem_metadata_missing_consequence(),
+    })),
+    Match.when('missing', () => ({
+      title: m.app_changes_problem_missing_title(),
+      reason: m.app_changes_problem_missing_reason(),
+      consequence: m.app_changes_problem_missing_consequence(),
+    })),
+    Match.when('missing-reference', () => ({
+      title: m.app_changes_problem_missing_reference_title(),
+      reason: m.app_changes_problem_missing_reference_reason(),
+      consequence: m.app_changes_problem_missing_reference_consequence(),
+    })),
+    Match.when('oversized', () => ({
+      title: m.app_changes_problem_oversized_title(),
+      reason: m.app_changes_problem_oversized_reason(),
+      consequence: m.app_changes_problem_oversized_consequence(),
+    })),
+    Match.when('processor-unavailable', () => ({
+      title: m.app_changes_problem_processor_unavailable_title(),
+      reason: m.app_changes_problem_processor_unavailable_reason(),
+      consequence: m.app_changes_problem_processor_unavailable_consequence(),
+    })),
+    Match.when('projection-failed', () => ({
+      title: m.app_changes_problem_projection_failed_title(),
+      reason: m.app_changes_problem_projection_failed_reason(),
+      consequence: m.app_changes_problem_projection_failed_consequence(),
+    })),
+    Match.when('unavailable', () => ({
+      title: m.app_changes_problem_unavailable_title(),
+      reason: m.app_changes_problem_unavailable_reason(),
+      consequence: m.app_changes_problem_unavailable_consequence(),
+    })),
+    Match.exhaustive,
+  )
 }
 
 export function formatBytes(value: number) {
@@ -209,20 +192,15 @@ export function candidateStatisticsNote(input: {
     return m.app_changes_stats_calculated()
   }
   if (input.calculated?.status === 'unavailable') {
-    switch (input.calculated.reason) {
-      case 'binary':
-        return m.app_changes_stats_binary()
-      case 'empty':
-        return m.app_changes_stats_empty()
-      case 'malformed':
-        return m.app_changes_stats_malformed()
-      case 'missing':
-        return m.app_changes_stats_missing()
-      case 'oversized':
-        return m.app_changes_stats_oversized()
-      case 'truncated':
-        return m.app_changes_stats_truncated()
-    }
+    return Match.value(input.calculated.reason).pipe(
+      Match.when('binary', () => m.app_changes_stats_binary()),
+      Match.when('empty', () => m.app_changes_stats_empty()),
+      Match.when('malformed', () => m.app_changes_stats_malformed()),
+      Match.when('missing', () => m.app_changes_stats_missing()),
+      Match.when('oversized', () => m.app_changes_stats_oversized()),
+      Match.when('truncated', () => m.app_changes_stats_truncated()),
+      Match.exhaustive,
+    )
   }
   return m.app_changes_stats_load()
 }

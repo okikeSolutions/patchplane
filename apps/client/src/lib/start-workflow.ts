@@ -1,31 +1,25 @@
+import { createServerFn } from '@tanstack/react-start'
 import { AuthRequestContext } from '@patchplane/core/services/auth-request-context'
 import { StartAuthenticatedWorkflowFromPrompt } from '@patchplane/core/workflows/start-authenticated-workflow-from-prompt'
-import { AuthError, publicErrorMessage } from '@patchplane/domain/errors'
+import { publicErrorMessage } from '@patchplane/domain/errors'
 import { StartWorkflowPromptInput } from '@patchplane/domain/start-workflow'
 import type { WorkflowStart } from '@patchplane/domain/workflow-start'
 import { Effect } from 'effect'
-import { effectServerFn } from './effect-server-fn'
+import { effectServerFnHandlers } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
 
-export const startWorkflowServerFn = effectServerFn({
+const startWorkflowHandlers = effectServerFnHandlers({
   method: 'POST',
   input: StartWorkflowPromptInput,
   operation: 'startWorkflowServerFn',
   effect: (data, context) =>
-    Effect.tryPromise({
-      try: () => getWorkOSAuthRequest(),
-      catch: (cause) => new AuthError({
-        operation: 'startWorkflowServerFn.getWorkOSAuthRequest',
-        message: 'Unable to load the authenticated session',
-        cause,
-      }),
-    }).pipe(
+    getWorkOSAuthRequest().pipe(
       Effect.flatMap((authRequest) =>
         StartAuthenticatedWorkflowFromPrompt({
           source: 'app',
           traceId: context.traceId,
           prompt: data.prompt,
-        }).pipe(Effect.provideService(AuthRequestContext, authRequest))
+        }).pipe(Effect.provideService(AuthRequestContext, authRequest)),
       ),
     ),
   success: (workflowStart: WorkflowStart) => ({
@@ -54,3 +48,10 @@ export const startWorkflowServerFn = effectServerFn({
     error: publicErrorMessage(cause, 'startWorkflowServerFn failed'),
   }),
 })
+
+export const startWorkflowServerFn = createServerFn({
+  method: 'POST',
+  strict: false,
+})
+  .validator(startWorkflowHandlers.validator)
+  .handler(startWorkflowHandlers.handler)

@@ -8,6 +8,7 @@ import {
   UserCheckIcon,
   XCircleIcon,
 } from 'lucide-react'
+import { Match } from 'effect'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -334,16 +335,13 @@ function ActivityTableRows({
 }
 
 function timelineStatusLabel(status: TimelineStatus) {
-  switch (status) {
-    case 'started':
-      return m.app_activity_started()
-    case 'succeeded':
-      return m.app_activity_succeeded()
-    case 'failed':
-      return m.app_activity_failed()
-    case 'blocked':
-      return m.app_activity_blocked()
-  }
+  return Match.value(status).pipe(
+    Match.when('started', () => m.app_activity_started()),
+    Match.when('succeeded', () => m.app_activity_succeeded()),
+    Match.when('failed', () => m.app_activity_failed()),
+    Match.when('blocked', () => m.app_activity_blocked()),
+    Match.exhaustive,
+  )
 }
 
 function TimelineIcon({

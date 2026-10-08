@@ -8,6 +8,7 @@ import {
   readFileSync,
 } from 'node:fs'
 import { gzipSync } from 'node:zlib'
+import ts from 'typescript'
 import { join, relative } from 'node:path'
 
 interface Options {
@@ -38,35 +39,55 @@ interface Report {
   readonly client: BundleStats
 }
 
-// Keep the pre-renderer application envelope visible instead of losing it in a
-// single raised ceiling. @pierre/diffs@1.2.12 emits a broad lazy language/theme
-// graph under Vite; DIFF-001 measured a 9.84 MiB raw / 1.88 MiB gzip delta.
-// The dedicated allowance rounds that evidence up for production integration
-// while preserving the existing largest-chunk guard.
-const baseClientBudgetMiB = 3
-const pierreDiffsClientAllowanceMiB = 11
-const baseClientJsGzipBudgetKiB = 762
-const pierreDiffsClientJsGzipAllowanceKiB = 2_048
+// Shiki languages are loaded through the client adapter, and unrelated vendor
+// modules are size-split. Keep measured output below these ceilings with room
+// for ordinary application changes.
+const defaultClientBudgetMiB = 6.25
+const defaultClientJsGzipBudgetKiB = 1_200
+const defaultClientLargestJsBudgetMiB = 0.4
 // EXEC-010 adds the PatchPlane-owned bounded provider process identity schema
 // to server-side Patch Report decoding. The measured production delta is
 // 2,203 raw bytes; keep a narrowly rounded allowance rather than weakening
 // client transfer or largest-chunk limits.
 const providerProcessIdentityServerAllowanceMiB = 0.01
+// Centralizing Convex cancellation adds one shared server-only adapter chunk.
+// The measured production delta is 1,253 raw bytes.
+const cancellableConvexServerAllowanceMiB = 0.002
+// Enforcing exhaustive Effect Match branches adds 1,040 measured raw bytes to
+// the production server bundle. Keep a 2 KiB allowance for build hash noise.
+const effectMatchServerAllowanceMiB = 0.002
+// Effect 4.0.2 plus its matching platform packages puts the current Cloudflare
+// server output at 7,993,979 bytes. Keep a 0.082 MiB allowance over the prior
+// ceiling while the gzip and largest-client-chunk budgets continue to bound
+// transferred code.
+const stableEffectV4ServerAllowanceMiB = 0.082
+// Composing artifact authorization, metadata, R2 reads, and diff parsing under
+// one request-level Effect bridge adds 6,798 measured raw server bytes. Keep an
+// 8 KiB allowance while retaining the aggregate gzip and chunk ceilings.
+const artifactEffectBoundaryServerAllowanceMiB = 0.008
+// Statically discoverable TanStack server-function declarations and terminal
+// decision/publication retry handling add 19,983 measured raw server bytes.
+// Keep a narrowly rounded allowance while the manifest-presence gate below
+// ensures these handlers cannot silently disappear from production output.
+const serverFunctionManifestAllowanceMiB = 0.022
+const defaultServerBudgetMiB =
+  7.5 +
+  providerProcessIdentityServerAllowanceMiB +
+  cancellableConvexServerAllowanceMiB +
+  effectMatchServerAllowanceMiB +
+  stableEffectV4ServerAllowanceMiB +
+  artifactEffectBoundaryServerAllowanceMiB +
+  serverFunctionManifestAllowanceMiB
 
 function parseOptions(argv: readonly string[]): Options {
   let check = false
   let json = false
   let skipBuild = false
   let top = 10
-  let serverBudgetMiB = 7.5 + providerProcessIdentityServerAllowanceMiB
-  let clientBudgetMiB = baseClientBudgetMiB + pierreDiffsClientAllowanceMiB
-  let clientJsGzipBudgetKiB =
-    baseClientJsGzipBudgetKiB + pierreDiffsClientJsGzipAllowanceKiB
-  // The landing page intentionally keeps the shader runtime in the entry chunk
-  // so the canvas can start immediately; its visual-startup benchmark guards
-  // that behavior separately. Keep a modest ceiling above the measured 1.54 MiB
-  // baseline while the aggregate gzip budget protects transfer cost.
-  let clientLargestJsBudgetMiB = 1.75
+  let serverBudgetMiB = defaultServerBudgetMiB
+  let clientBudgetMiB = defaultClientBudgetMiB
+  let clientJsGzipBudgetKiB = defaultClientJsGzipBudgetKiB
+  let clientLargestJsBudgetMiB = defaultClientLargestJsBudgetMiB
 
   for (const arg of argv) {
     if (arg === '--check') {
@@ -131,12 +152,12 @@ Options:
   --json                     Print machine-readable JSON
   --skip-build               Measure existing apps/client/dist output
   --top=N                    Number of largest files to show (default: 10)
-  --server-budget-mib=N      Server total budget for --check (default: 7.51)
-  --client-budget-mib=N      Client total budget for --check (default: 14)
+  --server-budget-mib=N      Server total budget for --check (default: ${defaultServerBudgetMiB})
+  --client-budget-mib=N      Client total budget for --check (default: ${defaultClientBudgetMiB})
   --client-js-gzip-budget-kib=N
-                             Client JavaScript gzip budget (default: 2810)
+                             Client JavaScript gzip budget (default: ${defaultClientJsGzipBudgetKiB})
   --client-largest-js-budget-mib=N
-                             Largest client JavaScript chunk budget (default: 1.75)
+                             Largest client JavaScript chunk budget (default: ${defaultClientLargestJsBudgetMiB})
 `)
 }
 
@@ -160,7 +181,7 @@ function buildClientDist() {
     'bun',
     [
       '-e',
-      "import * as Effect from 'effect/Effect'; import * as NodeServices from '@effect/platform-node/NodeServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }).pipe(Effect.provide(NodeServices.layer)));",
+      "import * as Effect from 'effect/Effect'; import * as NodeServices from '@effect/platform-node/NodeServices'; import { viteBuild } from '../../node_modules/alchemy/src/Cloudflare/Workers/Sources/Vite.ts'; await Effect.runPromise(viteBuild('.', {}, { compatibilityFlags: ['nodejs_compat'] }, 'PatchPlaneClient').pipe(Effect.provide(NodeServices.layer)));",
     ],
     clientDir,
   )
@@ -252,6 +273,49 @@ function printMarkdown(report: Report, options: Options) {
   }
 }
 
+const requiredClientServerFunctions = [
+  'submitReviewDecisionServerFn_createServerFn_handler',
+  'rerunWorkflowServerFn_createServerFn_handler',
+  'startWorkflowServerFn_createServerFn_handler',
+] as const
+
+function checkServerFunctionManifest() {
+  const serverDirectory = join(process.cwd(), 'apps/client/dist/server')
+  const discovered = new Set<string>()
+  for (const file of walkFiles(serverDirectory)) {
+    if (!file.endsWith('.js')) continue
+    const source = readFileSync(file, 'utf8')
+    const ast = ts.createSourceFile(
+      file,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.JS,
+    )
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isPropertyAssignment(node) &&
+        (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+        node.name.text === 'functionName' &&
+        (ts.isStringLiteral(node.initializer) ||
+          ts.isNoSubstitutionTemplateLiteral(node.initializer))
+      ) {
+        discovered.add(node.initializer.text)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(ast)
+  }
+  const missing = requiredClientServerFunctions.filter(
+    (functionName) => !discovered.has(functionName),
+  )
+  if (missing.length > 0) {
+    throw new Error(
+      `Client server-function manifest is missing: ${missing.join(', ')}`,
+    )
+  }
+}
+
 function checkBudgets(report: Report, options: Options) {
   const serverBudget = options.serverBudgetMiB * 1024 * 1024
   const clientBudget = options.clientBudgetMiB * 1024 * 1024
@@ -302,6 +366,7 @@ try {
   }
 
   if (options.check) {
+    checkServerFunctionManifest()
     checkBudgets(report, options)
   }
 } catch (error) {

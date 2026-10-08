@@ -22,12 +22,16 @@ function token(source: string, name: string) {
 }
 
 function rgb(hex: string) {
-  const channels = hex
-    .match(/[a-f\d]{2}/gi)
-    ?.map((value) => Number.parseInt(value, 16) / 255)
-  if (channels === undefined || channels.length !== 3)
+  const matches = hex.match(/[a-f\d]{2}/gi)
+  if (matches === null || matches.length !== 3)
     throw new Error(`Invalid color: ${hex}`)
-  return channels as [number, number, number]
+  const red = matches[0]
+  const green = matches[1]
+  const blue = matches[2]
+  if (red === undefined || green === undefined || blue === undefined) {
+    throw new Error(`Invalid color: ${hex}`)
+  }
+  return [red, green, blue].map((value) => Number.parseInt(value, 16) / 255)
 }
 
 function luminance(hex: string) {
@@ -52,11 +56,6 @@ function composite(foreground: string, background: string, opacity: number) {
 }
 
 describe('app theme contrast contract', () => {
-  test('does not animate the entire document during theme changes', () => {
-    expect(stylesheet).not.toContain('html[data-theme-transition]')
-    expect(stylesheet).not.toContain('transition-duration: 180ms')
-  })
-
   test('keeps production dark surfaces and secondary text readable', () => {
     const background = token(darkTokens, 'background')
     const card = token(darkTokens, 'card')

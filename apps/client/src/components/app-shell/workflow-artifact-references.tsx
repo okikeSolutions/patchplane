@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Effect, Schema } from 'effect'
 import { CircleAlertIcon, ExternalLinkIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -158,7 +159,12 @@ export function decodeArtifactUrlPayload(
     : undefined
 }
 
-async function openArtifact(
+class ArtifactOpenError extends Schema.TaggedError<ArtifactOpenError>()(
+  'ArtifactOpenError',
+  { cause: Schema.optional(Schema.Defect()) },
+) {}
+
+export async function openArtifact(
   reference: WorkflowArtifactReference,
   callbacks: {
     readonly onStart: () => void
@@ -167,21 +173,42 @@ async function openArtifact(
   },
 ) {
   if (reference.artifactId === undefined) return
+  const artifactId = reference.artifactId
 
   callbacks.onStart()
   try {
     const params = new URLSearchParams({
-      artifactId: reference.artifactId,
+      artifactId,
     })
     if (reference.workflowRunId !== undefined) {
       params.set('workflowRunId', reference.workflowRunId)
     }
-    const response = await fetch(`/api/artifacts/url?${params.toString()}`)
-    const payload = decodeArtifactUrlPayload(await response.json(), {
-      artifactId: reference.artifactId,
-      baseUrl: window.location.href,
-      workflowRunId: reference.workflowRunId,
-    })
+    const { diffProjectionRuntime } = await import('@/effect/diff-runtime')
+    const { payload, response } = await diffProjectionRuntime.runPromise(
+      Effect.tryPromise({
+        try: async (signal) => {
+          const artifactResponse = await fetch(
+            `/api/artifacts/url?${params.toString()}`,
+            { signal },
+          )
+          const body = await artifactResponse.json()
+          return {
+            response: artifactResponse,
+            payload: decodeArtifactUrlPayload(body, {
+              artifactId,
+              baseUrl: window.location.href,
+              workflowRunId: reference.workflowRunId,
+            }),
+          }
+        },
+        catch: (cause) => new ArtifactOpenError({ cause }),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: 30_000,
+          orElse: () => Effect.fail(new ArtifactOpenError({})),
+        }),
+      ),
+    )
     if (!response.ok || payload?.ok !== true) {
       callbacks.onError(
         payload?.ok === false ? payload.error : m.app_artifact_open_failed(),

@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { Badge } from '@/components/ui/badge'
 import * as m from '@/paraglide/messages'
 import type { WorkflowTrustState } from './workflow-trust-state'
@@ -30,65 +31,51 @@ export function WorkflowTrustStateBadge({
 function workflowRunStatusVariant(
   status: 'queued' | 'running' | 'reviewed' | 'failed',
 ) {
-  switch (status) {
-    case 'reviewed':
-      return 'success' as const
-    case 'failed':
-      return 'destructive' as const
-    case 'running':
-      return 'outline' as const
-    case 'queued':
-      return 'secondary' as const
-  }
+  return Match.value(status).pipe(
+    Match.when('reviewed', () => 'success' as const),
+    Match.when('failed', () => 'destructive' as const),
+    Match.when('running', () => 'outline' as const),
+    Match.when('queued', () => 'secondary' as const),
+    Match.exhaustive,
+  )
 }
 
 function workflowTrustStateVariant(state: WorkflowTrustState) {
-  switch (state) {
-    case 'approved':
-      return 'success' as const
-    case 'needs-review':
-    case 'changes-requested':
-      return 'warning' as const
-    case 'sandbox-failed':
-    case 'rejected':
-      return 'destructive' as const
-    case 'queued':
-    case 'running':
-    case 'no-sandbox-run':
-      return 'secondary' as const
-  }
+  return Match.value(state).pipe(
+    Match.when('approved', () => 'success' as const),
+    Match.when('needs-review', () => 'warning' as const),
+    Match.when('changes-requested', () => 'warning' as const),
+    Match.when('sandbox-failed', () => 'destructive' as const),
+    Match.when('rejected', () => 'destructive' as const),
+    Match.when('queued', () => 'secondary' as const),
+    Match.when('running', () => 'secondary' as const),
+    Match.when('no-sandbox-run', () => 'secondary' as const),
+    Match.exhaustive,
+  )
 }
 
 export function workflowTrustAlertVariant(state: WorkflowTrustState) {
-  switch (state) {
-    case 'approved':
-      return 'success' as const
-    case 'needs-review':
-    case 'changes-requested':
-      return 'warning' as const
-    case 'sandbox-failed':
-    case 'rejected':
-      return 'destructive' as const
-    case 'queued':
-    case 'running':
-    case 'no-sandbox-run':
-      return 'default' as const
-  }
+  return Match.value(state).pipe(
+    Match.when('approved', () => 'success' as const),
+    Match.when('needs-review', () => 'warning' as const),
+    Match.when('changes-requested', () => 'warning' as const),
+    Match.when('sandbox-failed', () => 'destructive' as const),
+    Match.when('rejected', () => 'destructive' as const),
+    Match.when('queued', () => 'default' as const),
+    Match.when('running', () => 'default' as const),
+    Match.when('no-sandbox-run', () => 'default' as const),
+    Match.exhaustive,
+  )
 }
 
 export function workflowStatusLabel(
   status: 'queued' | 'running' | 'reviewed' | 'failed',
 ) {
-  switch (status) {
-    case 'queued':
-      return m.app_status_queued()
-    case 'running':
-      return m.app_status_running()
-    case 'reviewed':
-      return m.app_status_run_complete()
-    case 'failed':
-      return m.app_status_execution_failed()
-    default:
-      return status
-  }
+  return Match.value(status).pipe(
+    Match.when('queued', () => m.app_status_queued()),
+    Match.when('running', () => m.app_status_running()),
+    Match.when('reviewed', () => m.app_status_run_complete()),
+    Match.when('failed', () => m.app_status_execution_failed()),
+    Match.exhaustive,
+  )
 }

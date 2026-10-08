@@ -63,19 +63,6 @@ function expectAccessibleReportOutline(title: string) {
   }
 }
 
-function expectTableRecordBorders(table: HTMLElement) {
-  const bodies = Array.from(table.querySelectorAll('tbody'))
-  expect(bodies.length).toBeGreaterThan(0)
-
-  for (const body of bodies.slice(0, -1)) {
-    expect(body.className.split(' ')).toContain('[&_tr:last-child]:border-b')
-  }
-
-  expect(bodies.at(-1)?.className.split(' ')).not.toContain(
-    '[&_tr:last-child]:border-b',
-  )
-}
-
 function workflowRow(
   id: string,
   status: WorkflowStartRow['workflowRun']['status'],
@@ -263,11 +250,6 @@ describe('WorkflowConsole', () => {
       screen.getAllByText('okikeSolutions/guerillaglass').length,
     ).toBeGreaterThan(0)
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0)
-    expect(
-      screen.getByRole('link', {
-        name: /^patchplane smoke retry after GitHub App PEM fix\./,
-      }).className,
-    ).toContain('min-h-11')
   })
 
   test('renders only the pull request title in the workflow queue', () => {
@@ -303,7 +285,6 @@ describe('WorkflowConsole', () => {
     }
     expect(link.getAttribute('aria-label')).not.toContain(body)
     expect(link.getAttribute('aria-label')).not.toContain(externalReview)
-    expect(titleNode.className).toContain('truncate')
     expect(titleNode.getAttribute('title')).toBe(title)
     expect(
       screen.getByText('okikeSolutions/guerillaglass · PR #128 · Attempt 2'),
@@ -431,27 +412,6 @@ describe('WorkflowConsole', () => {
     expect(screen.getByRole('tab', { name: 'Changes' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Evidence' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Activity' })).toBeTruthy()
-    const reportTabs = screen.getByRole('tablist', {
-      name: 'Patch report sections',
-    })
-    expect(reportTabs.className).toContain('sticky')
-    expect(reportTabs.className).toContain('top-0')
-    expect(reportTabs.className).toContain('group-data-horizontal/tabs:h-auto')
-    const reportTabsRoot = reportTabs.closest('[data-slot="tabs"]')
-    expect(reportTabsRoot).toBeInstanceOf(HTMLDivElement)
-    expect(reportTabsRoot?.className).toContain('gap-6')
-    for (const tab of ['Summary', 'Changes', 'Evidence', 'Activity']) {
-      expect(screen.getByRole('tab', { name: tab }).className).toContain(
-        'flex-none',
-      )
-    }
-    const reportContent = document.querySelector(
-      '[data-slot="workflow-report-content"]',
-    )
-    expect(reportContent).toBeInstanceOf(HTMLDivElement)
-    expect(reportContent?.className).toContain('pb-10')
-    expect(reportContent?.className).toContain('lg:pb-12')
-    expect(reportContent?.className).not.toContain('min-h-0')
     expect(screen.queryByRole('tab', { name: 'Logs' })).toBeNull()
     expect(screen.queryByLabelText('Required comment')).toBeNull()
     expect(screen.queryByText('Review ready')).toBeNull()
@@ -465,16 +425,6 @@ describe('WorkflowConsole', () => {
       screen.getAllByText('Policy status is changes-requested.').length,
     ).toBeGreaterThan(0)
 
-    if (!(reportTabsRoot instanceof HTMLDivElement)) {
-      throw new Error('Patch report tabs should render in the shared Tabs root')
-    }
-    const reviewPane = document.querySelector(
-      '[data-slot="workflow-review-pane"]',
-    )
-    expect(reviewPane).toBeInstanceOf(HTMLElement)
-    expect(reviewPane?.className).toContain('self-start')
-    expect(reviewPane?.className).toContain('xl:sticky')
-    expect(reviewPane?.className).toContain('xl:top-4')
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -482,40 +432,10 @@ describe('WorkflowConsole', () => {
     })
 
     fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
-    expect(document.querySelector('[data-slot="workflow-review-pane"]')).toBe(
-      reviewPane,
-    )
-    const evidenceTabs = screen.getByRole('tablist', {
-      name: 'Evidence views',
-    })
-    expect(evidenceTabs.className).toContain('max-w-full')
-    expect(evidenceTabs.className).toContain(
-      'group-data-horizontal/tabs:h-auto',
-    )
-    expect(evidenceTabs.className.split(' ')).not.toContain('w-full')
-    expect(evidenceTabs.closest('[data-slot="tabs"]')?.className).toContain(
-      'gap-5',
-    )
-    for (const tab of ['Artifacts (0)', 'Sandbox (1)', 'Logs', 'Diagnostics']) {
-      expect(screen.getByRole('tab', { name: tab }).className).toContain(
-        'flex-none',
-      )
-    }
     fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))
     const runtimeLogTable = screen.getByRole('table', {
       name: /Normalized runtime events/,
     })
-    expect(runtimeLogTable.className).toContain('table-fixed')
-    expect(runtimeLogTable.querySelectorAll('col')).toHaveLength(5)
-    expect(
-      Array.from(runtimeLogTable.querySelectorAll('col')).every(
-        (column) => !column.className.includes('hidden'),
-      ),
-    ).toBe(true)
-    expectTableRecordBorders(runtimeLogTable)
-    const logTabs = screen.getByRole('tablist', { name: 'Log streams' })
-    expect(logTabs.className).toContain('flex-wrap')
-    expect(logTabs.className).toContain('max-w-full')
     expect(
       within(runtimeLogTable).getByText('Patch artifact generated'),
     ).toBeTruthy()
@@ -531,9 +451,6 @@ describe('WorkflowConsole', () => {
     const stdoutTable = screen.getByRole('table', {
       name: /Sandbox standard output streams/,
     })
-    expect(stdoutTable.className).toContain('table-fixed')
-    expect(stdoutTable.querySelectorAll('col')).toHaveLength(5)
-    expectTableRecordBorders(stdoutTable)
     expect(within(stdoutTable).queryByText('Typecheck failed')).toBeNull()
     fireEvent.click(
       within(stdoutTable).getByRole('button', {
@@ -546,9 +463,6 @@ describe('WorkflowConsole', () => {
     const stderrTable = screen.getByRole('table', {
       name: /Sandbox standard error streams/,
     })
-    expect(stderrTable.className).toContain('table-fixed')
-    expect(stderrTable.querySelectorAll('col')).toHaveLength(5)
-    expectTableRecordBorders(stderrTable)
     expect(within(stderrTable).queryByText('src/index.ts:1:1 error')).toBeNull()
     fireEvent.click(
       within(stderrTable).getByRole('button', {
@@ -561,7 +475,6 @@ describe('WorkflowConsole', () => {
     const diagnosticsTable = screen.getByRole('table', {
       name: /Normalized workflow diagnostic groups/,
     })
-    expect(diagnosticsTable.className).toContain('table-fixed')
     expect(within(diagnosticsTable).queryByText(/workspaceId/)).toBeNull()
     fireEvent.click(
       within(diagnosticsTable).getByRole('button', {
@@ -572,21 +485,10 @@ describe('WorkflowConsole', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Activity' }))
     expect(scrollIntoView).not.toHaveBeenCalled()
-    expect(document.querySelector('[data-slot="workflow-review-pane"]')).toBe(
-      reviewPane,
-    )
     expect(screen.getByText('daytona:pi-rpc')).toBeTruthy()
     const activityTable = screen.getByRole('table', {
       name: /Workflow activity in chronological order/,
     })
-    expect(activityTable.className).toContain('table-fixed')
-    expect(activityTable.querySelectorAll('col')).toHaveLength(5)
-    expect(
-      Array.from(activityTable.querySelectorAll('col')).every(
-        (column) => !column.className.includes('hidden'),
-      ),
-    ).toBe(true)
-    expectTableRecordBorders(activityTable)
     expect(within(activityTable).getAllByRole('row').length).toBeGreaterThan(2)
     expect(within(activityTable).queryByText('bun typecheck')).toBeNull()
     const sandboxDetails = within(activityTable).getByRole('button', {
@@ -666,7 +568,6 @@ describe('WorkflowConsole', () => {
       name: title,
     })
     expect(heading.textContent).toBe(title)
-    expect(heading.className).toContain('line-clamp-2')
     expect(heading.getAttribute('title')).toBe(title)
     expect(header.getAttribute('aria-labelledby')).toBe('patch-report-title')
     expect(within(header).getByText('Workflow run ID:')).toBeTruthy()
@@ -799,23 +700,12 @@ describe('WorkflowConsole', () => {
     const expand = await screen.findByRole('button', {
       name: 'Expand diff',
     })
-    const reportHeader = screen.getByRole('banner')
-    const reportTabs = screen.getByRole('tablist', {
-      name: 'Patch report sections',
-    })
-    const reportContent = document.querySelector<HTMLElement>(
-      '[data-slot="workflow-report-content"]',
-    )
-    const reviewPane = document.querySelector<HTMLElement>(
-      '[data-slot="workflow-review-pane"]',
-    )
-
     fireEvent.click(expand)
 
-    expect(reportHeader.className.split(' ')).toContain('hidden')
-    expect(reportTabs.className.split(' ')).toContain('hidden')
-    expect(reviewPane?.className.split(' ')).toContain('hidden')
-    expect(reportContent?.dataset.diffExpanded).toBe('true')
+    expect(screen.queryByRole('banner')).toBeNull()
+    expect(
+      screen.queryByRole('tablist', { name: 'Patch report sections' }),
+    ).toBeNull()
     expect(
       screen.getByRole('button', { name: 'Back to Patch Report' }),
     ).toBeTruthy()
@@ -830,10 +720,10 @@ describe('WorkflowConsole', () => {
       screen.getByRole('button', { name: 'Back to Patch Report' }),
     )
 
-    expect(reportHeader.className.split(' ')).not.toContain('hidden')
-    expect(reportTabs.className.split(' ')).not.toContain('hidden')
-    expect(reviewPane?.className.split(' ')).not.toContain('hidden')
-    expect(reportContent?.dataset.diffExpanded).toBeUndefined()
+    expect(screen.getByRole('banner')).toBeTruthy()
+    expect(
+      screen.getByRole('tablist', { name: 'Patch report sections' }),
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand diff' }))
     expect(

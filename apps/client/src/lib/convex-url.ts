@@ -6,11 +6,11 @@ class ConvexUrlConfigError extends Data.TaggedError('ConvexUrlConfigError')<{
 }> {}
 
 const ConvexUrlEnvironment = Config.all({
-  canonical: Config.option(Config.nonEmptyString('CONVEX_URL')),
-  legacy: Config.option(Config.nonEmptyString('VITE_CONVEX_URL')),
+  canonical: Config.option(Config.NonEmptyString('CONVEX_URL')),
+  legacy: Config.option(Config.NonEmptyString('VITE_CONVEX_URL')),
 })
 
-export const loadConfiguredConvexUrl = Effect.fnUntraced(function*() {
+export const loadConfiguredConvexUrl = Effect.fnUntraced(function* () {
   const environment = yield* ConvexUrlEnvironment
   const value = Option.isSome(environment.canonical)
     ? environment.canonical.value
@@ -22,9 +22,10 @@ export const loadConfiguredConvexUrl = Effect.fnUntraced(function*() {
   }
   return yield* Effect.try({
     try: () => new URL(value),
-    catch: (cause) => new ConvexUrlConfigError({
-      message: 'Convex URL configuration is invalid',
-      cause,
-    }),
+    catch: (cause) =>
+      new ConvexUrlConfigError({
+        message: 'Convex URL configuration is invalid',
+        cause,
+      }),
   })
 })

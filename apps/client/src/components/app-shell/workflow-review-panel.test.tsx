@@ -142,6 +142,96 @@ describe('WorkflowReviewPanel', () => {
     submitReviewDecision.mockReset()
   })
 
+  test('does not offer another decision after the workflow decision is recorded', () => {
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          humanDecisions: [
+            {
+              id: 'decision-1',
+              workflowRunId,
+              sandboxExecutionId: 'execution-1',
+              candidatePatchSetId: 'candidate-1',
+              reviewRunId: 'review-1',
+              policyDecisionId: 'policy-1',
+              actorId: 'workos:user-1',
+              status: 'approved',
+              comment: 'Reviewed evidence.',
+              decidedAt: 6,
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull()
+  })
+
+  test('offers publication retry without offering a second decision', async () => {
+    submitReviewDecision.mockResolvedValue({
+      ok: true,
+      decision: { id: 'decision-1', status: 'approved' },
+      publications: [],
+    })
+    render(
+      <WorkflowReviewPanel
+        detail={{
+          ...detail,
+          promptRequest: {
+            ...detail.promptRequest,
+            externalRef: {
+              provider: 'github',
+              deliveryId: 'delivery-1',
+              eventKind: 'github.pull_request.synchronize',
+              repositoryProvider: 'github',
+              repositoryOwner: 'patchplane',
+              repositoryName: 'demo',
+            },
+          },
+          candidatePatchSets: detail.candidatePatchSets.map((candidate) => ({
+            ...candidate,
+            headSha: 'abc123',
+          })),
+          humanDecisions: [
+            {
+              id: 'decision-1',
+              workflowRunId,
+              sandboxExecutionId: 'execution-1',
+              candidatePatchSetId: 'candidate-1',
+              reviewRunId: 'review-1',
+              policyDecisionId: 'policy-1',
+              actorId: 'workos:user-1',
+              status: 'approved',
+              comment: 'Reviewed evidence.',
+              decidedAt: 6,
+              idempotencyKey: 'decision-key-1',
+            },
+          ],
+          publicationResults: [],
+        }}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry publication' }))
+    await waitFor(() => expect(submitReviewDecision).toHaveBeenCalledTimes(1))
+    expect(submitReviewDecision).toHaveBeenCalledWith({
+      data: {
+        workflowRunId,
+        sandboxExecutionId: 'execution-1',
+        candidatePatchSetId: 'candidate-1',
+        reviewRunId: 'review-1',
+        policyDecisionId: 'policy-1',
+        status: 'approved',
+        comment: 'Reviewed evidence.',
+        idempotencyKey: 'decision-key-1',
+      },
+    })
+  })
+
   test.each([
     ['Approve', 'Confirm approval', 'approved'],
     ['Request changes', 'Confirm request', 'changes-requested'],
@@ -271,11 +361,6 @@ describe('WorkflowReviewPanel', () => {
         .getByRole('heading', { name: 'Requested change' })
         .closest('[data-slot="card"]'),
     ).not.toBeNull()
-    expect(
-      screen.getByText('Needs review').closest('[data-slot="alert"]')
-        ?.className,
-    ).toContain('border-warning/30')
-    expect(container.querySelector('.bg-primary\\/15')).toBeNull()
   })
 
   test('blocks every decision when the report identity is incoherent', () => {

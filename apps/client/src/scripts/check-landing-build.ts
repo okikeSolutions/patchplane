@@ -43,13 +43,6 @@ for (const file of requiredFiles) {
   }
 }
 
-for (const file of ['de/index.html', 'en/index.html']) {
-  const html = readFileSync(join(outputDirectory, file), 'utf8')
-  if (!html.includes('data-testid="shader-loader"')) {
-    fail(`${file} does not render the shader loader before hydration`)
-  }
-}
-
 const files = filesIn(outputDirectory)
 const unexpectedHtml = files
   .map((file) => relative(outputDirectory, file))

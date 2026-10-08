@@ -32,10 +32,16 @@ function describeCause(cause: unknown, depth = 0): string {
     return `${cause.name} ${cause.message} ${describeCause(cause.cause, depth + 1)}`
   }
   if (typeof cause !== 'object' || cause === null) return ''
-  const record = cause as Readonly<Record<string, unknown>>
-  return [
-    typeof record.message === 'string' ? record.message : '',
-    typeof record.data === 'string' ? record.data : '',
-    describeCause(record.cause, depth + 1),
-  ].join(' ')
+  try {
+    const message: unknown = Reflect.get(cause, 'message')
+    const data: unknown = Reflect.get(cause, 'data')
+    const nestedCause: unknown = Reflect.get(cause, 'cause')
+    return [
+      typeof message === 'string' ? message : '',
+      typeof data === 'string' ? data : '',
+      describeCause(nestedCause, depth + 1),
+    ].join(' ')
+  } catch {
+    return ''
+  }
 }

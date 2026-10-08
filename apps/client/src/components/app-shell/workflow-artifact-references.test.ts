@@ -1,11 +1,116 @@
-import { describe, expect, test } from 'vitest'
-import { decodeArtifactUrlPayload } from './workflow-artifact-references'
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import {
+  decodeArtifactUrlPayload,
+  openArtifact,
+} from './workflow-artifact-references'
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 const expected = {
   artifactId: 'artifact_diff',
   baseUrl: 'https://app.patchplane.test/app/workflows/run_123?tab=evidence',
   workflowRunId: 'run_123',
 }
+
+describe('artifact opening', () => {
+  test('aborts a stalled request at the Effect deadline', async () => {
+    vi.useFakeTimers()
+    let observedSignal: AbortSignal | undefined
+    let notifyStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        observedSignal = init?.signal ?? undefined
+        notifyStarted?.()
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener(
+            'abort',
+            () => reject(observedSignal?.reason),
+            { once: true },
+          )
+        })
+      }),
+    )
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+    const result = openArtifact(
+      {
+        id: 'artifact_diff',
+        label: 'Diff',
+        value: 'r2:diff',
+        source: 'text/x-diff',
+        artifactId: 'artifact_diff',
+        workflowRunId: 'run_123',
+      },
+      { onStart: vi.fn(), onComplete, onError },
+    )
+
+    await started
+    await vi.advanceTimersByTimeAsync(30_000)
+    await result
+
+    expect(observedSignal?.aborted).toBe(true)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(onComplete).toHaveBeenCalledOnce()
+  })
+
+  test('keeps the fetch signal owned until a stalled response body is cancelled', async () => {
+    vi.useFakeTimers()
+    let observedSignal: AbortSignal | undefined
+    let notifyBodyStarted: (() => void) | undefined
+    const bodyStarted = new Promise<void>((resolve) => {
+      notifyBodyStarted = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        observedSignal = init?.signal ?? undefined
+        return Promise.resolve({
+          ok: true,
+          json: () => {
+            notifyBodyStarted?.()
+            return new Promise<unknown>((_resolve, reject) => {
+              observedSignal?.addEventListener(
+                'abort',
+                () => reject(observedSignal?.reason),
+                { once: true },
+              )
+            })
+          },
+        } as Response)
+      }),
+    )
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+    const result = openArtifact(
+      {
+        id: 'artifact_diff',
+        label: 'Diff',
+        value: 'r2:diff',
+        source: 'text/x-diff',
+        artifactId: 'artifact_diff',
+        workflowRunId: 'run_123',
+      },
+      { onStart: vi.fn(), onComplete, onError },
+    )
+
+    await bodyStarted
+    await vi.advanceTimersByTimeAsync(30_000)
+    await result
+
+    expect(observedSignal?.aborted).toBe(true)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(onComplete).toHaveBeenCalledOnce()
+  })
+})
 
 describe('artifact download URL decoding', () => {
   test('accepts a candidate-bound same-origin download URL', () => {

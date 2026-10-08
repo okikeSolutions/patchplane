@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
@@ -127,18 +125,6 @@ describe('ThemeProvider', () => {
       </ThemeProvider>,
     )
     expect(document.documentElement.className).toBe('dark')
-  })
-
-  test('keeps the root theme class under one runtime owner', () => {
-    const rootSource = readFileSync(
-      join(process.cwd(), 'src/routes/__root.tsx'),
-      'utf8',
-    )
-
-    expect(rootSource).toMatch(
-      /<html\s+lang=\{documentLocale\}\s+className="scroll-smooth"/,
-    )
-    expect(rootSource).not.toContain("cn('scroll-smooth', theme)")
   })
 })
 

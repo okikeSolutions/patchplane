@@ -1,7 +1,4 @@
-import {
-  sentryGlobalFunctionMiddleware,
-  sentryGlobalRequestMiddleware,
-} from '@sentry/tanstackstart-react'
+import { AuthError } from '@patchplane/domain/errors'
 import { Config, Effect } from 'effect'
 import {
   createCsrfMiddleware,
@@ -10,6 +7,7 @@ import {
   type RequestMiddlewareServerFnResult,
 } from '@tanstack/react-start'
 import { resolveWorkOSRedirectUri } from './lib/workos-redirect-uri'
+import { boundedServerFunctionBodyMiddleware } from './lib/server-function-request-bound'
 
 type WorkOSMiddlewareServer = (
   input: unknown,
@@ -40,27 +38,57 @@ const csrfMiddleware = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === 'serverFn',
 })
 
-const workosAuthkitMiddleware = createMiddleware().server(async (args) => {
-  const { authkitMiddleware } =
-    await import('@workos/authkit-tanstack-react-start')
-  const configuredRedirectUri = await Effect.runPromise(
-    Config.string('WORKOS_REDIRECT_URI').pipe(Config.withDefault('')),
-  )
-  const middleware: unknown = authkitMiddleware({
-    redirectUri: resolveWorkOSRedirectUri(args.request, configuredRedirectUri),
-  })
+const workosAuthkitMiddleware = createMiddleware().server((args) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const { authkitMiddleware } = yield* Effect.tryPromise({
+        try: () => import('@workos/authkit-tanstack-react-start'),
+        catch: (cause) =>
+          new AuthError({
+            operation: 'workos.middleware.adapter',
+            message: 'WorkOS middleware adapter is unavailable',
+            cause,
+          }),
+      })
+      const configuredRedirectUri = yield* Config.String(
+        'WORKOS_REDIRECT_URI',
+      ).pipe(Config.withDefault(''))
+      const middleware: unknown = authkitMiddleware({
+        redirectUri: resolveWorkOSRedirectUri(
+          args.request,
+          configuredRedirectUri,
+        ),
+      })
 
-  if (hasMiddlewareServer(middleware) && middleware.options.server) {
-    return middleware.options.server(args)
-  }
+      if (hasMiddlewareServer(middleware) && middleware.options.server) {
+        const server = middleware.options.server
+        return yield* Effect.tryPromise({
+          try: () => Promise.resolve(server(args)),
+          catch: (cause) =>
+            new AuthError({
+              operation: 'workos.middleware',
+              message: 'WorkOS middleware failed',
+              cause,
+            }),
+        })
+      }
 
-  return args.next()
-})
+      return yield* Effect.tryPromise({
+        try: () => Promise.resolve(args.next()),
+        catch: (cause) =>
+          new AuthError({
+            operation: 'workos.middleware.next',
+            message: 'Request middleware continuation failed',
+            cause,
+          }),
+      })
+    }),
+  ),
+)
 
 export const startInstance = createStart(() => ({
-  functionMiddleware: [sentryGlobalFunctionMiddleware],
   requestMiddleware: [
-    sentryGlobalRequestMiddleware,
+    boundedServerFunctionBodyMiddleware,
     csrfMiddleware,
     workosAuthkitMiddleware,
   ],

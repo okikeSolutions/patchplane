@@ -37,7 +37,28 @@ Current runtime:
 - `src/effect/runtime.ts` — the PatchPlane `ManagedRuntime` for app/server route execution.
 - `src/effect/app-layer.ts` — app runtime layer for WorkOS, Convex, telemetry, and web crypto.
 
-Server functions and API routes dynamically import the runtime only inside server handlers so server-only SDK code does not enter the browser bundle.
+The shared server-function adapter loads the runtime through
+`createServerOnlyFn`. Router tracing and error capture use `createClientOnlyFn`,
+so browser Sentry instrumentation is removed from SSR.
+
+## Build runtime boundaries
+
+`vite.config.ts` enables production minification for the Worker output and
+rejects imports that cross the browser/Worker boundary. Alchemy already supplies
+Worker resolution conditions and Node compatibility; browser builds receive no
+Node polyfills.
+
+`build/runtime-boundaries.ts` checks emitted module identities after framework
+transforms and tree shaking. Browser output must contain no Sentry server SDKs,
+Node builtin imports, or Vite browser-external replacements. Worker output must
+contain no Sentry React or Browser SDK. The build writes local module evidence
+under the root `.patchplane/state/build/` directory.
+
+`bun run build:client` produces the standalone Vite output. The root
+`bun run bundle:check:client` rebuilds through Alchemy and checks the deployable
+Cloudflare output against the existing budgets. `bun run verify` runs both paths.
+The server-function manifest check parses JavaScript syntax, including
+minified template literals, instead of depending on formatting.
 
 `patchplane.config.json` is CLI-managed, user-visible project config. The `.patchplane/` directory is reserved for generated local artifacts such as logs, cache, and state.
 
@@ -64,6 +85,9 @@ Required server environment for creating workflows from webhooks:
 
 ```text
 GITHUB_APP_ID
+GITHUB_CLIENT_ID
+GITHUB_CLIENT_SECRET
+PATCHPLANE_GITHUB_OAUTH_CALLBACK_URL
 GITHUB_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 CONVEX_URL or VITE_CONVEX_URL
@@ -74,13 +98,18 @@ PATCHPLANE_GITHUB_ALLOWED_REPOSITORIES=owner/repo,another/repo # local/self-host
 PATCHPLANE_GITHUB_WORKSPACE_ID or PATCHPLANE_WORKOS_ORGANIZATION_ID
 ```
 
+Configure the GitHub App **Setup URL** and **Callback URL** to `/api/github/install/callback`. Keep GitHub's **Request user authorization (OAuth) during installation** option disabled: PatchPlane first stages the setup callback's `installation_id`, then starts its own state-bound PKCE authorization. Enable **expiring user access tokens**; PatchPlane rejects non-expiring OAuth responses and revokes the temporary token after ownership verification. A network timeout after GitHub commits issuance but before returning the token is an unavoidable distributed ambiguity; the enforced eight-hour access-token and six-month refresh-token limits bound it, and operators should revoke the app authorization if provider logs show such a failed exchange.
+
 Hosted flow:
 
 ```text
 /api/github/install/start
 → Convex pending GitHub connection intent
 → GitHub App installation screen
-→ /api/github/install/callback
+→ /api/github/install/callback stages the installation and PKCE verifier
+→ GitHub user authorization callback consumes one-time state
+→ source-control Worker verifies GitHub installation account control
+→ temporary user token revocation
 → Octokit installation repository listing
 → Convex connected repositories
 → source-control Worker /api/github/webhook

@@ -38,6 +38,9 @@ export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
   convexClient: ConvexAuthClient
 }>()({
+  beforeLoad: async () => ({
+    initialAuth: await getInitialAuthServerFn(),
+  }),
   head: () => ({
     meta: [
       {
@@ -82,13 +85,12 @@ export const Route = createRootRouteWithContext<{
       },
     ],
   }),
-  loader: async () => {
-    const [theme, initialAuth, appVersionId] = await Promise.all([
+  loader: async ({ context }) => {
+    const [theme, appVersionId] = await Promise.all([
       getThemeServerFn(),
-      getInitialAuthServerFn(),
       getClientVersionIdServerFn(),
     ])
-    return { theme, initialAuth, appVersionId }
+    return { theme, initialAuth: context.initialAuth, appVersionId }
   },
   shellComponent: RootDocument,
 })

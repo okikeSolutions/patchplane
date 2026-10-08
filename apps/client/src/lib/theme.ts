@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getCookie, setCookie } from '@tanstack/react-start/server'
-import { Schema } from 'effect'
+import { Config, Effect, Schema } from 'effect'
 
 const Theme = Schema.Literals(['light', 'dark', 'system'])
 export type T = Schema.Schema.Type<typeof Theme>
@@ -15,18 +15,30 @@ function decodeThemeOrDefault(value: unknown): T {
   }
 }
 
-export const getThemeServerFn = createServerFn().handler(async () =>
-  decodeThemeOrDefault(getCookie(storageKey)),
+export const getThemeServerFn = createServerFn().handler(() =>
+  Effect.runPromise(
+    Effect.sync(() => decodeThemeOrDefault(getCookie(storageKey))),
+  ),
 )
 
 export const setThemeServerFn = createServerFn({ method: 'POST' })
   .validator(decodeTheme)
-  .handler(async ({ data }) =>
-    setCookie(storageKey, data, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365, // 1 year
-    }),
+  .handler(({ data }) =>
+    Effect.runPromise(
+      Config.String('NODE_ENV').pipe(
+        Config.withDefault('development'),
+        Config.map((environment) => environment === 'production'),
+        Effect.flatMap((secure) =>
+          Effect.sync(() =>
+            setCookie(storageKey, data, {
+              httpOnly: true,
+              secure,
+              sameSite: 'lax',
+              path: '/',
+              maxAge: 60 * 60 * 24 * 365,
+            }),
+          ),
+        ),
+      ),
+    ),
   )

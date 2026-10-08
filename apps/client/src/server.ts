@@ -1,5 +1,4 @@
 import { withCloudflareSentry, type CloudflareSentryEnv } from '@patchplane/plugins/sentry/cloudflare-worker'
-import { wrapFetchWithSentry } from '@sentry/tanstackstart-react'
 import handler from '@tanstack/react-start/server-entry'
 import { paraglideMiddleware } from './paraglide/server'
 import {
@@ -19,11 +18,11 @@ function enabled(value: boolean | string | undefined) {
   return value === true || value === 'true'
 }
 
-const tanstackHandler = wrapFetchWithSentry({
+const tanstackHandler = {
   fetch(request: Request): Promise<Response> {
     return paraglideMiddleware(request, () => handler.fetch(request))
   },
-})
+}
 
 const clientHandler = {
   async fetch(request: Request, env?: ClientWorkerEnv): Promise<Response> {

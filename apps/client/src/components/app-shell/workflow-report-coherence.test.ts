@@ -137,6 +137,32 @@ describe('assessWorkflowReportCoherence', () => {
     })
   })
 
+  test('accepts an incoming candidate pinned to the workflow source base', () => {
+    const detail = coherentDetail()
+    detail.workflowRun.candidateIdentityVersion = 'incoming-pr-v1'
+    detail.workflowRun.sourceBaseSha = '1'.repeat(40)
+    detail.candidatePatchSets[0]!.baseSha = '1'.repeat(40)
+    detail.candidatePatchSets[0]!.headSha = detail.workflowRun.sourceCommitSha
+
+    expect(assessWorkflowReportCoherence(detail)).toEqual({
+      status: 'coherent',
+      issues: [],
+    })
+  })
+
+  test('fails closed when an incoming candidate head is stale', () => {
+    const detail = coherentDetail()
+    detail.workflowRun.candidateIdentityVersion = 'incoming-pr-v1'
+    detail.workflowRun.sourceBaseSha = '1'.repeat(40)
+    detail.candidatePatchSets[0]!.baseSha = '1'.repeat(40)
+    detail.candidatePatchSets[0]!.headSha = '2'.repeat(40)
+
+    expect(assessWorkflowReportCoherence(detail)).toMatchObject({
+      status: 'blocked',
+      issues: ['candidate-stale'],
+    })
+  })
+
   test('fails closed when the candidate base is stale', () => {
     const detail = coherentDetail()
     detail.candidatePatchSets[0]!.baseSha = 'f'.repeat(40)
@@ -149,8 +175,7 @@ describe('assessWorkflowReportCoherence', () => {
 
   test('fails closed when verification observes candidate mutation', () => {
     const detail = coherentDetail()
-    detail.verificationResults[0]!.candidateDigestAfter =
-      `sha256:${'b'.repeat(64)}`
+    detail.verificationResults[0]!.candidateDigestAfter = `sha256:${'b'.repeat(64)}`
 
     expect(assessWorkflowReportCoherence(detail)).toMatchObject({
       status: 'blocked',

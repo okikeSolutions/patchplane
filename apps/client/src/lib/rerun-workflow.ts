@@ -1,31 +1,33 @@
 import * as Cloudflare from 'alchemy/Cloudflare/Bridge'
-import { ConvexHttpClient } from 'convex/browser'
+import { createServerFn } from '@tanstack/react-start'
 import { makeFunctionReference } from 'convex/server'
 import { Effect, Schema } from 'effect'
-import * as HttpBody from 'effect/unstable/http/HttpBody'
-import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
+import * as HttpBody from 'effect/http/HttpBody'
+import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import { publicErrorMessage } from '@patchplane/domain/errors'
+import { convexMutation } from '@patchplane/plugins/convex/http-client'
 import { SandboxExecutionId, WorkflowRunId } from '@patchplane/domain/ids'
 import {
   criticalPathStages,
   withCriticalPathTransition,
 } from '@patchplane/core/services/telemetry-service'
 import { getSourceControlWorker } from '@/env'
-import { effectServerFn } from './effect-server-fn'
+import { effectServerFnHandlers } from './effect-server-fn'
 import { getWorkOSAuthRequest } from './workos-auth-request'
 import { loadConfiguredConvexUrl } from './convex-url'
 
-class RerunWorkflowError extends Schema.ErrorClass<RerunWorkflowError>(
+class RerunWorkflowError extends Schema.TaggedError<RerunWorkflowError>()(
   'RerunWorkflowError',
-)({
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect()),
-}) {}
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 const RerunWorkflowInput = Schema.Struct({
   parentWorkflowRunId: WorkflowRunId,
-  reason: Schema.String,
-  idempotencyKey: Schema.String,
+  reason: Schema.String.check(Schema.isMaxLength(4_000)),
+  idempotencyKey: Schema.String.check(Schema.isMaxLength(512)),
 })
 
 const createRerunMutation = makeFunctionReference<
@@ -46,7 +48,7 @@ const RerunExecutionResponse = Schema.Struct({
   error: Schema.optional(Schema.String),
 })
 
-export const rerunWorkflowServerFn = effectServerFn({
+const rerunWorkflowHandlers = effectServerFnHandlers({
   method: 'POST',
   input: RerunWorkflowInput,
   operation: 'rerunWorkflowServerFn',
@@ -59,13 +61,15 @@ export const rerunWorkflowServerFn = effectServerFn({
         })
       }
 
-      const authRequest = yield* Effect.tryPromise({
-        try: () => getWorkOSAuthRequest(),
-        catch: () =>
-          new RerunWorkflowError({
-            message: 'Unable to load the authenticated session',
-          }),
-      })
+      const authRequest = yield* getWorkOSAuthRequest().pipe(
+        Effect.mapError(
+          (cause) =>
+            new RerunWorkflowError({
+              message: 'Unable to load the authenticated session',
+              cause,
+            }),
+        ),
+      )
       const convexUrl = yield* loadConfiguredConvexUrl().pipe(
         Effect.mapError(
           (cause) =>
@@ -75,11 +79,6 @@ export const rerunWorkflowServerFn = effectServerFn({
             }),
         ),
       )
-      const convex = new ConvexHttpClient(
-        convexUrl.toString().replace(/\/$/, ''),
-      )
-      if (authRequest.accessToken !== undefined)
-        convex.setAuth(authRequest.accessToken)
       const workflowStart = yield* withCriticalPathTransition(
         {
           traceId: context.traceId,
@@ -87,13 +86,17 @@ export const rerunWorkflowServerFn = effectServerFn({
           operation: 'rerunWorkflowServerFn.createRerun',
           stage: criticalPathStages.rerunCreated,
         },
-        Effect.tryPromise({
-          try: () =>
-            convex.mutation(createRerunMutation, {
-              parentWorkflowRunId: input.parentWorkflowRunId,
-              reason,
-              idempotencyKey: input.idempotencyKey,
-            }),
+        convexMutation({
+          url: convexUrl.toString().replace(/\/$/, ''),
+          ...(authRequest.accessToken === undefined
+            ? {}
+            : { auth: authRequest.accessToken }),
+          reference: createRerunMutation,
+          args: {
+            parentWorkflowRunId: input.parentWorkflowRunId,
+            reason,
+            idempotencyKey: input.idempotencyKey,
+          },
           catch: (cause) =>
             new RerunWorkflowError({
               message: `Unable to create rerun attempt: ${String(cause)}`,
@@ -107,39 +110,35 @@ export const rerunWorkflowServerFn = effectServerFn({
         error:
           'The child attempt was created, but execution dispatch could not be confirmed.',
       }
-      const response = yield* Effect.tryPromise({
-        try: async () => {
-          const client = Cloudflare.toHttpClient(
-            Cloudflare.fromCloudflareFetcher(await getSourceControlWorker()),
-          )
-          const { patchPlaneRuntime } = await import('@/effect/runtime')
-          return await patchPlaneRuntime.runPromise(
-            client
-              .execute(
-                HttpClientRequest.post(
-                  'https://source-control-worker/internal/workflow/rerun',
-                  {
-                    headers: { 'content-type': 'application/json' },
-                    body: HttpBody.text(
-                      JSON.stringify({
-                        traceId: context.traceId,
-                        workflowRunId: workflowStart.workflowRun.id,
-                      }),
-                      'application/json',
-                    ),
-                  },
+      const response = yield* Effect.gen(function* () {
+        const fetcher = yield* Effect.tryPromise({
+          try: () => getSourceControlWorker(),
+          catch: () =>
+            new RerunWorkflowError({ message: dispatchFallback.error }),
+        })
+        const client = Cloudflare.toHttpClient(
+          Cloudflare.fromCloudflareFetcher(fetcher),
+        )
+        return yield* client
+          .execute(
+            HttpClientRequest.post(
+              'https://source-control-worker/internal/workflow/rerun',
+              {
+                headers: { 'content-type': 'application/json' },
+                body: HttpBody.text(
+                  JSON.stringify({
+                    traceId: context.traceId,
+                    workflowRunId: workflowStart.workflowRun.id,
+                  }),
+                  'application/json',
                 ),
-              )
-              .pipe(
-                Effect.flatMap((workerResponse) => workerResponse.json),
-                Effect.flatMap(
-                  Schema.decodeUnknownEffect(RerunExecutionResponse),
-                ),
-              ),
+              },
+            ),
           )
-        },
-        catch: () =>
-          new RerunWorkflowError({ message: dispatchFallback.error }),
+          .pipe(
+            Effect.flatMap((workerResponse) => workerResponse.json),
+            Effect.flatMap(Schema.decodeUnknownEffect(RerunExecutionResponse)),
+          )
       }).pipe(Effect.orElseSucceed(() => dispatchFallback))
 
       return {
@@ -161,3 +160,10 @@ export const rerunWorkflowServerFn = effectServerFn({
     error: publicErrorMessage(cause, 'Workflow rerun failed'),
   }),
 })
+
+export const rerunWorkflowServerFn = createServerFn({
+  method: 'POST',
+  strict: false,
+})
+  .validator(rerunWorkflowHandlers.validator)
+  .handler(rerunWorkflowHandlers.handler)

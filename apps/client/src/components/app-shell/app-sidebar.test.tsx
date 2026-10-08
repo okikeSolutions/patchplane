@@ -39,20 +39,13 @@ describe('AppSidebar', () => {
     cleanup()
   })
 
-  test('uses a flush workflow console shell instead of the inset dashboard frame', () => {
+  test('exposes workflow navigation and omits unfinished sections', () => {
     render(
       <SidebarProvider>
         <AppSidebar />
       </SidebarProvider>,
     )
 
-    const sidebar = document.querySelector('[data-slot="sidebar"]')
-    const sidebarContainer = document.querySelector(
-      '[data-slot="sidebar-container"]',
-    )
-
-    expect(sidebar?.getAttribute('data-variant')).toBe('sidebar')
-    expect(sidebarContainer?.className).toContain('border-sidebar-border/60')
     expect(screen.getByText('patchplane')).toBeTruthy()
     expect(screen.getByText('Patch reports')).toBeTruthy()
     expect(

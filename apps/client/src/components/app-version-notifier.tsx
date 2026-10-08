@@ -12,9 +12,10 @@ const appVersionQueryKey = ['app-version'] as const
 const appVersionToastId = 'app-version-update'
 const appVersionRefetchIntervalMs = 5 * 60 * 1_000
 
-async function fetchActiveAppVersion() {
+async function fetchActiveAppVersion(signal: AbortSignal) {
   const response = await fetch('/api/version', {
     cache: 'no-store',
+    signal,
     headers: { accept: 'application/json' },
   })
   if (!response.ok) {
@@ -31,7 +32,7 @@ export function AppVersionNotifier({
   const initialVersionId = useRef(bootVersionId)
   const activeVersion = useQuery({
     queryKey: appVersionQueryKey,
-    queryFn: fetchActiveAppVersion,
+    queryFn: ({ signal }) => fetchActiveAppVersion(signal),
     refetchInterval: appVersionRefetchIntervalMs,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,

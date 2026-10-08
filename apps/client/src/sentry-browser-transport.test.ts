@@ -14,12 +14,12 @@ import {
   sanitizeSentryEvent,
   sanitizeSentryLog,
   sanitizeSentryMetric,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
   sentryMaxBreadcrumbs,
   sentryTelemetryPolicyMarker,
 } from '@patchplane/plugins/sentry/sanitize'
 import { Effect } from 'effect'
+import { sentryTraceMetadataSanitizer } from './instrument-client-runtime'
 
 const sentinel = 'PATCHPLANE_BROWSER_TRANSPORT_SENTINEL_8b1a'
 const sourceSentinel = 'PATCHPLANE_SOURCE_CONTENT_SENTINEL_31ce'
@@ -65,18 +65,15 @@ describe('browser Sentry transport boundary', () => {
           dsn: 'https://public@example.com/1',
           defaultIntegrations: false,
           transport: () => collectingTransport(envelopes),
-          sendDefaultPii: false,
           dataCollection: makeSentryDataCollection(),
           maxBreadcrumbs: sentryMaxBreadcrumbs,
-          enableLogs: true,
-          enableMetrics: true,
           tracesSampleRate: 1,
           beforeSend: sanitizeSentryEvent,
-          beforeSendTransaction: sanitizeSentryTransaction,
           beforeBreadcrumb: sanitizeSentryBreadcrumb,
           beforeSendLog: sanitizeSentryLog,
           beforeSendMetric: sanitizeSentryMetric,
-          beforeSendSpan: sanitizeSentrySpan,
+          beforeSendSpan: sanitizeSentryStreamedSpan,
+          integrations: [sentryTraceMetadataSanitizer],
         })
 
         Sentry.addBreadcrumb({
@@ -193,7 +190,7 @@ describe('browser Sentry transport boundary', () => {
         assert.ok(itemTypes.includes('event'))
         assert.ok(itemTypes.includes('log'))
         assert.ok(itemTypes.includes('trace_metric'))
-        assert.ok(itemTypes.includes('transaction'))
+        assert.ok(itemTypes.includes('span'))
         const serialized = JSON.stringify(envelopes)
         assert.ok(!serialized.includes(sentinel))
         assert.ok(!serialized.includes(rawSourceSentinel))

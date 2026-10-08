@@ -6,7 +6,7 @@ import { GitHubConnectionStatus } from './github-connection-status'
 import { GitHubRepositoryConnections } from './github-repository-connections'
 import { NoOrganizationAlert } from './no-organization-alert'
 import { WorkflowConsole } from './workflow-console'
-import type { ViewerIdentity, WorkflowStartRow } from './types'
+import type { WorkflowStartRow } from './types'
 import type { WorkflowFilter } from './workflow-console-model'
 import * as m from '@/paraglide/messages'
 
@@ -25,13 +25,13 @@ export function WorkflowConsoleContent({
 }) {
   const { user, organizationId } = useAuth()
   const ensureCurrentUser = useMutation(api.auth.ensureCurrentUser)
-  const viewer = useQuery(api.viewer.current, {}) as ViewerIdentity | undefined
+  const viewer = useQuery(api.viewer.current, {})
   const workflows = useQuery(
     api.workflowStarts.listRecent,
     organizationId === undefined || organizationId === null
       ? 'skip'
       : { workspaceId: `workos:${organizationId}`, limit: 10 },
-  ) as ReadonlyArray<WorkflowStartRow> | undefined
+  )
 
   useEffect(() => {
     void ensureCurrentUser({})

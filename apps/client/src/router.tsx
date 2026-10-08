@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
-import * as Sentry from '@sentry/tanstackstart-react'
+import { lazy, useEffect } from 'react'
+import * as Sentry from '@sentry/react'
+import { createClientOnlyFn } from '@tanstack/react-start'
 import { createRouter, ErrorComponent } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { routerWithQueryClient } from '@tanstack/react-router-with-query'
@@ -29,7 +30,7 @@ export function getRouter() {
   const router = routerWithQueryClient(
     createRouter({
       routeTree,
-      defaultErrorComponent: SentryRouteError,
+      defaultErrorComponent: lazy(async () => ({ default: SentryRouteError })),
       defaultPreload: 'intent',
       context: { queryClient, convexClient: convexQueryClient.convexClient },
       scrollRestoration: true,
@@ -42,19 +43,29 @@ export function getRouter() {
   )
 
   if (!router.isServer) {
-    Sentry.addIntegration(
-      Sentry.tanstackRouterBrowserTracingIntegration(router),
-    )
+    instrumentRouter(router)
   }
 
   return router
 }
 
-function SentryRouteError({ error }: { readonly error: Error }) {
+const instrumentRouter = createClientOnlyFn(
+  (router: ReturnType<typeof getRouter>) => {
+    Sentry.addIntegration(
+      Sentry.tanstackRouterBrowserTracingIntegration(router),
+    )
+  },
+)
+
+const captureRouteError = createClientOnlyFn((error: unknown) => {
+  Sentry.captureException(error, {
+    tags: { surface: 'client-router' },
+  })
+})
+
+function SentryRouteError({ error }: { readonly error: unknown }) {
   useEffect(() => {
-    Sentry.captureException(error, {
-      tags: { surface: 'client-router' },
-    })
+    captureRouteError(error)
   }, [error])
 
   return <ErrorComponent error={error} />

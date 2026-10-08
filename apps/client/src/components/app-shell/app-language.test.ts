@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import * as m from '@/paraglide/messages'
 import { localizeHref } from '@/paraglide/runtime'
+import deMessages from '../../../messages/de.json'
+import enMessages from '../../../messages/en.json'
 import { documentLocaleForPathname } from './app-language'
 
 describe('alpha app language', () => {
@@ -11,31 +12,14 @@ describe('alpha app language', () => {
     expect(documentLocaleForPathname('/', 'de')).toBe('de')
   })
 
-  test('keeps app links and operational copy in the selected locale', () => {
+  test('localizes app navigation targets', () => {
     expect(localizeHref('/app', { locale: 'de' })).toBe('/de/app')
     expect(localizeHref('/app', { locale: 'en' })).toBe('/en/app')
-    expect(m.app_queue_heading({}, { locale: 'de' })).toBe(
-      'Workflow-Warteschlange',
+  })
+
+  test('keeps translated message keys aligned', () => {
+    expect(Object.keys(deMessages).toSorted()).toEqual(
+      Object.keys(enMessages).toSorted(),
     )
-    expect(m.app_queue_heading({}, { locale: 'en' })).toBe('Workflow queue')
-    expect(m.app_detail_summary({}, { locale: 'de' })).toBe('Übersicht')
-    expect(m.app_detail_summary({}, { locale: 'en' })).toBe('Summary')
-    expect(m.app_update_available_title({}, { locale: 'de' })).toBe(
-      'Neue Patchplane-Version verfügbar',
-    )
-    expect(m.app_update_available_title({}, { locale: 'en' })).toBe(
-      'New Patchplane version available',
-    )
-    expect(m.app_update_reload({}, { locale: 'de' })).toBe('Neu laden')
-    expect(m.app_update_reload({}, { locale: 'en' })).toBe('Reload')
-    expect(m.app_nav_sign_out({}, { locale: 'de' })).toBe('Abmelden')
-    expect(m.app_nav_sign_out({}, { locale: 'en' })).toBe('Logout')
-    expect(m.app_diff_a11y_added({}, { locale: 'de' })).toBe('Hinzugefügt.')
-    expect(m.app_diff_a11y_deleted({}, { locale: 'de' })).toBe('Gelöscht.')
-    expect(m.app_diff_a11y_unchanged({}, { locale: 'de' })).toBe('Unverändert.')
-    expect(m.app_diff_a11y_old_line({ line: '34' }, { locale: 'de' })).toBe(
-      'Alte Zeile 34.',
-    )
-    expect(m.app_diff_a11y_added({}, { locale: 'en' })).toBe('Added.')
   })
 })

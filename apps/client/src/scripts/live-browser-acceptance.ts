@@ -339,6 +339,7 @@ export async function runLiveBrowserAcceptance(
   if (options.baseUrl === undefined) {
     throw new Error('Base URL is required')
   }
+  const baseUrl = options.baseUrl
   if (
     options.workflowRunId !== undefined &&
     options.expectedDecision === undefined
@@ -360,7 +361,7 @@ export async function runLiveBrowserAcceptance(
   let stage = 'launch'
   emit({
     type: 'browser_acceptance_started',
-    baseOrigin: options.baseUrl.origin,
+    baseOrigin: baseUrl.origin,
     headed: true,
     profileDirectory: PROFILE_DIRECTORY,
   })
@@ -376,7 +377,7 @@ export async function runLiveBrowserAcceptance(
     })
     const page = context.pages()[0] ?? (await context.newPage())
     stage = 'open_app'
-    await page.goto(new URL('/app', options.baseUrl).toString(), {
+    await page.goto(new URL('/app', baseUrl).toString(), {
       waitUntil: 'domcontentloaded',
     })
     emit({ type: 'browser_acceptance_app_opened', ...safeLocation(page) })
@@ -398,7 +399,7 @@ export async function runLiveBrowserAcceptance(
       )
     }
 
-    connectGitHub = await assertAuthenticatedApp(page, options.baseUrl)
+    connectGitHub = await assertAuthenticatedApp(page, baseUrl)
     emit({
       type: 'browser_acceptance_authkit_confirmed',
       ...safeLocation(page),
@@ -422,7 +423,7 @@ export async function runLiveBrowserAcceptance(
       stage = 'assert_github_callback'
       await page.waitForURL(
         (candidate) =>
-          isAppLocation(candidate, options.baseUrl!) &&
+          isAppLocation(candidate, baseUrl) &&
           candidate.searchParams.get('github') === 'connected',
         { timeout: 15_000 },
       )
@@ -493,12 +494,12 @@ export async function runLiveBrowserAcceptance(
     ) {
       stage = 'workflow_readback'
       const workflowPath = `/app/workflows/${encodeURIComponent(options.workflowRunId)}`
-      await page.goto(new URL(workflowPath, options.baseUrl).toString(), {
+      await page.goto(new URL(workflowPath, baseUrl).toString(), {
         waitUntil: 'domcontentloaded',
       })
       await page.waitForURL(
         (candidate) =>
-          candidate.origin === options.baseUrl!.origin &&
+          candidate.origin === baseUrl.origin &&
           candidate.pathname === workflowPath,
         { timeout: 15_000 },
       )

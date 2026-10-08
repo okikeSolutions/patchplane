@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { CircleAlertIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,8 @@ export function WorkflowCoherenceAlert({
   readonly detail: WorkflowDetail
   readonly onOpenAttempt?: ((workflowRunId: string) => void) | undefined
 }) {
+  const { newerAttempt } = detail
+
   return (
     <Alert role="alert" variant="destructive">
       <CircleAlertIcon />
@@ -36,15 +39,15 @@ export function WorkflowCoherenceAlert({
             <li key={issue}>{coherenceIssueCopy(issue)}</li>
           ))}
         </ul>
-        {detail.newerAttempt === undefined ? null : (
+        {newerAttempt === undefined ? null : (
           <Button
             type="button"
             variant="outline"
             className="w-fit"
-            onClick={() => onOpenAttempt?.(detail.newerAttempt!.workflowRunId)}
+            onClick={() => onOpenAttempt?.(newerAttempt.workflowRunId)}
           >
             {m.app_coherence_open_attempt({
-              attempt: detail.newerAttempt.attemptNumber,
+              attempt: newerAttempt.attemptNumber,
             })}
           </Button>
         )}
@@ -54,16 +57,13 @@ export function WorkflowCoherenceAlert({
 }
 
 function coherenceIssueCopy(issue: WorkflowReportCoherenceIssue) {
-  switch (issue) {
-    case 'candidate-stale':
-      return m.app_coherence_stale()
-    case 'candidate-mutated':
-      return m.app_coherence_mutated()
-    case 'candidate-mismatch':
-      return m.app_coherence_mismatched()
-    case 'superseded-attempt':
-      return m.app_coherence_superseded()
-  }
+  return Match.value(issue).pipe(
+    Match.when('candidate-stale', () => m.app_coherence_stale()),
+    Match.when('candidate-mutated', () => m.app_coherence_mutated()),
+    Match.when('candidate-mismatch', () => m.app_coherence_mismatched()),
+    Match.when('superseded-attempt', () => m.app_coherence_superseded()),
+    Match.exhaustive,
+  )
 }
 
 export function WorkflowEvidenceWorkspace({

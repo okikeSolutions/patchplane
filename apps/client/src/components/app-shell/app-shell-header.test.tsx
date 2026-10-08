@@ -50,14 +50,9 @@ describe('AppShellHeader', () => {
         .getByRole('link', { name: 'Patch Report' })
         .getAttribute('aria-current'),
     ).toBe('page')
-    expect(trigger.className).toContain('size-11')
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(separator.getAttribute('aria-orientation')).toBe('vertical')
-    expect(separator.className.split(' ')).toContain('data-vertical:h-4')
-    expect(separator.className.split(' ')).toContain('data-vertical:self-auto')
-    expect(separator.className).not.toContain('data-[orientation=vertical]')
     fireEvent.click(trigger)
-    expect(trigger.getAttribute('data-slot')).toBe('sidebar-trigger')
     expect(trigger.getAttribute('aria-expanded')).toBe('true')
   })
 

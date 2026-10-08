@@ -9,20 +9,15 @@ describe('SignedOutWorkflowConsole', () => {
     cleanup()
   })
 
-  test('uses the fixed English alpha app language with shared card previews', () => {
+  test('offers a sign-in route back to the localized workflow queue', () => {
     render(<SignedOutWorkflowConsole />)
 
     expect(
       screen.getByRole('heading', { name: 'Sign in to view workflows' }),
     ).toBeTruthy()
     expect(
-      screen.getByText(
-        'patchplane keeps workflow evidence, sandbox logs, and review state behind your workspace session.',
-      ),
-    ).toBeTruthy()
-    expect(screen.getByText('Private')).toBeTruthy()
-    expect(screen.getByText('Protected')).toBeTruthy()
-    expect(screen.getByText('Required')).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(3)
+      screen.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
+    ).toBe('/api/auth/sign-in?returnPathname=%2Fen%2Fapp')
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
   })
 })

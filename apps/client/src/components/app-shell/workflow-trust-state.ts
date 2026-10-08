@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import type { WorkflowDetail } from './types'
 import * as m from '@/paraglide/messages'
 
@@ -97,24 +98,15 @@ export function deriveWorkflowTrustState(
 }
 
 export function workflowTrustStateLabel(state: WorkflowTrustState) {
-  switch (state) {
-    case 'queued':
-      return m.app_status_queued()
-    case 'running':
-      return m.app_status_running()
-    case 'no-sandbox-run':
-      return m.app_status_no_sandbox()
-    case 'sandbox-failed':
-      return m.app_status_sandbox_failed()
-    case 'needs-review':
-      return m.app_status_needs_review()
-    case 'approved':
-      return m.app_status_approved()
-    case 'rejected':
-      return m.app_status_rejected()
-    case 'changes-requested':
-      return m.app_status_changes_requested()
-    default:
-      return state
-  }
+  return Match.value(state).pipe(
+    Match.when('queued', () => m.app_status_queued()),
+    Match.when('running', () => m.app_status_running()),
+    Match.when('no-sandbox-run', () => m.app_status_no_sandbox()),
+    Match.when('sandbox-failed', () => m.app_status_sandbox_failed()),
+    Match.when('needs-review', () => m.app_status_needs_review()),
+    Match.when('approved', () => m.app_status_approved()),
+    Match.when('rejected', () => m.app_status_rejected()),
+    Match.when('changes-requested', () => m.app_status_changes_requested()),
+    Match.exhaustive,
+  )
 }

@@ -4,8 +4,7 @@ import {
   sanitizeSentryEvent,
   sanitizeSentryLog,
   sanitizeSentryMetric,
-  sanitizeSentrySpan,
-  sanitizeSentryTransaction,
+  sanitizeSentryStreamedSpan,
 } from '@patchplane/plugins/sentry/sanitize'
 import { Effect } from 'effect'
 import { vi } from 'vitest'
@@ -17,9 +16,9 @@ const sentryMocks = vi.hoisted(() => ({
   init: vi.fn(),
 }))
 
-vi.mock('@sentry/tanstackstart-react', async (importOriginal) => {
+vi.mock('@sentry/react', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('@sentry/tanstackstart-react')>()
+    await importOriginal<typeof import('@sentry/react')>()
   return {
     ...original,
     breadcrumbsIntegration: sentryMocks.breadcrumbsIntegration,
@@ -49,25 +48,38 @@ describe('browser Sentry instrumentation', () => {
               cookies: false,
               httpHeaders: { request: false, response: false },
               httpBodies: [],
-              queryParams: false,
+              urlQueryParams: false,
+              graphQL: { document: false, variables: false },
               genAI: { inputs: false, outputs: false },
+              databaseQueryData: false,
+              queues: false,
               stackFrameVariables: false,
               frameContextLines: 0,
             })
             assert.strictEqual(options.maxBreadcrumbs, 64)
-            assert.strictEqual(options.sendDefaultPii, false)
             assert.strictEqual(options.beforeSend, sanitizeSentryEvent)
-            assert.strictEqual(
-              options.beforeSendTransaction,
-              sanitizeSentryTransaction,
-            )
             assert.strictEqual(
               options.beforeBreadcrumb,
               sanitizeSentryBreadcrumb,
             )
             assert.strictEqual(options.beforeSendLog, sanitizeSentryLog)
             assert.strictEqual(options.beforeSendMetric, sanitizeSentryMetric)
-            assert.strictEqual(options.beforeSendSpan, sanitizeSentrySpan)
+            assert.strictEqual(
+              options.beforeSendSpan,
+              sanitizeSentryStreamedSpan,
+            )
+            assert.deepStrictEqual(
+              sanitizeSentryStreamedSpan({
+                span_id: '0123456789abcdef',
+                trace_id: '0123456789abcdef0123456789abcdef',
+                name: 'request',
+                start_timestamp: 1,
+                status: 'ok',
+                is_segment: false,
+                attributes: { prompt: 'private prompt' },
+              }).attributes,
+              {},
+            )
 
             const resolveIntegrations = options.integrations as
               | ((defaults: Array<{ readonly name: string }>) => Array<{
@@ -78,13 +90,14 @@ describe('browser Sentry instrumentation', () => {
             assert.deepStrictEqual(
               resolveIntegrations([
                 { name: 'Breadcrumbs' },
+                { name: 'Console' },
                 { name: 'Keep' },
               ]).map(({ name }) => name),
-              ['Keep', 'Breadcrumbs'],
+              ['Keep', 'PatchplaneTraceMetadataSanitizer', 'Breadcrumbs'],
             )
-            assert.deepStrictEqual(
-              sentryMocks.breadcrumbsIntegration.mock.calls[0]?.[0],
-              { console: false },
+            assert.equal(
+              sentryMocks.breadcrumbsIntegration.mock.calls.length,
+              1,
             )
           }),
         ),

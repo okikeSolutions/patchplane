@@ -94,6 +94,42 @@ export function WorkflowReviewPanel({
     detail.policyDecisions,
     (decision) => decision.createdAt,
   )
+  const currentHumanDecision = latestBy(
+    detail.humanDecisions,
+    (decision) => decision.decidedAt,
+  )
+  const currentDecisionPublications = detail.publicationResults.filter(
+    (publication) => publication.humanDecisionId === currentHumanDecision?.id,
+  )
+  const decisionCandidate = detail.candidatePatchSets.find(
+    (candidate) => candidate.id === currentHumanDecision?.candidatePatchSetId,
+  )
+  const repositoryRef = detail.promptRequest.externalRef
+  const hasPublicationRepository =
+    repositoryRef?.repositoryProvider !== undefined &&
+    repositoryRef.repositoryOwner !== undefined &&
+    repositoryRef.repositoryName !== undefined
+  const expectedPublicationKinds = hasPublicationRepository
+    ? [
+        ...(repositoryRef.issueNumber === undefined
+          ? []
+          : (['issue-comment'] as const)),
+        ...(decisionCandidate?.headSha === undefined
+          ? []
+          : (['check-run'] as const)),
+      ]
+    : []
+  const publicationNeedsRetry =
+    currentHumanDecision?.idempotencyKey !== undefined &&
+    expectedPublicationKinds.some(
+      (kind) =>
+        !currentDecisionPublications.some(
+          (publication) =>
+            publication.kind === kind &&
+            publication.status === 'published' &&
+            publication.idempotencyKey === `${currentHumanDecision.id}:${kind}`,
+        ),
+    )
   const policyAllowsReview =
     policyDecision?.status === 'approved' ||
     policyDecision?.status === 'manual-review'
@@ -132,6 +168,55 @@ export function WorkflowReviewPanel({
     setVerificationOverrideReason('')
     setError(undefined)
     trigger?.focus()
+  }
+
+  const retryDecisionPublication = async () => {
+    if (
+      currentHumanDecision === undefined ||
+      currentHumanDecision.sandboxExecutionId === undefined ||
+      currentHumanDecision.candidatePatchSetId === undefined ||
+      currentHumanDecision.reviewRunId === undefined ||
+      currentHumanDecision.policyDecisionId === undefined ||
+      currentHumanDecision.idempotencyKey === undefined ||
+      isSubmitting
+    ) {
+      return
+    }
+
+    setSubmittingStatus(currentHumanDecision.status)
+    setError(undefined)
+    setSuccess(undefined)
+    try {
+      const response = await submitReviewDecisionServerFn({
+        data: {
+          workflowRunId: detail.workflowRun.id,
+          sandboxExecutionId: currentHumanDecision.sandboxExecutionId,
+          candidatePatchSetId: currentHumanDecision.candidatePatchSetId,
+          reviewRunId: currentHumanDecision.reviewRunId,
+          policyDecisionId: currentHumanDecision.policyDecisionId,
+          status: currentHumanDecision.status,
+          comment: currentHumanDecision.comment,
+          ...(currentHumanDecision.verificationOverrideReason === undefined
+            ? {}
+            : {
+                verificationOverrideReason:
+                  currentHumanDecision.verificationOverrideReason,
+              }),
+          idempotencyKey: currentHumanDecision.idempotencyKey,
+        },
+      })
+      if (!response.ok) {
+        setError(response.error)
+        return
+      }
+      setSuccess(m.app_review_publication_retry_succeeded())
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : m.app_review_record_failed(),
+      )
+    } finally {
+      setSubmittingStatus(undefined)
+    }
   }
 
   const submitDecision = async (status: HumanDecisionStatus) => {
@@ -279,169 +364,191 @@ export function WorkflowReviewPanel({
           </Alert>
         )}
       </div>
-      <div
-        aria-label={m.app_review_choose()}
-        className="grid grid-cols-1 gap-2"
-      >
-        <Button
-          ref={(node) => {
-            decisionButtons.current.approved = node ?? undefined
-          }}
-          type="button"
-          className="min-h-11 w-full"
-          aria-pressed={decisionIntent === 'approved'}
-          disabled={
-            !policyAllowsReview ||
-            !verificationCoverage.canOverride ||
-            !hasCurrentProjection ||
-            sandboxExecution.status !== 'succeeded' ||
-            candidatePatchSet.status !== 'captured' ||
-            reviewRun.status !== 'completed'
-          }
-          onClick={() => chooseDecision('approved')}
-        >
-          <CheckIcon data-icon="inline-start" />
-          {m.app_review_approve()}
-        </Button>
-        <Button
-          ref={(node) => {
-            decisionButtons.current['changes-requested'] = node ?? undefined
-          }}
-          type="button"
-          variant="secondary"
-          className="min-h-11 w-full"
-          aria-pressed={decisionIntent === 'changes-requested'}
-          disabled={!hasCurrentProjection}
-          onClick={() => chooseDecision('changes-requested')}
-        >
-          <CircleAlertIcon data-icon="inline-start" />
-          {m.app_review_request_changes()}
-        </Button>
-        <Button
-          ref={(node) => {
-            decisionButtons.current.rejected = node ?? undefined
-          }}
-          type="button"
-          variant="destructive"
-          className="min-h-11 w-full"
-          aria-pressed={decisionIntent === 'rejected'}
-          disabled={!hasCurrentProjection}
-          onClick={() => chooseDecision('rejected')}
-        >
-          <XIcon data-icon="inline-start" />
-          {m.app_review_reject()}
-        </Button>
-      </div>
-      <Collapsible open={decisionIntent !== undefined}>
-        <CollapsibleContent>
-          {decisionIntent === undefined ? null : (
-            <div
-              aria-label={`${decisionLabel(decisionIntent)} form`}
-              className="mt-1 flex flex-col gap-4 border-t border-border pt-4"
+      {currentHumanDecision === undefined ? (
+        <>
+          <div
+            aria-label={m.app_review_choose()}
+            className="grid grid-cols-1 gap-2"
+          >
+            <Button
+              ref={(node) => {
+                decisionButtons.current.approved = node ?? undefined
+              }}
+              type="button"
+              className="min-h-11 w-full"
+              aria-pressed={decisionIntent === 'approved'}
+              disabled={
+                !policyAllowsReview ||
+                !verificationCoverage.canOverride ||
+                !hasCurrentProjection ||
+                sandboxExecution.status !== 'succeeded' ||
+                candidatePatchSet.status !== 'captured' ||
+                reviewRun.status !== 'completed'
+              }
+              onClick={() => chooseDecision('approved')}
             >
-              <div>
-                <h3 className="text-sm font-medium">
-                  {decisionLabel(decisionIntent)}
-                </h3>
-                <p className="m-0 mt-1 text-xs text-muted-foreground">
-                  {m.app_review_rationale()}
-                </p>
-              </div>
-              <FieldGroup>
-                <Field
-                  data-invalid={
-                    !hasComment && comment.length > 0 ? true : undefined
-                  }
+              <CheckIcon data-icon="inline-start" />
+              {m.app_review_approve()}
+            </Button>
+            <Button
+              ref={(node) => {
+                decisionButtons.current['changes-requested'] = node ?? undefined
+              }}
+              type="button"
+              variant="secondary"
+              className="min-h-11 w-full"
+              aria-pressed={decisionIntent === 'changes-requested'}
+              disabled={!hasCurrentProjection}
+              onClick={() => chooseDecision('changes-requested')}
+            >
+              <CircleAlertIcon data-icon="inline-start" />
+              {m.app_review_request_changes()}
+            </Button>
+            <Button
+              ref={(node) => {
+                decisionButtons.current.rejected = node ?? undefined
+              }}
+              type="button"
+              variant="destructive"
+              className="min-h-11 w-full"
+              aria-pressed={decisionIntent === 'rejected'}
+              disabled={!hasCurrentProjection}
+              onClick={() => chooseDecision('rejected')}
+            >
+              <XIcon data-icon="inline-start" />
+              {m.app_review_reject()}
+            </Button>
+          </div>
+          <Collapsible open={decisionIntent !== undefined}>
+            <CollapsibleContent>
+              {decisionIntent === undefined ? null : (
+                <div
+                  aria-label={`${decisionLabel(decisionIntent)} form`}
+                  className="mt-1 flex flex-col gap-4 border-t border-border pt-4"
                 >
-                  <FieldLabel htmlFor="workflow-review-comment">
-                    {m.app_review_comment()}
-                  </FieldLabel>
-                  <Textarea
-                    ref={commentRef}
-                    id="workflow-review-comment"
-                    value={comment}
-                    required
-                    aria-describedby="workflow-review-comment-description"
-                    aria-invalid={!hasComment && comment.length > 0}
-                    placeholder={m.app_review_comment_placeholder()}
-                    onChange={(event) => setComment(event.currentTarget.value)}
-                  />
-                  <FieldDescription id="workflow-review-comment-description">
-                    {m.app_review_comment_detail()}
-                  </FieldDescription>
-                </Field>
-                {decisionIntent !== 'approved' ||
-                verificationCoverage.complete ||
-                !verificationCoverage.canOverride ? null : (
-                  <Field
-                    data-invalid={
-                      !hasOverrideReason &&
-                      verificationOverrideReason.length > 0
-                        ? true
-                        : undefined
-                    }
-                  >
-                    <FieldLabel htmlFor="workflow-verification-override-reason">
-                      {m.app_review_override()}
-                    </FieldLabel>
-                    <Textarea
-                      id="workflow-verification-override-reason"
-                      value={verificationOverrideReason}
-                      aria-describedby="workflow-verification-override-description"
-                      aria-invalid={
-                        !hasOverrideReason &&
-                        verificationOverrideReason.length > 0
+                  <div>
+                    <h3 className="text-sm font-medium">
+                      {decisionLabel(decisionIntent)}
+                    </h3>
+                    <p className="m-0 mt-1 text-xs text-muted-foreground">
+                      {m.app_review_rationale()}
+                    </p>
+                  </div>
+                  <FieldGroup>
+                    <Field
+                      data-invalid={
+                        !hasComment && comment.length > 0 ? true : undefined
                       }
-                      maxLength={1000}
-                      placeholder={m.app_review_override_placeholder()}
-                      onChange={(event) =>
-                        setVerificationOverrideReason(event.currentTarget.value)
+                    >
+                      <FieldLabel htmlFor="workflow-review-comment">
+                        {m.app_review_comment()}
+                      </FieldLabel>
+                      <Textarea
+                        ref={commentRef}
+                        id="workflow-review-comment"
+                        value={comment}
+                        required
+                        aria-describedby="workflow-review-comment-description"
+                        aria-invalid={!hasComment && comment.length > 0}
+                        placeholder={m.app_review_comment_placeholder()}
+                        onChange={(event) =>
+                          setComment(event.currentTarget.value)
+                        }
+                      />
+                      <FieldDescription id="workflow-review-comment-description">
+                        {m.app_review_comment_detail()}
+                      </FieldDescription>
+                    </Field>
+                    {decisionIntent !== 'approved' ||
+                    verificationCoverage.complete ||
+                    !verificationCoverage.canOverride ? null : (
+                      <Field
+                        data-invalid={
+                          !hasOverrideReason &&
+                          verificationOverrideReason.length > 0
+                            ? true
+                            : undefined
+                        }
+                      >
+                        <FieldLabel htmlFor="workflow-verification-override-reason">
+                          {m.app_review_override()}
+                        </FieldLabel>
+                        <Textarea
+                          id="workflow-verification-override-reason"
+                          value={verificationOverrideReason}
+                          aria-describedby="workflow-verification-override-description"
+                          aria-invalid={
+                            !hasOverrideReason &&
+                            verificationOverrideReason.length > 0
+                          }
+                          maxLength={1000}
+                          placeholder={m.app_review_override_placeholder()}
+                          onChange={(event) =>
+                            setVerificationOverrideReason(
+                              event.currentTarget.value,
+                            )
+                          }
+                        />
+                        <FieldDescription id="workflow-verification-override-description">
+                          {m.app_review_override_detail()}
+                        </FieldDescription>
+                      </Field>
+                    )}
+                  </FieldGroup>
+                  <div className="grid grid-cols-1 gap-2">
+                    <Button
+                      type="button"
+                      variant={
+                        decisionIntent === 'rejected'
+                          ? 'destructive'
+                          : 'default'
                       }
-                    />
-                    <FieldDescription id="workflow-verification-override-description">
-                      {m.app_review_override_detail()}
-                    </FieldDescription>
-                  </Field>
-                )}
-              </FieldGroup>
-              <div className="grid grid-cols-1 gap-2">
-                <Button
-                  type="button"
-                  variant={
-                    decisionIntent === 'rejected' ? 'destructive' : 'default'
-                  }
-                  className="min-h-11 w-full"
-                  aria-busy={submittingStatus === decisionIntent}
-                  disabled={
-                    !hasComment ||
-                    (decisionIntent === 'approved' &&
-                      (!policyAllowsReview ||
-                        (!verificationCoverage.complete &&
-                          (!verificationCoverage.canOverride ||
-                            !hasOverrideReason)))) ||
-                    isSubmitting ||
-                    !hasCurrentProjection
-                  }
-                  onClick={() => void submitDecision(decisionIntent)}
-                >
-                  {submittingStatus === decisionIntent
-                    ? decisionPendingLabel(decisionIntent)
-                    : decisionConfirmationLabel(decisionIntent)}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="min-h-11 w-full"
-                  disabled={isSubmitting}
-                  onClick={cancelDecision}
-                >
-                  {m.app_cancel()}
-                </Button>
-              </div>
-            </div>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
+                      className="min-h-11 w-full"
+                      aria-busy={submittingStatus === decisionIntent}
+                      disabled={
+                        !hasComment ||
+                        (decisionIntent === 'approved' &&
+                          (!policyAllowsReview ||
+                            (!verificationCoverage.complete &&
+                              (!verificationCoverage.canOverride ||
+                                !hasOverrideReason)))) ||
+                        isSubmitting ||
+                        !hasCurrentProjection
+                      }
+                      onClick={() => void submitDecision(decisionIntent)}
+                    >
+                      {submittingStatus === decisionIntent
+                        ? decisionPendingLabel(decisionIntent)
+                        : decisionConfirmationLabel(decisionIntent)}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-11 w-full"
+                      disabled={isSubmitting}
+                      onClick={cancelDecision}
+                    >
+                      {m.app_cancel()}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+        </>
+      ) : publicationNeedsRetry ? (
+        <Button
+          type="button"
+          className="min-h-11 w-full"
+          aria-busy={isSubmitting}
+          disabled={isSubmitting}
+          onClick={() => void retryDecisionPublication()}
+        >
+          {isSubmitting
+            ? m.app_review_publication_retry_pending()
+            : m.app_review_publication_retry()}
+        </Button>
+      ) : null}
     </section>
   )
 }

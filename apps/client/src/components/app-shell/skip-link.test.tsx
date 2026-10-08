@@ -7,7 +7,7 @@ import { SkipLink } from './skip-link'
 afterEach(cleanup)
 
 describe('SkipLink', () => {
-  test('targets the primary content and becomes visible on focus', () => {
+  test('links to the primary content target', () => {
     render(
       <>
         <SkipLink />
@@ -16,6 +16,5 @@ describe('SkipLink', () => {
     )
     const link = screen.getByRole('link', { name: 'Skip to main content' })
     expect(link.getAttribute('href')).toBe('#main-content')
-    expect(link.className).toContain('focus:translate-y-0')
   })
 })

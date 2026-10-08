@@ -69,7 +69,7 @@ export function WorkflowDetailPage({
   const queriedDetail = useQuery(
     api.workflowStarts.getDetail,
     detailOverride === undefined ? { workflowRunId } : 'skip',
-  ) as WorkflowDetail | undefined
+  )
   const detail = detailOverride ?? queriedDetail
   const [internalTab, setInternalTab] = useState<DetailTab>(tab)
   const [internalDiffNavigation, setInternalDiffNavigation] =
@@ -93,9 +93,8 @@ export function WorkflowDetailPage({
   const coherence = assessWorkflowReportCoherence(detail)
 
   function changeTab(value: string) {
-    const next = detailTabs.includes(value as DetailTab)
-      ? (value as DetailTab)
-      : 'summary'
+    const next =
+      detailTabs.find((detailTab) => detailTab === value) ?? 'summary'
     if (next !== 'changes') {
       setInternalDiffNavigation((current) => ({
         ...current,
@@ -116,6 +115,7 @@ export function WorkflowDetailPage({
     <div className="flex min-h-full flex-1 flex-col bg-background">
       <header
         aria-labelledby="patch-report-title"
+        hidden={diffExpanded}
         className={cn(
           'border-b border-border bg-background px-4 py-3 lg:px-6',
           diffExpanded && 'hidden',
@@ -226,6 +226,7 @@ export function WorkflowDetailPage({
               <TabsList
                 variant="line"
                 aria-label={m.app_detail_sections()}
+                hidden={diffExpanded}
                 className={cn(
                   'sticky top-0 z-20 h-auto w-full flex-wrap justify-start overflow-visible border-b border-border bg-background/95 py-1 backdrop-blur group-data-horizontal/tabs:h-auto supports-[backdrop-filter]:bg-background/80',
                   diffExpanded && 'hidden',
@@ -291,6 +292,7 @@ export function WorkflowDetailPage({
           </div>
           <aside
             data-slot="workflow-review-pane"
+            hidden={diffExpanded}
             className={cn(
               'self-start xl:sticky xl:top-4',
               diffExpanded && 'hidden',

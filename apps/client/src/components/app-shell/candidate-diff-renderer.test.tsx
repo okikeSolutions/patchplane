@@ -208,6 +208,57 @@ describe('CandidateDiffRenderer changed-file navigation', () => {
     })
   })
 
+  test('keeps unknown file types readable in the unified diff', async () => {
+    const unknownFileContent = `diff --git a/config/policy.unknown b/config/policy.unknown
+--- a/config/policy.unknown
++++ b/config/policy.unknown
+@@ -1 +1 @@
+-approval = manual
++approval = required
+`
+    const unknownFileProjection: CandidateChangedFilesProjection = {
+      ...projection,
+      files: candidateFiles([
+        {
+          path: 'config/policy.unknown',
+          changeKind: 'modified' as const,
+          contentKind: 'text' as const,
+          additions: 1,
+          deletions: 1,
+        },
+      ]),
+    }
+
+    const { container } = render(
+      <CandidateDiffRenderer
+        content={unknownFileContent}
+        projection={unknownFileProjection}
+      />,
+    )
+
+    const diffHost = await waitFor(() => {
+      const host = container.querySelector('diffs-container')
+      expect(host?.shadowRoot?.querySelector('pre[data-diff-type="single"]'))
+        .toBeTruthy()
+      return host!
+    })
+    const transcript = screen.getByRole('document', {
+      name: 'Accessible unified diff',
+    })
+
+    await waitFor(() => {
+      expect(transcript.textContent).toContain(
+        'Deleted. Old line 1. New line not applicable. approval = manual',
+      )
+      expect(transcript.textContent).toContain(
+        'Added. Old line not applicable. New line 1. approval = required',
+      )
+    })
+    expect(diffHost.shadowRoot?.querySelector('pre')?.textContent).toContain(
+      'approval = required',
+    )
+  })
+
   test('restores a bounded file index and persists expanded view-mode changes', async () => {
     const onSelectedFileIndexChange = vi.fn()
     const onViewChange = vi.fn()

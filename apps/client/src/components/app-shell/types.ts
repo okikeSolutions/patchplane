@@ -53,6 +53,8 @@ interface WorkflowRunRow {
   rootWorkflowRunId?: string
   attemptNumber?: number
   trigger?: 'intake' | 'rerun'
+  candidateIdentityVersion?: 'incoming-pr-v1'
+  sourceBaseSha?: string
   sourceCommitSha?: string
   trustState?:
     | 'queued'
@@ -254,7 +256,7 @@ interface VerificationResultRow {
   skippedCount?: number
   artifactIds: ReadonlyArray<string>
   producedArtifactKinds: ReadonlyArray<EvidenceArtifactRow['kind']>
-  candidateDigestBefore: string
+  candidateDigestBefore?: string
   candidateDigestAfter?: string
   startedAt: number
   completedAt?: number

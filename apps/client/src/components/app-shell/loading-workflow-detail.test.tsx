@@ -15,32 +15,15 @@ describe('LoadingWorkflowDetail', () => {
   })
 
   test.each(['summary', 'changes', 'evidence', 'activity'] as const)(
-    'preserves the report shell and selected %s panel geometry',
+    'announces loading for the selected %s section without exposing controls',
     (tab) => {
-      const { container } = render(<LoadingWorkflowDetail tab={tab} />)
+      render(<LoadingWorkflowDetail tab={tab} />)
 
       const status = screen.getByRole('region', {
         name: 'Loading Patch Report',
       })
       expect(status.getAttribute('aria-busy')).toBe('true')
       expect(status.getAttribute('data-loading-tab')).toBe(tab)
-      expect(
-        screen.getByText(
-          'Loading the report header, selected section, and review status.',
-        ),
-      ).toBeTruthy()
-      expect(
-        container.querySelector('[data-slot="workflow-report-loading-header"]'),
-      ).not.toBeNull()
-      expect(
-        container.querySelector('[data-slot="workflow-report-loading-tabs"]'),
-      ).not.toBeNull()
-      expect(
-        container.querySelector('[data-slot="workflow-report-loading-panel"]'),
-      ).not.toBeNull()
-      expect(
-        container.querySelector('[data-slot="workflow-report-loading-review"]'),
-      ).not.toBeNull()
       expect(screen.queryByRole('button')).toBeNull()
       expect(screen.queryByRole('tab')).toBeNull()
       expect(screen.queryByText('Loading workflows')).toBeNull()

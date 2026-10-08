@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -91,16 +92,13 @@ export function LoadingWorkflowDetail({
 }
 
 function LoadingTabPanel({ tab }: { readonly tab: LoadingWorkflowDetailTab }) {
-  switch (tab) {
-    case 'changes':
-      return <LoadingChangesPanel />
-    case 'evidence':
-      return <LoadingEvidencePanel />
-    case 'activity':
-      return <LoadingActivityPanel />
-    case 'summary':
-      return <LoadingSummaryPanel />
-  }
+  return Match.value(tab).pipe(
+    Match.when('changes', () => <LoadingChangesPanel />),
+    Match.when('evidence', () => <LoadingEvidencePanel />),
+    Match.when('activity', () => <LoadingActivityPanel />),
+    Match.when('summary', () => <LoadingSummaryPanel />),
+    Match.exhaustive,
+  )
 }
 
 function LoadingSummaryPanel() {
@@ -228,14 +226,11 @@ function LoadingActivityPanel() {
 }
 
 function tabIndex(tab: LoadingWorkflowDetailTab) {
-  switch (tab) {
-    case 'summary':
-      return 0
-    case 'changes':
-      return 1
-    case 'evidence':
-      return 2
-    case 'activity':
-      return 3
-  }
+  return Match.value(tab).pipe(
+    Match.when('summary', () => 0),
+    Match.when('changes', () => 1),
+    Match.when('evidence', () => 2),
+    Match.when('activity', () => 3),
+    Match.exhaustive,
+  )
 }
