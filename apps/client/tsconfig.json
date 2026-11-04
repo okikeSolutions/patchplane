@@ -25,7 +25,8 @@
     "noUncheckedSideEffectImports": true,
     "plugins": [
       {
-        "name": "@effect/language-service"
+        "name": "@effect/language-service",
+        "ignoreEffectWarningsInTscExitCode": true
       }
     ]
   }

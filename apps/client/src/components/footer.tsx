@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils'
 import { BrandLogo } from './brand-logo'
 import { GitHubIcon } from './github-icon'
 
+const currentYear = new Date().getFullYear()
+
 const repositoryUrl = 'https://github.com/okikeSolutions/patchplane'
 const readmeUrl = `${repositoryUrl}#readme`
 const quickStartUrl = `${repositoryUrl}#quick-start`
@@ -18,13 +20,12 @@ export default function Footer() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const year = new Date().getFullYear()
   const isLandingPage = ['/', '/en', '/de', '/en/', '/de/'].includes(pathname)
 
   return isLandingPage ? (
-    <LandingFooter year={year} />
+    <LandingFooter year={currentYear} />
   ) : (
-    <CompactFooter year={year} />
+    <CompactFooter year={currentYear} />
   )
 }
 

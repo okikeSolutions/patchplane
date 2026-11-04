@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { Effect, type Scope } from 'effect'
+import { it as effectIt } from '@effect/vitest'
+import { Deferred, Effect, Fiber, type Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { App } from 'octokit'
 import nock from 'nock'
 import MockDate from 'mockdate'
@@ -163,8 +165,8 @@ afterEach(() => {
   delete process.env.GITHUB_BASE_URL
 })
 
-describe.sequential('GitHubProviderPlugin', () => {
-  test.sequential('verifies repository access through an installation client', async () => {
+describe('GitHubProviderPlugin', { concurrent: false }, () => {
+  test('verifies repository access through an installation client', async () => {
     process.env.GITHUB_BASE_URL = 'https://api.github.com/'
     nock('https://api.github.com')
       .post('/app/installations/123/access_tokens', {
@@ -222,7 +224,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('revokes repository verification credentials when capability decoding fails', async () => {
+  test('revokes repository verification credentials when capability decoding fails', async () => {
     nock('https://api.github.com')
       .post('/app/installations/123/access_tokens', {
         repositories: ['octokit.js'],
@@ -260,7 +262,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('fetches exact immutable comparison diff bytes by explicit SHAs', async () => {
+  test('fetches exact immutable comparison diff bytes by explicit SHAs', async () => {
     mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
@@ -307,7 +309,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential.each([
+  test.each([
     {
       name: 'HTTP 406',
       status: 406,
@@ -392,7 +394,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     15_000,
   )
 
-  test.sequential('fails closed when comparison transfer is truncated', async () => {
+  test('fails closed when comparison transfer is truncated', async () => {
     mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
@@ -425,7 +427,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   }, 15_000)
 
-  test.sequential('aborts a stalled comparison body at the configured deadline', async () => {
+  test('aborts a stalled comparison body at the configured deadline', async () => {
     mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
@@ -479,7 +481,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('propagates Effect interruption to a stalled comparison body', async () => {
+  test('propagates Effect interruption to a stalled comparison body', async () => {
     mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
@@ -538,7 +540,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('revokes a comparison token returned during cancellation', async () => {
+  test('revokes a comparison token returned during cancellation', async () => {
     nock('https://api.github.com')
       .delete('/installation/token')
       .matchHeader('authorization', 'Bearer cancelled-comparison-token')
@@ -599,7 +601,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('cleans up the comparison request after an early fetch rejection', async () => {
+  test('cleans up the comparison request after an early fetch rejection', async () => {
     mockComparisonToken()
     const baseSha = makeGitCommitSha('a'.repeat(40))
     const headSha = makeGitCommitSha('b'.repeat(40))
@@ -633,29 +635,34 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('bounds a stalled installation-token request before comparison fetch', async () => {
-    const baseSha = makeGitCommitSha('a'.repeat(40))
-    const headSha = makeGitCommitSha('b'.repeat(40))
-    let authenticationSignal: AbortSignal | undefined
-    let comparisonFetchCalled = false
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      const url = input instanceof Request ? input.url : String(input)
-      if (url.includes('/access_tokens')) {
-        authenticationSignal =
-          input instanceof Request ? input.signal : (init?.signal ?? undefined)
-        return new Promise<Response>((_resolve, reject) => {
-          authenticationSignal?.addEventListener('abort', () =>
-            reject(authenticationSignal?.reason),
-          )
+  effectIt.effect(
+    'bounds a stalled installation-token request before comparison fetch',
+    () =>
+      Effect.gen(function* () {
+        const baseSha = makeGitCommitSha('a'.repeat(40))
+        const headSha = makeGitCommitSha('b'.repeat(40))
+        const authenticationStarted = yield* Deferred.make<void>()
+        let authenticationSignal: AbortSignal | undefined
+        let comparisonFetchCalled = false
+        vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+          const url = input instanceof Request ? input.url : String(input)
+          if (url.includes('/access_tokens')) {
+            authenticationSignal =
+              input instanceof Request
+                ? input.signal
+                : (init?.signal ?? undefined)
+            Deferred.doneUnsafe(authenticationStarted, Effect.void)
+            return new Promise<Response>((_resolve, reject) => {
+              authenticationSignal?.addEventListener('abort', () =>
+                reject(authenticationSignal?.reason),
+              )
+            })
+          }
+          comparisonFetchCalled = true
+          return Promise.reject(new Error('comparison fetch must not run'))
         })
-      }
-      comparisonFetchCalled = true
-      return Promise.reject(new Error('comparison fetch must not run'))
-    })
 
-    await expect(
-      withGitHubProvider(
-        Effect.gen(function* () {
+        const fiber = yield* Effect.gen(function* () {
           const github = yield* SourceControlService
           return yield* github.fetchImmutableComparison({
             provider: 'github',
@@ -667,14 +674,20 @@ describe.sequential('GitHubProviderPlugin', () => {
             maxBytes: 1024,
             timeoutMilliseconds: 25,
           })
-        }),
-      ),
-    ).rejects.toThrow('GitHub comparison exceeded the configured deadline')
-    expect(comparisonFetchCalled).toBe(false)
-    expect(authenticationSignal?.aborted).toBe(true)
-  })
+        }).pipe(Effect.provide(GitHubProviderPlugin.layer), Effect.forkScoped)
 
-  test.sequential('gets GitHub App installation account metadata', async () => {
+        yield* Deferred.await(authenticationStarted)
+        yield* TestClock.adjust(25)
+        const failure = yield* Fiber.join(fiber).pipe(Effect.flip)
+        expect(failure).toMatchObject({
+          message: 'GitHub comparison exceeded the configured deadline',
+        })
+        expect(comparisonFetchCalled).toBe(false)
+        expect(authenticationSignal?.aborted).toBe(true)
+      }),
+  )
+
+  test('gets GitHub App installation account metadata', async () => {
     nock('https://api.github.com')
       .get('/app/installations/123')
       .reply(200, {
@@ -706,7 +719,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('rejects malformed installation account identity', async () => {
+  test('rejects malformed installation account identity', async () => {
     nock('https://api.github.com')
       .get('/app/installations/123')
       .reply(200, { id: 123, account: { type: 'Organization' } })
@@ -727,7 +740,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('verifies organization installation ownership and revokes the temporary user token', async () => {
+  test('verifies organization installation ownership and revokes the temporary user token', async () => {
     nock('https://github.com')
       .post('/login/oauth/access_token', {
         client_id: 'Iv1.client',
@@ -784,7 +797,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('rejects a spoofed installation id and still revokes the temporary user token', async () => {
+  test('rejects a spoofed installation id and still revokes the temporary user token', async () => {
     nock('https://github.com')
       .post('/login/oauth/access_token', {
         client_id: 'Iv1.client',
@@ -833,7 +846,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('rejects an OAuth error returned with HTTP 200 without exposing a token', async () => {
+  test('rejects an OAuth error returned with HTTP 200 without exposing a token', async () => {
     nock('https://github.com')
       .post('/login/oauth/access_token', {
         client_id: 'Iv1.client',
@@ -866,7 +879,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('rejects an organization member without administrator ownership', async () => {
+  test('rejects an organization member without administrator ownership', async () => {
     nock('https://github.com')
       .post('/login/oauth/access_token', {
         client_id: 'Iv1.client',
@@ -926,7 +939,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('revokes a token returned concurrently with cancellation', async () => {
+  test('revokes a token returned concurrently with cancellation', async () => {
     nock('https://api.github.com')
       .delete('/applications/Iv1.client/token', {
         access_token: 'cancelled-user-token',
@@ -991,7 +1004,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('revokes the temporary user token when ownership verification is interrupted', async () => {
+  test('revokes the temporary user token when ownership verification is interrupted', async () => {
     nock('https://github.com')
       .post('/login/oauth/access_token', {
         client_id: 'Iv1.client',
@@ -1058,7 +1071,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('lists repositories accessible to an installation', async () => {
+  test('lists repositories accessible to an installation', async () => {
     mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
@@ -1100,7 +1113,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('revokes an installation token returned during cancellation', async () => {
+  test('revokes an installation token returned during cancellation', async () => {
     nock('https://api.github.com')
       .delete('/installation/token')
       .matchHeader('authorization', 'Bearer cancelled-installation-token')
@@ -1155,7 +1168,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('rejects repository inventories above the configured bound', async () => {
+  test('rejects repository inventories above the configured bound', async () => {
     mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
@@ -1187,7 +1200,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('wraps installation repository listing API failures as SourceControlError', async () => {
+  test('wraps installation repository listing API failures as SourceControlError', async () => {
     mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
@@ -1210,7 +1223,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('rejects invalid installation repository metadata from GitHub', async () => {
+  test('rejects invalid installation repository metadata from GitHub', async () => {
     mockInventoryToken()
     nock('https://api.github.com')
       .get('/installation/repositories')
@@ -1243,7 +1256,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('creates an issue comment through a scoped installation client', async () => {
+  test('creates an issue comment through a scoped installation client', async () => {
     mockPublicationToken('issues')
     nock('https://api.github.com')
       .post('/repos/octokit/octokit.js/issues/1/comments', {
@@ -1268,7 +1281,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('uses pull-request permission for a pull-request comment', async () => {
+  test('uses pull-request permission for a pull-request comment', async () => {
     mockPublicationToken('pull_requests')
     nock('https://api.github.com')
       .post('/repos/octokit/octokit.js/issues/1/comments', {
@@ -1294,7 +1307,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('settles a stalled publication-token acquisition at its owned deadline', async () => {
+  test('settles a stalled publication-token acquisition at its owned deadline', async () => {
     const deadline = new AbortController()
     vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal)
     const realFetch = globalThis.fetch.bind(globalThis)
@@ -1340,7 +1353,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('rejects an over-privileged publication token', async () => {
+  test('rejects an over-privileged publication token', async () => {
     nock('https://api.github.com')
       .post('/app/installations/123/access_tokens', {
         repositories: ['octokit.js'],
@@ -1382,7 +1395,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('updates the canonical issue comment with the same publication marker', async () => {
+  test('updates the canonical issue comment with the same publication marker', async () => {
     mockPublicationToken('issues')
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/issues/1/comments')
@@ -1432,7 +1445,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('aborts issue-comment reconciliation when publication is interrupted', async () => {
+  test('aborts issue-comment reconciliation when publication is interrupted', async () => {
     mockPublicationToken('issues')
     const realFetch = globalThis.fetch.bind(globalThis)
     let publicationSignal: AbortSignal | undefined
@@ -1474,7 +1487,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('adopts a check run with a legacy external publication id', async () => {
+  test('adopts a check run with a legacy external publication id', async () => {
     mockPublicationToken('checks')
     nock('https://api.github.com')
       .get('/repos/octokit/octokit.js/commits/abc123/check-runs')
@@ -1544,7 +1557,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential('creates repository-scoped installation clone credentials for private repository clones', async () => {
+  test('creates repository-scoped installation clone credentials for private repository clones', async () => {
     mockScopedInstallationToken()
 
     const credentials = await withGitHubProvider(
@@ -1567,7 +1580,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(nock.isDone()).toBe(true)
   })
 
-  test.sequential.each([
+  test.each([
     {
       name: 'additional write permission',
       permissions: { contents: 'read', metadata: 'read', issues: 'write' },
@@ -1618,7 +1631,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     },
   )
 
-  test.sequential('rejects non-positive installation ids', async () => {
+  test('rejects non-positive installation ids', async () => {
     await expect(
       withGitHubProvider(
         Effect.gen(function* () {
@@ -1637,7 +1650,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     })
   })
 
-  test.sequential('verifies a signed webhook event without dispatching handlers', async () => {
+  test('verifies a signed webhook event without dispatching handlers', async () => {
     const payload = JSON.stringify({
       action: 'opened',
       installation: { id: 123 },
@@ -1668,7 +1681,7 @@ describe.sequential('GitHubProviderPlugin', () => {
     expect(event.payload).toMatchObject({ action: 'opened' })
   })
 
-  test.sequential('rejects invalid webhook signatures', async () => {
+  test('rejects invalid webhook signatures', async () => {
     await expect(
       withGitHubProvider(
         Effect.gen(function* () {

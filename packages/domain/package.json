@@ -37,7 +37,7 @@
     "./workspace": "./src/workspace.ts"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {

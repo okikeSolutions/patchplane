@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
 import * as ts from 'typescript'
@@ -6,6 +7,7 @@ import {
   fileText,
   pathExists,
   relativeToRepo,
+  repoRoot,
   sourceFilesUnder,
 } from './architecture-files'
 
@@ -425,6 +427,16 @@ describe('Effect-native boundaries', () => {
   it.effect('keeps registry IDs unique and evidence references honest', () =>
     Effect.gen(function* () {
       const registry = yield* loadRegistry()
+      const root = yield* repoRoot()
+      const trackedFiles = yield* Effect.try(
+        () =>
+          new Set(
+            execFileSync('git', ['ls-files', '-z'], {
+              cwd: root,
+              encoding: 'utf8',
+            }).split('\0'),
+          ),
+      )
       const entries = [
         ...registry.runtimeBridges,
         ...registry.asyncOrchestrationExceptions,
@@ -434,8 +446,16 @@ describe('Effect-native boundaries', () => {
       expect(new Set(entries.map(({ id }) => id)).size).toBe(entries.length)
       for (const entry of entries) {
         expect(yield* pathExists(entry.file), entry.file).toBe(true)
+        expect(
+          trackedFiles.has(entry.file),
+          `${entry.file} must be tracked`,
+        ).toBe(true)
         if ('evidence' in entry && entry.evidence !== null) {
           expect(yield* pathExists(entry.evidence), entry.evidence).toBe(true)
+          expect(
+            trackedFiles.has(entry.evidence),
+            `${entry.evidence} must be tracked`,
+          ).toBe(true)
         }
       }
       for (const entry of registry.runtimeBridges) {

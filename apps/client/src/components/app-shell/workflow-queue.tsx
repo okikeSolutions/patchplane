@@ -54,6 +54,9 @@ export function WorkflowQueue({
   readonly returnTo: string
   readonly onOpenWorkflow?: (workflowRunId: string, returnTo: string) => void
 }) {
+  // TanStack Table v8 exposes mutable methods that React Compiler cannot memoize.
+  'use no memo'
+
   const columns = useMemo(
     () => workflowQueueColumns(returnTo, onOpenWorkflow),
     [onOpenWorkflow, returnTo],

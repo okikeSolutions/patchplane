@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "smoke:trust-loop": "bun src/scripts/live-trust-loop-smoke.ts"
   },
@@ -12,7 +12,7 @@
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
     "@patchplane/plugins": "workspace:*",
-    "convex": "^1.42.3",
+    "convex": "^1.49.0",
     "effect": "4.0.2"
   },
   "devDependencies": {

@@ -38,7 +38,7 @@
     "./workflows/start-workflow-from-prompt": "./src/workflows/start-workflow-from-prompt.ts"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {

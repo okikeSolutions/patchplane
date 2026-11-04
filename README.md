@@ -223,9 +223,31 @@ bun run --cwd packages/plugins smoke:daytona-rpc | tee .patchplane/logs/daytona-
 Useful checks before committing:
 
 ```bash
+bun run audit
 bun run verify:fast
 bun run verify
 ```
+
+CI runs `bun run audit` against the committed lockfile before verification.
+The repository has no Git submodules; dependencies come from the Bun workspace
+and lockfile. The existing MIT-licensed shadcn CSS is kept in `apps/client/src/shadcn.css`.
+The shadcn CLI is optional authoring tooling, invoked with
+`bunx --bun shadcn@latest` from `apps/client` when adding components.
+
+Security overrides in `package.json` keep Hono and its Node adapter, Lodash,
+Valibot, Glob, Minimatch, and PostCSS selector parsing on audited versions
+while upstream dependencies still request older releases. Review these pins
+when updating those parents. Effect 4.0.2, Alchemy beta.81, Pierre Diffs 1.2.12, TanStack Table 8,
+WorkOS Node 11, Convex WorkOS AuthKit 0.2, and Convex ESLint 2 remain on
+compatible API lines. Effect platform/SQL overrides keep the transitive
+packages on the same Effect version. The newer Pierre Diffs release exceeds
+our client bundle budgets, so its upgrade remains separate. TypeScript 6
+supplies the JavaScript compiler API; the typecheck executable is TypeScript 7.
+`bun outdated --recursive` reports these migration candidates even when the
+security audit passes. Effect compiler warnings remain visible; only errors
+fail typechecking. The new React Compiler incompatible-library diagnostic stays
+a warning because the compiler skips such APIs; the Table 8 queue also declares
+`use no memo`.
 
 `verify` is the complete non-credentialed repository gate and runs on every
 pull request. Credentialed smoke checks remain opt-in; see

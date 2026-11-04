@@ -1,8 +1,7 @@
 import type { FileRoutesByTo } from '../routeTree.gen'
 
 export const translatedPathnameLocales = ['en', 'de'] as const
-export type TranslatedPathnameLocale =
-  (typeof translatedPathnameLocales)[number]
+type TranslatedPathnameLocale = (typeof translatedPathnameLocales)[number]
 
 type RoutePath = keyof FileRoutesByTo
 
