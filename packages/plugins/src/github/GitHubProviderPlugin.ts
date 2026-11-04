@@ -682,14 +682,14 @@ const sourceControlLayer = Layer.effect(
                 >['data']['installations'][number]
               | undefined
             for (let page = 1; page <= 10; page += 1) {
-              const response = await userOctokit.request(
-                'GET /user/installations',
-                {
-                  per_page: 100,
-                  page,
-                  request: { signal },
-                },
-              )
+              const response =
+                await userOctokit.rest.apps.listInstallationsForAuthenticatedUser(
+                  {
+                    per_page: 100,
+                    page,
+                    request: { signal },
+                  },
+                )
               requestedInstallation = response.data.installations.find(
                 (installation) => installation.id === installationId,
               )
@@ -895,14 +895,14 @@ const sourceControlLayer = Layer.effect(
               >['data']['repositories'][number]
             >
             for (let page = 1; page <= 10; page += 1) {
-              const response = await installationOctokit.request(
-                'GET /installation/repositories',
-                {
-                  per_page: 100,
-                  page,
-                  request: { signal },
-                },
-              )
+              const response =
+                await installationOctokit.rest.apps.listReposAccessibleToInstallation(
+                  {
+                    per_page: 100,
+                    page,
+                    request: { signal },
+                  },
+                )
               if (
                 response.data.total_count > 1_000 ||
                 collectedRepositories.length +

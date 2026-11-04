@@ -62,8 +62,8 @@ interrupted, but the native operation stops only if it observes that signal.
 `runPromise` and `ManagedRuntime.runPromise` accept a boundary `AbortSignal`.
 `acquireUseRelease` makes acquisition and release uninterruptible, so a provider
 Promise used by a finalizer also needs a native deadline if it can fail to
-settle. These semantics are verified in the vendored Effect implementation and
-its interruption tests under `vendor/effect/packages/effect`.
+settle. These semantics are documented in the pinned npm `effect` package source and
+verified by PatchPlane's interruption and cleanup tests listed below.
 
 ## Boundary classes
 

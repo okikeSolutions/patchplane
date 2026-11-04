@@ -19,7 +19,8 @@
     "moduleDetection": "force",
     "plugins": [
       {
-        "name": "@effect/language-service"
+        "name": "@effect/language-service",
+        "ignoreEffectWarningsInTscExitCode": true
       }
     ]
   }

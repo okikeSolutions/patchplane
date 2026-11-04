@@ -21,7 +21,8 @@
     "patchplane/no-ambient-env-in-effect-code": "error",
     "patchplane/no-synchronous-set-state-in-effect": "error",
     "patchplane/require-effect-cleanup": "error",
-    "patchplane/no-fetch-in-effect": "error"
+    "patchplane/no-fetch-in-effect": "error",
+    "react/incompatible-library": "warn"
   },
   "overrides": [
     {

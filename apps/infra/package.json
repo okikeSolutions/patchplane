@@ -7,7 +7,7 @@
     "plan": "sh -c 'cd ../.. && bun run infra:plan \"$@\"' --",
     "deploy": "sh -c 'cd ../.. && bun run infra:deploy \"$@\"' --",
     "destroy": "sh -c 'cd ../.. && bun run infra:destroy \"$@\"' --",
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -18,7 +18,7 @@
   "devDependencies": {
     "@effect/vitest": "4.0.2",
     "@patchplane/typescript-config": "workspace:*",
-    "@types/bun": "^1.3.14",
-    "vitest": "^4.1.8"
+    "@types/bun": "^1.4.4",
+    "vitest": "^5.1.0"
   }
 }

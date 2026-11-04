@@ -17,8 +17,7 @@ const sentryMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@sentry/react', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('@sentry/react')>()
+  const original = await importOriginal<typeof import('@sentry/react')>()
   return {
     ...original,
     breadcrumbsIntegration: sentryMocks.breadcrumbsIntegration,
@@ -51,6 +50,7 @@ describe('browser Sentry instrumentation', () => {
               urlQueryParams: false,
               graphQL: { document: false, variables: false },
               genAI: { inputs: false, outputs: false },
+              mcp: { inputs: false, outputs: false },
               databaseQueryData: false,
               queues: false,
               stackFrameVariables: false,

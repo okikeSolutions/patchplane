@@ -21,6 +21,11 @@ describe('Sentry tunnel boundary', () => {
       const accepted = await forwardSentryTunnelEnvelope(
         new Request('https://patchplane.example/api/e4c1f9a7', {
           method: 'POST',
+          headers: {
+            'Content-Length': String(
+              new TextEncoder().encode(envelope(allowedDsn)).byteLength,
+            ),
+          },
           body: envelope(allowedDsn),
         }),
         allowedDsn,
@@ -43,6 +48,11 @@ describe('Sentry tunnel boundary', () => {
       const rejected = await forwardSentryTunnelEnvelope(
         new Request('https://patchplane.example/api/e4c1f9a7', {
           method: 'POST',
+          headers: {
+            'Content-Length': String(
+              new TextEncoder().encode(envelope(hostileDsn)).byteLength,
+            ),
+          },
           body: envelope(hostileDsn),
         }),
         allowedDsn,

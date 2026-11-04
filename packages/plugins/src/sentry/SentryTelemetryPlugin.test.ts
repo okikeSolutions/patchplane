@@ -149,16 +149,18 @@ describe('SentryTelemetryPlugin', () => {
     }).pipe(Effect.provide(TestLayer)),
   )
 
-  it.effect('does not forward operational events when Sentry logs are disabled', () =>
-    Effect.gen(function* () {
-      const telemetry = yield* TelemetryService
-      yield* telemetry.recordEvent({
-        name: 'test.event',
-        operation: 'test.recordEvent',
-      })
+  it.effect(
+    'does not forward operational events when Sentry logs are disabled',
+    () =>
+      Effect.gen(function* () {
+        const telemetry = yield* TelemetryService
+        yield* telemetry.recordEvent({
+          name: 'test.event',
+          operation: 'test.recordEvent',
+        })
 
-      assert.strictEqual(sentryMocks.loggerInfo.mock.calls.length, 0)
-    }).pipe(Effect.provide(DisabledSentryLogsLayer)),
+        assert.strictEqual(sentryMocks.loggerInfo.mock.calls.length, 0)
+      }).pipe(Effect.provide(DisabledSentryLogsLayer)),
   )
 
   it.effect(
@@ -176,6 +178,7 @@ describe('SentryTelemetryPlugin', () => {
           urlQueryParams: false,
           graphQL: { document: false, variables: false },
           genAI: { inputs: false, outputs: false },
+          mcp: { inputs: false, outputs: false },
           databaseQueryData: false,
           queues: false,
           stackFrameVariables: false,

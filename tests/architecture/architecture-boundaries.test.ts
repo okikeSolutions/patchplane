@@ -221,7 +221,7 @@ describe('architecture boundaries', () => {
           ({ path }) => path === 'package.json',
         )?.manifest
         expect(root?.scripts?.prepare).toBe('effect-tsgo patch')
-        expect(root?.devDependencies?.['@effect/tsgo']).toBe('0.24.3')
+        expect(root?.devDependencies?.['@effect/tsgo']).toBe('0.67.0')
         expect(root?.devDependencies?.['@typescript/native']).toBe(
           'npm:typescript@7.0.2',
         )

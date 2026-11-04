@@ -44,7 +44,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && bun build src/main.ts --target=node --outfile=dist/main.js && chmod +x dist/main.js",
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "prepublishOnly": "bun run test && bun run typecheck && bun run build"
   },
@@ -53,9 +53,9 @@
     "@effect/vitest": "4.0.2",
     "@patchplane/plugins": "workspace:*",
     "@patchplane/typescript-config": "workspace:*",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.6.6",
     "effect": "4.0.2",
-    "vitest": "^4.1.8"
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": ">=22.19.0"

@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(rootDir, 'apps/client/src'),
+      'cloudflare:workers': resolve(rootDir, 'apps/client/src/test/cloudflare-workers.ts'),
       '@patchplane/backend/convex/_generated/api': resolve(rootDir, 'packages/backend/convex/_generated/api.js'),
       '@patchplane/backend/convex/_generated/server': resolve(rootDir, 'packages/backend/convex/_generated/server.js'),
     },
