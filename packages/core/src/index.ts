@@ -5,9 +5,43 @@ export {
 } from './services/acceptance-store'
 
 export {
+  assertCloudOnlyProvider,
+  assertDedicatedDevAccountAndSyntheticFixture,
+  assertSafeApkOutputPath,
+  assertSafeRemoteHttpsUrl,
+  assertValidArbeoObservation,
+  DEFAULT_CLOUD_DEVICE_TIMEOUT_MS,
+  EXPECTED_ARBEO_IMPORT_DURATION,
+  MAX_ANDROID_APK_BYTES,
+  MAX_CLOUD_DEVICE_ARTIFACT_BYTES,
+  MAX_CLOUD_DEVICE_ARTIFACT_COUNT,
+  MAX_CLOUD_DEVICE_TIMEOUT_MS,
+  MAX_CLOUD_DEVICE_TOTAL_ARTIFACT_BYTES,
+} from './services/android-verification-policy'
+
+export {
+  AndroidVerificationStore,
+  type AndroidVerificationStoreService,
+} from './services/android-verification-store'
+
+export {
+  ApkDownloadUrlIssuer,
+  type ApkDownloadUrlIssuerService,
+} from './services/apk-download-url-issuer'
+
+export {
   ArtifactStore,
   type ArtifactStoreService,
 } from './services/artifact-store'
+
+export {
+  type CloudAndroidDeviceAdapterService,
+  CloudAndroidDeviceAdapter,
+  type CloudAndroidDiagnosticArtifact,
+  type CloudAndroidDispatchRequest,
+  type CloudAndroidDispatchResult,
+  type CloudAndroidVerificationReport,
+} from './services/cloud-device-adapter'
 
 export {
   ModelCredentialIssuer,
@@ -47,6 +81,18 @@ export {
   VerificationStepRunner,
   type VerificationStepRunnerService,
 } from './services/verification-step-runner'
+
+export {
+  buildDebugApkInIsolatedSandbox,
+  CloudAndroidVerificationResult,
+  CloudAndroidVerificationWorkflow,
+  CloudAndroidVerificationWorkflowError,
+  CloudAndroidVerificationWorkflowLayer,
+  CloudAndroidVerificationWorkflowPayload,
+  runVerifiedApkOnCloudDevice,
+  Stage1ApkBuildResult,
+  Stage2CloudDeviceResult,
+} from './workflows/cloud-android-verification-workflow'
 
 export {
   type CleanupPolicyOptions,

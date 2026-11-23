@@ -48,6 +48,10 @@ const wrapDaytonaHandle = (
     handle
       .exec(command, options)
       .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
+  readFile: (path: string) =>
+    handle.files
+      .read(path)
+      .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
 })
 
 const bindDaytonaClient = (

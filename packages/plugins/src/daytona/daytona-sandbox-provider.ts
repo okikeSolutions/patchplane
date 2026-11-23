@@ -26,6 +26,7 @@ export interface DaytonaSandboxExecPort<E = unknown> {
     command: string,
     options?: { readonly timeout?: Duration.Input },
   ) => Effect.Effect<{ readonly exitCode: number; readonly result: string }, E>
+  readonly readFile?: (path: string) => Effect.Effect<Uint8Array, E>
 }
 
 export interface DaytonaListedSandboxPort {
@@ -196,6 +197,43 @@ export const makeDaytonaSandboxProviderLayer = <
           sandboxId,
         )
       }),
+
+      readFileBytes: Effect.fn('DaytonaSandboxProvider.readFileBytes')(
+        function* ({ sandboxId, path, maxBytes }) {
+          const operation = 'DaytonaSandboxProvider.readFileBytes'
+          const handle = yield* client
+            .get(sandboxId)
+            .pipe(sandboxExecutionError(operation, sandboxId))
+
+          if (handle === undefined) {
+            return yield* new SandboxExecutionError({
+              operation,
+              message: `Sandbox ${sandboxId} not found`,
+              sandboxId,
+            })
+          }
+          if (handle.readFile === undefined) {
+            return yield* new SandboxExecutionError({
+              operation,
+              message: `Sandbox ${sandboxId} handle does not expose file reads`,
+              sandboxId,
+            })
+          }
+
+          const bytes = yield* handle
+            .readFile(path)
+            .pipe(sandboxExecutionError(operation, sandboxId))
+
+          if (bytes.byteLength > maxBytes) {
+            return yield* new SandboxExecutionError({
+              operation,
+              message: `File "${path}" (${bytes.byteLength} bytes) exceeds max allowed size (${maxBytes} bytes)`,
+              sandboxId,
+            })
+          }
+          return bytes
+        },
+      ),
 
       getSandbox: Effect.fn('DaytonaSandboxProvider.getSandbox')(
         function* (sandboxId) {

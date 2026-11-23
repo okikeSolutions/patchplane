@@ -27,6 +27,12 @@ export interface SandboxProviderService {
     readonly timeoutMs: number
   }) => Effect.Effect<SandboxExecOutput, SandboxExecutionError>
 
+  readonly readFileBytes: (input: {
+    readonly sandboxId: SandboxId
+    readonly path: string
+    readonly maxBytes: number
+  }) => Effect.Effect<Uint8Array, SandboxExecutionError>
+
   readonly getSandbox: (
     sandboxId: SandboxId,
   ) => Effect.Effect<Option.Option<SandboxSummary>, SandboxExecutionError>

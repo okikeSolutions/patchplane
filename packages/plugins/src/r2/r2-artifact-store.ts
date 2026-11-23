@@ -1,6 +1,13 @@
 import { Effect, Layer } from 'effect'
 import * as Digest from 'effect/crypto/Digest'
-import { ArtifactStore, MAX_ARTIFACT_BYTES } from '@patchplane/core'
+import {
+  ArtifactStore,
+  MAX_ANDROID_APK_BYTES,
+  MAX_ARTIFACT_BYTES,
+} from '@patchplane/core'
+
+const maxArtifactBytesForKey = (artifactKey: string): number =>
+  artifactKey.endsWith('.apk') ? MAX_ANDROID_APK_BYTES : MAX_ARTIFACT_BYTES
 import {
   ArtifactIntegrityError,
   type ArtifactRecord,
@@ -76,11 +83,12 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
           ),
         )
 
-        if (bytes.byteLength > MAX_ARTIFACT_BYTES) {
+        const maxBytes = maxArtifactBytesForKey(artifactKey)
+        if (bytes.byteLength > maxBytes) {
           return yield* new ArtifactStorageError({
             operation: 'R2ArtifactStore.getBytes',
             artifactKey,
-            message: `Artifact size (${bytes.byteLength} bytes) exceeds limit (${MAX_ARTIFACT_BYTES} bytes)`,
+            message: `Artifact size (${bytes.byteLength} bytes) exceeds limit (${maxBytes} bytes)`,
           })
         }
 
@@ -105,11 +113,12 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
             contentType,
             expectedSha256,
           }) {
-            if (body.byteLength > MAX_ARTIFACT_BYTES) {
+            const maxBytes = maxArtifactBytesForKey(artifactKey)
+            if (body.byteLength > maxBytes) {
               return yield* new ArtifactStorageError({
                 operation: 'R2ArtifactStore.put',
                 artifactKey,
-                message: `Artifact size (${body.byteLength} bytes) exceeds limit (${MAX_ARTIFACT_BYTES} bytes)`,
+                message: `Artifact size (${body.byteLength} bytes) exceeds limit (${maxBytes} bytes)`,
               })
             }
 
