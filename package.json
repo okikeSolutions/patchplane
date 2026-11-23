@@ -23,6 +23,7 @@
     "infra:deploy": "bun --cwd apps/infra alchemy deploy --stage dev",
     "infra:destroy": "bun --cwd apps/infra alchemy destroy --stage dev",
     "audit": "bun audit",
+    "verify:unit": "bun run check:toolchain && bun run typecheck && bun run lint && bun run knip && bun run fmt:check && bun run test:unit",
     "verify:fast": "bun run check:toolchain && bun run typecheck && bun run lint && bun run knip && bun run fmt:check && bun run test",
     "verify": "bun run verify:fast"
   },

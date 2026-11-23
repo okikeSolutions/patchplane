@@ -7,7 +7,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           isolate: false,
-          sequence: { groupOrder: 0 },
+          sequence: { groupOrder: 0, shuffle: true },
           include: [
             'packages/*/src/**/*.test.ts',
             'apps/*/src/**/*.test.ts',
@@ -23,7 +23,7 @@ export default defineConfig({
           name: 'integration',
           isolate: false,
           fileParallelism: false,
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 1, shuffle: true },
           include: ['tests/integration/**/*.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
         },
