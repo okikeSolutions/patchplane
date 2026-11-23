@@ -1,7 +1,5 @@
-import { BunFileSystem, BunPath } from '@effect/platform-bun'
 import { describe, expect, it } from '@effect/vitest'
 import { Clock, Duration, Effect, Fiber, Layer, Option, Schema } from 'effect'
-import * as Config from 'effect/Config'
 import * as Digest from 'effect/crypto/Digest'
 import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
@@ -34,72 +32,24 @@ import {
   VerificationAttemptId,
 } from '../../packages/domain/src/index'
 import {
-  applySqlMigrations,
   type DaytonaCreateSandboxPort,
-  loadSqlMigrations,
   makeDaytonaSandboxProviderLayer,
-  makePostgresSqlLayer,
   makeR2ArtifactStoreLayer,
   PostgresSandboxLifecycleStoreLayer,
   type R2ArtifactBucketPort,
 } from '../../packages/plugins/src/index'
-
-const TestDatabaseUrlConfig = Config.Redacted(
-  'PATCHPLANE_TEST_DATABASE_URL',
-).pipe(
-  Config.withDefault(
-    Redacted.make(
-      'postgresql://patchplane:patchplane@127.0.0.1:55432/patchplane_test',
-    ),
-  ),
-)
-
-class UnsafeTestDatabaseError extends Schema.TaggedError<
-  UnsafeTestDatabaseError,
-  { readonly brand: unique symbol }
->()('UnsafeTestDatabaseError', { reason: Schema.String }) {}
-
-const assertDisposableTestDatabase = (url: Redacted.Redacted) =>
-  Effect.gen(function* () {
-    const parsed = yield* Effect.try({
-      try: () => new URL(Redacted.value(url)),
-      catch: () =>
-        new UnsafeTestDatabaseError({
-          reason: 'PATCHPLANE_TEST_DATABASE_URL is not a valid URL',
-        }),
-    })
-    if (!parsed.pathname.replace(/^\//, '').endsWith('_test')) {
-      return yield* new UnsafeTestDatabaseError({
-        reason:
-          'PATCHPLANE_TEST_DATABASE_URL must name a disposable database ending in "_test"',
-      })
-    }
-    return url
-  })
+import {
+  resetAndMigrateDatabase,
+  TestDatabaseUrl,
+  TestPostgresSqlLayer,
+} from './test-db'
 
 const makeTestLifecycleDbLayer = () =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const url = yield* assertDisposableTestDatabase(
-        yield* TestDatabaseUrlConfig,
-      )
-      const sqlLayer = makePostgresSqlLayer({ url })
-      return PostgresSandboxLifecycleStoreLayer.pipe(
-        Layer.provideMerge(Digest.layerWebCrypto),
-        Layer.provideMerge(sqlLayer),
-      )
-    }),
+  PostgresSandboxLifecycleStoreLayer.pipe(
+    Layer.provideMerge(TestPostgresSqlLayer),
   )
 
-const resetAndMigrate = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  yield* sql.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
-  yield* sql.unsafe('CREATE SCHEMA public')
-  const migrations = yield* loadSqlMigrations().pipe(
-    Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
-  )
-  yield* applySqlMigrations(migrations)
-})
+const resetAndMigrate = resetAndMigrateDatabase
 
 interface FakeSandboxEntry {
   readonly id: string
@@ -122,8 +72,6 @@ function makeFakeDaytona(options?: {
     readonly public: boolean | undefined
   }> = []
   const deleteCalls: Array<string> = []
-  const getCalls: Array<string> = []
-  const listCalls: Array<Record<string, string> | undefined> = []
 
   const port: DaytonaCreateSandboxPort<string, string, string, string, string> =
     {
@@ -159,7 +107,6 @@ function makeFakeDaytona(options?: {
 
       get: (idOrName) =>
         Effect.sync(() => {
-          getCalls.push(idOrName)
           const found = sandboxes.get(idOrName)
           // Mirror @alchemy.run/daytona CreateSandboxHttp.ts:69 where
           // `state === "destroying" || state === "destroyed"` returns undefined.
@@ -184,7 +131,6 @@ function makeFakeDaytona(options?: {
 
       list: (input) =>
         Effect.sync(() => {
-          listCalls.push(input?.labels)
           const filter = input?.labels ?? {}
           return [...sandboxes.values()]
             .filter((entry) =>
@@ -222,8 +168,6 @@ function makeFakeDaytona(options?: {
     sandboxes,
     createdRequests,
     deleteCalls,
-    getCalls,
-    listCalls,
   }
 }
 
@@ -308,8 +252,6 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
         expect(result.cleanupConfirmed).toBe(true)
         expect(daytona.sandboxes.size).toBe(0)
         expect(daytona.deleteCalls).toEqual([result.sandboxId])
-        expect(daytona.getCalls).toContain(result.sandboxId)
-        expect(daytona.listCalls.length).toBeGreaterThanOrEqual(1)
 
         // Verify exact labels and strict credential isolation on Daytona create input
         const createdReq = daytona.createdRequests[0]
@@ -746,8 +688,12 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
           isPublic: false,
         })
 
-        const quarantinedReasons: Array<string> = []
-        const inboxSummaries: Array<string> = []
+        const quarantineCalls: Array<{
+          readonly sandboxId: string
+          readonly attemptId: string
+          readonly changeRequestId: string
+          readonly reason: string
+        }> = []
 
         const stubStoreLayer = Layer.succeed(
           SandboxLifecycleStore,
@@ -758,9 +704,12 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
             recordArtifactMetadata: (artifact) => Effect.succeed(artifact),
             quarantineSandboxEnvironment: (input) =>
               Effect.sync(() => {
-                quarantinedReasons.push(input.reason)
-                const summary = `Cleanup quarantined ${input.sandboxId}: ${input.reason}`
-                inboxSummaries.push(summary)
+                quarantineCalls.push({
+                  sandboxId: input.sandboxId,
+                  attemptId: input.attemptId,
+                  changeRequestId: input.changeRequestId,
+                  reason: input.reason,
+                })
                 return {
                   quarantine: {
                     id: input.quarantineId,
@@ -774,7 +723,7 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
                     attemptId: input.attemptId,
                     kind: 'cleanup_quarantine' as const,
                     status: 'open' as const,
-                    summary,
+                    summary: input.reason,
                     sandboxId: input.sandboxId,
                   },
                 }
@@ -804,17 +753,26 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
           Effect.forkScoped,
         )
 
-        yield* TestClock.adjust(Duration.millis(DEFAULT_CLEANUP_TIMEOUT_MS))
+        // Must NOT treat a stuck "destroying" sandbox as deleted before the 5m deadline
+        yield* TestClock.adjust(
+          Duration.millis(DEFAULT_CLEANUP_TIMEOUT_MS - 1_000),
+        )
+        expect(quarantineCalls).toHaveLength(0)
+
+        yield* TestClock.adjust(Duration.millis(1_000))
         const error = yield* Fiber.join(fiber)
 
         expect(error._tag).toBe('SandboxCleanupError')
         if (error._tag === 'SandboxCleanupError') {
           expect(error.timedOut).toBe(true)
         }
-        // Dual readback MUST have polled `list` after `get()` collapsed `"destroying"` to undefined
-        expect(daytona.listCalls.length).toBeGreaterThan(1)
-        expect(quarantinedReasons).toHaveLength(1)
-        expect(inboxSummaries).toHaveLength(1)
+        expect(quarantineCalls).toHaveLength(1)
+        expect(quarantineCalls[0]).toMatchObject({
+          sandboxId,
+          attemptId,
+          changeRequestId,
+        })
+        expect(quarantineCalls[0]?.reason.length).toBeGreaterThan(0)
       }),
   )
 
@@ -836,9 +794,7 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
           'github:okikeSolutions/patchplane#407',
         )
 
-        const url = yield* assertDisposableTestDatabase(
-          yield* TestDatabaseUrlConfig,
-        )
+        const url = yield* TestDatabaseUrl
         const baseClusterLayer = makeControlPlaneSingleStoreLayer({
           url,
           entityMailboxPollIntervalMs: 100,

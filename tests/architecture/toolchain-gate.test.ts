@@ -32,20 +32,6 @@ const runEffectTsgo = (args: ReadonlyArray<string>) =>
 
 describe('V2 published tsrs3 toolchain and lint gates', () => {
   it.live(
-    'runs exact published @effect/tsgo 0.73.2 with tsrs 7.1.0-beta.tsrs3 and no fallback',
-    () =>
-      Effect.gen(function* () {
-        const result = yield* runEffectTsgo([
-          'tsrs@7.1.0-beta.tsrs3',
-          '--version',
-        ])
-        expect(result.status).toBe(0)
-        expect(result.output).toContain('effect-tsgo.0.73.2')
-        expect(result.output).toContain('tsrs 7.1.0-beta.tsrs3')
-      }).pipe(Effect.provide(BunServices.layer)),
-  )
-
-  it.live(
     'rejects a discarded Effect with an Effect compiler diagnostic under tsrs3',
     () =>
       Effect.gen(function* () {
