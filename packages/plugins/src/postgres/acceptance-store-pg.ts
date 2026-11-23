@@ -8,11 +8,14 @@ import {
   AttemptGeneration,
   AttemptNotFoundError,
   AttemptStatus,
+  AttemptTransitionKey,
+  canTransitionAttempt,
   ChangeRequestId,
   ConflictingDecisionError,
   DecisionId,
   DecisionKind,
   DeliveryId,
+  InvalidAttemptTransitionError,
   PersistenceError,
   ProposalVersion,
   StaleAttemptOwnershipError,
@@ -32,6 +35,18 @@ const AttemptRow = Schema.Struct({
   change_request_id: ChangeRequestId,
   status: AttemptStatus,
   generation: AttemptGeneration,
+})
+
+const LockedAttemptRow = Schema.Struct({
+  ...AttemptRow.fields,
+  last_transition_key: Schema.NullOr(AttemptTransitionKey),
+})
+
+const toAttempt = (decoded: typeof AttemptRow.Type): VerificationAttempt => ({
+  id: decoded.id,
+  changeRequestId: decoded.change_request_id,
+  status: decoded.status,
+  generation: decoded.generation,
 })
 
 const DecisionRow = Schema.Struct({
@@ -181,28 +196,84 @@ export const PostgresAcceptanceStoreLayer = Layer.effect(
 
       advanceAttemptState: Effect.fn(
         'PostgresAcceptanceStore.advanceAttemptState',
-      )(function* ({ attemptId, expectedGeneration, nextStatus }) {
-        const rows = yield* sql`
-          UPDATE verification_attempts
-          SET status = ${nextStatus},
-              generation = generation + 1,
-              updated_at = now()
-          WHERE id = ${attemptId}
-            AND generation = ${expectedGeneration}
-          RETURNING id, change_request_id, status, generation
-        `.pipe(persistenceError('AcceptanceStore.advanceAttemptState'))
+      )(function* ({
+        attemptId,
+        expectedGeneration,
+        nextStatus,
+        transitionKey,
+      }) {
+        const operation = 'AcceptanceStore.advanceAttemptState'
+        return yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              // Row lock serializes competing transitions so the fencing,
+              // state-machine and idempotent-replay checks below see one truth.
+              const lockedRows = yield* sql`
+                SELECT id, change_request_id, status, generation, last_transition_key
+                FROM verification_attempts
+                WHERE id = ${attemptId}
+                FOR UPDATE
+              `.pipe(persistenceError(operation))
 
-        const first = rows[0]
-        if (first === undefined) {
-          return yield* new StaleAttemptOwnershipError({
-            attemptId,
-            expectedGeneration,
-          })
-        }
-        return yield* decodeAttemptRow(
-          first,
-          'AcceptanceStore.advanceAttemptState',
-        )
+              const lockedRow = lockedRows[0]
+              if (lockedRow === undefined) {
+                return yield* new AttemptNotFoundError({ attemptId })
+              }
+              const locked = yield* Schema.decodeUnknownEffect(
+                LockedAttemptRow,
+              )(lockedRow).pipe(persistenceError(operation))
+              const current = toAttempt(locked)
+
+              const isReplayOfAppliedTransition =
+                transitionKey !== undefined &&
+                locked.last_transition_key === transitionKey &&
+                current.status === nextStatus &&
+                current.generation === expectedGeneration + 1
+              if (isReplayOfAppliedTransition) {
+                return current
+              }
+
+              if (current.generation !== expectedGeneration) {
+                return yield* new StaleAttemptOwnershipError({
+                  attemptId,
+                  expectedGeneration,
+                })
+              }
+
+              if (!canTransitionAttempt(current.status, nextStatus)) {
+                return yield* new InvalidAttemptTransitionError({
+                  attemptId,
+                  from: current.status,
+                  to: nextStatus,
+                })
+              }
+
+              const rows = yield* sql`
+                UPDATE verification_attempts
+                SET status = ${nextStatus},
+                    generation = generation + 1,
+                    last_transition_key = ${transitionKey ?? null},
+                    updated_at = now()
+                WHERE id = ${attemptId}
+                  AND generation = ${expectedGeneration}
+                RETURNING id, change_request_id, status, generation
+              `.pipe(persistenceError(operation))
+
+              const first = rows[0]
+              if (first === undefined) {
+                return yield* new StaleAttemptOwnershipError({
+                  attemptId,
+                  expectedGeneration,
+                })
+              }
+              return yield* decodeAttemptRow(first, operation)
+            }),
+          )
+          .pipe(
+            Effect.catchTag('SqlError', (sqlError) =>
+              Effect.fail(toPersistenceError(operation)(sqlError)),
+            ),
+          )
       }),
 
       recordDecision: Effect.fn('PostgresAcceptanceStore.recordDecision')(

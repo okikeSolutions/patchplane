@@ -1,10 +1,11 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
 import { Effect } from 'effect'
+import * as HttpServerResponse from 'effect/http/HttpServerResponse'
 import {
   ControlPlaneWakeError,
   type ControlPlaneWakeResult,
 } from './control-plane-container'
-import { ControlPlaneHost, handleWakeHttpResponse } from './control-plane-host'
+import { ControlPlaneHost } from './control-plane-host'
 
 export const runScheduledWakeup = Effect.fn('WakeupWorker.cron')(function* <
   E,
@@ -44,13 +45,23 @@ export const runScheduledWakeup = Effect.fn('WakeupWorker.cron')(function* <
 })
 
 /**
+ * HTTP never wakes the control plane: an unauthenticated route that starts a
+ * container and opens Postgres connections is a cost and DoS amplifier.
+ */
+export const rejectHttpWake = Effect.fn('WakeupWorker.fetch')(function* () {
+  return yield* HttpServerResponse.json({ error: 'not_found' }, { status: 404 })
+})
+
+/**
  * Stateless scheduled Worker that wakes the Bun Effect container on a fixed interval
  * so durable timers stored in Postgres resume even after container inactivity sleep.
+ * It has no public route (`workersDev: false`); the cron trigger is its only entry.
  */
 export class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
   'WakeupWorker',
   {
     main: import.meta.url,
+    workersDev: false,
   },
   Effect.gen(function* () {
     const host = yield* ControlPlaneHost
@@ -61,33 +72,8 @@ export class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
       ),
     )
 
-    const handleFetch = Effect.fn('WakeupWorker.fetch')(function* () {
-      return yield* handleWakeHttpResponse(
-        host
-          .getByName('primary')
-          .wake('http')
-          .pipe(
-            Effect.mapError((cause) =>
-              cause instanceof ControlPlaneWakeError
-                ? cause
-                : new ControlPlaneWakeError({
-                    trigger: 'http',
-                    message: String(cause),
-                    cause,
-                  }),
-            ),
-            Effect.tapError((error) =>
-              Effect.logError('WakeupWorker.fetch failed', {
-                trigger: error.trigger,
-                message: error.message,
-              }),
-            ),
-          ),
-      )
-    })
-
     return {
-      fetch: handleFetch(),
+      fetch: rejectHttpWake(),
     }
     // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Alchemy Worker entry point
   }).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),

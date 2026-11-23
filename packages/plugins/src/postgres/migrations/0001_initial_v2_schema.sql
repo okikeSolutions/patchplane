@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS verification_attempts (
   change_request_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'passed', 'incomplete', 'failed', 'cancelled')),
   generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),
+  last_transition_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

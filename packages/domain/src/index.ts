@@ -46,6 +46,34 @@ export const AttemptStatus = Schema.Literals([
 ])
 export type AttemptStatus = typeof AttemptStatus.Type
 
+/**
+ * Idempotency key for one attempt state transition. A replay that presents the
+ * same key for an already-applied transition returns the persisted row instead
+ * of failing ownership fencing, so a workflow activity that crashed after the
+ * database commit (but before its journal entry) can be retried safely.
+ */
+export const AttemptTransitionKey = Schema.NonEmptyString.pipe(
+  Schema.brand('AttemptTransitionKey'),
+)
+export type AttemptTransitionKey = typeof AttemptTransitionKey.Type
+
+const ATTEMPT_TRANSITIONS: {
+  readonly [From in AttemptStatus]: ReadonlyArray<AttemptStatus>
+} = {
+  pending: ['running', 'cancelled'],
+  running: ['passed', 'failed', 'incomplete', 'cancelled'],
+  passed: [],
+  incomplete: [],
+  failed: [],
+  cancelled: [],
+}
+
+/** Terminal attempts never re-open; every other transition must be listed. */
+export const canTransitionAttempt = (
+  from: AttemptStatus,
+  to: AttemptStatus,
+): boolean => ATTEMPT_TRANSITIONS[from].includes(to)
+
 export const DecisionKind = Schema.Literals(['approve', 'reject', 'waive'])
 export type DecisionKind = typeof DecisionKind.Type
 
@@ -100,6 +128,15 @@ export class StaleAttemptOwnershipError extends Schema.TaggedError<
 >()('StaleAttemptOwnershipError', {
   attemptId: VerificationAttemptId,
   expectedGeneration: AttemptGeneration,
+}) {}
+
+export class InvalidAttemptTransitionError extends Schema.TaggedError<
+  InvalidAttemptTransitionError,
+  { readonly brand: unique symbol }
+>()('InvalidAttemptTransitionError', {
+  attemptId: VerificationAttemptId,
+  from: AttemptStatus,
+  to: AttemptStatus,
 }) {}
 
 export class ConflictingDecisionError extends Schema.TaggedError<

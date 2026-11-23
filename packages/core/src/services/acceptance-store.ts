@@ -6,11 +6,13 @@ import type {
   AttemptGeneration,
   AttemptNotFoundError,
   AttemptStatus,
+  AttemptTransitionKey,
   ChangeRequestId,
   ConflictingDecisionError,
   DecisionId,
   DecisionKind,
   DeliveryId,
+  InvalidAttemptTransitionError,
   PersistenceError,
   ProposalVersion,
   StaleAttemptOwnershipError,
@@ -37,13 +39,22 @@ export interface AcceptanceStoreService {
     ActiveAttemptConflictError | PersistenceError
   >
 
+  /**
+   * Fenced, state-machine-checked transition. `transitionKey` makes a replay of
+   * an already-applied transition idempotent; callers without a key always
+   * receive `StaleAttemptOwnershipError` once the generation has moved on.
+   */
   readonly advanceAttemptState: (input: {
     readonly attemptId: VerificationAttemptId
     readonly expectedGeneration: AttemptGeneration
     readonly nextStatus: AttemptStatus
+    readonly transitionKey?: AttemptTransitionKey
   }) => Effect.Effect<
     VerificationAttempt,
-    StaleAttemptOwnershipError | PersistenceError
+    | AttemptNotFoundError
+    | StaleAttemptOwnershipError
+    | InvalidAttemptTransitionError
+    | PersistenceError
   >
 
   readonly recordDecision: (input: {

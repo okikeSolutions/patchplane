@@ -3,6 +3,7 @@ import { Effect } from 'effect'
 import * as HttpServerRequest from 'effect/http/HttpServerRequest'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
 import {
+  CONTROL_PLANE_UNAVAILABLE,
   ControlPlaneContainer,
   ControlPlaneWakeError,
   type ControlPlaneWakeResult,
@@ -60,7 +61,7 @@ export const handleWakeHttpResponse = Effect.fn(
         {
           ok: false,
           trigger: error.trigger,
-          error: error.message,
+          error: CONTROL_PLANE_UNAVAILABLE,
         },
         { status: 503 },
       ),

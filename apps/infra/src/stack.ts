@@ -23,7 +23,7 @@ export const PatchplaneV2Stack = Alchemy.Stack(
       databaseProjectId: db.projectId,
       databaseBranchId: db.defaultBranchId,
       artifactsBucketName: artifacts.bucketName,
-      wakeupWorkerUrl: worker.url,
+      wakeupWorkerName: worker.workerName,
     }
     // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Alchemy stack entry point
   }).pipe(Effect.provide(ControlPlaneContainerLive)),

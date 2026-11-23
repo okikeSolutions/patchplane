@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import {
+  CONTROL_PLANE_UNAVAILABLE,
   ControlPlaneWakeError,
   type ControlPlaneWakeResult,
 } from '../../apps/infra/src/control-plane-container'
@@ -8,7 +9,23 @@ import {
   handleWakeHttpResponse,
   wakeControlPlaneContainer,
 } from '../../apps/infra/src/control-plane-host'
-import { runScheduledWakeup } from '../../apps/infra/src/wakeup-worker'
+import {
+  rejectHttpWake,
+  runScheduledWakeup,
+} from '../../apps/infra/src/wakeup-worker'
+
+const readJsonBody = (response: { readonly body: unknown }): string => {
+  const body = response.body
+  if (
+    typeof body === 'object' &&
+    body !== null &&
+    Reflect.get(body, '_tag') === 'Uint8Array'
+  ) {
+    const bytes = Reflect.get(body, 'body')
+    if (bytes instanceof Uint8Array) return new TextDecoder().decode(bytes)
+  }
+  return JSON.stringify(body)
+}
 
 describe('ControlPlaneHost and WakeupWorker error visibility', () => {
   it.effect('returns 200 JSON when container start and wake succeed', () =>
@@ -32,12 +49,14 @@ describe('ControlPlaneHost and WakeupWorker error visibility', () => {
   )
 
   it.effect(
-    'surfaces ControlPlaneWakeError and returns 503 when container start fails',
+    'surfaces ControlPlaneWakeError internally but returns an opaque 503 body',
     () =>
       Effect.gen(function* () {
+        const sensitiveCause =
+          'connect ECONNREFUSED ep-secret-host.eu-central-1.aws.neon.tech:5432'
         const wake = wakeControlPlaneContainer(
           {
-            start: () => Effect.fail('container boot timeout'),
+            start: () => Effect.fail(sensitiveCause),
             wake: (trigger) =>
               Effect.succeed({
                 ok: true,
@@ -51,11 +70,22 @@ describe('ControlPlaneHost and WakeupWorker error visibility', () => {
         const failure = yield* Effect.flip(wake)
         expect(failure._tag).toBe('ControlPlaneWakeError')
         expect(failure.trigger).toBe('http')
-        expect(failure.message).toContain('container boot timeout')
+        expect(failure.message).toContain('ECONNREFUSED')
 
         const response = yield* handleWakeHttpResponse(wake)
         expect(response.status).toBe(503)
+        const body = readJsonBody(response)
+        expect(body).toContain(CONTROL_PLANE_UNAVAILABLE)
+        expect(body).not.toContain('neon.tech')
+        expect(body).not.toContain('ECONNREFUSED')
       }),
+  )
+
+  it.effect('never wakes the control plane from an HTTP request', () =>
+    Effect.gen(function* () {
+      const response = yield* rejectHttpWake()
+      expect(response.status).toBe(404)
+    }),
   )
 
   it.effect(

@@ -29,6 +29,7 @@ import {
 import {
   ActorId,
   AttemptGeneration,
+  AttemptTransitionKey,
   ChangeRequestId,
   DecisionId,
   DeliveryId,
@@ -53,10 +54,44 @@ const TestDatabaseUrlConfig = Config.Redacted(
   ),
 )
 
+class UnsafeTestDatabaseError extends Schema.TaggedError<
+  UnsafeTestDatabaseError,
+  { readonly brand: unique symbol }
+>()('UnsafeTestDatabaseError', { reason: Schema.String }) {}
+
+/**
+ * These tests DROP SCHEMA public. Refuse any database whose name does not end
+ * in `_test` so a mis-set PATCHPLANE_TEST_DATABASE_URL cannot wipe real data.
+ * The URL itself is never included in the error.
+ */
+const assertDisposableTestDatabase = (url: Redacted.Redacted) =>
+  Effect.gen(function* () {
+    const parsed = yield* Effect.try({
+      try: () => new URL(Redacted.value(url)),
+      catch: () =>
+        new UnsafeTestDatabaseError({
+          reason: 'PATCHPLANE_TEST_DATABASE_URL is not a valid URL',
+        }),
+    })
+    const databaseName = parsed.pathname.replace(/^\//, '')
+    if (!databaseName.endsWith('_test')) {
+      return yield* new UnsafeTestDatabaseError({
+        reason:
+          'PATCHPLANE_TEST_DATABASE_URL must name a disposable database ending in "_test"',
+      })
+    }
+    return url
+  })
+
+const TestDatabaseUrl = Effect.gen(function* () {
+  const url = yield* TestDatabaseUrlConfig
+  return yield* assertDisposableTestDatabase(url)
+})
+
 const makeTestPostgresSqlLayer = () =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const url = yield* TestDatabaseUrlConfig
+      const url = yield* TestDatabaseUrl
       return makePostgresSqlLayer({ url })
     }),
   )
@@ -66,7 +101,7 @@ const makeTestControlPlaneLayer = (
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const url = yield* TestDatabaseUrlConfig
+      const url = yield* TestDatabaseUrl
       return makeControlPlaneSingleStoreLayer(
         {
           url,
@@ -92,6 +127,29 @@ function extractFailureTag<A, E extends { readonly _tag: string }>(
 }
 
 describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', () => {
+  it.effect(
+    'refuses to run destructive tests against a non-disposable database',
+    () =>
+      Effect.gen(function* () {
+        const prod = yield* Effect.flip(
+          assertDisposableTestDatabase(
+            Redacted.make('postgresql://owner:secret@db.example.com/neondb'),
+          ),
+        )
+        expect(prod._tag).toBe('UnsafeTestDatabaseError')
+        expect(prod.reason).not.toContain('secret')
+
+        const garbage = yield* Effect.flip(
+          assertDisposableTestDatabase(Redacted.make('not a url')),
+        )
+        expect(garbage._tag).toBe('UnsafeTestDatabaseError')
+
+        const ok = yield* assertDisposableTestDatabase(
+          Redacted.make('postgresql://u:p@127.0.0.1:55432/patchplane_test'),
+        )
+        expect(Redacted.isRedacted(ok)).toBe(true)
+      }),
+  )
   it.live(
     'applies committed SQL migrations idempotently and fails closed on invalid or rewritten migrations',
     () =>
@@ -291,7 +349,99 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         })
         expect(replayed.id).toBe(winningDecision.id)
 
-        // 5. Interrupted transaction rolls back completely without partial writes
+        // 5. State machine + idempotent transition replay (separate CR so the
+        //    active-attempt index above does not interfere)
+        const transitionCr = yield* Schema.decodeEffect(ChangeRequestId)(
+          'github:okikeSolutions/patchplane#303',
+        )
+        const transitionAttemptId = yield* Schema.decodeEffect(
+          VerificationAttemptId,
+        )('attempt-transitions')
+        const runningKey = yield* Schema.decodeEffect(AttemptTransitionKey)(
+          'attempt-transitions/mark-attempt-running',
+        )
+        const otherKey = yield* Schema.decodeEffect(AttemptTransitionKey)(
+          'attempt-transitions/someone-else',
+        )
+        const passedKey = yield* Schema.decodeEffect(AttemptTransitionKey)(
+          'attempt-transitions/finalize-attempt',
+        )
+        const gen2 = yield* Schema.decodeEffect(AttemptGeneration)(2)
+        const gen3 = yield* Schema.decodeEffect(AttemptGeneration)(3)
+
+        yield* store.claimAttempt({
+          attemptId: transitionAttemptId,
+          changeRequestId: transitionCr,
+        })
+
+        // pending -> passed skips running: rejected by the state machine
+        const skipped = yield* Effect.flip(
+          store.advanceAttemptState({
+            attemptId: transitionAttemptId,
+            expectedGeneration: gen1,
+            nextStatus: 'passed',
+          }),
+        )
+        expect(skipped._tag).toBe('InvalidAttemptTransitionError')
+
+        const applied = yield* store.advanceAttemptState({
+          attemptId: transitionAttemptId,
+          expectedGeneration: gen1,
+          nextStatus: 'running',
+          transitionKey: runningKey,
+        })
+        expect(applied.generation).toBe(2)
+
+        // Crash-after-commit replay with the same key is idempotent...
+        const replayedTransition = yield* store.advanceAttemptState({
+          attemptId: transitionAttemptId,
+          expectedGeneration: gen1,
+          nextStatus: 'running',
+          transitionKey: runningKey,
+        })
+        expect(replayedTransition).toEqual(applied)
+
+        // ...but a different key (or none) is still fenced out
+        const foreignReplay = yield* Effect.flip(
+          store.advanceAttemptState({
+            attemptId: transitionAttemptId,
+            expectedGeneration: gen1,
+            nextStatus: 'running',
+            transitionKey: otherKey,
+          }),
+        )
+        expect(foreignReplay._tag).toBe('StaleAttemptOwnershipError')
+
+        yield* store.advanceAttemptState({
+          attemptId: transitionAttemptId,
+          expectedGeneration: gen2,
+          nextStatus: 'passed',
+          transitionKey: passedKey,
+        })
+
+        // Terminal attempts never re-open
+        const reopened = yield* Effect.flip(
+          store.advanceAttemptState({
+            attemptId: transitionAttemptId,
+            expectedGeneration: gen3,
+            nextStatus: 'running',
+          }),
+        )
+        expect(reopened._tag).toBe('InvalidAttemptTransitionError')
+
+        const missingAttemptId = yield* Schema.decodeEffect(
+          VerificationAttemptId,
+        )('attempt-does-not-exist')
+        const missing = yield* Effect.flip(
+          store.advanceAttemptState({
+            attemptId: missingAttemptId,
+            expectedGeneration: gen1,
+            nextStatus: 'running',
+          }),
+        )
+        expect(missing._tag).toBe('AttemptNotFoundError')
+
+        // 6. Interrupted transaction rolls back completely without partial writes
         const sql = yield* SqlClient.SqlClient
         const insertedInTx = yield* Deferred.make<void>()
         const interruptedDelivery = yield* Schema.decodeEffect(DeliveryId)(

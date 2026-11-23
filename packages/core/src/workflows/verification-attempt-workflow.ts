@@ -2,7 +2,10 @@ import { Duration, Effect, Schema } from 'effect'
 import { Activity, DurableClock, Workflow } from 'effect/workflow'
 import {
   AttemptGeneration,
+  AttemptNotFoundError,
+  AttemptTransitionKey,
   ChangeRequestId,
+  InvalidAttemptTransitionError,
   PersistenceError,
   PrepareDigest,
   StaleAttemptOwnershipError,
@@ -35,7 +38,9 @@ export interface VerificationAttemptWorkflowResult extends Schema.Schema.Type<
 > {}
 
 export const VerificationAttemptWorkflowError = Schema.Union([
+  AttemptNotFoundError,
   StaleAttemptOwnershipError,
+  InvalidAttemptTransitionError,
   PersistenceError,
   StepRunnerError,
 ])
@@ -50,6 +55,12 @@ export const VerificationAttemptWorkflow = Workflow.make(
   },
 )
 
+/** One key per (attempt, activity): the workflow runs once per attempt. */
+const transitionKeyFor = (
+  attemptId: VerificationAttemptId,
+  activity: string,
+): AttemptTransitionKey => AttemptTransitionKey.make(`${attemptId}/${activity}`)
+
 export const VerificationAttemptWorkflowLayer =
   VerificationAttemptWorkflow.toLayer(
     Effect.fn('VerificationAttemptWorkflow.execute')(function* (payload) {
@@ -63,6 +74,10 @@ export const VerificationAttemptWorkflowLayer =
             attemptId: payload.attemptId,
             expectedGeneration: payload.initialGeneration,
             nextStatus: 'running',
+            transitionKey: transitionKeyFor(
+              payload.attemptId,
+              'mark-attempt-running',
+            ),
           })
         }),
       })
@@ -98,6 +113,10 @@ export const VerificationAttemptWorkflowLayer =
             attemptId: payload.attemptId,
             expectedGeneration: running.generation,
             nextStatus: 'passed',
+            transitionKey: transitionKeyFor(
+              payload.attemptId,
+              'finalize-attempt',
+            ),
           })
         }),
       })

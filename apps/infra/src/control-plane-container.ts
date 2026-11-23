@@ -8,6 +8,9 @@ export interface ControlPlaneWakeResult {
   readonly wokenAt: number
 }
 
+/** Stable public error code; causes are logged, never returned to callers. */
+export const CONTROL_PLANE_UNAVAILABLE = 'control_plane_unavailable'
+
 export class ControlPlaneWakeError extends Schema.TaggedError<
   ControlPlaneWakeError,
   { readonly brand: unique symbol }
