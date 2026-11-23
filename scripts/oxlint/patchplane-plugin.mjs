@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import registry from '../../config/effect-boundaries.json' with { type: 'json' }
 
 const EFFECT_MODULES = new Set(['effect', 'effect/Effect'])
 const RUNTIME_EXECUTION_NAMES = new Set([
@@ -17,13 +17,6 @@ const PROMISE_STATIC_METHODS = new Set([
   'withResolvers',
 ])
 const PROMISE_CHAIN_METHODS = new Set(['then', 'catch', 'finally'])
-
-const registry = JSON.parse(
-  readFileSync(
-    new URL('../../config/effect-boundaries.json', import.meta.url),
-    'utf8',
-  ),
-)
 
 function buildLimits(kind) {
   const limits = new Map()

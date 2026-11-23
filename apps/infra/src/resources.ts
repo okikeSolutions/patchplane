@@ -1,4 +1,5 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
+import * as Daytona from '@alchemy.run/daytona'
 import * as Neon from '@alchemy.run/neon'
 import { DEFAULT_POSTGRES_MIGRATIONS_DIR } from '@patchplane/plugins'
 
@@ -26,3 +27,18 @@ export const PatchplaneArtifacts = Cloudflare.R2.Bucket('PatchplaneArtifacts', {
     },
   ],
 })
+
+/**
+ * Durable Linux verification sandbox base image managed by Alchemy.
+ * Per-attempt sandboxes are created dynamically at runtime via the scoped
+ * `Daytona.CreateSandbox` binding (`write:sandboxes`, `delete:sandboxes`).
+ */
+export const PatchplaneVerificationSnapshot = Daytona.Snapshot(
+  'PatchplaneVerificationSnapshot',
+  {
+    image: 'oven/bun:1.3.10-slim',
+    cpu: 2,
+    memory: 4,
+    disk: 10,
+  },
+)

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["tests/fixtures/**"],
+  "ignoreDependencies": ["oxlint", "tsrs", "@effect/language-service"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts"]
+    },
+    "apps/infra": {
+      "entry": [
+        "alchemy.run.ts",
+        "src/wakeup-worker.ts",
+        "src/control-plane-container.runtime.ts"
+      ]
+    }
+  }
+}

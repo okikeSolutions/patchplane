@@ -1,4 +1,3 @@
-import { BunFileSystem } from '@effect/platform-bun'
 import { describe, expect, it } from '@effect/vitest'
 import {
   Cause,
@@ -13,8 +12,6 @@ import {
   Schedule,
   Schema,
 } from 'effect'
-import * as Config from 'effect/Config'
-import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
 import {
   claimAndStartAttempt,
@@ -41,60 +38,14 @@ import {
 import {
   applySqlMigrations,
   loadSqlMigrations,
-  makePostgresSqlLayer,
 } from '../../packages/plugins/src/index'
-
-const TestDatabaseUrlConfig = Config.Redacted(
-  'PATCHPLANE_TEST_DATABASE_URL',
-).pipe(
-  Config.withDefault(
-    Redacted.make(
-      'postgresql://patchplane:patchplane@127.0.0.1:55432/patchplane_test',
-    ),
-  ),
-)
-
-class UnsafeTestDatabaseError extends Schema.TaggedError<
-  UnsafeTestDatabaseError,
-  { readonly brand: unique symbol }
->()('UnsafeTestDatabaseError', { reason: Schema.String }) {}
-
-/**
- * These tests DROP SCHEMA public. Refuse any database whose name does not end
- * in `_test` so a mis-set PATCHPLANE_TEST_DATABASE_URL cannot wipe real data.
- * The URL itself is never included in the error.
- */
-const assertDisposableTestDatabase = (url: Redacted.Redacted) =>
-  Effect.gen(function* () {
-    const parsed = yield* Effect.try({
-      try: () => new URL(Redacted.value(url)),
-      catch: () =>
-        new UnsafeTestDatabaseError({
-          reason: 'PATCHPLANE_TEST_DATABASE_URL is not a valid URL',
-        }),
-    })
-    const databaseName = parsed.pathname.replace(/^\//, '')
-    if (!databaseName.endsWith('_test')) {
-      return yield* new UnsafeTestDatabaseError({
-        reason:
-          'PATCHPLANE_TEST_DATABASE_URL must name a disposable database ending in "_test"',
-      })
-    }
-    return url
-  })
-
-const TestDatabaseUrl = Effect.gen(function* () {
-  const url = yield* TestDatabaseUrlConfig
-  return yield* assertDisposableTestDatabase(url)
-})
-
-const makeTestPostgresSqlLayer = () =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const url = yield* TestDatabaseUrl
-      return makePostgresSqlLayer({ url })
-    }),
-  )
+import {
+  resetAndMigrateDatabase,
+  resetDatabase,
+  TestDatabaseUrl,
+  TestMigrationDepsLayer,
+  TestPostgresSqlLayer,
+} from './test-db'
 
 const makeTestControlPlaneLayer = (
   runnerLayer?: Layer.Layer<VerificationStepRunner>,
@@ -110,13 +61,7 @@ const makeTestControlPlaneLayer = (
         runnerLayer,
       )
     }),
-  )
-
-const resetDatabase = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  yield* sql.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
-  yield* sql.unsafe('CREATE SCHEMA public')
-})
+  ).pipe(Layer.provideMerge(TestMigrationDepsLayer))
 
 function extractFailureTag<A, E extends { readonly _tag: string }>(
   exit: Exit.Exit<A, E>,
@@ -127,37 +72,12 @@ function extractFailureTag<A, E extends { readonly _tag: string }>(
 }
 
 describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', () => {
-  it.effect(
-    'refuses to run destructive tests against a non-disposable database',
-    () =>
-      Effect.gen(function* () {
-        const prod = yield* Effect.flip(
-          assertDisposableTestDatabase(
-            Redacted.make('postgresql://owner:secret@db.example.com/neondb'),
-          ),
-        )
-        expect(prod._tag).toBe('UnsafeTestDatabaseError')
-        expect(prod.reason).not.toContain('secret')
-
-        const garbage = yield* Effect.flip(
-          assertDisposableTestDatabase(Redacted.make('not a url')),
-        )
-        expect(garbage._tag).toBe('UnsafeTestDatabaseError')
-
-        const ok = yield* assertDisposableTestDatabase(
-          Redacted.make('postgresql://u:p@127.0.0.1:55432/patchplane_test'),
-        )
-        expect(Redacted.isRedacted(ok)).toBe(true)
-      }),
-  )
   it.live(
-    'applies committed SQL migrations idempotently and fails closed on invalid or rewritten migrations',
+    'applies committed and complex-syntax SQL migrations idempotently and fails closed on invalid or rewritten migrations',
     () =>
       Effect.gen(function* () {
         yield* resetDatabase
-        const committed = yield* loadSqlMigrations().pipe(
-          Effect.provide(BunFileSystem.layer),
-        )
+        const committed = yield* loadSqlMigrations()
         const firstMigration = committed[0]
         expect(firstMigration).toBeDefined()
         if (firstMigration === undefined) return
@@ -167,6 +87,37 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
 
         const secondRun = yield* applySqlMigrations(committed)
         expect(secondRun).toEqual([])
+
+        // Complex SQL with comments, escaped quotes, and dollar-quoted blocks
+        // must execute cleanly as real PostgreSQL statements.
+        const complexApplied = yield* applySqlMigrations([
+          ...committed,
+          {
+            name: '9000_complex_syntax_proof.sql',
+            sql: `
+              -- leading comment; with semicolon
+              CREATE TABLE complex_mig_proof (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL DEFAULT 'semi;colon''quoted'
+              );
+              /* nested /* block; comment */ still comment; */
+              DO $mig$
+              BEGIN
+                INSERT INTO complex_mig_proof (id) VALUES ('ok');
+              END
+              $mig$;
+            `,
+            sha256: 'complex-syntax-sha256',
+          },
+        ])
+        expect(complexApplied).toEqual(['9000_complex_syntax_proof.sql'])
+
+        const sql = yield* SqlClient.SqlClient
+        const complexRows = yield* sql<{
+          readonly id: string
+          readonly label: string
+        }>`SELECT id, label FROM complex_mig_proof`
+        expect(complexRows).toEqual([{ id: 'ok', label: "semi;colon'quoted" }])
 
         const invalidFailure = yield* Effect.flip(
           applySqlMigrations([
@@ -181,7 +132,6 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         expect(invalidFailure._tag).toBe('MigrationFailureError')
         expect(invalidFailure.migrationName).toBe('9999_invalid_sql.sql')
 
-        const sql = yield* SqlClient.SqlClient
         const brokenTables = yield* sql<{ readonly exists: string | null }>`
           SELECT to_regclass('public.broken_table')::text AS exists
         `
@@ -196,8 +146,12 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
           ]),
         )
         expect(rewrittenFailure._tag).toBe('MigrationFailureError')
-        expect(rewrittenFailure.reason).toContain('checksum mismatch')
-      }).pipe(Effect.provide(makeTestPostgresSqlLayer())),
+        expect(rewrittenFailure.migrationName).toBe(firstMigration.name)
+        const storedChecksums = yield* sql<{ readonly sha256: string }>`
+          SELECT sha256 FROM patchplane_migrations WHERE name = ${firstMigration.name}
+        `
+        expect(storedChecksums[0]?.sha256).toBe(firstMigration.sha256)
+      }).pipe(Effect.provide(TestPostgresSqlLayer)),
     20_000,
   )
 
@@ -205,11 +159,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
     'enforces competing claims, duplicate deliveries, stale ownership fencing, conflicting decisions, and interrupted transactions on real Postgres',
     () =>
       Effect.gen(function* () {
-        yield* resetDatabase
-        const committed = yield* loadSqlMigrations().pipe(
-          Effect.provide(BunFileSystem.layer),
-        )
-        yield* applySqlMigrations(committed)
+        yield* resetAndMigrateDatabase
 
         const store = yield* AcceptanceStore
         const changeRequestId = yield* Schema.decodeEffect(ChangeRequestId)(
@@ -496,13 +446,9 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
     'persists domain state and ClusterWorkflowEngine journal in one Postgres DB and resumes after container sleep/restart without duplicating side effects',
     () =>
       Effect.gen(function* () {
-        yield* Effect.gen(function* () {
-          yield* resetDatabase
-          const committed = yield* loadSqlMigrations().pipe(
-            Effect.provide(BunFileSystem.layer),
-          )
-          yield* applySqlMigrations(committed)
-        }).pipe(Effect.provide(makeTestPostgresSqlLayer()))
+        yield* resetAndMigrateDatabase.pipe(
+          Effect.provide(TestPostgresSqlLayer),
+        )
 
         const prepareCallsRef = yield* Ref.make(0)
         const prepareCompleted = yield* Deferred.make<void>()
@@ -551,7 +497,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
             const started = yield* claimAndStartAttempt({
               attemptId,
               changeRequestId,
-              waitDurationMs: 1_200,
+              waitDurationMs: 350,
             })
 
             yield* Deferred.await(prepareCompleted).pipe(
@@ -591,7 +537,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         )
 
         // Wait past the durable clock deadline while NO container is running
-        yield* Effect.sleep(Duration.millis(1_500))
+        yield* Effect.sleep(Duration.millis(450))
 
         // Container Boot #2 (simulated stateless Cron Wakeup booting fresh container against same Postgres DB)
         yield* Effect.scoped(

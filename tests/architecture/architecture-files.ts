@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { BunFileSystem, BunPath } from '@effect/platform-bun'
+import { Effect, FileSystem, Layer, Path } from 'effect'
 import { parseSync } from 'oxc-parser'
 
 const IGNORED_DIRS = new Set([
@@ -12,44 +12,77 @@ const IGNORED_DIRS = new Set([
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
 
-export const REPO_ROOT = resolve(import.meta.dirname, '../..')
+const REPO_ROOT_URL = new URL('../..', import.meta.url)
 
-export function toPosix(filePath: string): string {
+export const ArchitecturePlatformLayer = Layer.merge(
+  BunFileSystem.layer,
+  BunPath.layer,
+)
+
+export const getRepoRoot = Effect.gen(function* () {
+  const path = yield* Path.Path
+  return path.resolve(yield* path.fromFileUrl(REPO_ROOT_URL))
+})
+
+function toPosix(filePath: string): string {
   return filePath.split('\\').join('/')
 }
 
-export function relativeToRepo(absolutePath: string): string {
-  return toPosix(relative(REPO_ROOT, absolutePath))
-}
+export const readRepoFile = (repoRelativePath: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const root = yield* getRepoRoot
+    return yield* fs.readFileString(path.resolve(root, repoRelativePath))
+  })
 
-export function readRepoFile(repoRelativePath: string): string {
-  return readFileSync(resolve(REPO_ROOT, repoRelativePath), 'utf8')
-}
+export const repoFileExists = (repoRelativePath: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const root = yield* getRepoRoot
+    return yield* fs.exists(path.resolve(root, repoRelativePath))
+  })
 
-export function listSourceFiles(directory: string): ReadonlyArray<string> {
-  const start = resolve(REPO_ROOT, directory)
-  const results: string[] = []
+export const listSourceFiles = (directory: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const root = yield* getRepoRoot
+    const start = path.resolve(root, directory)
+    const results: Array<string> = []
 
-  const walk = (current: string) => {
-    for (const entry of readdirSync(current)) {
-      if (IGNORED_DIRS.has(entry)) continue
-      const absolute = join(current, entry)
-      const stat = statSync(absolute)
-      if (stat.isDirectory()) {
-        walk(absolute)
-        continue
-      }
-      if (!stat.isFile()) continue
-      const dot = entry.lastIndexOf('.')
-      if (dot !== -1 && SOURCE_EXTENSIONS.has(entry.slice(dot))) {
-        results.push(relativeToRepo(absolute))
-      }
-    }
-  }
+    const walk = (
+      current: string,
+    ): Effect.Effect<
+      void,
+      FileSystem.FileSystem['stat'] extends (
+        ...args: never[]
+      ) => Effect.Effect<unknown, infer E>
+        ? E
+        : never
+    > =>
+      Effect.gen(function* () {
+        const entries = yield* fs.readDirectory(current)
+        for (const entry of entries) {
+          if (IGNORED_DIRS.has(entry)) continue
+          const absolute = path.join(current, entry)
+          const info = yield* fs.stat(absolute)
+          if (info.type === 'Directory') {
+            yield* walk(absolute)
+            continue
+          }
+          if (info.type !== 'File') continue
+          const dot = entry.lastIndexOf('.')
+          if (dot !== -1 && SOURCE_EXTENSIONS.has(entry.slice(dot))) {
+            results.push(toPosix(path.relative(root, absolute)))
+          }
+        }
+      })
 
-  walk(start)
-  return results.toSorted()
-}
+    yield* walk(start)
+    return results.toSorted()
+  })
 
 export function isProductionSourceFile(repoRelativePath: string): boolean {
   return (

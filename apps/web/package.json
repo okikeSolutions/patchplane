@@ -9,7 +9,6 @@
   "dependencies": {
     "@effect/platform-browser": "4.1.5",
     "@patchplane/contracts": "workspace:*",
-    "@patchplane/domain": "workspace:*",
     "effect": "4.1.5",
     "foldkit": "0.171.0"
   }

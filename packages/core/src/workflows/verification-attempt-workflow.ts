@@ -16,7 +16,7 @@ import {
 import { AcceptanceStore } from '../services/acceptance-store'
 import { VerificationStepRunner } from '../services/verification-step-runner'
 
-export const MAX_VERIFICATION_WAIT_DURATION_MS = 24 * 60 * 60 * 1000
+const MAX_VERIFICATION_WAIT_DURATION_MS = 24 * 60 * 60 * 1000
 
 export const VerificationAttemptWorkflowPayload = Schema.Struct({
   attemptId: VerificationAttemptId,

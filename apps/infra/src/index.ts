@@ -5,10 +5,11 @@ export { ControlPlaneHost } from './control-plane-host'
 export {
   PatchplaneArtifacts,
   PatchplaneDb,
+  PatchplaneVerificationSnapshot,
   POSTGRES_MIGRATIONS_DIR,
 } from './resources'
 export { PatchplaneV2Stack } from './stack'
-export { WakeupWorker } from './wakeup-worker'
+export { default as WakeupWorker } from './wakeup-worker'
 
 export const describeV2InfrastructurePlan = Effect.fn(
   'Infra.describeV2InfrastructurePlan',
