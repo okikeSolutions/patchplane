@@ -24,15 +24,37 @@ export const PrepareDigest = Schema.NonEmptyString.pipe(
 )
 export type PrepareDigest = typeof PrepareDigest.Type
 
+const PG_INT4_MAX = 2_147_483_647
+
+/**
+ * Scrubs embedded URI credentials, password query parameters, and bearer tokens
+ * before an external error is persisted in workflow journals or emitted to logs.
+ */
+export const sanitizeErrorMessage = (cause: unknown): string => {
+  const raw =
+    cause instanceof Error && cause.message.length > 0
+      ? `${cause.name}: ${cause.message}`
+      : String(cause)
+  return raw
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, '$1<redacted>@')
+    .replace(
+      /([?&](?:password|passwd|pwd|token|secret|api[_-]?key)=)[^&\s]+/gi,
+      '$1<redacted>',
+    )
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>')
+}
+
 export const ProposalVersion = Schema.Number.check(
   Schema.isInt(),
   Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(PG_INT4_MAX),
 ).pipe(Schema.brand('ProposalVersion'))
 export type ProposalVersion = typeof ProposalVersion.Type
 
 export const AttemptGeneration = Schema.Number.check(
   Schema.isInt(),
   Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(PG_INT4_MAX),
 ).pipe(Schema.brand('AttemptGeneration'))
 export type AttemptGeneration = typeof AttemptGeneration.Type
 
@@ -147,6 +169,8 @@ export class ConflictingDecisionError extends Schema.TaggedError<
   proposalVersion: ProposalVersion,
   existingKind: DecisionKind,
   requestedKind: DecisionKind,
+  existingActorId: ActorId,
+  requestedActorId: ActorId,
 }) {}
 
 export class PersistenceError extends Schema.TaggedError<

@@ -74,6 +74,14 @@ function variableForIdentifier(identifier, context) {
   return undefined
 }
 
+function isImportBinding(identifier, context) {
+  const variable = variableForIdentifier(identifier, context)
+  return (
+    variable !== undefined &&
+    variable.defs.some((def) => def.type === 'ImportBinding')
+  )
+}
+
 function isUnshadowedGlobal(identifier, context) {
   const variable = variableForIdentifier(identifier, context)
   return variable === undefined || variable.defs.length === 0
@@ -289,7 +297,8 @@ const noUnregisteredPromiseBoundary = {
             PROMISE_STATIC_METHODS.has(prop)
           const isEffectStatic =
             node.callee.object.type === 'Identifier' &&
-            bindings.namespaces.has(node.callee.object.name)
+            bindings.namespaces.has(node.callee.object.name) &&
+            isImportBinding(node.callee.object, context)
           const isPromiseChain =
             !isEffectStatic && PROMISE_CHAIN_METHODS.has(prop)
           if (isPromiseStatic || isPromiseChain) {

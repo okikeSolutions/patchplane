@@ -1,4 +1,5 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
+import { sanitizeErrorMessage } from '@patchplane/domain'
 import { Effect } from 'effect'
 import * as HttpServerRequest from 'effect/http/HttpServerRequest'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
@@ -36,7 +37,7 @@ export const wakeControlPlaneContainer = Effect.fn(
         ? cause
         : new ControlPlaneWakeError({
             trigger,
-            message: String(cause),
+            message: sanitizeErrorMessage(cause),
             cause,
           }),
     ),

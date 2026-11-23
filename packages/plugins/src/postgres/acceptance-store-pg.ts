@@ -18,6 +18,7 @@ import {
   InvalidAttemptTransitionError,
   PersistenceError,
   ProposalVersion,
+  sanitizeErrorMessage,
   StaleAttemptOwnershipError,
   VerificationAttempt,
   VerificationAttemptId,
@@ -100,7 +101,7 @@ const toPersistenceError =
   (cause: unknown): PersistenceError =>
     new PersistenceError({
       operation,
-      message: String(cause),
+      message: sanitizeErrorMessage(cause),
       cause,
     })
 
@@ -314,12 +315,14 @@ export const PostgresAcceptanceStoreLayer = Layer.effect(
                   existingRow,
                   'AcceptanceStore.recordDecision',
                 )
-                if (existing.kind !== kind) {
+                if (existing.kind !== kind || existing.actorId !== actorId) {
                   return yield* new ConflictingDecisionError({
                     attemptId,
                     proposalVersion,
                     existingKind: existing.kind,
                     requestedKind: kind,
+                    existingActorId: existing.actorId,
+                    requestedActorId: actorId,
                   })
                 }
                 return existing

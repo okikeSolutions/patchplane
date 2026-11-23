@@ -10,6 +10,7 @@ import {
 } from 'effect'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
 import type * as Redacted from 'effect/Redacted'
+import { sanitizeErrorMessage } from '@patchplane/domain'
 import {
   makeControlPlaneSingleStoreLayer,
   wakeControlPlane,
@@ -49,8 +50,11 @@ export default ControlPlaneContainer.make(
           onSome: (services) => Effect.succeed([services, current] as const),
           onNone: () =>
             Effect.gen(function* () {
+              // SingleRunner + SqlRunnerStorage use session advisory locks and
+              // prepared statements, which require Neon's direct (session) URL
+              // rather than PgBouncer transaction pooling.
               const connectionString: Redacted.Redacted =
-                yield* db.pooledConnectionString
+                yield* db.directConnectionString
               // Process-lifetime scope: released when the container exits.
               const scope = yield* Scope.make()
               const services = yield* Layer.buildWithScope(
@@ -84,7 +88,7 @@ export default ControlPlaneContainer.make(
             (cause) =>
               new ControlPlaneWakeError({
                 trigger,
-                message: String(cause),
+                message: sanitizeErrorMessage(cause),
                 cause,
               }),
           ),

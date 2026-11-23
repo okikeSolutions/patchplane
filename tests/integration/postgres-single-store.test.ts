@@ -339,7 +339,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         if (winningDecisionExit === undefined) return
         const winningDecision = winningDecisionExit.value
 
-        // Replaying the winning decision is idempotent
+        // Replaying the winning decision by the same actor is idempotent
         const replayed = yield* store.recordDecision({
           decisionId: replayId,
           attemptId: winner.id,
@@ -348,6 +348,26 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
           actorId: winningDecision.actorId,
         })
         expect(replayed.id).toBe(winningDecision.id)
+
+        // A different actor submitting even the same kind must fail as a conflict
+        const otherActor = winningDecision.actorId === actor1 ? actor2 : actor1
+        const replayByOtherActorId = yield* Schema.decodeEffect(DecisionId)(
+          'decision-replay-other-actor',
+        )
+        const actorConflict = yield* Effect.flip(
+          store.recordDecision({
+            decisionId: replayByOtherActorId,
+            attemptId: winner.id,
+            proposalVersion: proposalV1,
+            kind: winningDecision.kind,
+            actorId: otherActor,
+          }),
+        )
+        expect(actorConflict._tag).toBe('ConflictingDecisionError')
+        if (actorConflict._tag === 'ConflictingDecisionError') {
+          expect(actorConflict.existingActorId).toBe(winningDecision.actorId)
+          expect(actorConflict.requestedActorId).toBe(otherActor)
+        }
 
         // 5. State machine + idempotent transition replay (separate CR so the
         //    active-attempt index above does not interfere)

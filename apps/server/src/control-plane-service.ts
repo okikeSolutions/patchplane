@@ -10,6 +10,7 @@ import {
   type ChangeRequestId,
   PersistenceError,
   PrepareDigest,
+  sanitizeErrorMessage,
   StepRunnerError,
   type VerificationAttemptId,
 } from '@patchplane/domain'
@@ -34,7 +35,7 @@ export const DefaultVerificationStepRunnerLayer = Layer.succeed(
             (cause) =>
               new StepRunnerError({
                 operation: 'VerificationStepRunner.runPrepare',
-                message: String(cause),
+                message: sanitizeErrorMessage(cause),
                 cause,
               }),
           ),
@@ -63,7 +64,7 @@ export const wakeControlPlane = Effect.fn('Server.wakeControlPlane')(
         (cause) =>
           new PersistenceError({
             operation: 'Server.wakeControlPlane',
-            message: String(cause),
+            message: sanitizeErrorMessage(cause),
             cause,
           }),
       ),
@@ -75,7 +76,7 @@ export const wakeControlPlane = Effect.fn('Server.wakeControlPlane')(
         (cause) =>
           new PersistenceError({
             operation: 'Server.wakeControlPlane',
-            message: String(cause),
+            message: sanitizeErrorMessage(cause),
             cause,
           }),
       ),

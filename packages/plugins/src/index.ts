@@ -12,6 +12,7 @@ export {
   applySqlMigrations,
   DEFAULT_POSTGRES_MIGRATIONS_DIR,
   loadSqlMigrations,
+  splitSqlStatements,
   type SqlMigrationFile,
 } from './postgres/migrator'
 export {

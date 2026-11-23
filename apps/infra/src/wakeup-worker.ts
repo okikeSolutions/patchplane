@@ -1,4 +1,5 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
+import { sanitizeErrorMessage } from '@patchplane/domain'
 import { Effect } from 'effect'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
 import {
@@ -17,7 +18,7 @@ export const runScheduledWakeup = Effect.fn('WakeupWorker.cron')(function* <
         ? cause
         : new ControlPlaneWakeError({
             trigger: 'cron',
-            message: String(cause),
+            message: sanitizeErrorMessage(cause),
             cause,
           }),
     ),

@@ -9,12 +9,14 @@ export interface PostgresSingleStoreConfig {
   readonly url: Redacted.Redacted
   readonly maxConnections?: number
   readonly entityMailboxPollIntervalMs?: number
+  readonly prepare?: boolean
 }
 
 export const makePostgresSqlLayer = (config: PostgresSingleStoreConfig) =>
   PgClient.layer({
     url: config.url,
     maxConnections: config.maxConnections ?? 10,
+    ...(config.prepare !== undefined ? { prepare: config.prepare } : {}),
   })
 
 export const makePostgresSingleStoreClusterLayer = (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import {
   CONTROL_PLANE_UNAVAILABLE,
   ControlPlaneWakeError,
@@ -13,6 +13,13 @@ import {
   rejectHttpWake,
   runScheduledWakeup,
 } from '../../apps/infra/src/wakeup-worker'
+import { VerificationAttemptWorkflowPayload } from '../../packages/core/src/index'
+import {
+  AttemptGeneration,
+  ProposalVersion,
+  sanitizeErrorMessage,
+} from '../../packages/domain/src/index'
+import { splitSqlStatements } from '../../packages/plugins/src/index'
 
 const readJsonBody = (response: { readonly body: unknown }): string => {
   const body = response.body
@@ -118,4 +125,89 @@ describe('ControlPlaneHost and WakeupWorker error visibility', () => {
         expect(unhealthyFailure.message).toContain('ok=false')
       }),
   )
+
+  it.effect(
+    'sanitizes URI credentials, password query params, and bearer tokens in error messages',
+    () =>
+      Effect.gen(function* () {
+        const sanitized = sanitizeErrorMessage(
+          new Error(
+            'connect failed postgresql://neondb_owner:super-secret@ep-demo.neon.tech/neondb?password=leaked-pwd&sslmode=require with Bearer tok_secret_123',
+          ),
+        )
+        expect(sanitized).not.toContain('super-secret')
+        expect(sanitized).not.toContain('leaked-pwd')
+        expect(sanitized).not.toContain('tok_secret_123')
+        expect(sanitized).toContain('postgresql://<redacted>@ep-demo.neon.tech')
+        expect(sanitized).toContain('Bearer <redacted>')
+
+        const wakeFailure = yield* Effect.flip(
+          wakeControlPlaneContainer(
+            {
+              start: () =>
+                Effect.fail(
+                  'failed connecting to postgres://admin:p4ssw0rd@db.internal:5432/app',
+                ),
+              wake: (trigger) =>
+                Effect.succeed({
+                  ok: true,
+                  trigger,
+                  wokenAt: 0,
+                } satisfies ControlPlaneWakeResult),
+            },
+            'cron',
+          ),
+        )
+        expect(wakeFailure.message).not.toContain('p4ssw0rd')
+        expect(wakeFailure.message).toContain('postgres://<redacted>@')
+      }),
+  )
+
+  it.effect(
+    'enforces INT4 upper bounds and bounded workflow sleep durations at the schema boundary',
+    () =>
+      Effect.gen(function* () {
+        const overflowGen = yield* Effect.flip(
+          Schema.decodeEffect(AttemptGeneration)(2_147_483_648),
+        )
+        expect(overflowGen._tag).toBe('SchemaError')
+
+        const overflowProposal = yield* Effect.flip(
+          Schema.decodeEffect(ProposalVersion)(2_147_483_648),
+        )
+        expect(overflowProposal._tag).toBe('SchemaError')
+
+        const unboundedSleep = yield* Effect.flip(
+          Schema.decodeEffect(VerificationAttemptWorkflowPayload)({
+            attemptId: 'attempt-1',
+            changeRequestId: 'github:org/repo#1',
+            initialGeneration: 1,
+            waitDurationMs: 365 * 24 * 60 * 60 * 1000,
+          }),
+        )
+        expect(unboundedSleep._tag).toBe('SchemaError')
+      }),
+  )
+
+  it('splits PostgreSQL migration statements without breaking comments, strings, or dollar-quoted blocks', () => {
+    const statements = splitSqlStatements(`
+      -- leading comment; with semicolon
+      CREATE TABLE demo (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL DEFAULT 'semi;colon''quoted'
+      );
+      /* nested /* block; comment */ still comment; */
+      DO $mig$
+      BEGIN
+        PERFORM 1;
+        PERFORM 2;
+      END
+      $mig$;
+      -- trailing comment only;
+    `)
+    expect(statements).toHaveLength(2)
+    expect(statements[0]).toContain("DEFAULT 'semi;colon''quoted'")
+    expect(statements[1]).toContain('PERFORM 1;')
+    expect(statements[1]).toContain('PERFORM 2;')
+  })
 })
