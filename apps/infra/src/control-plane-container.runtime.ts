@@ -9,6 +9,8 @@ export default ControlPlaneContainer.make(
   {
     main: import.meta.url,
     runtime: 'bun',
+    instanceType: 'lite',
+    maxInstances: 1,
   },
   Effect.gen(function* () {
     const db = yield* Neon.Connect(PatchplaneDb)

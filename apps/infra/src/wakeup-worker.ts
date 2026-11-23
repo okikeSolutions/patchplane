@@ -15,7 +15,7 @@ export class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
   Effect.gen(function* () {
     const host = yield* ControlPlaneHost
 
-    yield* Cloudflare.Workers.cron('* * * * *', () =>
+    yield* Cloudflare.Workers.cron('*/15 * * * *', () =>
       host.getByName('primary').wake('cron').pipe(Effect.asVoid),
     )
 
