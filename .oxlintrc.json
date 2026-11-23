@@ -28,12 +28,7 @@
   },
   "overrides": [
     {
-      "files": [
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "apps/infra/src/stack.ts",
-        "apps/infra/src/wakeup-worker.ts"
-      ],
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
       "rules": {
         "effecttsgo/strict-effect-provide": "off"
       }

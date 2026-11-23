@@ -2,11 +2,13 @@ import { Context, type Effect } from 'effect'
 import type {
   AcceptanceDecision,
   ActiveAttemptConflictError,
+  ActorId,
   AttemptGeneration,
   AttemptNotFoundError,
   AttemptStatus,
   ChangeRequestId,
   ConflictingDecisionError,
+  DecisionId,
   DecisionKind,
   DeliveryId,
   PersistenceError,
@@ -45,11 +47,11 @@ export interface AcceptanceStoreService {
   >
 
   readonly recordDecision: (input: {
-    readonly decisionId: string
+    readonly decisionId: DecisionId
     readonly attemptId: VerificationAttemptId
     readonly proposalVersion: ProposalVersion
     readonly kind: DecisionKind
-    readonly actorId: string
+    readonly actorId: ActorId
   }) => Effect.Effect<
     AcceptanceDecision,
     ConflictingDecisionError | PersistenceError
@@ -67,15 +69,3 @@ export class AcceptanceStore extends Context.Service<
   AcceptanceStore,
   AcceptanceStoreService
 >()('@patchplane/core/AcceptanceStore') {}
-
-export interface VerificationStepRunnerService {
-  readonly runPrepare: (input: {
-    readonly attemptId: VerificationAttemptId
-    readonly changeRequestId: ChangeRequestId
-  }) => Effect.Effect<string, PersistenceError>
-}
-
-export class VerificationStepRunner extends Context.Service<
-  VerificationStepRunner,
-  VerificationStepRunnerService
->()('@patchplane/core/VerificationStepRunner') {}

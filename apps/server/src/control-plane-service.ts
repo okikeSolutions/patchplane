@@ -1,4 +1,4 @@
-import { Clock, Effect, Layer } from 'effect'
+import { Clock, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 import {
   AcceptanceStore,
@@ -8,6 +8,9 @@ import {
 } from '@patchplane/core'
 import {
   type ChangeRequestId,
+  PersistenceError,
+  PrepareDigest,
+  StepRunnerError,
   type VerificationAttemptId,
 } from '@patchplane/domain'
 import {
@@ -15,12 +18,27 @@ import {
   type PostgresSingleStoreConfig,
 } from '@patchplane/plugins'
 
+const HealthCheckRow = Schema.Struct({
+  ok: Schema.Literal(1),
+})
+
 export const DefaultVerificationStepRunnerLayer = Layer.succeed(
   VerificationStepRunner,
   VerificationStepRunner.of({
     runPrepare: Effect.fn('DefaultVerificationStepRunner.runPrepare')(
       function* ({ attemptId, changeRequestId }) {
-        return yield* Effect.succeed(`prepared:${changeRequestId}:${attemptId}`)
+        return yield* Schema.decodeEffect(PrepareDigest)(
+          `prepared:${changeRequestId}:${attemptId}`,
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StepRunnerError({
+                operation: 'VerificationStepRunner.runPrepare',
+                message: String(cause),
+                cause,
+              }),
+          ),
+        )
       },
     ),
   }),
@@ -31,19 +49,40 @@ export const makeControlPlaneSingleStoreLayer = (
   runnerLayer: Layer.Layer<VerificationStepRunner> = DefaultVerificationStepRunnerLayer,
 ) => {
   const clusterLayer = makePostgresSingleStoreClusterLayer(config)
-  const workflowLayer = VerificationAttemptWorkflowLayer.pipe(
-    Layer.provide(Layer.merge(clusterLayer, runnerLayer)),
+  return VerificationAttemptWorkflowLayer.pipe(
+    Layer.provideMerge(clusterLayer),
+    Layer.provideMerge(runnerLayer),
   )
-  return Layer.mergeAll(clusterLayer, runnerLayer, workflowLayer)
 }
 
 export const wakeControlPlane = Effect.fn('Server.wakeControlPlane')(
   function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ readonly ok: number }>`SELECT 1 AS ok`
+    const rows = yield* sql`SELECT 1 AS ok`.pipe(
+      Effect.mapError(
+        (cause) =>
+          new PersistenceError({
+            operation: 'Server.wakeControlPlane',
+            message: String(cause),
+            cause,
+          }),
+      ),
+    )
+    const decoded = yield* Schema.decodeUnknownEffect(HealthCheckRow)(
+      rows[0],
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PersistenceError({
+            operation: 'Server.wakeControlPlane',
+            message: String(cause),
+            cause,
+          }),
+      ),
+    )
     const wokenAt = yield* Clock.currentTimeMillis
     return {
-      ok: rows[0]?.ok === 1,
+      ok: decoded.ok === 1,
       wokenAt,
     }
   },

@@ -31,19 +31,11 @@ export const makePostgresSingleStoreClusterLayer = (
         config.entityMailboxPollIntervalMs ?? 200,
       ),
     },
-  }).pipe(Layer.provide(Layer.merge(sqlLayer, Digest.layerWebCrypto)))
+  }).pipe(Layer.provide(Digest.layerWebCrypto))
 
-  const workflowEngineLayer = ClusterWorkflowEngine.layer.pipe(
-    Layer.provide(runnerLayer),
-  )
-  const acceptanceStoreLayer = PostgresAcceptanceStoreLayer.pipe(
-    Layer.provide(sqlLayer),
-  )
-
-  return Layer.mergeAll(
-    sqlLayer,
-    runnerLayer,
-    workflowEngineLayer,
-    acceptanceStoreLayer,
+  return ClusterWorkflowEngine.layer.pipe(
+    Layer.provideMerge(runnerLayer),
+    Layer.provideMerge(PostgresAcceptanceStoreLayer),
+    Layer.provideMerge(sqlLayer),
   )
 }

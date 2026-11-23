@@ -1,12 +1,30 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
-import type { Effect } from 'effect'
+import type { RuntimeContext } from 'alchemy/RuntimeContext'
+import { type Effect, Schema } from 'effect'
+
+export interface ControlPlaneWakeResult {
+  readonly ok: boolean
+  readonly trigger: string
+  readonly wokenAt: number
+}
+
+export class ControlPlaneWakeError extends Schema.TaggedError<
+  ControlPlaneWakeError,
+  { readonly brand: unique symbol }
+>()('ControlPlaneWakeError', {
+  trigger: Schema.NonEmptyString,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 export type ControlPlaneContainerShape = {
-  readonly wake: (trigger: string) => Effect.Effect<{
-    readonly ok: boolean
-    readonly trigger: string
-    readonly wokenAt: number
-  }>
+  readonly wake: (
+    trigger: string,
+  ) => Effect.Effect<
+    ControlPlaneWakeResult,
+    ControlPlaneWakeError,
+    RuntimeContext
+  >
 }
 
 export class ControlPlaneContainer extends Cloudflare.Containers.Container<

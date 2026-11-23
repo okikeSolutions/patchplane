@@ -9,11 +9,14 @@ import type {
 
 export {
   AcceptanceStore,
-  VerificationStepRunner,
   type AcceptanceStoreService,
   type DeliveryReceiptResult,
-  type VerificationStepRunnerService,
 } from './services/acceptance-store'
+
+export {
+  VerificationStepRunner,
+  type VerificationStepRunnerService,
+} from './services/verification-step-runner'
 
 export {
   VerificationAttemptWorkflow,

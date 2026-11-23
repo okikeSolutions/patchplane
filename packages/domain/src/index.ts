@@ -13,6 +13,17 @@ export type VerificationAttemptId = typeof VerificationAttemptId.Type
 export const DeliveryId = Schema.NonEmptyString.pipe(Schema.brand('DeliveryId'))
 export type DeliveryId = typeof DeliveryId.Type
 
+export const DecisionId = Schema.NonEmptyString.pipe(Schema.brand('DecisionId'))
+export type DecisionId = typeof DecisionId.Type
+
+export const ActorId = Schema.NonEmptyString.pipe(Schema.brand('ActorId'))
+export type ActorId = typeof ActorId.Type
+
+export const PrepareDigest = Schema.NonEmptyString.pipe(
+  Schema.brand('PrepareDigest'),
+)
+export type PrepareDigest = typeof PrepareDigest.Type
+
 export const ProposalVersion = Schema.Number.check(
   Schema.isInt(),
   Schema.isGreaterThan(0),
@@ -44,7 +55,9 @@ export const ChangeRequest = Schema.Struct({
   repositoryId: Schema.NonEmptyString,
   headSha: Schema.NonEmptyString,
 })
-export type ChangeRequest = typeof ChangeRequest.Type
+export interface ChangeRequest extends Schema.Schema.Type<
+  typeof ChangeRequest
+> {}
 
 export const VerificationAttempt = Schema.Struct({
   id: VerificationAttemptId,
@@ -52,16 +65,20 @@ export const VerificationAttempt = Schema.Struct({
   status: AttemptStatus,
   generation: AttemptGeneration,
 })
-export type VerificationAttempt = typeof VerificationAttempt.Type
+export interface VerificationAttempt extends Schema.Schema.Type<
+  typeof VerificationAttempt
+> {}
 
 export const AcceptanceDecision = Schema.Struct({
-  id: Schema.NonEmptyString,
+  id: DecisionId,
   attemptId: VerificationAttemptId,
   proposalVersion: ProposalVersion,
   kind: DecisionKind,
-  actorId: Schema.NonEmptyString,
+  actorId: ActorId,
 })
-export type AcceptanceDecision = typeof AcceptanceDecision.Type
+export interface AcceptanceDecision extends Schema.Schema.Type<
+  typeof AcceptanceDecision
+> {}
 
 export class AttemptNotFoundError extends Schema.TaggedError<
   AttemptNotFoundError,
@@ -101,6 +118,16 @@ export class PersistenceError extends Schema.TaggedError<
 >()('PersistenceError', {
   operation: Schema.NonEmptyString,
   message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
+
+export class StepRunnerError extends Schema.TaggedError<
+  StepRunnerError,
+  { readonly brand: unique symbol }
+>()('StepRunnerError', {
+  operation: Schema.NonEmptyString,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
 }) {}
 
 export class MigrationFailureError extends Schema.TaggedError<
@@ -109,4 +136,5 @@ export class MigrationFailureError extends Schema.TaggedError<
 >()('MigrationFailureError', {
   migrationName: Schema.NonEmptyString,
   reason: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect()),
 }) {}

@@ -1,11 +1,8 @@
-import { resolve } from 'node:path'
 import * as Cloudflare from '@alchemy.run/cloudflare'
 import * as Neon from '@alchemy.run/neon'
+import { DEFAULT_POSTGRES_MIGRATIONS_DIR } from '@patchplane/plugins'
 
-export const POSTGRES_MIGRATIONS_DIR = resolve(
-  import.meta.dirname,
-  '../../../packages/plugins/src/postgres/migrations',
-)
+export const POSTGRES_MIGRATIONS_DIR = DEFAULT_POSTGRES_MIGRATIONS_DIR
 
 export const PatchplaneDb = Neon.Project('PatchplaneDb', {
   pgVersion: 17,

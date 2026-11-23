@@ -26,11 +26,3 @@ CREATE TABLE IF NOT EXISTS acceptance_decisions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_acceptance_decisions_attempt_proposal UNIQUE (attempt_id, proposal_version)
 );
-
-CREATE TABLE IF NOT EXISTS inbox_items (
-  id TEXT PRIMARY KEY,
-  attempt_id TEXT NOT NULL REFERENCES verification_attempts (id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,
-  status TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);

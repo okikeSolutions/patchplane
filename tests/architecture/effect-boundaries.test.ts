@@ -79,8 +79,49 @@ function isAstNode(value: unknown): value is AstNode {
   )
 }
 
-function scanBoundaryUsages(file: string, source: string): BoundaryUsageCounts {
+function collectEffectNamespaces(program: AstNode): ReadonlySet<string> {
+  const namespaces = new Set<string>()
+  const body = Array.isArray(program.body) ? program.body : []
+  for (const statement of body) {
+    if (!isAstNode(statement) || statement.type !== 'ImportDeclaration')
+      continue
+    if (!isAstNode(statement.source)) continue
+    const source = statement.source.value
+    if (source !== 'effect' && source !== 'effect/Effect') continue
+    const specifiers = Array.isArray(statement.specifiers)
+      ? statement.specifiers
+      : []
+    for (const specifier of specifiers) {
+      if (!isAstNode(specifier) || !isAstNode(specifier.local)) continue
+      const localName = String(specifier.local.name)
+      if (
+        source === 'effect/Effect' &&
+        (specifier.type === 'ImportNamespaceSpecifier' ||
+          specifier.type === 'ImportDefaultSpecifier')
+      ) {
+        namespaces.add(localName)
+      } else if (
+        source === 'effect' &&
+        specifier.type === 'ImportSpecifier' &&
+        isAstNode(specifier.imported) &&
+        specifier.imported.name === 'Effect'
+      ) {
+        namespaces.add(localName)
+      }
+    }
+  }
+  return namespaces
+}
+
+export function scanBoundaryUsages(
+  file: string,
+  source: string,
+): BoundaryUsageCounts {
   const { program } = parseAst(file, source)
+  const root: unknown = program
+  const effectNamespaces = isAstNode(root)
+    ? collectEffectNamespaces(root)
+    : new Set<string>()
   const counts = {
     'runtime-entry': 0,
     'try-promise': 0,
@@ -129,15 +170,18 @@ function scanBoundaryUsages(file: string, source: string): BoundaryUsageCounts {
             ? String(callee.object.name)
             : undefined
 
-        if (objName === 'Effect' && prop === 'promise') {
+        const isEffectNamespace =
+          objName !== undefined && effectNamespaces.has(objName)
+
+        if (isEffectNamespace && prop === 'promise') {
           counts.effectPromiseCalls += 1
-        } else if (objName === 'Effect' && prop === 'tryPromise') {
+        } else if (isEffectNamespace && prop === 'tryPromise') {
           counts['try-promise'] += 1
         } else if (RUNTIME_NAMES.has(prop)) {
           counts['runtime-entry'] += 1
         } else if (objName === 'Promise' && PROMISE_STATICS.has(prop)) {
           counts['native-promise'] += 1
-        } else if (objName !== 'Effect' && PROMISE_CHAINS.has(prop)) {
+        } else if (!isEffectNamespace && PROMISE_CHAINS.has(prop)) {
           counts['native-promise'] += 1
         }
       } else if (
@@ -160,7 +204,6 @@ function scanBoundaryUsages(file: string, source: string): BoundaryUsageCounts {
     }
   }
 
-  const root: unknown = program
   if (isAstNode(root)) {
     visit(root, undefined)
   }
@@ -297,5 +340,27 @@ describe('V2 Effect boundary registry', () => {
     expect(errors).toEqual([
       'packages/core/src/index.ts: stale try-promise allowance (found 0, registered 1)',
     ])
+  })
+
+  it('allows Effect.catch and aliased Effect namespace catch while flagging promise.catch', () => {
+    const effectCatchCounts = scanBoundaryUsages(
+      'sample-effect.ts',
+      `
+        import { Effect as E } from 'effect'
+        import * as Fx from 'effect/Effect'
+        export const a = E.succeed(1).pipe(E.catch(() => E.succeed(2)))
+        export const b = Fx.succeed(1).pipe(Fx.catch(() => Fx.succeed(2)))
+      `,
+    )
+    expect(effectCatchCounts['native-promise']).toBe(0)
+
+    const promiseCatchCounts = scanBoundaryUsages(
+      'sample-promise.ts',
+      `
+        export const run = (value: { catch: (fn: () => void) => void }) =>
+          value.catch(() => {})
+      `,
+    )
+    expect(promiseCatchCounts['native-promise']).toBe(1)
   })
 })

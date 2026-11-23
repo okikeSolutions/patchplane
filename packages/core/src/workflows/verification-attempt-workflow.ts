@@ -4,14 +4,14 @@ import {
   AttemptGeneration,
   ChangeRequestId,
   PersistenceError,
+  PrepareDigest,
   StaleAttemptOwnershipError,
+  StepRunnerError,
   VerificationAttempt,
   VerificationAttemptId,
 } from '@patchplane/domain'
-import {
-  AcceptanceStore,
-  VerificationStepRunner,
-} from '../services/acceptance-store'
+import { AcceptanceStore } from '../services/acceptance-store'
+import { VerificationStepRunner } from '../services/verification-step-runner'
 
 export const VerificationAttemptWorkflowPayload = Schema.Struct({
   attemptId: VerificationAttemptId,
@@ -22,19 +22,22 @@ export const VerificationAttemptWorkflowPayload = Schema.Struct({
     Schema.isGreaterThanOrEqualTo(0),
   ),
 })
-export type VerificationAttemptWorkflowPayload =
-  typeof VerificationAttemptWorkflowPayload.Type
+export interface VerificationAttemptWorkflowPayload extends Schema.Schema.Type<
+  typeof VerificationAttemptWorkflowPayload
+> {}
 
 export const VerificationAttemptWorkflowResult = Schema.Struct({
   attempt: VerificationAttempt,
-  prepareDigest: Schema.NonEmptyString,
+  prepareDigest: PrepareDigest,
 })
-export type VerificationAttemptWorkflowResult =
-  typeof VerificationAttemptWorkflowResult.Type
+export interface VerificationAttemptWorkflowResult extends Schema.Schema.Type<
+  typeof VerificationAttemptWorkflowResult
+> {}
 
 export const VerificationAttemptWorkflowError = Schema.Union([
   StaleAttemptOwnershipError,
   PersistenceError,
+  StepRunnerError,
 ])
 
 export const VerificationAttemptWorkflow = Workflow.make(
@@ -47,34 +50,33 @@ export const VerificationAttemptWorkflow = Workflow.make(
   },
 )
 
-const PrepareAttemptResult = Schema.Struct({
-  attempt: VerificationAttempt,
-  prepareDigest: Schema.NonEmptyString,
-})
-
 export const VerificationAttemptWorkflowLayer =
   VerificationAttemptWorkflow.toLayer(
     Effect.fn('VerificationAttemptWorkflow.execute')(function* (payload) {
-      const prepared = yield* Activity.make({
-        name: 'prepare-attempt',
-        success: PrepareAttemptResult,
+      const running = yield* Activity.make({
+        name: 'mark-attempt-running',
+        success: VerificationAttempt,
         error: VerificationAttemptWorkflowError,
         execute: Effect.gen(function* () {
           const store = yield* AcceptanceStore
-          const runner = yield* VerificationStepRunner
-          const running = yield* store.advanceAttemptState({
+          return yield* store.advanceAttemptState({
             attemptId: payload.attemptId,
             expectedGeneration: payload.initialGeneration,
             nextStatus: 'running',
           })
-          const prepareDigest = yield* runner.runPrepare({
+        }),
+      })
+
+      const prepareDigest = yield* Activity.make({
+        name: 'prepare-attempt',
+        success: PrepareDigest,
+        error: VerificationAttemptWorkflowError,
+        execute: Effect.gen(function* () {
+          const runner = yield* VerificationStepRunner
+          return yield* runner.runPrepare({
             attemptId: payload.attemptId,
             changeRequestId: payload.changeRequestId,
           })
-          return {
-            attempt: running,
-            prepareDigest,
-          }
         }),
       })
 
@@ -94,7 +96,7 @@ export const VerificationAttemptWorkflowLayer =
           const store = yield* AcceptanceStore
           return yield* store.advanceAttemptState({
             attemptId: payload.attemptId,
-            expectedGeneration: prepared.attempt.generation,
+            expectedGeneration: running.generation,
             nextStatus: 'passed',
           })
         }),
@@ -102,7 +104,7 @@ export const VerificationAttemptWorkflowLayer =
 
       return {
         attempt: finalized,
-        prepareDigest: prepared.prepareDigest,
+        prepareDigest,
       }
     }),
   )

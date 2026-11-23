@@ -6,9 +6,7 @@ import ControlPlaneContainerLive from './control-plane-container.runtime'
 import { PatchplaneArtifacts, PatchplaneDb } from './resources'
 import { WakeupWorker } from './wakeup-worker'
 
-const BaseProviders = Neon.providers().pipe(
-  Layer.provideMerge(Cloudflare.providers()),
-)
+const BaseProviders = Layer.merge(Neon.providers(), Cloudflare.providers())
 
 export const PatchplaneV2Stack = Alchemy.Stack(
   'patchplane-v2',
@@ -27,5 +25,6 @@ export const PatchplaneV2Stack = Alchemy.Stack(
       artifactsBucketName: artifacts.bucketName,
       wakeupWorkerUrl: worker.url,
     }
+    // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Alchemy stack entry point
   }).pipe(Effect.provide(ControlPlaneContainerLive)),
 )

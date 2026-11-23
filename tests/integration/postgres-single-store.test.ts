@@ -1,5 +1,18 @@
+import { BunFileSystem } from '@effect/platform-bun'
 import { describe, expect, it } from '@effect/vitest'
-import { Duration, Effect, Exit, Layer, Option, Ref, Schema } from 'effect'
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Schema,
+} from 'effect'
 import * as Config from 'effect/Config'
 import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
@@ -14,10 +27,14 @@ import {
   VerificationStepRunner,
 } from '../../packages/core/src/index'
 import {
+  ActorId,
   AttemptGeneration,
   ChangeRequestId,
+  DecisionId,
   DeliveryId,
+  PrepareDigest,
   ProposalVersion,
+  StepRunnerError,
   VerificationAttemptId,
 } from '../../packages/domain/src/index'
 import {
@@ -66,14 +83,26 @@ const resetDatabase = Effect.gen(function* () {
   yield* sql.unsafe('CREATE SCHEMA public')
 })
 
+function extractFailureTag<A, E extends { readonly _tag: string }>(
+  exit: Exit.Exit<A, E>,
+): string | undefined {
+  if (!Exit.isFailure(exit)) return undefined
+  const error = Cause.findErrorOption(exit.cause)
+  return Option.isSome(error) ? error.value._tag : undefined
+}
+
 describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', () => {
   it.live(
     'applies committed SQL migrations idempotently and fails closed on invalid or rewritten migrations',
     () =>
       Effect.gen(function* () {
         yield* resetDatabase
-        const committed = yield* loadSqlMigrations()
-        expect(committed.length).toBeGreaterThanOrEqual(1)
+        const committed = yield* loadSqlMigrations().pipe(
+          Effect.provide(BunFileSystem.layer),
+        )
+        const firstMigration = committed[0]
+        expect(firstMigration).toBeDefined()
+        if (firstMigration === undefined) return
 
         const firstRun = yield* applySqlMigrations(committed)
         expect(firstRun).toEqual(committed.map((entry) => entry.name))
@@ -103,7 +132,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         const rewrittenFailure = yield* Effect.flip(
           applySqlMigrations([
             {
-              ...committed[0]!,
+              ...firstMigration,
               sha256: 'tampered-checksum',
             },
           ]),
@@ -115,11 +144,13 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
   )
 
   it.live(
-    'enforces competing claims, duplicate deliveries, stale ownership fencing, and conflicting decisions on real Postgres',
+    'enforces competing claims, duplicate deliveries, stale ownership fencing, conflicting decisions, and interrupted transactions on real Postgres',
     () =>
       Effect.gen(function* () {
         yield* resetDatabase
-        const committed = yield* loadSqlMigrations()
+        const committed = yield* loadSqlMigrations().pipe(
+          Effect.provide(BunFileSystem.layer),
+        )
         yield* applySqlMigrations(committed)
 
         const store = yield* AcceptanceStore
@@ -157,8 +188,25 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         const conflicts = claimExits.filter(Exit.isFailure)
         expect(winners).toHaveLength(1)
         expect(conflicts).toHaveLength(7)
+        for (const conflict of conflicts) {
+          expect(extractFailureTag(conflict)).toBe('ActiveAttemptConflictError')
+        }
 
-        const winner = winners[0]!.value
+        const firstWinner = winners[0]
+        if (firstWinner === undefined) return
+        const winner = firstWinner.value
+
+        // Duplicate primary key on a DIFFERENT CR must fail with PersistenceError, not ActiveAttemptConflictError
+        const otherCrId = yield* Schema.decodeEffect(ChangeRequestId)(
+          'github:okikeSolutions/patchplane#999',
+        )
+        const duplicatePkFailure = yield* Effect.flip(
+          store.claimAttempt({
+            attemptId: winner.id,
+            changeRequestId: otherCrId,
+          }),
+        )
+        expect(duplicatePkFailure._tag).toBe('PersistenceError')
 
         // 3. Stale ownership fencing (5 concurrent transitions at generation 1)
         const gen1 = yield* Schema.decodeEffect(AttemptGeneration)(1)
@@ -177,29 +225,41 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         const advancedWinners = advanceExits.filter(Exit.isSuccess)
         const staleRejections = advanceExits.filter(Exit.isFailure)
         expect(advancedWinners).toHaveLength(1)
-        expect(advancedWinners[0]!.value.generation).toBe(2)
+        expect(advancedWinners[0]?.value.generation).toBe(2)
         expect(staleRejections).toHaveLength(4)
+        for (const stale of staleRejections) {
+          expect(extractFailureTag(stale)).toBe('StaleAttemptOwnershipError')
+        }
 
         // 4. Conflicting decisions on same (attemptId, proposalVersion)
         const proposalV1 = yield* Schema.decodeEffect(ProposalVersion)(1)
+        const approveId =
+          yield* Schema.decodeEffect(DecisionId)('decision-approve')
+        const rejectId =
+          yield* Schema.decodeEffect(DecisionId)('decision-reject')
+        const replayId =
+          yield* Schema.decodeEffect(DecisionId)('decision-replay')
+        const actor1 = yield* Schema.decodeEffect(ActorId)('workos:user-1')
+        const actor2 = yield* Schema.decodeEffect(ActorId)('workos:user-2')
+
         const decisionExits = yield* Effect.all(
           [
             Effect.exit(
               store.recordDecision({
-                decisionId: 'decision-approve',
+                decisionId: approveId,
                 attemptId: winner.id,
                 proposalVersion: proposalV1,
                 kind: 'approve',
-                actorId: 'workos:user-1',
+                actorId: actor1,
               }),
             ),
             Effect.exit(
               store.recordDecision({
-                decisionId: 'decision-reject',
+                decisionId: rejectId,
                 attemptId: winner.id,
                 proposalVersion: proposalV1,
                 kind: 'reject',
-                actorId: 'workos:user-2',
+                actorId: actor2,
               }),
             ),
           ],
@@ -209,17 +269,55 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         const decisionConflicts = decisionExits.filter(Exit.isFailure)
         expect(decisionWins).toHaveLength(1)
         expect(decisionConflicts).toHaveLength(1)
+        const firstConflict = decisionConflicts[0]
+        expect(firstConflict).toBeDefined()
+        if (firstConflict !== undefined) {
+          expect(extractFailureTag(firstConflict)).toBe(
+            'ConflictingDecisionError',
+          )
+        }
+
+        const winningDecisionExit = decisionWins[0]
+        if (winningDecisionExit === undefined) return
+        const winningDecision = winningDecisionExit.value
 
         // Replaying the winning decision is idempotent
-        const winningDecision = decisionWins[0]!.value
         const replayed = yield* store.recordDecision({
-          decisionId: 'decision-replay',
+          decisionId: replayId,
           attemptId: winner.id,
           proposalVersion: proposalV1,
           kind: winningDecision.kind,
           actorId: winningDecision.actorId,
         })
         expect(replayed.id).toBe(winningDecision.id)
+
+        // 5. Interrupted transaction rolls back completely without partial writes
+        const sql = yield* SqlClient.SqlClient
+        const insertedInTx = yield* Deferred.make<void>()
+        const interruptedDelivery = yield* Schema.decodeEffect(DeliveryId)(
+          'delivery-interrupted-tx',
+        )
+        const txFiber = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* store.recordDeliveryReceipt({
+                deliveryId: interruptedDelivery,
+                changeRequestId,
+              })
+              yield* Deferred.succeed(insertedInTx, undefined)
+              return yield* Effect.never
+            }),
+          )
+          .pipe(Effect.forkScoped)
+
+        yield* Deferred.await(insertedInTx)
+        yield* Fiber.interrupt(txFiber)
+
+        const afterInterrupt = yield* store.recordDeliveryReceipt({
+          deliveryId: interruptedDelivery,
+          changeRequestId,
+        })
+        expect(afterInterrupt.inserted).toBe(true)
       }).pipe(Effect.provide(makeTestControlPlaneLayer())),
     20_000,
   )
@@ -228,13 +326,16 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
     'persists domain state and ClusterWorkflowEngine journal in one Postgres DB and resumes after container sleep/restart without duplicating side effects',
     () =>
       Effect.gen(function* () {
-        yield* resetDatabase.pipe(Effect.provide(makeTestPostgresSqlLayer()))
-        const committed = yield* loadSqlMigrations()
-        yield* applySqlMigrations(committed).pipe(
-          Effect.provide(makeTestPostgresSqlLayer()),
-        )
+        yield* Effect.gen(function* () {
+          yield* resetDatabase
+          const committed = yield* loadSqlMigrations().pipe(
+            Effect.provide(BunFileSystem.layer),
+          )
+          yield* applySqlMigrations(committed)
+        }).pipe(Effect.provide(makeTestPostgresSqlLayer()))
 
         const prepareCallsRef = yield* Ref.make(0)
+        const prepareCompleted = yield* Deferred.make<void>()
         const countingRunnerLayer = Layer.succeed(
           VerificationStepRunner,
           VerificationStepRunner.of({
@@ -245,7 +346,20 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
                 prepareCallsRef,
                 (current) => current + 1,
               )
-              return `prepare-run-${count}-${attemptId}`
+              const digest = yield* Schema.decodeEffect(PrepareDigest)(
+                `prepare-run-${count}-${attemptId}`,
+              ).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new StepRunnerError({
+                      operation: 'TestRunner.runPrepare',
+                      message: String(cause),
+                      cause,
+                    }),
+                ),
+              )
+              yield* Deferred.succeed(prepareCompleted, undefined)
+              return digest
             }),
           }),
         )
@@ -261,7 +375,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
           makeTestControlPlaneLayer(countingRunnerLayer)
 
         // Container Boot #1 (scoped): claim attempt, execute workflow with durable sleep,
-        // verify prepare-attempt + SQL journal rows, then close scope to simulate container sleep/restart
+        // await deterministic prepare signal + SQL journal rows, then close scope to simulate container sleep/restart
         const executionId = yield* Effect.scoped(
           Effect.gen(function* () {
             const started = yield* claimAndStartAttempt({
@@ -270,24 +384,37 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
               waitDurationMs: 1_200,
             })
 
-            const store = yield* AcceptanceStore
-            for (let tick = 0; tick < 50; tick += 1) {
-              const current = yield* store.findAttemptById(attemptId)
-              if (current.status === 'running') break
-              yield* Effect.sleep(Duration.millis(100))
-            }
+            yield* Deferred.await(prepareCompleted).pipe(
+              Effect.timeout(Duration.seconds(10)),
+            )
+
+            // Wait for prepare-attempt activity reply to flush into cluster_replies
+            const sql = yield* SqlClient.SqlClient
+            yield* Effect.gen(function* () {
+              const messages = yield* sql<{ readonly count: string }>`
+                SELECT COUNT(*)::text AS count FROM cluster_messages
+              `
+              const replies = yield* sql<{ readonly count: string }>`
+                SELECT COUNT(*)::text AS count FROM cluster_replies
+              `
+              return (
+                Number(messages[0]?.count ?? '0') > 0 &&
+                Number(replies[0]?.count ?? '0') > 0
+              )
+            }).pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced(Duration.millis(50)),
+                until: (ready) => ready,
+              }),
+              Effect.timeout(Duration.seconds(5)),
+            )
 
             expect(yield* Ref.get(prepareCallsRef)).toBe(1)
 
-            const sql = yield* SqlClient.SqlClient
-            const messages = yield* sql<{ readonly count: string }>`
-              SELECT COUNT(*)::text AS count FROM cluster_messages
-            `
-            const replies = yield* sql<{ readonly count: string }>`
-              SELECT COUNT(*)::text AS count FROM cluster_replies
-            `
-            expect(Number(messages[0]?.count ?? '0')).toBeGreaterThan(0)
-            expect(Number(replies[0]?.count ?? '0')).toBeGreaterThan(0)
+            const store = yield* AcceptanceStore
+            const runningAttempt = yield* store.findAttemptById(attemptId)
+            expect(runningAttempt.status).toBe('running')
+            expect(runningAttempt.generation).toBe(2)
 
             return started.executionId
           }).pipe(Effect.provide(makeContainerLayer())),
@@ -302,22 +429,27 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
             const woke = yield* wakeControlPlane()
             expect(woke.ok).toBe(true)
 
-            let finalStatus: string = 'running'
-            for (let tick = 0; tick < 60; tick += 1) {
-              const polled =
-                yield* VerificationAttemptWorkflow.poll(executionId)
-              if (
-                Option.isSome(polled) &&
-                polled.value._tag === 'Complete' &&
-                polled.value.exit._tag === 'Success'
-              ) {
-                finalStatus = polled.value.exit.value.attempt.status
-                break
-              }
-              yield* Effect.sleep(Duration.millis(150))
-            }
+            const completed = yield* VerificationAttemptWorkflow.poll(
+              executionId,
+            ).pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced(Duration.millis(150)),
+                until: (polled) =>
+                  Option.isSome(polled) && polled.value._tag === 'Complete',
+              }),
+              Effect.timeout(Duration.seconds(10)),
+            )
 
-            expect(finalStatus).toBe('passed')
+            expect(Option.isSome(completed)).toBe(true)
+            if (
+              Option.isSome(completed) &&
+              completed.value._tag === 'Complete'
+            ) {
+              expect(completed.value.exit._tag).toBe('Success')
+              if (completed.value.exit._tag === 'Success') {
+                expect(completed.value.exit.value.attempt.status).toBe('passed')
+              }
+            }
 
             const store = yield* AcceptanceStore
             const finalAttempt = yield* store.findAttemptById(attemptId)
