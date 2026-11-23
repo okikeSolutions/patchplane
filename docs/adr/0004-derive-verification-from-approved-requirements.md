@@ -1,0 +1,9 @@
+# Derive verification from approved requirements
+
+Accepted during the V2 design interview on 2026-11-07. Independent verification includes checks derived independently from approved Acceptance Requirements. Rerunning existing repository checks is useful evidence but does not establish requirement coverage on its own. Bug fixes require a meaningful before/after Regression Demonstration where feasible. This adds verification work and baseline handling in exchange for challenging implementations that could pass self-authored but inadequate tests. Check-authoring authority, execution isolation and treatment of infeasible comparisons remain open decisions.
+
+Q10 and Q15, answered on 2026-11-22, resolve check-authoring authority and infeasible comparisons. A separate verifier session may inspect the candidate and create checks in an isolated verification workspace. It cannot modify the submitted implementation or approved requirements. A discovered fix becomes a separate proposal handed to an implementation agent. Session separation alone does not establish independent verification.
+
+When a meaningful before/after demonstration is infeasible, record the attempted comparison and the reason. The maintainer may approve alternative evidence or explicitly waive the requirement; the limitation remains in the report. The verifier cannot grant that waiver or report a successful Regression Demonstration. The technical execution-isolation mechanism remains to be established.
+
+Updated on 2026-11-23: add a first-class Derived Check Challenge action in the Decision Inbox so a maintainer can flag a defective verifier-authored check and trigger check regeneration without recording a Verification Waiver against the underlying Acceptance Requirement. Maintainers may also promote useful derived checks into the repository suite.
