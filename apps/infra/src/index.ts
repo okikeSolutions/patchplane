@@ -5,6 +5,7 @@ export { ControlPlaneHost } from './control-plane-host'
 export {
   PatchplaneArtifacts,
   PatchplaneDb,
+  PatchplaneVerificationSnapshot,
   POSTGRES_MIGRATIONS_DIR,
 } from './resources'
 export { PatchplaneV2Stack } from './stack'

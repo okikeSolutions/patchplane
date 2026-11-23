@@ -19,6 +19,51 @@ export {
 } from './services/verification-step-runner'
 
 export {
+  ArtifactStore,
+  type ArtifactStoreService,
+} from './services/artifact-store'
+
+export {
+  assertAllowedSandboxEnvKey,
+  buildAttemptSandboxLabels,
+  buildValidatedSandboxEnv,
+  MAX_MODEL_CREDENTIAL_TTL_MS,
+  PATCHPLANE_ATTEMPT_ID_LABEL,
+  PATCHPLANE_CHANGE_REQUEST_ID_LABEL,
+  PATCHPLANE_MANAGED_LABEL,
+  PATCHPLANE_PURPOSE_LABEL,
+  SANDBOX_ATTEMPT_ID_ENV,
+  SANDBOX_MODEL_GATEWAY_URL_ENV,
+  SANDBOX_MODEL_TOKEN_ENV,
+  type ShortLivedAttemptModelCredential,
+  type ValidatedSandboxEnv,
+} from './services/sandbox-credential-policy'
+
+export {
+  type QuarantineResult,
+  SandboxLifecycleStore,
+  type SandboxLifecycleStoreService,
+} from './services/sandbox-lifecycle-store'
+
+export {
+  type SandboxExecOutput,
+  SandboxProvider,
+  type SandboxProviderService,
+  type SandboxSummary,
+} from './services/sandbox-provider'
+
+export {
+  type CleanupPolicyOptions,
+  confirmSandboxDeletion,
+  DEFAULT_CLEANUP_POLL_INTERVAL_MS,
+  DEFAULT_CLEANUP_TIMEOUT_MS,
+  type IsolatedSandboxCheckResult,
+  type LeakReconciliationReport,
+  reconcileLeakedSandboxes,
+  runIsolatedCheckInSandbox,
+} from './workflows/sandbox-verification-workflow'
+
+export {
   VerificationAttemptWorkflow,
   VerificationAttemptWorkflowError,
   VerificationAttemptWorkflowLayer,
