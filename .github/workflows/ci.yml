@@ -18,6 +18,22 @@ jobs:
     name: Full repository gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: patchplane
+          POSTGRES_PASSWORD: patchplane
+          POSTGRES_DB: patchplane_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd="pg_isready -U patchplane -d patchplane_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PATCHPLANE_TEST_DATABASE_URL: postgresql://patchplane:patchplane@127.0.0.1:55432/patchplane_test
     steps:
       - uses: actions/checkout@v6
 

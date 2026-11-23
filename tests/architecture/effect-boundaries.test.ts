@@ -137,7 +137,7 @@ function scanBoundaryUsages(file: string, source: string): BoundaryUsageCounts {
           counts['runtime-entry'] += 1
         } else if (objName === 'Promise' && PROMISE_STATICS.has(prop)) {
           counts['native-promise'] += 1
-        } else if (PROMISE_CHAINS.has(prop)) {
+        } else if (objName !== 'Effect' && PROMISE_CHAINS.has(prop)) {
           counts['native-promise'] += 1
         }
       } else if (

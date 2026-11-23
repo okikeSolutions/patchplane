@@ -7,6 +7,22 @@ import type {
   VerificationAttemptId,
 } from '@patchplane/domain'
 
+export {
+  AcceptanceStore,
+  VerificationStepRunner,
+  type AcceptanceStoreService,
+  type DeliveryReceiptResult,
+  type VerificationStepRunnerService,
+} from './services/acceptance-store'
+
+export {
+  VerificationAttemptWorkflow,
+  VerificationAttemptWorkflowError,
+  VerificationAttemptWorkflowLayer,
+  VerificationAttemptWorkflowPayload,
+  VerificationAttemptWorkflowResult,
+} from './workflows/verification-attempt-workflow'
+
 export interface AttemptStoreService {
   readonly findById: (
     attemptId: VerificationAttemptId,

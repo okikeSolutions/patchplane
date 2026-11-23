@@ -1,16 +1,17 @@
 import { describe, expect, it } from '@effect/vitest'
-import {
-  AttemptNotFoundError,
-  ChangeRequestId,
-  type VerificationAttempt,
-  VerificationAttemptId,
-} from '../../packages/domain/src/index'
 import { Effect, Schema } from 'effect'
 import {
   resolveAttemptSummary,
   ServerAttemptStoreLayer,
 } from '../../apps/server/src/index'
 import { initialInboxModel, updateInboxModel } from '../../apps/web/src/index'
+import {
+  AttemptGeneration,
+  AttemptNotFoundError,
+  ChangeRequestId,
+  type VerificationAttempt,
+  VerificationAttemptId,
+} from '../../packages/domain/src/index'
 
 describe('V2 greenfield core smoke', () => {
   it.effect(
@@ -22,6 +23,7 @@ describe('V2 greenfield core smoke', () => {
         const attemptId = yield* Schema.decodeEffect(VerificationAttemptId)(
           'attempt-1',
         )
+        const generation = yield* Schema.decodeEffect(AttemptGeneration)(1)
         const attempts = new Map<VerificationAttemptId, VerificationAttempt>([
           [
             attemptId,
@@ -29,6 +31,7 @@ describe('V2 greenfield core smoke', () => {
               id: attemptId,
               changeRequestId,
               status: 'incomplete',
+              generation,
             },
           ],
         ])

@@ -15,6 +15,10 @@
     "fmt:check": "oxfmt --check .",
     "test": "vitest run",
     "test:architecture": "vitest run tests/architecture",
+    "test:postgres": "vitest run tests/integration/postgres-single-store.test.ts",
+    "infra:plan": "bun --cwd apps/infra alchemy plan --stage dev",
+    "infra:deploy": "bun --cwd apps/infra alchemy deploy --stage dev",
+    "infra:destroy": "bun --cwd apps/infra alchemy destroy --stage dev",
     "audit": "bun audit",
     "verify:fast": "bun run check:toolchain && bun run typecheck && bun run lint && bun run fmt:check && bun run test",
     "verify": "bun run verify:fast"

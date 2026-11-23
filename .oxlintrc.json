@@ -19,6 +19,7 @@
     "effecttsgo/missing-return-yield-star": "error",
     "effecttsgo/class-self-mismatch": "error",
     "effecttsgo/unstable-api-usage": "off",
+    "eslint/no-underscore-dangle": ["error", { "allow": ["_tag"] }],
     "patchplane/no-unregistered-promise-boundary": "error",
     "patchplane/no-detached-effect-fork": "error",
     "patchplane/no-untraced-effect-service-method": "error",
@@ -27,7 +28,12 @@
   },
   "overrides": [
     {
-      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "apps/infra/src/stack.ts",
+        "apps/infra/src/wakeup-worker.ts"
+      ],
       "rules": {
         "effecttsgo/strict-effect-provide": "off"
       }

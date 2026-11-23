@@ -88,6 +88,8 @@ function effectBindings() {
   const named = new Map()
 
   return {
+    namespaces,
+    named,
     importDeclaration(node) {
       if (!EFFECT_MODULES.has(node.source.value)) return
       for (const specifier of node.specifiers) {
@@ -285,7 +287,11 @@ const noUnregisteredPromiseBoundary = {
             node.callee.object.name === 'Promise' &&
             isUnshadowedGlobal(node.callee.object, context) &&
             PROMISE_STATIC_METHODS.has(prop)
-          const isPromiseChain = PROMISE_CHAIN_METHODS.has(prop)
+          const isEffectStatic =
+            node.callee.object.type === 'Identifier' &&
+            bindings.namespaces.has(node.callee.object.name)
+          const isPromiseChain =
+            !isEffectStatic && PROMISE_CHAIN_METHODS.has(prop)
           if (isPromiseStatic || isPromiseChain) {
             counts.nativePromise += 1
             if (counts.nativePromise > limits.nativePromise) {

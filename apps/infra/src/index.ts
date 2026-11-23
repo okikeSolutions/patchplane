@@ -1,15 +1,14 @@
-import type * as Cloudflare from '@alchemy.run/cloudflare'
-import type * as Daytona from '@alchemy.run/daytona'
-import type * as Neon from '@alchemy.run/neon'
-import type * as Alchemy from 'alchemy'
 import { Effect } from 'effect'
 
-export interface V2StackBindings {
-  readonly neonProject?: Neon.Project
-  readonly daytonaSnapshot?: Daytona.Snapshot
-  readonly cloudflareR2?: Cloudflare.R2.Bucket
-  readonly stackType?: typeof Alchemy.Stack
-}
+export { ControlPlaneContainer } from './control-plane-container'
+export { ControlPlaneHost } from './control-plane-host'
+export {
+  PatchplaneArtifacts,
+  PatchplaneDb,
+  POSTGRES_MIGRATIONS_DIR,
+} from './resources'
+export { PatchplaneV2Stack } from './stack'
+export { WakeupWorker } from './wakeup-worker'
 
 export const describeV2InfrastructurePlan = Effect.fn(
   'Infra.describeV2InfrastructurePlan',
@@ -18,6 +17,7 @@ export const describeV2InfrastructurePlan = Effect.fn(
     controlPlane: 'cloudflare-containers-bun',
     database: 'neon-postgresql-single-store',
     artifacts: 'cloudflare-r2',
+    wakeup: 'cloudflare-cron-worker',
     sandboxes: 'daytona-create-sandbox-binding',
   } as const)
 })

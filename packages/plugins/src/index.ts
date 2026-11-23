@@ -7,6 +7,19 @@ import {
   type VerificationAttemptId,
 } from '@patchplane/domain'
 
+export { PostgresAcceptanceStoreLayer } from './postgres/acceptance-store-pg'
+export {
+  applySqlMigrations,
+  DEFAULT_POSTGRES_MIGRATIONS_DIR,
+  loadSqlMigrations,
+  type SqlMigrationFile,
+} from './postgres/migrator'
+export {
+  makePostgresSingleStoreClusterLayer,
+  makePostgresSqlLayer,
+  type PostgresSingleStoreConfig,
+} from './postgres/workflow-runtime'
+
 export type PostgresClientConfig = PgClient.PgClientConfig
 
 export const makeInMemoryAttemptStoreLayer = (
