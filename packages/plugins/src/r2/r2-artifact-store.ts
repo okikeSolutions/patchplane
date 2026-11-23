@@ -1,6 +1,6 @@
 import { Effect, Layer } from 'effect'
 import * as Digest from 'effect/crypto/Digest'
-import { ArtifactStore } from '@patchplane/core'
+import { ArtifactStore, MAX_ARTIFACT_BYTES } from '@patchplane/core'
 import {
   ArtifactIntegrityError,
   type ArtifactRecord,
@@ -40,6 +40,62 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
     Effect.gen(function* () {
       const digest = yield* Digest.Digest
 
+      const getVerifiedArtifact = Effect.fn(
+        'R2ArtifactStore.getVerifiedArtifact',
+      )(function* ({
+        artifactKey,
+        expectedSha256,
+      }: Parameters<(typeof ArtifactStore.Service)['getVerifiedArtifact']>[0]) {
+        const stored = yield* bucket.get(artifactKey).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactStorageError({
+                operation: 'R2ArtifactStore.get',
+                artifactKey,
+                message: sanitizeErrorMessage(cause),
+              }),
+          ),
+        )
+
+        if (stored === null) {
+          return yield* new ArtifactIntegrityError({
+            artifactKey,
+            expectedSha256,
+            actualSha256: '<missing>',
+          })
+        }
+
+        const bytes = yield* stored.bytes().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ArtifactStorageError({
+                operation: 'R2ArtifactStore.getBytes',
+                artifactKey,
+                message: sanitizeErrorMessage(cause),
+              }),
+          ),
+        )
+
+        if (bytes.byteLength > MAX_ARTIFACT_BYTES) {
+          return yield* new ArtifactStorageError({
+            operation: 'R2ArtifactStore.getBytes',
+            artifactKey,
+            message: `Artifact size (${bytes.byteLength} bytes) exceeds limit (${MAX_ARTIFACT_BYTES} bytes)`,
+          })
+        }
+
+        const actualSha256 = yield* digest.digestHex(Digest.sha256, bytes)
+        if (actualSha256 !== expectedSha256) {
+          return yield* new ArtifactIntegrityError({
+            artifactKey,
+            expectedSha256,
+            actualSha256,
+          })
+        }
+
+        return bytes
+      })
+
       return ArtifactStore.of({
         putVerifiedArtifact: Effect.fn('R2ArtifactStore.putVerifiedArtifact')(
           function* ({
@@ -49,6 +105,14 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
             contentType,
             expectedSha256,
           }) {
+            if (body.byteLength > MAX_ARTIFACT_BYTES) {
+              return yield* new ArtifactStorageError({
+                operation: 'R2ArtifactStore.put',
+                artifactKey,
+                message: `Artifact size (${body.byteLength} bytes) exceeds limit (${MAX_ARTIFACT_BYTES} bytes)`,
+              })
+            }
+
             const inputSha256 = yield* digest.digestHex(Digest.sha256, body)
             if (inputSha256 !== expectedSha256) {
               return yield* new ArtifactIntegrityError({
@@ -73,55 +137,15 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
                       operation: 'R2ArtifactStore.put',
                       artifactKey,
                       message: sanitizeErrorMessage(cause),
-                      cause,
                     }),
                 ),
               )
 
             // Confirm integrity by reading back and hashing the persisted bytes.
-            const stored = yield* bucket.get(artifactKey).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactStorageError({
-                    operation: 'R2ArtifactStore.readback',
-                    artifactKey,
-                    message: sanitizeErrorMessage(cause),
-                    cause,
-                  }),
-              ),
-            )
-
-            if (stored === null) {
-              return yield* new ArtifactIntegrityError({
-                artifactKey,
-                expectedSha256,
-                actualSha256: '<missing>',
-              })
-            }
-
-            const persistedBytes = yield* stored.bytes().pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactStorageError({
-                    operation: 'R2ArtifactStore.readbackBytes',
-                    artifactKey,
-                    message: sanitizeErrorMessage(cause),
-                    cause,
-                  }),
-              ),
-            )
-
-            const actualSha256 = yield* digest.digestHex(
-              Digest.sha256,
-              persistedBytes,
-            )
-            if (actualSha256 !== expectedSha256) {
-              return yield* new ArtifactIntegrityError({
-                artifactKey,
-                expectedSha256,
-                actualSha256,
-              })
-            }
+            const persistedBytes = yield* getVerifiedArtifact({
+              artifactKey,
+              expectedSha256,
+            })
 
             return {
               artifactKey,
@@ -133,52 +157,7 @@ export const makeR2ArtifactStoreLayer = <EPut, EGet, EBody>(
           },
         ),
 
-        getVerifiedArtifact: Effect.fn('R2ArtifactStore.getVerifiedArtifact')(
-          function* ({ artifactKey, expectedSha256 }) {
-            const stored = yield* bucket.get(artifactKey).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactStorageError({
-                    operation: 'R2ArtifactStore.get',
-                    artifactKey,
-                    message: sanitizeErrorMessage(cause),
-                    cause,
-                  }),
-              ),
-            )
-
-            if (stored === null) {
-              return yield* new ArtifactIntegrityError({
-                artifactKey,
-                expectedSha256,
-                actualSha256: '<missing>',
-              })
-            }
-
-            const bytes = yield* stored.bytes().pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ArtifactStorageError({
-                    operation: 'R2ArtifactStore.getBytes',
-                    artifactKey,
-                    message: sanitizeErrorMessage(cause),
-                    cause,
-                  }),
-              ),
-            )
-
-            const actualSha256 = yield* digest.digestHex(Digest.sha256, bytes)
-            if (actualSha256 !== expectedSha256) {
-              return yield* new ArtifactIntegrityError({
-                artifactKey,
-                expectedSha256,
-                actualSha256,
-              })
-            }
-
-            return bytes
-          },
-        ),
+        getVerifiedArtifact,
       })
     }),
   )

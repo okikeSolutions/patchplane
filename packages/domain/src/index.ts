@@ -5,9 +5,33 @@ export const ChangeRequestId = Schema.NonEmptyString.pipe(
 )
 export type ChangeRequestId = typeof ChangeRequestId.Type
 
-export const VerificationAttemptId = Schema.NonEmptyString.pipe(
-  Schema.brand('VerificationAttemptId'),
-)
+const hasControlCharacter = (value: string): boolean => {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
+const isSafeRelativeIdentifier = (value: string): boolean =>
+  !hasControlCharacter(value) &&
+  !value.startsWith('/') &&
+  !value.endsWith('/') &&
+  !value.includes('\\') &&
+  !value
+    .split('/')
+    .some((segment) => segment === '' || segment === '.' || segment === '..')
+
+export const VerificationAttemptId = Schema.NonEmptyString.check(
+  Schema.makeFilter(
+    (value) => isSafeRelativeIdentifier(value) && !value.includes('/'),
+    {
+      title: 'SafeVerificationAttemptId',
+      description:
+        'Non-empty identifier without path separators or control characters',
+    },
+  ),
+).pipe(Schema.brand('VerificationAttemptId'))
 export type VerificationAttemptId = typeof VerificationAttemptId.Type
 
 export const DeliveryId = Schema.NonEmptyString.pipe(Schema.brand('DeliveryId'))
@@ -27,9 +51,13 @@ export type PrepareDigest = typeof PrepareDigest.Type
 export const SandboxId = Schema.NonEmptyString.pipe(Schema.brand('SandboxId'))
 export type SandboxId = typeof SandboxId.Type
 
-export const ArtifactKey = Schema.NonEmptyString.pipe(
-  Schema.brand('ArtifactKey'),
-)
+export const ArtifactKey = Schema.NonEmptyString.check(
+  Schema.makeFilter(isSafeRelativeIdentifier, {
+    title: 'SafeArtifactKey',
+    description:
+      'Relative artifact key without "..", leading "/", backslashes, or control characters',
+  }),
+).pipe(Schema.brand('ArtifactKey'))
 export type ArtifactKey = typeof ArtifactKey.Type
 
 export const Sha256Hex = Schema.String.check(
@@ -171,6 +199,27 @@ export interface SandboxRecord extends Schema.Schema.Type<
   typeof SandboxRecord
 > {}
 
+export const SandboxSummary = Schema.Struct({
+  sandboxId: SandboxId,
+  state: Schema.NonEmptyString,
+  labels: Schema.Record(Schema.String, Schema.String),
+})
+export interface SandboxSummary extends Schema.Schema.Type<
+  typeof SandboxSummary
+> {}
+
+export const SandboxExecOutput = Schema.Struct({
+  exitCode: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(-255),
+    Schema.isLessThanOrEqualTo(65_535),
+  ),
+  output: Schema.String,
+})
+export interface SandboxExecOutput extends Schema.Schema.Type<
+  typeof SandboxExecOutput
+> {}
+
 export const ArtifactRecord = Schema.Struct({
   artifactKey: ArtifactKey,
   attemptId: VerificationAttemptId,
@@ -180,7 +229,12 @@ export const ArtifactRecord = Schema.Struct({
     Schema.isGreaterThanOrEqualTo(0),
     Schema.isLessThanOrEqualTo(PG_INT4_MAX),
   ),
-  contentType: Schema.NonEmptyString,
+  contentType: Schema.NonEmptyString.check(
+    Schema.makeFilter((value) => !/[\r\n]/.test(value), {
+      title: 'SafeContentType',
+      description: 'Content-Type header value without CR/LF characters',
+    }),
+  ),
 })
 export interface ArtifactRecord extends Schema.Schema.Type<
   typeof ArtifactRecord
@@ -316,7 +370,7 @@ export class SandboxCleanupError extends Schema.TaggedError<
 >()('SandboxCleanupError', {
   sandboxId: SandboxId,
   attemptId: VerificationAttemptId,
-  reason: Schema.String,
+  reason: Schema.NonEmptyString,
   timedOut: Schema.Boolean,
   cause: Schema.optionalKey(Schema.Defect()),
 }) {}

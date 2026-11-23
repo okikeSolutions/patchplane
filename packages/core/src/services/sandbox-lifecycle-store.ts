@@ -25,9 +25,12 @@ export interface SandboxLifecycleStoreService {
     readonly labels: Readonly<Record<string, string>>
   }) => Effect.Effect<SandboxRecord, PersistenceError>
 
-  readonly markSandboxDeleted: (
-    sandboxId: SandboxId,
-  ) => Effect.Effect<void, PersistenceError>
+  readonly markSandboxDeleted: (input: {
+    readonly sandboxId: SandboxId
+    readonly attemptId: VerificationAttemptId
+    readonly changeRequestId: ChangeRequestId
+    readonly labels: Readonly<Record<string, string>>
+  }) => Effect.Effect<void, PersistenceError>
 
   readonly recordArtifactMetadata: (
     artifact: ArtifactRecord,

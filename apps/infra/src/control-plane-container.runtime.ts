@@ -13,6 +13,7 @@ import {
 } from 'effect'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
 import type * as Redacted from 'effect/Redacted'
+import type { ArtifactStore, SandboxProvider } from '@patchplane/core'
 import { sanitizeErrorMessage } from '@patchplane/domain'
 import {
   makeDaytonaSandboxProviderLayer,
@@ -33,9 +34,21 @@ import {
   PatchplaneVerificationSnapshot,
 } from './resources'
 
-type ControlPlaneRuntimeServices = Layer.Success<
-  ReturnType<typeof makeControlPlaneSingleStoreLayer>
->
+type ControlPlaneRuntimeServices =
+  | Layer.Success<ReturnType<typeof makeControlPlaneSingleStoreLayer>>
+  | SandboxProvider
+  | ArtifactStore
+
+const wrapDaytonaHandle = (
+  handle: Daytona.DaytonaSandbox,
+  runtimeContext: Context.Service.Shape<typeof RuntimeContext>,
+) => ({
+  sandboxId: handle.sandboxId,
+  exec: (command: string, options?: Parameters<typeof handle.exec>[1]) =>
+    handle
+      .exec(command, options)
+      .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
+})
 
 const bindDaytonaClient = (
   sandboxes: Daytona.CreateSandboxClient,
@@ -43,13 +56,7 @@ const bindDaytonaClient = (
 ) => ({
   create: (input?: Parameters<Daytona.CreateSandboxClient['create']>[0]) =>
     sandboxes.create(input).pipe(
-      Effect.map((handle) => ({
-        sandboxId: handle.sandboxId,
-        exec: (command: string, options?: Parameters<typeof handle.exec>[1]) =>
-          handle
-            .exec(command, options)
-            .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
-      })),
+      Effect.map((handle) => wrapDaytonaHandle(handle, runtimeContext)),
       Effect.provideService(RuntimeContext, runtimeContext),
     ),
   get: (idOrName: string) =>
@@ -57,16 +64,7 @@ const bindDaytonaClient = (
       Effect.map((handle) =>
         handle === undefined
           ? undefined
-          : {
-              sandboxId: handle.sandboxId,
-              exec: (
-                command: string,
-                options?: Parameters<typeof handle.exec>[1],
-              ) =>
-                handle
-                  .exec(command, options)
-                  .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
-            },
+          : wrapDaytonaHandle(handle, runtimeContext),
       ),
       Effect.provideService(RuntimeContext, runtimeContext),
     ),
@@ -116,15 +114,13 @@ export default ControlPlaneContainer.make(
     const artifactsBucket =
       yield* Cloudflare.R2.ReadWriteBucket(PatchplaneArtifacts)
 
-    // One Postgres pool + ClusterWorkflowEngine runner per container process.
-    // Building it per wake would open a fresh pool on every request and tear
-    // the runner down before any due durable timer could fire.
-    const singleStoreRef = yield* SynchronizedRef.make<
+    // One Postgres pool + ClusterWorkflowEngine + Daytona + R2 runtime per container process.
+    const controlPlaneRef = yield* SynchronizedRef.make<
       Option.Option<Context.Context<ControlPlaneRuntimeServices>>
     >(Option.none())
 
-    const acquireSingleStore = SynchronizedRef.modifyEffect(
-      singleStoreRef,
+    const acquireControlPlane = SynchronizedRef.modifyEffect(
+      controlPlaneRef,
       (current) =>
         Option.match(current, {
           onSome: (services) => Effect.succeed([services, current] as const),
@@ -170,7 +166,7 @@ export default ControlPlaneContainer.make(
       'ControlPlaneContainer.runWakeAgainstPostgres',
     )(
       function* (trigger: string) {
-        const services = yield* acquireSingleStore
+        const services = yield* acquireControlPlane
         const result = yield* wakeControlPlane().pipe(Effect.provide(services))
         return {
           ok: result.ok,

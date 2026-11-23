@@ -21,6 +21,8 @@ import {
   VerificationAttemptId,
 } from '@patchplane/domain'
 
+const MAX_LIST_ROWS = 500
+
 const LabelsRecord = Schema.Record(Schema.String, Schema.String)
 
 const SandboxRow = Schema.Struct({
@@ -132,6 +134,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
         FROM verification_sandboxes
         WHERE status = 'active'
         ORDER BY created_at ASC
+        LIMIT ${MAX_LIST_ROWS}
       `.pipe(persistenceError(operation))
 
       return yield* Effect.forEach(rows, (row) =>
@@ -148,6 +151,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
         FROM environment_quarantines
         WHERE status = 'quarantined'
         ORDER BY created_at ASC
+        LIMIT ${MAX_LIST_ROWS}
       `.pipe(persistenceError(operation))
 
       return yield* Effect.forEach(rows, (row) =>
@@ -166,6 +170,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
         FROM decision_inbox_items
         WHERE status = 'open'
         ORDER BY created_at ASC
+        LIMIT ${MAX_LIST_ROWS}
       `.pipe(persistenceError(operation))
 
       return yield* Effect.forEach(rows, (row) =>
@@ -179,12 +184,14 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
       )(function* ({ sandboxId, attemptId, changeRequestId, labels }) {
         const operation = 'SandboxLifecycleStore.recordSandboxCreated'
         const labelsJson = JSON.stringify(labels)
+        // Guard state machine: never regress a 'deleted' or 'quarantined'
+        // sandbox back to 'active'.
         const rows = yield* sql`
           INSERT INTO verification_sandboxes (sandbox_id, attempt_id, change_request_id, status, labels)
           VALUES (${sandboxId}, ${attemptId}, ${changeRequestId}, 'active', ${labelsJson}::jsonb)
           ON CONFLICT (sandbox_id) DO UPDATE
-            SET status = EXCLUDED.status,
-                labels = EXCLUDED.labels
+            SET labels = EXCLUDED.labels
+            WHERE verification_sandboxes.status = 'active'
           RETURNING sandbox_id, attempt_id, change_request_id, status, labels
         `.pipe(persistenceError(operation))
 
@@ -192,7 +199,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
         if (first === undefined) {
           return yield* new PersistenceError({
             operation,
-            message: 'INSERT into verification_sandboxes returned no row',
+            message: `Refusing to reactivate non-active sandbox "${sandboxId}"`,
           })
         }
         return yield* decodeSandboxRow(first, operation)
@@ -200,26 +207,45 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
 
       markSandboxDeleted: Effect.fn(
         'PostgresSandboxLifecycleStore.markSandboxDeleted',
-      )(function* (sandboxId) {
-        yield* sql`
-          UPDATE verification_sandboxes
-          SET status = 'deleted',
-              deleted_at = now()
-          WHERE sandbox_id = ${sandboxId}
-        `.pipe(persistenceError('SandboxLifecycleStore.markSandboxDeleted'))
+      )(function* ({ sandboxId, attemptId, changeRequestId, labels }) {
+        const operation = 'SandboxLifecycleStore.markSandboxDeleted'
+        const labelsJson = JSON.stringify(labels)
+        // Insert a 'deleted' audit row for pre-DB-crash orphans, and refuse to
+        // overwrite a 'quarantined' sandbox without an explicit quarantine release.
+        const rows = yield* sql`
+          INSERT INTO verification_sandboxes (sandbox_id, attempt_id, change_request_id, status, labels, deleted_at)
+          VALUES (${sandboxId}, ${attemptId}, ${changeRequestId}, 'deleted', ${labelsJson}::jsonb, now())
+          ON CONFLICT (sandbox_id) DO UPDATE
+            SET status = 'deleted',
+                deleted_at = COALESCE(verification_sandboxes.deleted_at, now())
+            WHERE verification_sandboxes.status <> 'quarantined'
+          RETURNING sandbox_id
+        `.pipe(persistenceError(operation))
+
+        if (rows[0] === undefined) {
+          return yield* new PersistenceError({
+            operation,
+            message: `Cannot mark quarantined sandbox "${sandboxId}" deleted without releasing quarantine`,
+          })
+        }
+        return yield* Effect.void
       }),
 
       recordArtifactMetadata: Effect.fn(
         'PostgresSandboxLifecycleStore.recordArtifactMetadata',
       )(function* (artifact) {
         const operation = 'SandboxLifecycleStore.recordArtifactMetadata'
+        // Enforce artifact immutability across attempts and digests: replaying
+        // the exact same (artifact_key, attempt_id, sha256) is idempotent, but
+        // overwriting an existing key for another attempt or digest is rejected.
         const rows = yield* sql`
           INSERT INTO verification_artifacts (artifact_key, attempt_id, sha256, byte_length, content_type)
           VALUES (${artifact.artifactKey}, ${artifact.attemptId}, ${artifact.sha256}, ${artifact.byteLength}, ${artifact.contentType})
           ON CONFLICT (artifact_key) DO UPDATE
-            SET sha256 = EXCLUDED.sha256,
-                byte_length = EXCLUDED.byte_length,
+            SET byte_length = EXCLUDED.byte_length,
                 content_type = EXCLUDED.content_type
+            WHERE verification_artifacts.attempt_id = EXCLUDED.attempt_id
+              AND verification_artifacts.sha256 = EXCLUDED.sha256
           RETURNING artifact_key, attempt_id, sha256, byte_length, content_type
         `.pipe(persistenceError(operation))
 
@@ -227,7 +253,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
         if (first === undefined) {
           return yield* new PersistenceError({
             operation,
-            message: 'INSERT into verification_artifacts returned no row',
+            message: `Refusing to overwrite immutable artifact "${artifact.artifactKey}" with conflicting attempt or digest`,
           })
         }
         return yield* decodeArtifactRow(first, operation)
@@ -246,7 +272,9 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
       }) {
         const operation = 'SandboxLifecycleStore.quarantineSandboxEnvironment'
         const labelsJson = JSON.stringify(labels)
-        const summary = `Cleanup quarantined sandbox ${sandboxId} for attempt ${attemptId}: ${reason}`
+        const normalizedReason =
+          reason.trim().length > 0 ? reason.trim() : 'Sandbox cleanup failed'
+        const summary = `Cleanup quarantined sandbox ${sandboxId} for attempt ${attemptId}: ${normalizedReason}`
 
         return yield* sql
           .withTransaction(
@@ -255,15 +283,17 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
                 INSERT INTO verification_sandboxes (sandbox_id, attempt_id, change_request_id, status, labels)
                 VALUES (${sandboxId}, ${attemptId}, ${changeRequestId}, 'quarantined', ${labelsJson}::jsonb)
                 ON CONFLICT (sandbox_id) DO UPDATE
-                  SET status = 'quarantined'
+                  SET status = 'quarantined',
+                      deleted_at = NULL
               `.pipe(persistenceError(operation))
 
               const quarantineRows = yield* sql`
                 INSERT INTO environment_quarantines (id, attempt_id, sandbox_id, reason, status)
-                VALUES (${quarantineId}, ${attemptId}, ${sandboxId}, ${reason}, 'quarantined')
+                VALUES (${quarantineId}, ${attemptId}, ${sandboxId}, ${normalizedReason}, 'quarantined')
                 ON CONFLICT (id) DO UPDATE
                   SET reason = EXCLUDED.reason,
-                      status = 'quarantined'
+                      status = 'quarantined',
+                      released_at = NULL
                 RETURNING id, attempt_id, sandbox_id, reason, status
               `.pipe(persistenceError(operation))
 
@@ -272,7 +302,8 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
                 VALUES (${inboxItemId}, ${attemptId}, 'cleanup_quarantine', 'open', ${summary}, ${sandboxId})
                 ON CONFLICT (id) DO UPDATE
                   SET summary = EXCLUDED.summary,
-                      status = 'open'
+                      status = 'open',
+                      resolved_at = NULL
                 RETURNING id, attempt_id, kind, status, summary, sandbox_id
               `.pipe(persistenceError(operation))
 
@@ -330,6 +361,7 @@ export const PostgresSandboxLifecycleStoreLayer = Layer.effect(
           FROM verification_artifacts
           WHERE attempt_id = ${attemptId}
           ORDER BY created_at ASC
+          LIMIT ${MAX_LIST_ROWS}
         `.pipe(persistenceError(operation))
 
         return yield* Effect.forEach(rows, (row) =>

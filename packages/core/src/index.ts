@@ -19,6 +19,11 @@ export {
 } from './services/verification-step-runner'
 
 export {
+  ModelCredentialIssuer,
+  type ModelCredentialIssuerService,
+} from './services/model-credential-issuer'
+
+export {
   ArtifactStore,
   type ArtifactStoreService,
 } from './services/artifact-store'
@@ -57,10 +62,20 @@ export {
   confirmSandboxDeletion,
   DEFAULT_CLEANUP_POLL_INTERVAL_MS,
   DEFAULT_CLEANUP_TIMEOUT_MS,
-  type IsolatedSandboxCheckResult,
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  IsolatedSandboxCheckResult,
   type LeakReconciliationReport,
+  MAX_ARTIFACT_BYTES,
+  MAX_CLEANUP_POLL_INTERVAL_MS,
+  MAX_CLEANUP_TIMEOUT_MS,
+  MAX_COMMAND_TIMEOUT_MS,
+  MIN_CLEANUP_POLL_INTERVAL_MS,
   reconcileLeakedSandboxes,
   runIsolatedCheckInSandbox,
+  SandboxVerificationWorkflow,
+  SandboxVerificationWorkflowError,
+  SandboxVerificationWorkflowLayer,
+  SandboxVerificationWorkflowPayload,
 } from './workflows/sandbox-verification-workflow'
 
 export {

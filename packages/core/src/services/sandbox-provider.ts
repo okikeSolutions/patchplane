@@ -2,22 +2,15 @@ import { Context, type Effect, type Option } from 'effect'
 import type {
   ChangeRequestId,
   SandboxCleanupError,
+  SandboxExecOutput,
   SandboxExecutionError,
   SandboxId,
+  SandboxSummary,
   VerificationAttemptId,
 } from '@patchplane/domain'
 import type { ValidatedSandboxEnv } from './sandbox-credential-policy'
 
-export interface SandboxSummary {
-  readonly sandboxId: SandboxId
-  readonly state: string
-  readonly labels: Readonly<Record<string, string>>
-}
-
-export interface SandboxExecOutput {
-  readonly exitCode: number
-  readonly output: string
-}
+export type { SandboxExecOutput, SandboxSummary }
 
 export interface SandboxProviderService {
   readonly createSandbox: (input: {
@@ -31,7 +24,7 @@ export interface SandboxProviderService {
   readonly execCommand: (input: {
     readonly sandboxId: SandboxId
     readonly command: string
-    readonly timeoutMs?: number
+    readonly timeoutMs: number
   }) => Effect.Effect<SandboxExecOutput, SandboxExecutionError>
 
   readonly getSandbox: (

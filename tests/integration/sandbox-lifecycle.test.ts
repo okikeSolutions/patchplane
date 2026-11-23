@@ -6,24 +6,31 @@ import * as Digest from 'effect/crypto/Digest'
 import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
+import { makeControlPlaneSingleStoreLayer } from '../../apps/server/src/index'
 import {
   buildAttemptSandboxLabels,
   confirmSandboxDeletion,
   DEFAULT_CLEANUP_TIMEOUT_MS,
-  MAX_MODEL_CREDENTIAL_TTL_MS,
+  ModelCredentialIssuer,
   PATCHPLANE_ATTEMPT_ID_LABEL,
   PATCHPLANE_CHANGE_REQUEST_ID_LABEL,
   PATCHPLANE_MANAGED_LABEL,
   reconcileLeakedSandboxes,
   runIsolatedCheckInSandbox,
   SandboxLifecycleStore,
+  SandboxVerificationWorkflow,
+  SandboxVerificationWorkflowLayer,
   SANDBOX_ATTEMPT_ID_ENV,
   SANDBOX_MODEL_GATEWAY_URL_ENV,
   SANDBOX_MODEL_TOKEN_ENV,
 } from '../../packages/core/src/index'
 import {
+  ArtifactKey,
+  ArtifactRecord,
   ChangeRequestId,
+  PersistenceError,
   SandboxId,
+  Sha256Hex,
   VerificationAttemptId,
 } from '../../packages/domain/src/index'
 import {
@@ -116,6 +123,7 @@ function makeFakeDaytona(options?: {
   }> = []
   const deleteCalls: Array<string> = []
   const getCalls: Array<string> = []
+  const listCalls: Array<Record<string, string> | undefined> = []
 
   const port: DaytonaCreateSandboxPort<string, string, string, string, string> =
     {
@@ -153,7 +161,15 @@ function makeFakeDaytona(options?: {
         Effect.sync(() => {
           getCalls.push(idOrName)
           const found = sandboxes.get(idOrName)
-          if (found === undefined) return undefined
+          // Mirror @alchemy.run/daytona CreateSandboxHttp.ts:69 where
+          // `state === "destroying" || state === "destroyed"` returns undefined.
+          if (
+            found === undefined ||
+            found.state === 'destroyed' ||
+            found.state === 'destroying'
+          ) {
+            return undefined
+          }
           return {
             sandboxId: found.id,
             state: found.state,
@@ -168,6 +184,7 @@ function makeFakeDaytona(options?: {
 
       list: (input) =>
         Effect.sync(() => {
+          listCalls.push(input?.labels)
           const filter = input?.labels ?? {}
           return [...sandboxes.values()]
             .filter((entry) =>
@@ -188,7 +205,12 @@ function makeFakeDaytona(options?: {
           if (options?.failDelete) {
             return Effect.fail('daytona delete API 500')
           }
-          if (!options?.hangReadbackAfterDelete) {
+          if (options?.hangReadbackAfterDelete) {
+            const existing = sandboxes.get(idOrName)
+            if (existing !== undefined) {
+              sandboxes.set(idOrName, { ...existing, state: 'destroying' })
+            }
+          } else {
             sandboxes.delete(idOrName)
           }
           return Effect.void
@@ -201,6 +223,7 @@ function makeFakeDaytona(options?: {
     createdRequests,
     deleteCalls,
     getCalls,
+    listCalls,
   }
 }
 
@@ -286,6 +309,7 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
         expect(daytona.sandboxes.size).toBe(0)
         expect(daytona.deleteCalls).toEqual([result.sandboxId])
         expect(daytona.getCalls).toContain(result.sandboxId)
+        expect(daytona.listCalls.length).toBeGreaterThanOrEqual(1)
 
         // Verify exact labels and strict credential isolation on Daytona create input
         const createdReq = daytona.createdRequests[0]
@@ -371,8 +395,85 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
     20_000,
   )
 
+  it.effect(
+    'confirms sandbox deletion even when recordSandboxCreated fails in Postgres (zero Daytona leak)',
+    () =>
+      Effect.gen(function* () {
+        const daytona = makeFakeDaytona()
+        const r2 = makeFakeR2()
+        const attemptId = yield* Schema.decodeEffect(VerificationAttemptId)(
+          'attempt-db-fail-after-create',
+        )
+        const changeRequestId = yield* Schema.decodeEffect(ChangeRequestId)(
+          'github:okikeSolutions/patchplane#402b',
+        )
+        const now = yield* Clock.currentTimeMillis
+        const markedDeleted: Array<string> = []
+
+        const failingRecordStoreLayer = Layer.succeed(
+          SandboxLifecycleStore,
+          SandboxLifecycleStore.of({
+            recordSandboxCreated: () =>
+              Effect.fail(
+                new PersistenceError({
+                  operation: 'SandboxLifecycleStore.recordSandboxCreated',
+                  message: 'simulated transient postgres outage',
+                }),
+              ),
+            markSandboxDeleted: (input) =>
+              Effect.sync(() => {
+                markedDeleted.push(input.sandboxId)
+              }),
+            recordArtifactMetadata: (artifact) => Effect.succeed(artifact),
+            quarantineSandboxEnvironment: () =>
+              Effect.fail(
+                new PersistenceError({
+                  operation: 'SandboxLifecycleStore.quarantine',
+                  message: 'unexpected quarantine',
+                }),
+              ),
+            findSandboxById: () => Effect.succeedNone,
+            listActiveSandboxes: Effect.succeed([]),
+            listQuarantinedEnvironments: Effect.succeed([]),
+            listOpenInboxItems: Effect.succeed([]),
+            listArtifactsByAttempt: () => Effect.succeed([]),
+          }),
+        )
+
+        const failure = yield* Effect.flip(
+          runIsolatedCheckInSandbox({
+            attemptId,
+            changeRequestId,
+            command: 'bun test',
+            modelCredential: {
+              token: Redacted.make('pp_attempt_model_short_lived_tok'),
+              attemptId,
+              expiresAtMs: now + 10 * 60 * 1000,
+            },
+            cleanup: { cleanupTimeoutMs: 5_000, cleanupPollIntervalMs: 10 },
+          }).pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                makeDaytonaSandboxProviderLayer(daytona.port),
+                makeR2ArtifactStoreLayer(r2.port).pipe(
+                  Layer.provide(Digest.layerWebCrypto),
+                ),
+                failingRecordStoreLayer,
+                Digest.layerWebCrypto,
+              ),
+            ),
+          ),
+        )
+
+        expect(failure._tag).toBe('PersistenceError')
+        expect(daytona.sandboxes.size).toBe(0)
+        expect(daytona.deleteCalls).toHaveLength(1)
+        expect(markedDeleted).toHaveLength(1)
+      }),
+  )
+
   it.live(
-    'discovers crashed/orphaned attempt sandboxes via labels and cleans them up while leaving active attempts untouched',
+    'discovers crashed, unlabeled, and malformed managed sandboxes via labels, persists deleted audit rows, and leaves active attempts untouched',
     () =>
       Effect.gen(function* () {
         yield* resetAndMigrate
@@ -388,7 +489,7 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
           'github:okikeSolutions/patchplane#403',
         )
 
-        // Simulate crash immediately after Daytona sandbox creation (not even persisted in DB yet)
+        // Simulate crash immediately after Daytona sandbox creation (not persisted in DB yet)
         daytona.sandboxes.set('sbx-leaked-1', {
           id: 'sbx-leaked-1',
           state: 'started',
@@ -397,6 +498,17 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
               attemptId: crashedAttemptId,
               changeRequestId: crId,
             }),
+          },
+          env: {},
+          isPublic: false,
+        })
+        // Simulate a managed sandbox with malformed attempt_id label (must NOT abort sweep)
+        daytona.sandboxes.set('sbx-malformed-label-1', {
+          id: 'sbx-malformed-label-1',
+          state: 'started',
+          labels: {
+            [PATCHPLANE_MANAGED_LABEL]: 'true',
+            [PATCHPLANE_ATTEMPT_ID_LABEL]: '../bad-attempt',
           },
           env: {},
           isPublic: false,
@@ -419,17 +531,93 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
           cleanup: { cleanupTimeoutMs: 5_000, cleanupPollIntervalMs: 10 },
         }).pipe(Effect.provide(makeDaytonaSandboxProviderLayer(daytona.port)))
 
-        expect(report.discoveredCount).toBe(1)
-        expect(report.cleanedSandboxIds).toEqual(['sbx-leaked-1'])
+        expect(report.discoveredCount).toBe(2)
+        expect(report.cleanedSandboxIds).toEqual([
+          'sbx-leaked-1',
+          'sbx-malformed-label-1',
+        ])
         expect(report.quarantinedSandboxIds).toEqual([])
         expect(daytona.sandboxes.has('sbx-leaked-1')).toBe(false)
+        expect(daytona.sandboxes.has('sbx-malformed-label-1')).toBe(false)
         expect(daytona.sandboxes.has('sbx-active-1')).toBe(true)
+
+        // Pre-DB orphan cleanup MUST leave a durable 'deleted' audit row in Postgres
+        const store = yield* SandboxLifecycleStore
+        const leakedRow = yield* store.findSandboxById(
+          SandboxId.make('sbx-leaked-1'),
+        )
+        expect(Option.isSome(leakedRow)).toBe(true)
+        if (Option.isSome(leakedRow)) {
+          expect(leakedRow.value.status).toBe('deleted')
+        }
       }).pipe(Effect.provide(makeTestLifecycleDbLayer())),
     20_000,
   )
 
+  it.effect(
+    'propagates PersistenceError in reconcileLeakedSandboxes instead of falsely reporting quarantine',
+    () =>
+      Effect.gen(function* () {
+        const daytona = makeFakeDaytona({ failDelete: true })
+        const attemptId = yield* Schema.decodeEffect(VerificationAttemptId)(
+          'attempt-reconcile-db-down',
+        )
+        const crId = yield* Schema.decodeEffect(ChangeRequestId)(
+          'github:okikeSolutions/patchplane#403b',
+        )
+        daytona.sandboxes.set('sbx-unquarantinable', {
+          id: 'sbx-unquarantinable',
+          state: 'started',
+          labels: {
+            ...buildAttemptSandboxLabels({ attemptId, changeRequestId: crId }),
+          },
+          env: {},
+          isPublic: false,
+        })
+
+        const failingQuarantineStoreLayer = Layer.succeed(
+          SandboxLifecycleStore,
+          SandboxLifecycleStore.of({
+            recordSandboxCreated: (input) =>
+              Effect.succeed({ ...input, status: 'active' as const }),
+            markSandboxDeleted: () => Effect.void,
+            recordArtifactMetadata: (artifact) => Effect.succeed(artifact),
+            quarantineSandboxEnvironment: () =>
+              Effect.fail(
+                new PersistenceError({
+                  operation:
+                    'SandboxLifecycleStore.quarantineSandboxEnvironment',
+                  message: 'postgres unavailable during quarantine write',
+                }),
+              ),
+            findSandboxById: () => Effect.succeedNone,
+            listActiveSandboxes: Effect.succeed([]),
+            listQuarantinedEnvironments: Effect.succeed([]),
+            listOpenInboxItems: Effect.succeed([]),
+            listArtifactsByAttempt: () => Effect.succeed([]),
+          }),
+        )
+
+        const failure = yield* Effect.flip(
+          reconcileLeakedSandboxes({
+            activeAttemptIds: new Set(),
+            cleanup: { cleanupTimeoutMs: 5_000, cleanupPollIntervalMs: 10 },
+          }).pipe(
+            Effect.provide(
+              Layer.merge(
+                makeDaytonaSandboxProviderLayer(daytona.port),
+                failingQuarantineStoreLayer,
+              ),
+            ),
+          ),
+        )
+
+        expect(failure._tag).toBe('PersistenceError')
+      }),
+  )
+
   it.live(
-    'quarantines the environment and creates an open Decision Inbox item when deletion fails',
+    'quarantines the environment and creates an open Decision Inbox item when deletion fails, and enforces sandbox/artifact immutability guards',
     () =>
       Effect.gen(function* () {
         yield* resetAndMigrate
@@ -439,6 +627,9 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
         const attemptId = yield* Schema.decodeEffect(VerificationAttemptId)(
           'attempt-delete-failure',
         )
+        const otherAttemptId = yield* Schema.decodeEffect(
+          VerificationAttemptId,
+        )('attempt-other-overwrite')
         const changeRequestId = yield* Schema.decodeEffect(ChangeRequestId)(
           'github:okikeSolutions/patchplane#404',
         )
@@ -480,12 +671,60 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
         expect(inboxItems[0]?.attemptId).toBe(attemptId)
         expect(inboxItems[0]?.kind).toBe('cleanup_quarantine')
         expect(inboxItems[0]?.status).toBe('open')
+
+        // State-machine guards: a quarantined sandbox cannot be reactivated or silently marked deleted
+        const quarantinedSandboxId = quarantines[0]?.sandboxId
+        expect(quarantinedSandboxId).toBeDefined()
+        if (quarantinedSandboxId !== undefined) {
+          const labels = buildAttemptSandboxLabels({
+            attemptId,
+            changeRequestId,
+          })
+          const reactivateFailure = yield* Effect.flip(
+            store.recordSandboxCreated({
+              sandboxId: quarantinedSandboxId,
+              attemptId,
+              changeRequestId,
+              labels,
+            }),
+          )
+          expect(reactivateFailure._tag).toBe('PersistenceError')
+
+          const overwriteQuarantineFailure = yield* Effect.flip(
+            store.markSandboxDeleted({
+              sandboxId: quarantinedSandboxId,
+              attemptId,
+              changeRequestId,
+              labels,
+            }),
+          )
+          expect(overwriteQuarantineFailure._tag).toBe('PersistenceError')
+        }
+
+        // Cross-attempt artifact overwrite guard
+        const existingArtifacts = yield* store.listArtifactsByAttempt(attemptId)
+        expect(existingArtifacts).toHaveLength(1)
+        const existing = existingArtifacts[0]
+        if (existing !== undefined) {
+          const crossAttemptOverwrite = yield* Effect.flip(
+            store.recordArtifactMetadata(
+              ArtifactRecord.make({
+                attemptId: otherAttemptId,
+                artifactKey: ArtifactKey.make(existing.artifactKey),
+                sha256: Sha256Hex.make(existing.sha256),
+                byteLength: existing.byteLength,
+                contentType: existing.contentType,
+              }),
+            ),
+          )
+          expect(crossAttemptOverwrite._tag).toBe('PersistenceError')
+        }
       }).pipe(Effect.provide(makeTestLifecycleDbLayer())),
     20_000,
   )
 
   it.effect(
-    'enforces the 5-minute cleanup timeout with TestClock, quarantines the environment, and opens a Decision Inbox item',
+    'enforces the 5-minute cleanup timeout with TestClock even when Daytona get() hides a stuck "destroying" sandbox',
     () =>
       Effect.gen(function* () {
         const daytona = makeFakeDaytona({ hangReadbackAfterDelete: true })
@@ -572,139 +811,88 @@ describe('V2 Stack Proof 3: Daytona.CreateSandbox lifecycle, SHA-256 R2 artifact
         if (error._tag === 'SandboxCleanupError') {
           expect(error.timedOut).toBe(true)
         }
+        // Dual readback MUST have polled `list` after `get()` collapsed `"destroying"` to undefined
+        expect(daytona.listCalls.length).toBeGreaterThan(1)
         expect(quarantinedReasons).toHaveLength(1)
         expect(inboxSummaries).toHaveLength(1)
       }),
   )
 
   it.live(
-    'rejects WorkOS, GitHub App, Postgres, Neon, Cloudflare, Daytona, control-plane, and expired/over-TTL credentials before creating any sandbox',
+    'executes SandboxVerificationWorkflow durably via ClusterWorkflowEngine without persisting model credentials in Postgres',
     () =>
       Effect.gen(function* () {
         yield* resetAndMigrate
 
-        const daytona = makeFakeDaytona()
+        const secretToken = 'pp_ephemeral_secret_must_never_hit_postgres'
+        const daytona = makeFakeDaytona({
+          execOutput: 'durable-workflow-check-ok\n',
+        })
         const r2 = makeFakeR2()
         const attemptId = yield* Schema.decodeEffect(VerificationAttemptId)(
-          'attempt-cred-policy',
+          'attempt-durable-wf',
         )
-        const otherAttemptId = yield* Schema.decodeEffect(
-          VerificationAttemptId,
-        )('attempt-other')
         const changeRequestId = yield* Schema.decodeEffect(ChangeRequestId)(
-          'github:okikeSolutions/patchplane#406',
+          'github:okikeSolutions/patchplane#407',
         )
-        const now = yield* Clock.currentTimeMillis
-        const validCredential = {
-          token: Redacted.make('pp_attempt_model_short_lived_tok'),
+
+        const url = yield* assertDisposableTestDatabase(
+          yield* TestDatabaseUrlConfig,
+        )
+        const baseClusterLayer = makeControlPlaneSingleStoreLayer({
+          url,
+          entityMailboxPollIntervalMs: 100,
+        })
+        const issuerLayer = Layer.succeed(
+          ModelCredentialIssuer,
+          ModelCredentialIssuer.of({
+            issueAttemptCredential: Effect.fn(
+              'TestModelCredentialIssuer.issue',
+            )(function* (forAttemptId) {
+              const now = yield* Clock.currentTimeMillis
+              return {
+                token: Redacted.make(secretToken),
+                attemptId: forAttemptId,
+                expiresAtMs: now + 10 * 60 * 1000,
+                gatewayUrl: 'https://gateway.patchplane.dev/v1',
+              }
+            }),
+          }),
+        )
+        const runtimeDeps = Layer.mergeAll(
+          makeDaytonaSandboxProviderLayer(daytona.port),
+          makeR2ArtifactStoreLayer(r2.port).pipe(
+            Layer.provide(Digest.layerWebCrypto),
+          ),
+          issuerLayer,
+          Digest.layerWebCrypto,
+        )
+        const workflowLayer = SandboxVerificationWorkflowLayer.pipe(
+          Layer.provideMerge(runtimeDeps),
+          Layer.provideMerge(baseClusterLayer),
+        )
+
+        const result = yield* SandboxVerificationWorkflow.execute({
           attemptId,
-          expiresAtMs: now + 10 * 60 * 1000,
-        }
+          changeRequestId,
+          command: 'bun test',
+          cleanupTimeoutMs: 5_000,
+          cleanupPollIntervalMs: 10,
+        }).pipe(Effect.provide(workflowLayer))
 
-        const forbiddenKeys = [
-          'WORKOS_API_KEY',
-          'WORKOS_COOKIE_PASSWORD',
-          'GITHUB_PRIVATE_KEY',
-          'GITHUB_WEBHOOK_SECRET',
-          'DATABASE_URL',
-          'PGPASSWORD',
-          'NEON_API_KEY',
-          'CLOUDFLARE_API_TOKEN',
-          'DAYTONA_API_KEY',
-          'PATCHPLANE_SYSTEM_INGESTION_SECRET',
-          'OPENAI_API_KEY',
-          'CUSTOM_UNALLOWLISTED_VAR',
-        ]
+        expect(result.exitCode).toBe(0)
+        expect(result.cleanupConfirmed).toBe(true)
+        expect(daytona.sandboxes.size).toBe(0)
 
-        for (const key of forbiddenKeys) {
-          const failure = yield* Effect.flip(
-            runIsolatedCheckInSandbox({
-              attemptId,
-              changeRequestId,
-              command: 'bun test',
-              modelCredential: validCredential,
-              extraEnv: { [key]: Redacted.make('should-never-enter-sandbox') },
-            }).pipe(
-              Effect.provide(
-                Layer.merge(
-                  makeDaytonaSandboxProviderLayer(daytona.port),
-                  makeR2ArtifactStoreLayer(r2.port),
-                ),
-              ),
-            ),
-          )
-          expect(failure._tag).toBe('SandboxCredentialPolicyError')
-        }
-
-        // Expired model token rejected
-        const expired = yield* Effect.flip(
-          runIsolatedCheckInSandbox({
-            attemptId,
-            changeRequestId,
-            command: 'bun test',
-            modelCredential: {
-              token: Redacted.make('expired_tok'),
-              attemptId,
-              expiresAtMs: now - 1_000,
-            },
-          }).pipe(
-            Effect.provide(
-              Layer.merge(
-                makeDaytonaSandboxProviderLayer(daytona.port),
-                makeR2ArtifactStoreLayer(r2.port),
-              ),
-            ),
-          ),
-        )
-        expect(expired._tag).toBe('SandboxCredentialPolicyError')
-
-        // Over-TTL (> 45 min) model token rejected
-        const overTtl = yield* Effect.flip(
-          runIsolatedCheckInSandbox({
-            attemptId,
-            changeRequestId,
-            command: 'bun test',
-            modelCredential: {
-              token: Redacted.make('too_long_lived_tok'),
-              attemptId,
-              expiresAtMs: now + MAX_MODEL_CREDENTIAL_TTL_MS + 60_000,
-            },
-          }).pipe(
-            Effect.provide(
-              Layer.merge(
-                makeDaytonaSandboxProviderLayer(daytona.port),
-                makeR2ArtifactStoreLayer(r2.port),
-              ),
-            ),
-          ),
-        )
-        expect(overTtl._tag).toBe('SandboxCredentialPolicyError')
-
-        // Wrong attempt scope rejected
-        const wrongScope = yield* Effect.flip(
-          runIsolatedCheckInSandbox({
-            attemptId,
-            changeRequestId,
-            command: 'bun test',
-            modelCredential: {
-              token: Redacted.make('wrong_attempt_tok'),
-              attemptId: otherAttemptId,
-              expiresAtMs: now + 5 * 60 * 1000,
-            },
-          }).pipe(
-            Effect.provide(
-              Layer.merge(
-                makeDaytonaSandboxProviderLayer(daytona.port),
-                makeR2ArtifactStoreLayer(r2.port),
-              ),
-            ),
-          ),
-        )
-        expect(wrongScope._tag).toBe('SandboxCredentialPolicyError')
-
-        // Verify Daytona createSandbox was NEVER called on any rejected input
-        expect(daytona.createdRequests).toHaveLength(0)
+        // Confirm zero model credential tokens were persisted into cluster_messages
+        const sql = yield* SqlClient.SqlClient
+        const leakedRows = yield* sql<{ readonly count: string }>`
+          SELECT count(*)::text AS count
+          FROM cluster_messages
+          WHERE payload::text LIKE ${`%${secretToken}%`}
+        `
+        expect(Number(leakedRows[0]?.count ?? '0')).toBe(0)
       }).pipe(Effect.provide(makeTestLifecycleDbLayer())),
-    20_000,
+    30_000,
   )
 })

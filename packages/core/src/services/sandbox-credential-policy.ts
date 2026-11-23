@@ -18,12 +18,6 @@ export const SANDBOX_MODEL_GATEWAY_URL_ENV = 'PATCHPLANE_MODEL_GATEWAY_URL'
 /** Maximum lifetime for an attempt-scoped verifier model credential (45 min). */
 export const MAX_MODEL_CREDENTIAL_TTL_MS = 45 * 60 * 1000
 
-const ALLOWED_SANDBOX_ENV_KEYS = new Set([
-  SANDBOX_ATTEMPT_ID_ENV,
-  SANDBOX_MODEL_TOKEN_ENV,
-  SANDBOX_MODEL_GATEWAY_URL_ENV,
-])
-
 const FORBIDDEN_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
   /^WORKOS_/i,
   /^GITHUB_/i,
@@ -41,6 +35,22 @@ const FORBIDDEN_CREDENTIAL_PATTERNS: ReadonlyArray<RegExp> = [
   /^GOOGLE_API_KEY$/i,
   /^GEMINI_API_KEY$/i,
   /(?:PRIVATE_KEY|WEBHOOK_SECRET|COOKIE_PASSWORD|ACCESS_KEY_ID|SECRET_ACCESS_KEY|INGESTION_SECRET)/i,
+]
+
+const FORBIDDEN_GATEWAY_HOST_PATTERNS: ReadonlyArray<RegExp> = [
+  /^localhost$/i,
+  /\.local$/i,
+  /\.internal$/i,
+  /^127\./,
+  /^10\./,
+  /^169\.254\./,
+  /^192\.168\./,
+  /^172\.(?:1[6-9]|2\d|3[01])\./,
+  /^0\.0\.0\.0$/,
+  /^\[?::1\]?$/,
+  /^\[?fe80:/i,
+  /^\[?fc00:/i,
+  /^\[?fd/i,
 ]
 
 export interface ShortLivedAttemptModelCredential {
@@ -62,7 +72,6 @@ export interface ValidatedSandboxEnv {
   readonly attemptId: VerificationAttemptId
   readonly modelToken: Redacted.Redacted
   readonly gatewayUrl?: string
-  readonly envKeys: ReadonlyArray<string>
 }
 
 export const buildAttemptSandboxLabels = (input: {
@@ -87,13 +96,10 @@ export const assertAllowedSandboxEnvKey = Effect.fn(
       })
     }
   }
-  if (!ALLOWED_SANDBOX_ENV_KEYS.has(key)) {
-    return yield* new SandboxCredentialPolicyError({
-      key: key.length > 0 ? key : '<empty>',
-      reason: `Environment key "${key}" is not on the sandbox allowlist`,
-    })
-  }
-  return yield* Effect.void
+  return yield* new SandboxCredentialPolicyError({
+    key: key.length > 0 ? key : '<empty>',
+    reason: `Arbitrary or override environment key "${key}" is not permitted in sandbox inputs`,
+  })
 })
 
 /**
@@ -110,7 +116,7 @@ export const buildValidatedSandboxEnv = Effect.fn(
 }) {
   if (input.extraEnv !== undefined) {
     for (const key of Object.keys(input.extraEnv)) {
-      yield* assertAllowedSandboxEnvKey(key)
+      return yield* assertAllowedSandboxEnvKey(key)
     }
   }
 
@@ -125,6 +131,14 @@ export const buildValidatedSandboxEnv = Effect.fn(
     return yield* new SandboxCredentialPolicyError({
       key: SANDBOX_MODEL_TOKEN_ENV,
       reason: 'Attempt-scoped model credential must not be empty',
+    })
+  }
+
+  if (!Number.isFinite(input.modelCredential.expiresAtMs)) {
+    return yield* new SandboxCredentialPolicyError({
+      key: SANDBOX_MODEL_TOKEN_ENV,
+      reason:
+        'Attempt-scoped model credential expiration must be a finite timestamp',
     })
   }
 
@@ -152,22 +166,31 @@ export const buildValidatedSandboxEnv = Effect.fn(
           reason: 'Model gateway URL must be a valid https URL',
         }),
     })
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0
+    ) {
       return yield* new SandboxCredentialPolicyError({
         key: SANDBOX_MODEL_GATEWAY_URL_ENV,
         reason:
-          'Model gateway URL must use https and must not embed userinfo credentials',
+          'Model gateway URL must use https without userinfo, query parameters, or fragments',
+      })
+    }
+    if (
+      FORBIDDEN_GATEWAY_HOST_PATTERNS.some((pattern) =>
+        pattern.test(parsed.hostname),
+      )
+    ) {
+      return yield* new SandboxCredentialPolicyError({
+        key: SANDBOX_MODEL_GATEWAY_URL_ENV,
+        reason:
+          'Model gateway URL must not target loopback, link-local, or private network hosts',
       })
     }
   }
-
-  const envKeys = [
-    SANDBOX_ATTEMPT_ID_ENV,
-    SANDBOX_MODEL_TOKEN_ENV,
-    ...(input.modelCredential.gatewayUrl !== undefined
-      ? [SANDBOX_MODEL_GATEWAY_URL_ENV]
-      : []),
-  ]
 
   const validated: ValidatedSandboxEnv = {
     [ValidatedSandboxEnvBrand]: true,
@@ -176,7 +199,6 @@ export const buildValidatedSandboxEnv = Effect.fn(
     ...(input.modelCredential.gatewayUrl !== undefined
       ? { gatewayUrl: input.modelCredential.gatewayUrl }
       : {}),
-    envKeys,
   }
   return validated
 })
