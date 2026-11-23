@@ -1,14 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
-import {
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Redacted,
-  Ref,
-  Schema,
-} from 'effect'
+import { Duration, Effect, Exit, Layer, Option, Ref, Schema } from 'effect'
+import * as Config from 'effect/Config'
+import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
 import {
   claimAndStartAttempt,
@@ -33,11 +26,39 @@ import {
   makePostgresSqlLayer,
 } from '../../packages/plugins/src/index'
 
-const TEST_DATABASE_URL =
-  process.env.PATCHPLANE_TEST_DATABASE_URL ??
-  'postgresql://patchplane:patchplane@127.0.0.1:55432/patchplane_test'
+const TestDatabaseUrlConfig = Config.Redacted(
+  'PATCHPLANE_TEST_DATABASE_URL',
+).pipe(
+  Config.withDefault(
+    Redacted.make(
+      'postgresql://patchplane:patchplane@127.0.0.1:55432/patchplane_test',
+    ),
+  ),
+)
 
-const redactedUrl = Redacted.make(TEST_DATABASE_URL)
+const makeTestPostgresSqlLayer = () =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const url = yield* TestDatabaseUrlConfig
+      return makePostgresSqlLayer({ url })
+    }),
+  )
+
+const makeTestControlPlaneLayer = (
+  runnerLayer?: Layer.Layer<VerificationStepRunner>,
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const url = yield* TestDatabaseUrlConfig
+      return makeControlPlaneSingleStoreLayer(
+        {
+          url,
+          entityMailboxPollIntervalMs: 100,
+        },
+        runnerLayer,
+      )
+    }),
+  )
 
 const resetDatabase = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -89,7 +110,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         )
         expect(rewrittenFailure._tag).toBe('MigrationFailureError')
         expect(rewrittenFailure.reason).toContain('checksum mismatch')
-      }).pipe(Effect.provide(makePostgresSqlLayer({ url: redactedUrl }))),
+      }).pipe(Effect.provide(makeTestPostgresSqlLayer())),
     20_000,
   )
 
@@ -199,14 +220,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
           actorId: winningDecision.actorId,
         })
         expect(replayed.id).toBe(winningDecision.id)
-      }).pipe(
-        Effect.provide(
-          makeControlPlaneSingleStoreLayer({
-            url: redactedUrl,
-            entityMailboxPollIntervalMs: 100,
-          }),
-        ),
-      ),
+      }).pipe(Effect.provide(makeTestControlPlaneLayer())),
     20_000,
   )
 
@@ -214,12 +228,10 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
     'persists domain state and ClusterWorkflowEngine journal in one Postgres DB and resumes after container sleep/restart without duplicating side effects',
     () =>
       Effect.gen(function* () {
-        yield* resetDatabase.pipe(
-          Effect.provide(makePostgresSqlLayer({ url: redactedUrl })),
-        )
+        yield* resetDatabase.pipe(Effect.provide(makeTestPostgresSqlLayer()))
         const committed = yield* loadSqlMigrations()
         yield* applySqlMigrations(committed).pipe(
-          Effect.provide(makePostgresSqlLayer({ url: redactedUrl })),
+          Effect.provide(makeTestPostgresSqlLayer()),
         )
 
         const prepareCallsRef = yield* Ref.make(0)
@@ -246,13 +258,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         )
 
         const makeContainerLayer = () =>
-          makeControlPlaneSingleStoreLayer(
-            {
-              url: redactedUrl,
-              entityMailboxPollIntervalMs: 100,
-            },
-            countingRunnerLayer,
-          )
+          makeTestControlPlaneLayer(countingRunnerLayer)
 
         // Container Boot #1 (scoped): claim attempt, execute workflow with durable sleep,
         // verify prepare-attempt + SQL journal rows, then close scope to simulate container sleep/restart

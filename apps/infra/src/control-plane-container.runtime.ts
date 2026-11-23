@@ -1,6 +1,7 @@
 import * as Neon from '@alchemy.run/neon'
 import { Clock, Effect } from 'effect'
 import * as HttpServerResponse from 'effect/http/HttpServerResponse'
+import * as Redacted from 'effect/Redacted'
 import { ControlPlaneContainer } from './control-plane-container'
 import { PatchplaneDb } from './resources'
 
@@ -13,11 +14,13 @@ export default ControlPlaneContainer.make(
     const db = yield* Neon.Connect(PatchplaneDb)
 
     const handleFetch = Effect.fn('ControlPlaneContainer.fetch')(function* () {
-      yield* db.pooledConnectionString
+      const connectionString: Redacted.Redacted =
+        yield* db.pooledConnectionString
       const wokenAt = yield* Clock.currentTimeMillis
       return yield* HttpServerResponse.json({
         status: 'ok',
         runtime: 'bun',
+        databaseBound: Redacted.isRedacted(connectionString),
         wokenAt,
       })
     })
@@ -37,5 +40,6 @@ export default ControlPlaneContainer.make(
       }),
       fetch: fetchEffect,
     })
-  }),
+    // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Container runtime entry point (main: import.meta.url)
+  }).pipe(Effect.provide(Neon.ConnectHttp)),
 )

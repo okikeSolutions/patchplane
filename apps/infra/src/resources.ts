@@ -10,6 +10,7 @@ export const POSTGRES_MIGRATIONS_DIR = resolve(
 export const PatchplaneDb = Neon.Project('PatchplaneDb', {
   pgVersion: 17,
   region: 'aws-eu-central-1',
+  historyRetentionSeconds: 21_600,
   migrations: POSTGRES_MIGRATIONS_DIR,
 })
 

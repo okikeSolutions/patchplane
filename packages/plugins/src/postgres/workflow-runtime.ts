@@ -1,7 +1,8 @@
 import { PgClient } from '@effect/sql-pg'
-import { Duration, Layer, type Redacted } from 'effect'
+import { Duration, Layer } from 'effect'
 import { ClusterWorkflowEngine, SingleRunner } from 'effect/cluster'
 import * as Digest from 'effect/crypto/Digest'
+import type * as Redacted from 'effect/Redacted'
 import { PostgresAcceptanceStoreLayer } from './acceptance-store-pg'
 
 export interface PostgresSingleStoreConfig {
