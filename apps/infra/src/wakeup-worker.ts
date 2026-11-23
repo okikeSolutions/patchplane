@@ -58,7 +58,7 @@ export const rejectHttpWake = Effect.fn('WakeupWorker.fetch')(function* () {
  * so durable timers stored in Postgres resume even after container inactivity sleep.
  * It has no public route (`workersDev: false`); the cron trigger is its only entry.
  */
-export class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
+class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
   'WakeupWorker',
   {
     main: import.meta.url,

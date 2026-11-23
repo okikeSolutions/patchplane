@@ -9,7 +9,7 @@ import {
   PatchplaneDb,
   PatchplaneVerificationSnapshot,
 } from './resources'
-import { WakeupWorker } from './wakeup-worker'
+import WakeupWorker from './wakeup-worker'
 
 const BaseProviders = Layer.merge(
   Neon.providers(),

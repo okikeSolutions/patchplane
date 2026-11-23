@@ -24,7 +24,7 @@ export const getRepoRoot = Effect.gen(function* () {
   return path.resolve(yield* path.fromFileUrl(REPO_ROOT_URL))
 })
 
-export function toPosix(filePath: string): string {
+function toPosix(filePath: string): string {
   return filePath.split('\\').join('/')
 }
 

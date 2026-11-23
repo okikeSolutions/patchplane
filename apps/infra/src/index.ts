@@ -9,7 +9,7 @@ export {
   POSTGRES_MIGRATIONS_DIR,
 } from './resources'
 export { PatchplaneV2Stack } from './stack'
-export { WakeupWorker } from './wakeup-worker'
+export { default as WakeupWorker } from './wakeup-worker'
 
 export const describeV2InfrastructurePlan = Effect.fn(
   'Infra.describeV2InfrastructurePlan',

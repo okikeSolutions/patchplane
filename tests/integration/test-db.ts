@@ -10,7 +10,7 @@ import {
   makePostgresSqlLayer,
 } from '../../packages/plugins/src/index'
 
-export const TestDatabaseUrlConfig = Config.Redacted(
+const TestDatabaseUrlConfig = Config.Redacted(
   'PATCHPLANE_TEST_DATABASE_URL',
 ).pipe(
   Config.withDefault(
@@ -29,7 +29,7 @@ class UnsafeTestDatabaseError extends Schema.TaggedError<
  * Integration tests DROP SCHEMA public. Refuse any database whose name does not
  * end in `_test` so a mis-set PATCHPLANE_TEST_DATABASE_URL cannot wipe real data.
  */
-export const assertDisposableTestDatabase = (url: Redacted.Redacted) =>
+const assertDisposableTestDatabase = (url: Redacted.Redacted) =>
   Effect.gen(function* () {
     const parsed = yield* Effect.try({
       try: () => new URL(Redacted.value(url)),

@@ -497,7 +497,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
             const started = yield* claimAndStartAttempt({
               attemptId,
               changeRequestId,
-              waitDurationMs: 1_200,
+              waitDurationMs: 350,
             })
 
             yield* Deferred.await(prepareCompleted).pipe(
@@ -537,7 +537,7 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         )
 
         // Wait past the durable clock deadline while NO container is running
-        yield* Effect.sleep(Duration.millis(1_500))
+        yield* Effect.sleep(Duration.millis(450))
 
         // Container Boot #2 (simulated stateless Cron Wakeup booting fresh container against same Postgres DB)
         yield* Effect.scoped(
