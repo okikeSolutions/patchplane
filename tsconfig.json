@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun", "node"]
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "apps/*/src/**/*.ts",
+    "apps/*/src/**/*.tsx",
+    "apps/*/alchemy.run.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.alchemy/**",
+    "tests/fixtures/**"
+  ]
+}

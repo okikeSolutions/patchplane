@@ -1,49 +1,12 @@
 {
   "name": "@patchplane/domain",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    "./actor": "./src/actor.ts",
-    "./authorization": "./src/authorization.ts",
-    "./candidate-file": "./src/candidate-file.ts",
-    "./candidate-subject": "./src/candidate-subject.ts",
-    "./decision-review": "./src/decision-review.ts",
-    "./errors": "./src/errors.ts",
-    "./evidence-artifact": "./src/evidence-artifact.ts",
-    "./external-workflow-ref": "./src/external-workflow-ref.ts",
-    "./github": "./src/github.ts",
-    "./ids": "./src/ids.ts",
-    "./list-recent-workflow-starts": "./src/list-recent-workflow-starts.ts",
-    "./membership": "./src/membership.ts",
-    "./patch-report": "./src/patch-report.ts",
-    "./patch-report-v1": "./src/patch-report-v1.ts",
-    "./permission": "./src/permission.ts",
-    "./prompt-request": "./src/prompt-request.ts",
-    "./refinements": "./src/refinements.ts",
-    "./runtime-event": "./src/runtime-event.ts",
-    "./runtime-control": "./src/runtime-control.ts",
-    "./runtime-session": "./src/runtime-session.ts",
-    "./sandbox-execution": "./src/sandbox-execution.ts",
-    "./sandbox-environment": "./src/sandbox-environment.ts",
-    "./sandbox-policy": "./src/sandbox-policy.ts",
-    "./server-function": "./src/server-function.ts",
-    "./start-workflow": "./src/start-workflow.ts",
-    "./telemetry": "./src/telemetry.ts",
-    "./verification": "./src/verification.ts",
-    "./workflow-intake": "./src/workflow-intake.ts",
-    "./workflow-run": "./src/workflow-run.ts",
-    "./workflow-start": "./src/workflow-start.ts",
-    "./workspace": "./src/workspace.ts"
-  },
-  "scripts": {
-    "test": "vitest run --config ../../vitest.config.ts",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    ".": "./src/index.ts"
   },
   "dependencies": {
-    "effect": "4.0.2"
-  },
-  "devDependencies": {
-    "@patchplane/typescript-config": "workspace:*"
+    "effect": "4.1.5"
   }
 }

@@ -1,209 +1,97 @@
-import { NodeFileSystem, NodePath } from '@effect/platform-node'
-import { Effect, FileSystem, Layer, Path } from 'effect'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
+import { parseSync } from 'oxc-parser'
 
-export const ArchitectureFileSystemLayer = Layer.mergeAll(
-  NodeFileSystem.layer,
-  NodePath.layer,
-)
-
-const ignoredDirectories = new Set([
+const IGNORED_DIRS = new Set([
   '.git',
-  '.turbo',
-  '.temp',
+  '.alchemy',
   'dist',
   'node_modules',
-  'vendor',
+  'fixtures',
 ])
 
-const sourceFileExtensions = new Set(['.ts', '.tsx', '.mts', '.cts'])
+const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts'])
 
-export interface ImportReference {
-  readonly file: string
-  readonly specifier: string
+export const REPO_ROOT = resolve(import.meta.dirname, '../..')
+
+export function toPosix(filePath: string): string {
+  return filePath.split('\\').join('/')
 }
 
-export interface PackageManifest {
-  exports?: Record<string, string>
-  scripts?: Record<string, string>
-  dependencies?: Record<string, string>
-  devDependencies?: Record<string, string>
+export function relativeToRepo(absolutePath: string): string {
+  return toPosix(relative(REPO_ROOT, absolutePath))
 }
 
-export function repoRoot() {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    let candidate = path.resolve(process.cwd())
-
-    while (true) {
-      const packageJsonPath = path.join(candidate, 'package.json')
-      if (yield* fs.exists(packageJsonPath)) {
-        const packageJsonText = yield* fs.readFileString(packageJsonPath)
-        const packageData: unknown = yield* Effect.try(() =>
-          JSON.parse(packageJsonText),
-        )
-        if (
-          typeof packageData === 'object' &&
-          packageData !== null &&
-          Reflect.get(packageData, 'name') === 'patchplane-monorepo'
-        ) {
-          return candidate
-        }
-      }
-
-      const parent = path.dirname(candidate)
-      if (parent === candidate) {
-        return path.resolve(process.cwd())
-      }
-      candidate = parent
-    }
-  })
+export function readRepoFile(repoRelativePath: string): string {
+  return readFileSync(resolve(REPO_ROOT, repoRelativePath), 'utf8')
 }
 
-function toPosix(path: string) {
-  return path.split('\\').join('/')
-}
+export function listSourceFiles(directory: string): ReadonlyArray<string> {
+  const start = resolve(REPO_ROOT, directory)
+  const results: string[] = []
 
-export function relativeToRepo(file: string) {
-  return Effect.gen(function* () {
-    const path = yield* Path.Path
-    const root = yield* repoRoot()
-    return toPosix(path.relative(root, file))
-  })
-}
-
-function sourceFile(path: string) {
-  return sourceFileExtensions.has(/\.[^.]+$/.exec(path)?.[0] ?? '')
-}
-
-export function pathExists(path: string) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const pathService = yield* Path.Path
-    const root = yield* repoRoot()
-    return yield* fs.exists(pathService.resolve(root, path))
-  })
-}
-
-function listFilesAbsolute(directory: string): Effect.Effect<string[], unknown, FileSystem.FileSystem | Path.Path> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const entries = yield* fs.readDirectory(directory)
-    const files: string[] = []
-
-    for (const entry of entries) {
-      if (ignoredDirectories.has(entry)) {
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current)) {
+      if (IGNORED_DIRS.has(entry)) continue
+      const absolute = join(current, entry)
+      const stat = statSync(absolute)
+      if (stat.isDirectory()) {
+        walk(absolute)
         continue
       }
-
-      const absolute = path.join(directory, entry)
-      const stat = yield* fs.stat(absolute)
-      if (stat.type === 'Directory') {
-        files.push(...yield* listFilesAbsolute(absolute))
-        continue
-      }
-
-      if (stat.type === 'File') {
-        files.push(absolute)
+      if (!stat.isFile()) continue
+      const dot = entry.lastIndexOf('.')
+      if (dot !== -1 && SOURCE_EXTENSIONS.has(entry.slice(dot))) {
+        results.push(relativeToRepo(absolute))
       }
     }
+  }
 
-    return files
+  walk(start)
+  return results.toSorted()
+}
+
+export function isProductionSourceFile(repoRelativePath: string): boolean {
+  return (
+    !repoRelativePath.endsWith('.test.ts') &&
+    !repoRelativePath.endsWith('.test.tsx') &&
+    !repoRelativePath.endsWith('.spec.ts') &&
+    !repoRelativePath.endsWith('.spec.tsx') &&
+    !repoRelativePath.endsWith('.d.ts') &&
+    !repoRelativePath.includes('/test/')
+  )
+}
+
+export function parseAst(repoRelativePath: string, source: string) {
+  return parseSync(repoRelativePath, source, {
+    sourceType: 'module',
   })
 }
 
-export function filesUnder(directory: string) {
-  return Effect.gen(function* () {
-    const path = yield* Path.Path
-    const root = yield* repoRoot()
-    return yield* listFilesAbsolute(path.resolve(root, directory))
-  })
-}
-
-export function sourceFilesUnder(directory: string) {
-  return Effect.map(filesUnder(directory), (files) => files.filter(sourceFile))
-}
-
-export function importSpecifiers(source: string): string[] {
+export function extractImportSpecifiers(
+  repoRelativePath: string,
+  source: string,
+): ReadonlyArray<string> {
+  const parsed = parseAst(repoRelativePath, source)
   const specifiers: string[] = []
-  const patterns = [
-    /import\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/g,
-    /export\s+(?:type\s+)?[^'";]+?\s+from\s+['"]([^'"]+)['"]/g,
-    /import\(\s*['"]([^'"]+)['"]\s*\)/g,
-  ]
 
-  for (const pattern of patterns) {
-    for (const match of source.matchAll(pattern)) {
-      specifiers.push(match[1]!)
+  for (const imp of parsed.module.staticImports) {
+    specifiers.push(imp.moduleRequest.value)
+  }
+  for (const exp of parsed.module.staticExports) {
+    for (const entry of exp.entries) {
+      if (entry.moduleRequest !== null) {
+        specifiers.push(entry.moduleRequest.value)
+      }
+    }
+  }
+  for (const dyn of parsed.module.dynamicImports) {
+    const raw = source.slice(dyn.moduleRequest.start, dyn.moduleRequest.end)
+    const stripped = raw.replace(/^['"]|['"]$/g, '')
+    if (stripped.length > 0) {
+      specifiers.push(stripped)
     }
   }
 
   return specifiers
-}
-
-export function fileText(file: string) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const root = yield* repoRoot()
-    return yield* fs.readFileString(path.resolve(root, file))
-  })
-}
-
-export function importsForFiles(files: readonly string[]) {
-  return Effect.gen(function* () {
-    const imports: ImportReference[] = []
-
-    for (const file of files) {
-      const source = yield* fileText(file)
-      const relativeFile = yield* relativeToRepo(file)
-      for (const specifier of importSpecifiers(source)) {
-        imports.push({ file: relativeFile, specifier })
-      }
-    }
-
-    return imports
-  })
-}
-
-export function sourceImportsUnder(directory: string) {
-  return Effect.flatMap(sourceFilesUnder(directory), importsForFiles)
-}
-
-function isObjectRecord(value: unknown): value is { readonly [key: string]: unknown } {
-  return typeof value === 'object' && value !== null
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return isObjectRecord(value) &&
-    Object.values(value).every((entry) => typeof entry === 'string')
-}
-
-export function packageJson(file: string) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const root = yield* repoRoot()
-    const packageJsonText = yield* fs.readFileString(path.resolve(root, file))
-    const value: unknown = yield* Effect.try(() => JSON.parse(packageJsonText))
-    if (!isObjectRecord(value)) {
-      return {}
-    }
-
-    const manifest: PackageManifest = {}
-    if (isStringRecord(value.exports)) {
-      manifest.exports = value.exports
-    }
-    if (isStringRecord(value.scripts)) {
-      manifest.scripts = value.scripts
-    }
-    if (isStringRecord(value.dependencies)) {
-      manifest.dependencies = value.dependencies
-    }
-    if (isStringRecord(value.devDependencies)) {
-      manifest.devDependencies = value.devDependencies
-    }
-    return manifest
-  })
 }

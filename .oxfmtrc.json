@@ -5,11 +5,13 @@
   "trailingComma": "all",
   "printWidth": 80,
   "ignorePatterns": [
-    "apps/client/dist/**",
-    "apps/client/.output/**",
-    "apps/client/.tanstack/**",
-    "apps/client/node_modules/**",
-    "packages/backend/convex/_generated/**",
-    "**/node_modules/**"
+    "**/dist/**",
+    "**/.alchemy/**",
+    "**/node_modules/**",
+    "tests/fixtures/**",
+    "docs/**",
+    "*.md",
+    ".github/FUNDING.yml",
+    ".github/ISSUE_TEMPLATE/**"
   ]
 }

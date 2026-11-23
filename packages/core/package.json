@@ -1,51 +1,14 @@
 {
   "name": "@patchplane/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    "./diff/project-candidate-changed-files": "./src/diff/project-candidate-changed-files.ts",
-    "./diff/parse-unified-diff-stats": "./src/diff/parse-unified-diff-stats.ts",
-    "./patch-report/assemble-patch-report-v1": "./src/patch-report/assemble-patch-report-v1.ts",
-    "./github/normalize-github-webhook-event": "./src/github/normalize-github-webhook-event.ts",
-    "./services/auth-request-context": "./src/services/auth-request-context.ts",
-    "./services/alpha-review-policy": "./src/services/alpha-review-policy.ts",
-    "./services/artifacts-service": "./src/services/artifacts-service.ts",
-    "./services/auth-service": "./src/services/auth-service.ts",
-    "./services/github-webhook-service": "./src/services/github-webhook-service.ts",
-    "./services/policy-service": "./src/services/policy-service.ts",
-    "./services/review-service": "./src/services/review-service.ts",
-    "./services/storage-service": "./src/services/storage-service.ts",
-    "./services/sandbox-service": "./src/services/sandbox-service.ts",
-    "./services/source-control-service": "./src/services/source-control-service.ts",
-    "./services/telemetry-service": "./src/services/telemetry-service.ts",
-    "./workflows/capture-evidence-artifact": "./src/workflows/capture-evidence-artifact.ts",
-    "./workflows/control-runtime-session": "./src/workflows/control-runtime-session.ts",
-    "./workflows/freeze-incoming-pull-request-candidate": "./src/workflows/freeze-incoming-pull-request-candidate.ts",
-    "./workflows/github-event-to-intake": "./src/workflows/github-event-to-intake.ts",
-    "./workflows/ingest-github-webhook": "./src/workflows/ingest-github-webhook.ts",
-    "./workflows/list-recent-workflow-starts": "./src/workflows/list-recent-workflow-starts.ts",
-    "./workflows/publish-decision-to-source": "./src/workflows/publish-decision-to-source.ts",
-    "./workflows/persist-sandbox-verification-evidence": "./src/workflows/persist-sandbox-verification-evidence.ts",
-    "./workflows/publish-sandbox-result-to-source": "./src/workflows/publish-sandbox-result-to-source.ts",
-    "./workflows/propose-merge-decision": "./src/workflows/propose-merge-decision.ts",
-    "./workflows/run-incoming-verification-plan": "./src/workflows/run-incoming-verification-plan.ts",
-    "./workflows/run-sandbox-agent-for-workflow": "./src/workflows/run-sandbox-agent-for-workflow.ts",
-    "./workflows/resolve-verification-plan-v1": "./src/workflows/resolve-verification-plan-v1.ts",
-    "./workflows/run-sandbox-command-for-workflow": "./src/workflows/run-sandbox-command-for-workflow.ts",
-    "./workflows/start-authenticated-workflow-from-prompt": "./src/workflows/start-authenticated-workflow-from-prompt.ts",
-    "./workflows/start-workflow-from-intake": "./src/workflows/start-workflow-from-intake.ts",
-    "./workflows/start-workflow-from-prompt": "./src/workflows/start-workflow-from-prompt.ts"
-  },
-  "scripts": {
-    "test": "vitest run --config ../../vitest.config.ts",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    ".": "./src/index.ts"
   },
   "dependencies": {
+    "@patchplane/contracts": "workspace:*",
     "@patchplane/domain": "workspace:*",
-    "effect": "4.0.2"
-  },
-  "devDependencies": {
-    "@patchplane/typescript-config": "workspace:*"
+    "effect": "4.1.5"
   }
 }
