@@ -1,62 +1,16 @@
 {
   "name": "@patchplane/plugins",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    "./cloudflare/r2-artifacts-config": "./src/cloudflare/R2ArtifactsConfig.ts",
-    "./cloudflare/r2-artifacts-plugin": "./src/cloudflare/R2ArtifactsPlugin.ts",
-    "./convex/bounded-native-promise": "./src/convex/storage/bounded-native-promise.ts",
-    "./convex/config": "./src/convex/ConvexConfig.ts",
-    "./convex/http-client": "./src/convex/http-client.ts",
-    "./convex/native-deadline-mutation": "./src/convex/native-deadline-mutation.ts",
-    "./convex/storage-plugin": "./src/convex/ConvexStoragePlugin.ts",
-    "./daytona/config": "./src/daytona/DaytonaConfig.ts",
-    "./daytona/sandbox-plugin": "./src/daytona/DaytonaSandboxPlugin.ts",
-    "./github/app": "./src/github/github-app.ts",
-    "./github/config": "./src/github/GitHubConfig.ts",
-    "./github/provider-plugin": "./src/github/GitHubProviderPlugin.ts",
-    "./observability/local-plugin": "./src/observability/LocalObservabilityPlugin.ts",
-    "./registry": "./src/registry.ts",
-    "./sentry/cloudflare-worker": "./src/sentry/cloudflare-worker.ts",
-    "./sentry/config": "./src/sentry/SentryConfig.ts",
-    "./sentry/cloudflare-telemetry-plugin": "./src/sentry/CloudflareTelemetryPlugin.ts",
-    "./sentry/sanitize": "./src/sentry/sanitize.ts",
-    "./sentry/telemetry-plugin": "./src/sentry/SentryTelemetryPlugin.ts",
-    "./workos/auth-plugin": "./src/workos/WorkOSAuthPlugin.ts",
-    "./workos/config": "./src/workos/WorkOSConfig.ts",
-    "./workos/session": "./src/workos/session.ts"
-  },
-  "scripts": {
-    "test": "vitest run --config ../../vitest.config.ts",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
-    "smoke:daytona-rpc": "bun src/daytona/live-rpc-smoke.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1161.0",
-    "@aws-sdk/s3-request-presigner": "^3.1161.0",
-    "@daytona/sdk": "^0.227.3",
-    "@effect/platform-node": "4.0.2",
+    "@effect/sql-pg": "4.1.5",
+    "@patchplane/contracts": "workspace:*",
     "@patchplane/core": "workspace:*",
     "@patchplane/domain": "workspace:*",
-    "@sentry/cloudflare": "11.10.0",
-    "@sentry/core": "11.10.0",
-    "@sentry/effect": "11.10.0",
-    "@workos-inc/node": "11.0.0",
-    "convex": "^1.49.0",
-    "effect": "4.0.2",
-    "fast-xml-parser": "5.12.0",
-    "octokit": "^5.0.5",
-    "pngjs": "7.0.0"
-  },
-  "devDependencies": {
-    "@patchplane/typescript-config": "workspace:*",
-    "@types/node": "^26.6.6",
-    "@types/pngjs": "^6.0.5",
-    "mockdate": "^3.0.5",
-    "nock": "^15.0.5"
-  },
-  "engines": {
-    "node": ">=22.19.0"
+    "effect": "4.1.5"
   }
 }

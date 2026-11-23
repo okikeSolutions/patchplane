@@ -1,47 +1,42 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+  "options": {
+    "typeAware": true
+  },
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
   },
-  "plugins": ["typescript", "react", "unicorn", "import", "jsx-a11y", "oxc"],
+  "plugins": ["typescript", "unicorn", "import", "oxc", "effecttsgo"],
   "jsPlugins": ["./scripts/oxlint/patchplane-plugin.mjs"],
   "rules": {
-    "react/react-in-jsx-scope": "off",
+    "typescript/no-floating-promises": "error",
+    "effecttsgo/floating-effect": "error",
+    "effecttsgo/floating-effect-in-vitest": "error",
+    "effecttsgo/missing-effect-context": "error",
+    "effecttsgo/missing-effect-error": "error",
+    "effecttsgo/missing-return-yield-star": "error",
+    "effecttsgo/class-self-mismatch": "error",
+    "effecttsgo/unstable-api-usage": "off",
+    "patchplane/no-unregistered-promise-boundary": "error",
     "patchplane/no-detached-effect-fork": "error",
     "patchplane/no-untraced-effect-service-method": "error",
-    "patchplane/no-unregistered-effect-runtime": "error",
-    "patchplane/no-unregistered-async-orchestration": "error",
-    "patchplane/no-unregistered-native-deadline": "error",
-    "patchplane/prefer-effect-pattern-matching": "error",
-    "patchplane/no-effect-promise": "error",
     "patchplane/no-throw-in-effect-sync": "error",
-    "patchplane/guard-json-parse-in-effect": "error",
-    "patchplane/no-run-sync-outside-entrypoint": "error",
-    "patchplane/no-ambient-env-in-effect-code": "error",
-    "patchplane/no-synchronous-set-state-in-effect": "error",
-    "patchplane/require-effect-cleanup": "error",
-    "patchplane/no-fetch-in-effect": "error",
-    "react/incompatible-library": "warn"
+    "patchplane/prefer-effect-pattern-matching": "error"
   },
   "overrides": [
     {
-      "files": ["packages/backend/convex/**/*.ts"],
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
       "rules": {
-        "eslint/no-underscore-dangle": "off"
+        "effecttsgo/strict-effect-provide": "off"
       }
     }
   ],
   "ignorePatterns": [
-    "apps/client/dist/**",
-    "apps/client/.output/**",
-    "apps/client/.tanstack/**",
-    "apps/client/node_modules/**",
-    "apps/client/src/components/ui/**",
-    "packages/backend/convex/_generated/**",
+    "**/dist/**",
     "**/.alchemy/**",
-    "packages/*/dist/**",
-    "vendor/**",
-    "**/node_modules/**"
+    "**/node_modules/**",
+    "tests/fixtures/**"
   ]
 }
