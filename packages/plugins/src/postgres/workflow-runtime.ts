@@ -4,6 +4,7 @@ import { ClusterWorkflowEngine, SingleRunner } from 'effect/cluster'
 import * as Digest from 'effect/crypto/Digest'
 import type * as Redacted from 'effect/Redacted'
 import { PostgresAcceptanceStoreLayer } from './acceptance-store-pg'
+import { PostgresAndroidVerificationStoreLayer } from './android-verification-store-pg'
 import { PostgresSandboxLifecycleStoreLayer } from './sandbox-lifecycle-store-pg'
 
 export interface PostgresSingleStoreConfig {
@@ -40,6 +41,7 @@ export const makePostgresSingleStoreClusterLayer = (
     Layer.provideMerge(runnerLayer),
     Layer.provideMerge(PostgresAcceptanceStoreLayer),
     Layer.provideMerge(PostgresSandboxLifecycleStoreLayer),
+    Layer.provideMerge(PostgresAndroidVerificationStoreLayer),
     Layer.provideMerge(Digest.layerWebCrypto),
     Layer.provideMerge(sqlLayer),
   )

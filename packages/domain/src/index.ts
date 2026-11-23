@@ -89,7 +89,7 @@ export const sanitizeErrorMessage = (cause: unknown): string => {
   return raw
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, '$1<redacted>@')
     .replace(
-      /([?&](?:password|passwd|pwd|token|secret|api[_-]?key)=)[^&\s]+/gi,
+      /([?&](?:password|passwd|pwd|token|secret|api[_-]?key|x-amz-signature|x-amz-credential|x-amz-security-token|sig|signature|policy|auth)=)[^&\s]+/gi,
       '$1<redacted>',
     )
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>')
@@ -220,21 +220,22 @@ export interface SandboxExecOutput extends Schema.Schema.Type<
   typeof SandboxExecOutput
 > {}
 
+export const SafeContentType = Schema.NonEmptyString.check(
+  Schema.makeFilter((value) => !/[\r\n]/.test(value), {
+    title: 'SafeContentType',
+    description: 'Content-Type header value without CR/LF characters',
+  }),
+)
+
 export const ArtifactRecord = Schema.Struct({
   artifactKey: ArtifactKey,
   attemptId: VerificationAttemptId,
   sha256: Sha256Hex,
-  byteLength: Schema.Number.check(
-    Schema.isInt(),
+  byteLength: Schema.Int.check(
     Schema.isGreaterThanOrEqualTo(0),
     Schema.isLessThanOrEqualTo(PG_INT4_MAX),
   ),
-  contentType: Schema.NonEmptyString.check(
-    Schema.makeFilter((value) => !/[\r\n]/.test(value), {
-      title: 'SafeContentType',
-      description: 'Content-Type header value without CR/LF characters',
-    }),
-  ),
+  contentType: SafeContentType,
 })
 export interface ArtifactRecord extends Schema.Schema.Type<
   typeof ArtifactRecord
@@ -392,4 +393,122 @@ export class ArtifactIntegrityError extends Schema.TaggedError<
   artifactKey: ArtifactKey,
   expectedSha256: Sha256Hex,
   actualSha256: Schema.String,
+}) {}
+
+export const GitCommitSha = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{40}$/),
+).pipe(Schema.brand('GitCommitSha'))
+export type GitCommitSha = typeof GitCommitSha.Type
+
+export const CloudDeviceRunId = Schema.NonEmptyString.check(
+  Schema.makeFilter(
+    (value) => isSafeRelativeIdentifier(value) && !value.includes('/'),
+    {
+      title: 'SafeCloudDeviceRunId',
+      description:
+        'Non-empty cloud device run identifier without path separators or control characters',
+    },
+  ),
+).pipe(Schema.brand('CloudDeviceRunId'))
+export type CloudDeviceRunId = typeof CloudDeviceRunId.Type
+
+export const AndroidPackageName = Schema.String.check(
+  Schema.isPattern(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/),
+).pipe(Schema.brand('AndroidPackageName'))
+export type AndroidPackageName = typeof AndroidPackageName.Type
+
+export const CloudDeviceProviderId = Schema.NonEmptyString.check(
+  Schema.makeFilter(
+    (value) =>
+      isSafeRelativeIdentifier(value) &&
+      !value.includes('/') &&
+      !/\s/.test(value),
+    {
+      title: 'SafeCloudDeviceProviderId',
+      description:
+        'Non-empty provider identifier without path separators, whitespace, or control characters',
+    },
+  ),
+).pipe(Schema.brand('CloudDeviceProviderId'))
+export type CloudDeviceProviderId = typeof CloudDeviceProviderId.Type
+
+export const CloudDeviceRunStatus = Schema.Literals([
+  'dispatched',
+  'passed',
+  'failed',
+])
+export type CloudDeviceRunStatus = typeof CloudDeviceRunStatus.Type
+
+export const AndroidApkBuildRecord = Schema.Struct({
+  attemptId: VerificationAttemptId,
+  changeRequestId: ChangeRequestId,
+  sourceSha: GitCommitSha,
+  apkArtifactKey: ArtifactKey,
+  apkSha256: Sha256Hex,
+  apkByteLength: Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
+  buildSandboxId: SandboxId,
+  packageName: AndroidPackageName,
+})
+export interface AndroidApkBuildRecord extends Schema.Schema.Type<
+  typeof AndroidApkBuildRecord
+> {}
+
+export const ArbeoJourneyObservation = Schema.Struct({
+  observedApkSha256: Sha256Hex,
+  apkSha256Verified: Schema.Boolean,
+  cleanEmulatorBooted: Schema.Boolean,
+  kvmAccelerated: Schema.optionalKey(Schema.Boolean),
+  importPreviewDuration: Schema.NonEmptyString,
+  importConfirmedDuration: Schema.NonEmptyString,
+  persistedAfterOfflineRestart: Schema.Boolean,
+  cleanupConfirmed: Schema.Boolean,
+})
+export interface ArbeoJourneyObservation extends Schema.Schema.Type<
+  typeof ArbeoJourneyObservation
+> {}
+
+export const CloudDeviceRunRecord = Schema.Struct({
+  runId: CloudDeviceRunId,
+  attemptId: VerificationAttemptId,
+  changeRequestId: ChangeRequestId,
+  providerId: CloudDeviceProviderId,
+  sourceSha: GitCommitSha,
+  apkArtifactKey: ArtifactKey,
+  apkSha256: Sha256Hex,
+  status: CloudDeviceRunStatus,
+  observation: Schema.optionalKey(ArbeoJourneyObservation),
+  artifactKeys: Schema.Array(ArtifactKey),
+})
+export interface CloudDeviceRunRecord extends Schema.Schema.Type<
+  typeof CloudDeviceRunRecord
+> {}
+
+export class CloudDevicePolicyError extends Schema.TaggedError<
+  CloudDevicePolicyError,
+  { readonly brand: unique symbol }
+>()('CloudDevicePolicyError', {
+  field: Schema.NonEmptyString,
+  reason: Schema.NonEmptyString,
+}) {}
+
+export class CloudDeviceExecutionError extends Schema.TaggedError<
+  CloudDeviceExecutionError,
+  { readonly brand: unique symbol }
+>()('CloudDeviceExecutionError', {
+  operation: Schema.NonEmptyString,
+  providerId: CloudDeviceProviderId,
+  message: Schema.String,
+  runId: Schema.optionalKey(CloudDeviceRunId),
+}) {}
+
+export class ApkIntegrityError extends Schema.TaggedError<
+  ApkIntegrityError,
+  { readonly brand: unique symbol }
+>()('ApkIntegrityError', {
+  expectedSha256: Sha256Hex,
+  actualSha256: Schema.String,
+  reason: Schema.NonEmptyString,
 }) {}

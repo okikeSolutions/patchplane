@@ -70,9 +70,31 @@ const ValidatedSandboxEnvBrand = Symbol('ValidatedSandboxEnv')
 export interface ValidatedSandboxEnv {
   readonly [ValidatedSandboxEnvBrand]: true
   readonly attemptId: VerificationAttemptId
-  readonly modelToken: Redacted.Redacted
+  readonly modelToken?: Redacted.Redacted
   readonly gatewayUrl?: string
 }
+
+/**
+ * Builds a zero-credential sandbox environment for untrusted build sandboxes
+ * (such as Stage 1 Gradle APK compilation) that require NO model credential
+ * and zero control-plane/provider secrets.
+ */
+export const buildBuildOnlySandboxEnv = Effect.fn(
+  'SandboxCredentialPolicy.buildBuildOnlySandboxEnv',
+)(function* (input: {
+  readonly attemptId: VerificationAttemptId
+  readonly extraEnv?: Readonly<Record<string, string | Redacted.Redacted>>
+}) {
+  if (input.extraEnv !== undefined) {
+    for (const key of Object.keys(input.extraEnv)) {
+      return yield* assertAllowedSandboxEnvKey(key)
+    }
+  }
+  return {
+    [ValidatedSandboxEnvBrand]: true,
+    attemptId: input.attemptId,
+  } satisfies ValidatedSandboxEnv
+})
 
 export const buildAttemptSandboxLabels = (input: {
   readonly attemptId: VerificationAttemptId

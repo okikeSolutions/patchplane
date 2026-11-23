@@ -6,7 +6,16 @@ export {
   type DaytonaListedSandboxPort,
   type DaytonaSandboxExecPort,
 } from './daytona/daytona-sandbox-provider'
+export {
+  GITHUB_ACTIONS_KVM_PROVIDER_ID,
+  GITHUB_ACTIONS_KVM_WORKFLOW_FILE,
+  makeGitHubActionsKvmDeviceAdapterLayer,
+  type GitHubActionsKvmDispatchPayload,
+  type GitHubActionsKvmRawResult,
+  type GitHubActionsKvmRunnerPort,
+} from './github/github-actions-kvm-device-adapter'
 export { PostgresAcceptanceStoreLayer } from './postgres/acceptance-store-pg'
+export { PostgresAndroidVerificationStoreLayer } from './postgres/android-verification-store-pg'
 export {
   applySqlMigrations,
   DEFAULT_POSTGRES_MIGRATIONS_DIR,

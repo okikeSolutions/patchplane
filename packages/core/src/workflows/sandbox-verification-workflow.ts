@@ -68,7 +68,7 @@ export interface LeakReconciliationReport {
   readonly quarantinedSandboxIds: ReadonlyArray<SandboxId>
 }
 
-const normalizePositiveBound = (
+export const normalizePositiveBound = (
   value: number | undefined,
   fallback: number,
   min: number,

@@ -5,9 +5,45 @@ export {
 } from './services/acceptance-store'
 
 export {
+  ALLOWED_STAGE2_ARTIFACT_CONTENT_TYPES,
+  assertAllowedStage2ContentType,
+  assertCloudOnlyProvider,
+  assertDedicatedDevAccountAndSyntheticFixture,
+  assertSafeApkOutputPath,
+  assertSafeRedactedHttpsUrl,
+  assertValidArbeoObservation,
+  DEFAULT_CLOUD_DEVICE_TIMEOUT_MS,
+  EXPECTED_ARBEO_IMPORT_DURATION,
+  MAX_ANDROID_APK_BYTES,
+  MAX_CLOUD_DEVICE_ARTIFACT_BYTES,
+  MAX_CLOUD_DEVICE_ARTIFACT_COUNT,
+  MAX_CLOUD_DEVICE_TIMEOUT_MS,
+  MAX_CLOUD_DEVICE_TOTAL_ARTIFACT_BYTES,
+} from './services/android-verification-policy'
+
+export {
+  AndroidVerificationStore,
+  type AndroidVerificationStoreService,
+} from './services/android-verification-store'
+
+export {
+  ApkDownloadUrlIssuer,
+  type ApkDownloadUrlIssuerService,
+} from './services/apk-download-url-issuer'
+
+export {
   ArtifactStore,
   type ArtifactStoreService,
 } from './services/artifact-store'
+
+export {
+  type CloudAndroidDeviceAdapterService,
+  CloudAndroidDeviceAdapter,
+  type CloudAndroidDiagnosticArtifact,
+  type CloudAndroidDispatchRequest,
+  type CloudAndroidDispatchResult,
+  type CloudAndroidVerificationReport,
+} from './services/cloud-device-adapter'
 
 export {
   ModelCredentialIssuer,
@@ -17,6 +53,7 @@ export {
 export {
   assertAllowedSandboxEnvKey,
   buildAttemptSandboxLabels,
+  buildBuildOnlySandboxEnv,
   buildValidatedSandboxEnv,
   MAX_MODEL_CREDENTIAL_TTL_MS,
   PATCHPLANE_ATTEMPT_ID_LABEL,
@@ -47,6 +84,23 @@ export {
   VerificationStepRunner,
   type VerificationStepRunnerService,
 } from './services/verification-step-runner'
+
+export {
+  awaitAndRecordCloudDeviceResult,
+  buildDebugApkInIsolatedSandbox,
+  CloudAndroidVerificationResult,
+  CloudAndroidVerificationWorkflow,
+  CloudAndroidVerificationWorkflowError,
+  CloudAndroidVerificationWorkflowLayer,
+  CloudAndroidVerificationWorkflowPayload,
+  dispatchVerifiedApkToCloudDevice,
+  runVerifiedApkOnCloudDevice,
+  Stage1ApkBuildError,
+  Stage1ApkBuildResult,
+  Stage2CloudDeviceError,
+  Stage2CloudDeviceResult,
+  Stage2DispatchReceipt,
+} from './workflows/cloud-android-verification-workflow'
 
 export {
   type CleanupPolicyOptions,

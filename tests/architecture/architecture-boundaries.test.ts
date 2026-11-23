@@ -190,6 +190,37 @@ describe('V2 architecture boundaries', () => {
       }).pipe(Effect.provide(ArchitecturePlatformLayer)),
   )
 
+  it.effect(
+    'forbids personal-device SimLock dependencies and keeps cloud Android verification provider-neutral in core',
+    () =>
+      Effect.gen(function* () {
+        const forbiddenEverywhere = [
+          /personal[-_]?simlock/i,
+          /local[-_]?simlock/i,
+          /firebase-test-lab/i,
+        ]
+        const allImports = (yield* Effect.forEach(['packages', 'apps'], (dir) =>
+          collectProductionImports(dir),
+        )).flat()
+        const personalDeviceViolations = allImports.filter(({ specifier }) =>
+          forbiddenEverywhere.some((pattern) => pattern.test(specifier)),
+        )
+        expect(personalDeviceViolations).toEqual([])
+
+        const coreFiles = (yield* listSourceFiles('packages/core/src')).filter(
+          isProductionSourceFile,
+        )
+        const githubCouplingViolations: Array<string> = []
+        for (const file of coreFiles) {
+          const source = yield* readRepoFile(file)
+          if (/github-actions-kvm|octokit|workflow_dispatch/i.test(source)) {
+            githubCouplingViolations.push(file)
+          }
+        }
+        expect(githubCouplingViolations).toEqual([])
+      }).pipe(Effect.provide(ArchitecturePlatformLayer)),
+  )
+
   it.effect('keeps removed V1 frameworks out of workspace manifests', () =>
     Effect.gen(function* () {
       const manifests = [
