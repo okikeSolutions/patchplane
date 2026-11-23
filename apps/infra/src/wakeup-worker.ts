@@ -27,3 +27,5 @@ export class WakeupWorker extends Cloudflare.Workers.Worker<WakeupWorker>()(
     }
   }).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
 ) {}
+
+export default WakeupWorker
