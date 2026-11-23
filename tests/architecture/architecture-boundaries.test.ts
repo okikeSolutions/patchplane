@@ -194,7 +194,11 @@ describe('V2 architecture boundaries', () => {
     'forbids personal-device SimLock dependencies and keeps cloud Android verification provider-neutral in core',
     () =>
       Effect.gen(function* () {
-        const forbiddenEverywhere = [/simlock/i, /firebase-test-lab/i]
+        const forbiddenEverywhere = [
+          /personal[-_]?simlock/i,
+          /local[-_]?simlock/i,
+          /firebase-test-lab/i,
+        ]
         const allImports = (yield* Effect.forEach(['packages', 'apps'], (dir) =>
           collectProductionImports(dir),
         )).flat()

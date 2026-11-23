@@ -23,32 +23,34 @@ export const MAX_CLOUD_DEVICE_TIMEOUT_MS = 30 * 60 * 1000
 /** Expected Arbeo synthetic offline work-time calculation result. */
 export const EXPECTED_ARBEO_IMPORT_DURATION = '+05:00'
 
+/** Explicit MIME allowlist for untrusted Stage 2 diagnostic artifacts. */
+export const ALLOWED_STAGE2_ARTIFACT_CONTENT_TYPES: ReadonlySet<string> =
+  new Set([
+    'image/png',
+    'image/jpeg',
+    'text/plain',
+    'text/plain; charset=utf-8',
+    'application/json',
+    'application/json; charset=utf-8',
+  ])
+
+/**
+ * Forbids personal-machine, local, laptop, and developer-Mac targets while
+ * allowing dedicated cloud KVM/SimLock worker pools (`cloud-*` with
+ * `executionEnvironment: 'cloud-isolated'`).
+ */
 const FORBIDDEN_PERSONAL_DEVICE_PATTERNS: ReadonlyArray<RegExp> = [
-  /simlock/i,
-  /\blocal\b/i,
+  /(?:^|[-_.])local(?:[-_.]|$)/i,
+  /localdevice/i,
   /localhost/i,
   /127\.0\.0\.1/,
   /personal/i,
   /laptop/i,
   /macbook/i,
   /developer[-_]?mac/i,
+  /physical[-_]?device/i,
+  /usb[-_]?adb/i,
   /xcrun/i,
-]
-
-const FORBIDDEN_URL_HOST_PATTERNS: ReadonlyArray<RegExp> = [
-  /^localhost$/i,
-  /\.local$/i,
-  /\.internal$/i,
-  /^127\./,
-  /^10\./,
-  /^169\.254\./,
-  /^192\.168\./,
-  /^172\.(?:1[6-9]|2\d|3[01])\./,
-  /^0\.0\.0\.0$/,
-  /^\[?::1\]?$/,
-  /^\[?fe80:/i,
-  /^\[?fc00:/i,
-  /^\[?fd/i,
 ]
 
 const FORBIDDEN_PRODUCTION_OR_SIGNING_PATTERNS: ReadonlyArray<RegExp> = [
@@ -57,12 +59,61 @@ const FORBIDDEN_PRODUCTION_OR_SIGNING_PATTERNS: ReadonlyArray<RegExp> = [
   /release[-_]?key/i,
   /play[-_]?store/i,
   /google[-_]?play/i,
-  /^prod(?:uction)?[-_:.@/]/i,
-  /[-_:.@/]prod(?:uction)?$/i,
+  /(?:^|[-_:.@/])prod(?:uction)?(?:[-_:.@/]|$)/i,
   /personal/i,
+  /@(?:gmail|icloud|me|yahoo|outlook|hotmail|live|protonmail|proton)\./i,
 ]
 
-const SAFE_SANDBOX_FILE_PATH = /^[A-Za-z0-9._/-]+$/
+const SAFE_IDENTIFIER_ARG = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/
+const SAFE_SANDBOX_FILE_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/
+
+const isPrivateOrReservedIpv4 = (host: string): boolean => {
+  const parts = host.split('.')
+  if (parts.length !== 4) return false
+  const nums = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : -1))
+  if (nums.some((n) => n < 0 || n > 255)) return false
+  const [a = -1, b = -1] = nums
+  return (
+    a === 0 || // 0.0.0.0/8
+    a === 10 || // 10.0.0.0/8
+    a === 127 || // 127.0.0.0/8 loopback
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 CGNAT / cloud VPC metadata
+    (a === 169 && b === 254) || // 169.254.0.0/16 link-local / cloud metadata
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+    (a === 192 && b === 168) || // 192.168.0.0/16
+    a >= 224 // multicast / reserved
+  )
+}
+
+const isPrivateOrReservedHost = (rawHostname: string): boolean => {
+  const host = rawHostname.replace(/\.+$/, '').toLowerCase()
+  if (
+    host.length === 0 ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
+    return true
+  }
+  if (isPrivateOrReservedIpv4(host)) return true
+
+  // Bracketed IPv6 literal (WHATWG URL normalizes IPv6-mapped IPv4 to hex form)
+  if (host.startsWith('[') && host.endsWith(']')) {
+    const ipv6 = host.slice(1, -1)
+    if (
+      ipv6 === '::' ||
+      ipv6 === '::1' ||
+      ipv6.startsWith('::ffff:') || // IPv4-mapped IPv6 (e.g. ::ffff:7f00:1 / ::ffff:a9fe:a9fe)
+      /^f[cd][0-9a-f]{2}:/.test(ipv6) || // fc00::/7 ULA
+      /^fe[89ab][0-9a-f]:/.test(ipv6) || // fe80::/10 link-local
+      ipv6.startsWith('ff') // multicast
+    ) {
+      return true
+    }
+  }
+  return false
+}
 
 export const assertCloudOnlyProvider = Effect.fn(
   'AndroidVerificationPolicy.assertCloudOnlyProvider',
@@ -77,6 +128,17 @@ export const assertCloudOnlyProvider = Effect.fn(
         'Patchplane never executes untrusted Android verification on personal or non-cloud devices',
     })
   }
+  // Allow dedicated cloud SimLock pools only when explicitly cloud-scoped;
+  // forbid bare/personal/local SimLock targets.
+  if (
+    /simlock/i.test(input.providerId) &&
+    !/^cloud[-_]/i.test(input.providerId)
+  ) {
+    return yield* new CloudDevicePolicyError({
+      field: 'providerId',
+      reason: `Personal or non-cloud SimLock provider "${input.providerId}" is forbidden by security-by-design policy`,
+    })
+  }
   for (const pattern of FORBIDDEN_PERSONAL_DEVICE_PATTERNS) {
     if (pattern.test(input.providerId)) {
       return yield* new CloudDevicePolicyError({
@@ -88,54 +150,75 @@ export const assertCloudOnlyProvider = Effect.fn(
   return input.providerId
 })
 
-export const assertSafeRemoteHttpsUrl = Effect.fn(
-  'AndroidVerificationPolicy.assertSafeRemoteHttpsUrl',
-)(function* (input: {
-  readonly field: string
-  readonly rawUrl: string
-  readonly allowQueryString: boolean
-}) {
-  const parsed = yield* Effect.try({
-    try: () => new URL(input.rawUrl),
-    catch: () =>
-      new CloudDevicePolicyError({
-        field: input.field,
-        reason: `${input.field} must be a valid HTTPS URL`,
-      }),
-  })
-  if (parsed.protocol !== 'https:') {
-    return yield* new CloudDevicePolicyError({
-      field: input.field,
-      reason: `${input.field} must use https://`,
+const validateHttpsUrl = (
+  field: string,
+  rawUrl: string,
+  allowQueryString: boolean,
+) =>
+  Effect.gen(function* () {
+    const safeField = field.trim().length > 0 ? field.trim() : 'url'
+    const parsed = yield* Effect.try({
+      try: () => new URL(rawUrl),
+      catch: () =>
+        new CloudDevicePolicyError({
+          field: safeField,
+          reason: `${safeField} must be a valid HTTPS URL`,
+        }),
     })
-  }
-  if (parsed.username.length > 0 || parsed.password.length > 0) {
-    return yield* new CloudDevicePolicyError({
-      field: input.field,
-      reason: `${input.field} must not embed credentials`,
-    })
-  }
-  if (parsed.hash.length > 0) {
-    return yield* new CloudDevicePolicyError({
-      field: input.field,
-      reason: `${input.field} must not include a URL fragment`,
-    })
-  }
-  if (!input.allowQueryString && parsed.search.length > 0) {
-    return yield* new CloudDevicePolicyError({
-      field: input.field,
-      reason: `${input.field} must not include query parameters`,
-    })
-  }
-  for (const pattern of FORBIDDEN_URL_HOST_PATTERNS) {
-    if (pattern.test(parsed.hostname)) {
+    if (parsed.protocol !== 'https:') {
       return yield* new CloudDevicePolicyError({
-        field: input.field,
-        reason: `${input.field} host "${parsed.hostname}" is not permitted`,
+        field: safeField,
+        reason: `${safeField} must use https://`,
       })
     }
-  }
-  return parsed.toString()
+    if (parsed.port !== '' && parsed.port !== '443') {
+      return yield* new CloudDevicePolicyError({
+        field: safeField,
+        reason: `${safeField} must use standard HTTPS port 443`,
+      })
+    }
+    if (parsed.username.length > 0 || parsed.password.length > 0) {
+      return yield* new CloudDevicePolicyError({
+        field: safeField,
+        reason: `${safeField} must not embed credentials`,
+      })
+    }
+    if (parsed.hash.length > 0) {
+      return yield* new CloudDevicePolicyError({
+        field: safeField,
+        reason: `${safeField} must not include a URL fragment`,
+      })
+    }
+    if (!allowQueryString && parsed.search.length > 0) {
+      return yield* new CloudDevicePolicyError({
+        field: safeField,
+        reason: `${safeField} must not include query parameters`,
+      })
+    }
+    if (isPrivateOrReservedHost(parsed.hostname)) {
+      return yield* new CloudDevicePolicyError({
+        field: safeField,
+        reason: `${safeField} host "${parsed.hostname}" is not permitted`,
+      })
+    }
+    return parsed.toString()
+  })
+
+/**
+ * Validates a `Redacted` HTTPS URL without returning the unwrapped secret URL.
+ */
+export const assertSafeRedactedHttpsUrl = Effect.fn(
+  'AndroidVerificationPolicy.assertSafeRedactedHttpsUrl',
+)(function* (input: {
+  readonly field: string
+  readonly url: Redacted.Redacted
+  readonly allowQueryString: boolean
+}) {
+  yield* validateHttpsUrl(
+    input.field,
+    Redacted.value(input.url),
+    input.allowQueryString,
+  )
 })
 
 export const assertSafeApkOutputPath = Effect.fn(
@@ -144,13 +227,16 @@ export const assertSafeApkOutputPath = Effect.fn(
   const trimmed = apkPath.trim()
   if (
     trimmed.length === 0 ||
+    trimmed.startsWith('/') ||
+    trimmed.endsWith('/') ||
     !SAFE_SANDBOX_FILE_PATH.test(trimmed) ||
     !trimmed.endsWith('.apk') ||
-    trimmed.split('/').some((seg) => seg === '..' || seg === '.')
+    trimmed.split('/').some((seg) => seg === '' || seg === '..' || seg === '.')
   ) {
     return yield* new CloudDevicePolicyError({
       field: 'apkOutputPath',
-      reason: 'APK output path must be a safe .apk path without traversal',
+      reason:
+        'APK output path must be a relative .apk path without leading "/", empty segments, or traversal',
     })
   }
   return trimmed
@@ -161,14 +247,14 @@ export const assertDedicatedDevAccountAndSyntheticFixture = Effect.fn(
 )(function* (input: {
   readonly devAccountHandle: string
   readonly syntheticFixtureId: string
-  readonly apkDownloadUrl: Redacted.Redacted
+  readonly apkDownloadUrl?: Redacted.Redacted
 }) {
   const account = input.devAccountHandle.trim()
-  if (account.length === 0) {
+  if (!SAFE_IDENTIFIER_ARG.test(account)) {
     return yield* new CloudDevicePolicyError({
       field: 'devAccountHandle',
       reason:
-        'A dedicated non-production development account handle is required',
+        'Dedicated dev account handle must be a safe non-flag identifier (no leading "-" or whitespace)',
     })
   }
   for (const pattern of FORBIDDEN_PRODUCTION_OR_SIGNING_PATTERNS) {
@@ -182,10 +268,11 @@ export const assertDedicatedDevAccountAndSyntheticFixture = Effect.fn(
   }
 
   const fixture = input.syntheticFixtureId.trim()
-  if (fixture.length === 0) {
+  if (!SAFE_IDENTIFIER_ARG.test(fixture)) {
     return yield* new CloudDevicePolicyError({
       field: 'syntheticFixtureId',
-      reason: 'An approved synthetic fixture identifier is required',
+      reason:
+        'Approved synthetic fixture ID must be a safe non-flag identifier (no leading "-" or whitespace)',
     })
   }
   for (const pattern of FORBIDDEN_PRODUCTION_OR_SIGNING_PATTERNS) {
@@ -198,13 +285,13 @@ export const assertDedicatedDevAccountAndSyntheticFixture = Effect.fn(
     }
   }
 
-  // Signed presigned R2 download URLs require query parameters (signature/expiry),
-  // but still must be HTTPS and non-SSRF.
-  yield* assertSafeRemoteHttpsUrl({
-    field: 'apkDownloadUrl',
-    rawUrl: Redacted.value(input.apkDownloadUrl),
-    allowQueryString: true,
-  })
+  if (input.apkDownloadUrl !== undefined) {
+    yield* assertSafeRedactedHttpsUrl({
+      field: 'apkDownloadUrl',
+      url: input.apkDownloadUrl,
+      allowQueryString: true,
+    })
+  }
 
   return {
     devAccountHandle: account,
@@ -212,6 +299,26 @@ export const assertDedicatedDevAccountAndSyntheticFixture = Effect.fn(
   } as const
 })
 
+export const assertAllowedStage2ContentType = Effect.fn(
+  'AndroidVerificationPolicy.assertAllowedStage2ContentType',
+)(function* (contentType: string) {
+  const normalized = contentType.trim().toLowerCase()
+  if (!ALLOWED_STAGE2_ARTIFACT_CONTENT_TYPES.has(normalized)) {
+    return yield* new CloudDevicePolicyError({
+      field: 'contentType',
+      reason: `Stage 2 artifact content type "${contentType}" is not in the allowed diagnostic MIME list`,
+    })
+  }
+  return contentType
+})
+
+/**
+ * Evaluates provider-neutral Arbeo journey assertions (`+05:00` preview &
+ * confirmation, offline-restart persistence, clean emulator boot, verified
+ * cleanup, and exact APK SHA-256). Hardware-specific checks (such as Linux
+ * `/dev/kvm`) are enforced by the concrete cloud provider adapter so Expo
+ * Simulators and dedicated cloud pools plug in with zero core changes.
+ */
 export const assertValidArbeoObservation = Effect.fn(
   'AndroidVerificationPolicy.assertValidArbeoObservation',
 )(function* (input: {
@@ -234,9 +341,6 @@ export const assertValidArbeoObservation = Effect.fn(
   const failures: Array<string> = []
   if (!observation.cleanEmulatorBooted) {
     failures.push('clean emulator boot not confirmed')
-  }
-  if (!observation.kvmAccelerated) {
-    failures.push('KVM hardware acceleration (/dev/kvm) not confirmed')
   }
   if (observation.importPreviewDuration !== EXPECTED_ARBEO_IMPORT_DURATION) {
     failures.push(

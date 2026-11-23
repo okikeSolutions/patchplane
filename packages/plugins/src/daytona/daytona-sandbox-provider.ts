@@ -26,6 +26,14 @@ export interface DaytonaSandboxExecPort<E = unknown> {
     command: string,
     options?: { readonly timeout?: Duration.Input },
   ) => Effect.Effect<{ readonly exitCode: number; readonly result: string }, E>
+  readonly statFile?: (path: string) => Effect.Effect<
+    {
+      readonly size: number
+      readonly isDir?: boolean | undefined
+      readonly isSymlink?: boolean | undefined
+    },
+    E
+  >
   readonly readFile?: (path: string) => Effect.Effect<Uint8Array, E>
 }
 
@@ -135,7 +143,9 @@ export const makeDaytonaSandboxProviderLayer = <
           // Daytona createSandbox boundary after core policy validation.
           const envMap: Record<string, string> = {
             [SANDBOX_ATTEMPT_ID_ENV]: env.attemptId,
-            [SANDBOX_MODEL_TOKEN_ENV]: Redacted.value(env.modelToken),
+            ...(env.modelToken !== undefined
+              ? { [SANDBOX_MODEL_TOKEN_ENV]: Redacted.value(env.modelToken) }
+              : {}),
             ...(env.gatewayUrl !== undefined
               ? { [SANDBOX_MODEL_GATEWAY_URL_ENV]: env.gatewayUrl }
               : {}),
@@ -199,8 +209,23 @@ export const makeDaytonaSandboxProviderLayer = <
       }),
 
       readFileBytes: Effect.fn('DaytonaSandboxProvider.readFileBytes')(
-        function* ({ sandboxId, path, maxBytes }) {
+        function* ({ sandboxId, path, maxBytes, timeoutMs }) {
           const operation = 'DaytonaSandboxProvider.readFileBytes'
+          if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+            return yield* new SandboxExecutionError({
+              operation,
+              message: `Invalid maxBytes ceiling (${maxBytes})`,
+              sandboxId,
+            })
+          }
+          if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+            return yield* new SandboxExecutionError({
+              operation,
+              message: `Invalid readFile timeoutMs (${timeoutMs})`,
+              sandboxId,
+            })
+          }
+
           const handle = yield* client
             .get(sandboxId)
             .pipe(sandboxExecutionError(operation, sandboxId))
@@ -220,9 +245,52 @@ export const makeDaytonaSandboxProviderLayer = <
             })
           }
 
-          const bytes = yield* handle
-            .readFile(path)
-            .pipe(sandboxExecutionError(operation, sandboxId))
+          // Check file type & size BEFORE buffering into lite-container RAM.
+          if (handle.statFile !== undefined) {
+            const stat = yield* handle.statFile(path).pipe(
+              Effect.timeoutOrElse({
+                duration: Duration.millis(timeoutMs),
+                orElse: () =>
+                  Effect.fail(
+                    new SandboxExecutionError({
+                      operation,
+                      message: `Timed out stating "${path}" after ${timeoutMs}ms`,
+                      sandboxId,
+                    }),
+                  ),
+              }),
+              sandboxExecutionError(operation, sandboxId),
+            )
+            if (stat.isDir === true || stat.isSymlink === true) {
+              return yield* new SandboxExecutionError({
+                operation,
+                message: `Refusing to read non-regular file "${path}" (directory or symlink)`,
+                sandboxId,
+              })
+            }
+            if (!Number.isFinite(stat.size) || stat.size > maxBytes) {
+              return yield* new SandboxExecutionError({
+                operation,
+                message: `File "${path}" (${stat.size} bytes) exceeds max allowed size (${maxBytes} bytes)`,
+                sandboxId,
+              })
+            }
+          }
+
+          const bytes = yield* handle.readFile(path).pipe(
+            Effect.timeoutOrElse({
+              duration: Duration.millis(timeoutMs),
+              orElse: () =>
+                Effect.fail(
+                  new SandboxExecutionError({
+                    operation,
+                    message: `Timed out reading "${path}" after ${timeoutMs}ms`,
+                    sandboxId,
+                  }),
+                ),
+            }),
+            sandboxExecutionError(operation, sandboxId),
+          )
 
           if (bytes.byteLength > maxBytes) {
             return yield* new SandboxExecutionError({

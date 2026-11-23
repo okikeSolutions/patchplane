@@ -5,10 +5,12 @@ export {
 } from './services/acceptance-store'
 
 export {
+  ALLOWED_STAGE2_ARTIFACT_CONTENT_TYPES,
+  assertAllowedStage2ContentType,
   assertCloudOnlyProvider,
   assertDedicatedDevAccountAndSyntheticFixture,
   assertSafeApkOutputPath,
-  assertSafeRemoteHttpsUrl,
+  assertSafeRedactedHttpsUrl,
   assertValidArbeoObservation,
   DEFAULT_CLOUD_DEVICE_TIMEOUT_MS,
   EXPECTED_ARBEO_IMPORT_DURATION,
@@ -51,6 +53,7 @@ export {
 export {
   assertAllowedSandboxEnvKey,
   buildAttemptSandboxLabels,
+  buildBuildOnlySandboxEnv,
   buildValidatedSandboxEnv,
   MAX_MODEL_CREDENTIAL_TTL_MS,
   PATCHPLANE_ATTEMPT_ID_LABEL,
@@ -83,15 +86,20 @@ export {
 } from './services/verification-step-runner'
 
 export {
+  awaitAndRecordCloudDeviceResult,
   buildDebugApkInIsolatedSandbox,
   CloudAndroidVerificationResult,
   CloudAndroidVerificationWorkflow,
   CloudAndroidVerificationWorkflowError,
   CloudAndroidVerificationWorkflowLayer,
   CloudAndroidVerificationWorkflowPayload,
+  dispatchVerifiedApkToCloudDevice,
   runVerifiedApkOnCloudDevice,
+  Stage1ApkBuildError,
   Stage1ApkBuildResult,
+  Stage2CloudDeviceError,
   Stage2CloudDeviceResult,
+  Stage2DispatchReceipt,
 } from './workflows/cloud-android-verification-workflow'
 
 export {

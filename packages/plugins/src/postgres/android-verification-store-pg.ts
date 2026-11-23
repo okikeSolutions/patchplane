@@ -10,13 +10,34 @@ import {
   sanitizeErrorMessage,
 } from '@patchplane/domain'
 
+const StrictPositiveSafeInt = Schema.Union([
+  Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
+  Schema.String.check(Schema.isPattern(/^[1-9]\d*$/)),
+  Schema.BigInt,
+])
+
+const ArtifactKeysColumn = Schema.Union([
+  Schema.Array(ArtifactKey),
+  Schema.fromJsonString(Schema.Array(ArtifactKey)),
+])
+
+const ObservationColumn = Schema.NullOr(
+  Schema.Union([
+    ArbeoJourneyObservation,
+    Schema.fromJsonString(ArbeoJourneyObservation),
+  ]),
+)
+
 const RawApkBuildRow = Schema.Struct({
   attempt_id: Schema.String,
   change_request_id: Schema.String,
   source_sha: Schema.String,
   apk_artifact_key: Schema.String,
   apk_sha256: Schema.String,
-  apk_byte_length: Schema.Union([Schema.Finite, Schema.String, Schema.BigInt]),
+  apk_byte_length: StrictPositiveSafeInt,
   build_sandbox_id: Schema.String,
   package_name: Schema.String,
 })
@@ -30,98 +51,84 @@ const RawCloudDeviceRunRow = Schema.Struct({
   apk_artifact_key: Schema.String,
   apk_sha256: Schema.String,
   status: Schema.String,
-  observation: Schema.NullOr(Schema.Unknown),
-  artifact_keys: Schema.Unknown,
+  observation: ObservationColumn,
+  artifact_keys: ArtifactKeysColumn,
 })
 
+/**
+ * Maps SQL/decode failures to `PersistenceError` without raw unsanitized
+ * `cause` objects so workflow error journals never persist driver internals.
+ */
 const persistenceError = (operation: string) =>
   Effect.mapError(
     (cause: unknown) =>
       new PersistenceError({
         operation,
         message: sanitizeErrorMessage(cause),
-        cause,
       }),
   )
 
-const decodeApkBuildRow = (row: unknown, operation: string) =>
+const parseSafeByteLength = (
+  value: number | string | bigint,
+  operation: string,
+) =>
   Effect.gen(function* () {
-    const raw = yield* Schema.decodeUnknownEffect(RawApkBuildRow)(row).pipe(
-      persistenceError(operation),
-    )
-    const byteLength =
-      typeof raw.apk_byte_length === 'number'
-        ? raw.apk_byte_length
-        : typeof raw.apk_byte_length === 'bigint'
-          ? Number(raw.apk_byte_length)
-          : Number.parseInt(raw.apk_byte_length, 10)
-    return yield* Schema.decodeEffect(AndroidApkBuildRecord)({
-      attemptId: raw.attempt_id,
-      changeRequestId: raw.change_request_id,
-      sourceSha: raw.source_sha,
-      apkArtifactKey: raw.apk_artifact_key,
-      apkSha256: raw.apk_sha256,
-      apkByteLength: byteLength,
-      buildSandboxId: raw.build_sandbox_id,
-      packageName: raw.package_name,
-    }).pipe(persistenceError(operation))
+    const numeric =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'bigint'
+          ? Number(value)
+          : Number(value)
+    if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+      return yield* new PersistenceError({
+        operation,
+        message:
+          'Stored apk_byte_length is outside safe positive integer range',
+      })
+    }
+    return numeric
   })
 
-const decodeCloudDeviceRunRow = (row: unknown, operation: string) =>
-  Effect.gen(function* () {
-    const raw = yield* Schema.decodeUnknownEffect(RawCloudDeviceRunRow)(
-      row,
-    ).pipe(persistenceError(operation))
-    const rawKeysValue = raw.artifact_keys
-    const rawKeys: unknown =
-      typeof rawKeysValue === 'string'
-        ? yield* Effect.try({
-            try: () => JSON.parse(rawKeysValue) as unknown,
-            catch: (cause) =>
-              new PersistenceError({
-                operation,
-                message: sanitizeErrorMessage(cause),
-                cause,
-              }),
-          })
-        : rawKeysValue
-    const artifactKeys = yield* Schema.decodeUnknownEffect(
-      Schema.Array(ArtifactKey),
-    )(rawKeys).pipe(persistenceError(operation))
+const decodeApkBuildRow = Effect.fnUntraced(function* (
+  row: unknown,
+  operation: string,
+) {
+  const raw = yield* Schema.decodeUnknownEffect(RawApkBuildRow)(row).pipe(
+    persistenceError(operation),
+  )
+  const byteLength = yield* parseSafeByteLength(raw.apk_byte_length, operation)
+  return yield* Schema.decodeEffect(AndroidApkBuildRecord)({
+    attemptId: raw.attempt_id,
+    changeRequestId: raw.change_request_id,
+    sourceSha: raw.source_sha,
+    apkArtifactKey: raw.apk_artifact_key,
+    apkSha256: raw.apk_sha256,
+    apkByteLength: byteLength,
+    buildSandboxId: raw.build_sandbox_id,
+    packageName: raw.package_name,
+  }).pipe(persistenceError(operation))
+})
 
-    const rawObservationValue = raw.observation
-    const rawObservation: unknown =
-      typeof rawObservationValue === 'string'
-        ? yield* Effect.try({
-            try: () => JSON.parse(rawObservationValue) as unknown,
-            catch: (cause) =>
-              new PersistenceError({
-                operation,
-                message: sanitizeErrorMessage(cause),
-                cause,
-              }),
-          })
-        : rawObservationValue
-    const observation =
-      rawObservation !== null && rawObservation !== undefined
-        ? yield* Schema.decodeUnknownEffect(ArbeoJourneyObservation)(
-            rawObservation,
-          ).pipe(persistenceError(operation))
-        : undefined
-
-    return yield* Schema.decodeUnknownEffect(CloudDeviceRunRecord)({
-      runId: raw.run_id,
-      attemptId: raw.attempt_id,
-      changeRequestId: raw.change_request_id,
-      providerId: raw.provider_id,
-      sourceSha: raw.source_sha,
-      apkArtifactKey: raw.apk_artifact_key,
-      apkSha256: raw.apk_sha256,
-      status: raw.status,
-      ...(observation !== undefined ? { observation } : {}),
-      artifactKeys,
-    }).pipe(persistenceError(operation))
-  })
+const decodeCloudDeviceRunRow = Effect.fnUntraced(function* (
+  row: unknown,
+  operation: string,
+) {
+  const raw = yield* Schema.decodeUnknownEffect(RawCloudDeviceRunRow)(row).pipe(
+    persistenceError(operation),
+  )
+  return yield* Schema.decodeUnknownEffect(CloudDeviceRunRecord)({
+    runId: raw.run_id,
+    attemptId: raw.attempt_id,
+    changeRequestId: raw.change_request_id,
+    providerId: raw.provider_id,
+    sourceSha: raw.source_sha,
+    apkArtifactKey: raw.apk_artifact_key,
+    apkSha256: raw.apk_sha256,
+    status: raw.status,
+    ...(raw.observation !== null ? { observation: raw.observation } : {}),
+    artifactKeys: raw.artifact_keys,
+  }).pipe(persistenceError(operation))
+})
 
 export const PostgresAndroidVerificationStoreLayer = Layer.effect(
   AndroidVerificationStore,
@@ -156,9 +163,12 @@ export const PostgresAndroidVerificationStoreLayer = Layer.effect(
           )
           ON CONFLICT (attempt_id) DO UPDATE
             SET apk_byte_length = android_apk_builds.apk_byte_length
-            WHERE android_apk_builds.source_sha = EXCLUDED.source_sha
+            WHERE android_apk_builds.change_request_id = EXCLUDED.change_request_id
+              AND android_apk_builds.source_sha = EXCLUDED.source_sha
               AND android_apk_builds.apk_sha256 = EXCLUDED.apk_sha256
               AND android_apk_builds.apk_artifact_key = EXCLUDED.apk_artifact_key
+              AND android_apk_builds.apk_byte_length = EXCLUDED.apk_byte_length
+              AND android_apk_builds.package_name = EXCLUDED.package_name
           RETURNING attempt_id, change_request_id, source_sha, apk_artifact_key, apk_sha256, apk_byte_length, build_sandbox_id, package_name
         `.pipe(persistenceError(operation))
 
@@ -166,7 +176,7 @@ export const PostgresAndroidVerificationStoreLayer = Layer.effect(
         if (first === undefined) {
           return yield* new PersistenceError({
             operation,
-            message: `APK build for attempt "${build.attemptId}" already exists with conflicting source SHA or APK digest`,
+            message: `APK build for attempt "${build.attemptId}" already exists with conflicting metadata or digest`,
           })
         }
         return yield* decodeApkBuildRow(first, operation)
@@ -181,6 +191,10 @@ export const PostgresAndroidVerificationStoreLayer = Layer.effect(
         const artifactKeysJson = JSON.stringify(run.artifactKeys)
         const isTerminal = run.status === 'passed' || run.status === 'failed'
 
+        // Forward-only state machine:
+        // - 'dispatched' -> 'passed' | 'failed' (with identical immutable identity)
+        // - Identical idempotent replay of an already-recorded row succeeds
+        // - Conflicting terminal transitions or identity mismatches fail closed
         const rows = yield* sql`
           INSERT INTO cloud_device_runs (
             run_id,
@@ -216,9 +230,20 @@ export const PostgresAndroidVerificationStoreLayer = Layer.effect(
                   WHEN EXCLUDED.status IN ('passed', 'failed') THEN COALESCE(cloud_device_runs.completed_at, now())
                   ELSE cloud_device_runs.completed_at
                 END
-            WHERE cloud_device_runs.status = 'dispatched'
-              AND cloud_device_runs.attempt_id = EXCLUDED.attempt_id
+            WHERE cloud_device_runs.attempt_id = EXCLUDED.attempt_id
+              AND cloud_device_runs.change_request_id = EXCLUDED.change_request_id
+              AND cloud_device_runs.provider_id = EXCLUDED.provider_id
+              AND cloud_device_runs.source_sha = EXCLUDED.source_sha
+              AND cloud_device_runs.apk_artifact_key = EXCLUDED.apk_artifact_key
               AND cloud_device_runs.apk_sha256 = EXCLUDED.apk_sha256
+              AND (
+                (cloud_device_runs.status = 'dispatched' AND EXCLUDED.status IN ('passed', 'failed'))
+                OR (
+                  cloud_device_runs.status = EXCLUDED.status
+                  AND cloud_device_runs.observation IS NOT DISTINCT FROM EXCLUDED.observation
+                  AND cloud_device_runs.artifact_keys = EXCLUDED.artifact_keys
+                )
+              )
           RETURNING run_id, attempt_id, change_request_id, provider_id, source_sha, apk_artifact_key, apk_sha256, status, observation, artifact_keys
         `.pipe(persistenceError(operation))
 
@@ -226,7 +251,7 @@ export const PostgresAndroidVerificationStoreLayer = Layer.effect(
         if (first === undefined) {
           return yield* new PersistenceError({
             operation,
-            message: `Cloud device run "${run.runId}" cannot be overwritten once terminal or mismatched`,
+            message: `Cloud device run "${run.runId}" cannot be mutated once terminal or mismatched`,
           })
         }
         return yield* decodeCloudDeviceRunRow(first, operation)

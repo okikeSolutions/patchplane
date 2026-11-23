@@ -89,7 +89,7 @@ export const sanitizeErrorMessage = (cause: unknown): string => {
   return raw
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, '$1<redacted>@')
     .replace(
-      /([?&](?:password|passwd|pwd|token|secret|api[_-]?key)=)[^&\s]+/gi,
+      /([?&](?:password|passwd|pwd|token|secret|api[_-]?key|x-amz-signature|x-amz-credential|x-amz-security-token|sig|signature|policy|auth)=)[^&\s]+/gi,
       '$1<redacted>',
     )
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>')
@@ -220,21 +220,22 @@ export interface SandboxExecOutput extends Schema.Schema.Type<
   typeof SandboxExecOutput
 > {}
 
+export const SafeContentType = Schema.NonEmptyString.check(
+  Schema.makeFilter((value) => !/[\r\n]/.test(value), {
+    title: 'SafeContentType',
+    description: 'Content-Type header value without CR/LF characters',
+  }),
+)
+
 export const ArtifactRecord = Schema.Struct({
   artifactKey: ArtifactKey,
   attemptId: VerificationAttemptId,
   sha256: Sha256Hex,
-  byteLength: Schema.Number.check(
-    Schema.isInt(),
+  byteLength: Schema.Int.check(
     Schema.isGreaterThanOrEqualTo(0),
     Schema.isLessThanOrEqualTo(PG_INT4_MAX),
   ),
-  contentType: Schema.NonEmptyString.check(
-    Schema.makeFilter((value) => !/[\r\n]/.test(value), {
-      title: 'SafeContentType',
-      description: 'Content-Type header value without CR/LF characters',
-    }),
-  ),
+  contentType: SafeContentType,
 })
 export interface ArtifactRecord extends Schema.Schema.Type<
   typeof ArtifactRecord
@@ -416,9 +417,19 @@ export const AndroidPackageName = Schema.String.check(
 ).pipe(Schema.brand('AndroidPackageName'))
 export type AndroidPackageName = typeof AndroidPackageName.Type
 
-export const CloudDeviceProviderId = Schema.NonEmptyString.pipe(
-  Schema.brand('CloudDeviceProviderId'),
-)
+export const CloudDeviceProviderId = Schema.NonEmptyString.check(
+  Schema.makeFilter(
+    (value) =>
+      isSafeRelativeIdentifier(value) &&
+      !value.includes('/') &&
+      !/\s/.test(value),
+    {
+      title: 'SafeCloudDeviceProviderId',
+      description:
+        'Non-empty provider identifier without path separators, whitespace, or control characters',
+    },
+  ),
+).pipe(Schema.brand('CloudDeviceProviderId'))
 export type CloudDeviceProviderId = typeof CloudDeviceProviderId.Type
 
 export const CloudDeviceRunStatus = Schema.Literals([
@@ -434,7 +445,10 @@ export const AndroidApkBuildRecord = Schema.Struct({
   sourceSha: GitCommitSha,
   apkArtifactKey: ArtifactKey,
   apkSha256: Sha256Hex,
-  apkByteLength: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+  apkByteLength: Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
   buildSandboxId: SandboxId,
   packageName: AndroidPackageName,
 })
@@ -446,7 +460,7 @@ export const ArbeoJourneyObservation = Schema.Struct({
   observedApkSha256: Sha256Hex,
   apkSha256Verified: Schema.Boolean,
   cleanEmulatorBooted: Schema.Boolean,
-  kvmAccelerated: Schema.Boolean,
+  kvmAccelerated: Schema.optionalKey(Schema.Boolean),
   importPreviewDuration: Schema.NonEmptyString,
   importConfirmedDuration: Schema.NonEmptyString,
   persistedAfterOfflineRestart: Schema.Boolean,

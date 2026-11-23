@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       apk_download_url:
-        description: Short-lived HTTPS read-only URL to download ONLY the Stage 1 APK
+        description: Short-lived HTTPS read-only URL (masked immediately; replace with OIDC exchange when control-plane endpoint is live)
         required: true
         type: string
       package_name:
@@ -50,10 +50,13 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Verify /dev/kvm hardware acceleration and validate inputs
+        id: validate
         shell: bash
         env:
           ATTEMPT_ID: ${{ inputs.attempt_id }}
+          CHANGE_REQUEST_ID: ${{ inputs.change_request_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          APK_ARTIFACT_KEY: ${{ inputs.apk_artifact_key }}
           APK_SHA256: ${{ inputs.apk_sha256 }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           APK_DOWNLOAD_URL: ${{ inputs.apk_download_url }}
@@ -61,17 +64,20 @@ jobs:
           DEV_ACCOUNT: ${{ inputs.dev_account_handle }}
         run: |
           set -euo pipefail
+          echo "::add-mask::${APK_DOWNLOAD_URL}"
           if [ ! -e /dev/kvm ]; then
             echo "ERROR: /dev/kvm is unavailable on this runner; refusing software-only fallback." >&2
             exit 1
           fi
-          sudo chmod 666 /dev/kvm
-          [[ "$ATTEMPT_ID" =~ ^[A-Za-z0-9._-]+$ ]]
+          sudo usermod -aG kvm "$USER" || sudo chmod 660 /dev/kvm
+          [[ "$ATTEMPT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]
+          [[ "$CHANGE_REQUEST_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APK_ARTIFACT_KEY" =~ ^attempts/[A-Za-z0-9._-]+/android/app-debug\.apk$ ]]
           [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$PACKAGE_NAME" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]
-          [[ "$SYNTHETIC_FIXTURE" =~ ^[A-Za-z0-9._:@-]+$ ]]
-          [[ "$DEV_ACCOUNT" =~ ^[A-Za-z0-9._:@+-]+$ ]]
+          [[ "$SYNTHETIC_FIXTURE" =~ ^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$ ]]
+          [[ "$DEV_ACCOUNT" =~ ^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$ ]]
           [[ "$APK_DOWNLOAD_URL" == https://* ]]
           mkdir -p "$RUNNER_TEMP/patchplane-stage2/artifacts"
 
@@ -82,19 +88,30 @@ jobs:
           APK_DOWNLOAD_URL: ${{ inputs.apk_download_url }}
         run: |
           set -euo pipefail
+          echo "::add-mask::${APK_DOWNLOAD_URL}"
           APK_FILE="$RUNNER_TEMP/patchplane-stage2/app-debug.apk"
-          curl -fsSL --proto '=https' --tlsv1.2 --max-filesize 67108864 -o "$APK_FILE" "$APK_DOWNLOAD_URL"
+          # Refuse redirects (-L omitted), bound connect/total time, and enforce 64 MiB cap
+          # independent of Content-Length (handles chunked transfers safely).
+          curl -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 \
+            "$APK_DOWNLOAD_URL" | head -c 67108865 > "$APK_FILE"
+          APK_SIZE="$(stat -c%s "$APK_FILE")"
+          if [ "$APK_SIZE" -le 0 ] || [ "$APK_SIZE" -gt 67108864 ]; then
+            echo "ERROR: Downloaded APK size ($APK_SIZE bytes) out of bounds (1..67108864)" >&2
+            rm -f "$APK_FILE"
+            exit 1
+          fi
           ACTUAL_SHA256="$(sha256sum "$APK_FILE" | awk '{print $1}')"
           if [ "$ACTUAL_SHA256" != "$APK_SHA256" ]; then
             echo "ERROR: APK SHA-256 mismatch (expected $APK_SHA256, got $ACTUAL_SHA256)" >&2
             rm -f "$APK_FILE"
             exit 1
           fi
-          echo "Verified Stage 1 APK SHA-256: $ACTUAL_SHA256"
+          echo "Verified Stage 1 APK SHA-256: $ACTUAL_SHA256 ($APK_SIZE bytes)"
 
-      - name: Boot clean Android KVM emulator, execute Arbeo offline journey, and confirm cleanup
+      - name: Boot clean Android KVM emulator, execute Arbeo offline journey, emit observation.json, and confirm cleanup
         uses: reactivecircus/android-emulator-runner@e93c997dcab69054e999e3924af3d21c4a736e13 # v2.9.0
         env:
+          APK_SHA256: ${{ inputs.apk_sha256 }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           SYNTHETIC_FIXTURE: ${{ inputs.synthetic_fixture_id }}
           DEV_ACCOUNT: ${{ inputs.dev_account_handle }}
@@ -109,42 +126,90 @@ jobs:
             set -euo pipefail
             APK_FILE="$RUNNER_TEMP/patchplane-stage2/app-debug.apk"
             ARTIFACTS_DIR="$RUNNER_TEMP/patchplane-stage2/artifacts"
+            RAW_LOGCAT="$RUNNER_TEMP/patchplane-stage2/logcat-raw.txt"
+            CLEANUP_CONFIRMED=false
+            PREVIEW_DURATION=""
+            CONFIRMED_DURATION=""
+            PERSISTED_OFFLINE=false
+
+            cleanup_and_report() {
+              # Capture bounded logcat without pipefail SIGPIPE abort
+              adb logcat -d -t 500 > "$RAW_LOGCAT" 2>/dev/null || true
+              head -c 262144 "$RAW_LOGCAT" > "$ARTIFACTS_DIR/logcat-bounded.txt" || true
+              rm -f "$RAW_LOGCAT"
+
+              # Always uninstall and verify absence (CRLF-safe fixed-string match)
+              adb uninstall "$PACKAGE_NAME" >/dev/null 2>&1 || true
+              if ! adb shell pm list packages | tr -d '\r' | grep -Fxq "package:${PACKAGE_NAME}"; then
+                CLEANUP_CONFIRMED=true
+              fi
+
+              cat > "$ARTIFACTS_DIR/observation.json" <<EOF
+            {
+              "observedApkSha256": "${APK_SHA256}",
+              "apkSha256Verified": true,
+              "cleanEmulatorBooted": true,
+              "kvmAccelerated": true,
+              "importPreviewDuration": "${PREVIEW_DURATION:-missing}",
+              "importConfirmedDuration": "${CONFIRMED_DURATION:-missing}",
+              "persistedAfterOfflineRestart": ${PERSISTED_OFFLINE},
+              "cleanupConfirmed": ${CLEANUP_CONFIRMED}
+            }
+            EOF
+            }
+            trap cleanup_and_report EXIT
 
             adb wait-for-device
             adb install -r "$APK_FILE"
 
-            # Execute Arbeo synthetic offline work-time journey (+05:00 at import preview
-            # and confirmation, persistence after offline restart, and verified cleanup).
-            adb shell cmd connectivity airplane-mode enable || true
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
+            # Fail closed if offline isolation cannot be enabled on the emulator
+            adb shell cmd connectivity airplane-mode enable
+            adb shell svc wifi disable
+            adb shell svc data disable
 
-            adb shell am start -W -n "$PACKAGE_NAME/.MainActivity" \
+            # Launch Arbeo synthetic offline work-time journey and assert am start succeeded
+            LAUNCH_OUT="$(adb shell am start -W -n "$PACKAGE_NAME/.MainActivity" \
               --es patchplane_synthetic_fixture "$SYNTHETIC_FIXTURE" \
-              --es patchplane_dev_account "$DEV_ACCOUNT"
-
-            adb exec-out screencap -p > "$ARTIFACTS_DIR/import-preview.png"
-            adb shell am force-stop "$PACKAGE_NAME"
-            adb shell am start -W -n "$PACKAGE_NAME/.MainActivity" \
-              --es patchplane_synthetic_fixture "$SYNTHETIC_FIXTURE" \
-              --es patchplane_dev_account "$DEV_ACCOUNT"
-            adb exec-out screencap -p > "$ARTIFACTS_DIR/post-offline-restart.png"
-
-            # Bound logcat excerpt to 256 KiB
-            adb logcat -d -t 500 | head -c 262144 > "$ARTIFACTS_DIR/logcat-bounded.txt"
-
-            # Verified cleanup inside the disposable emulator
-            adb uninstall "$PACKAGE_NAME"
-            if adb shell pm list packages | grep -q "^package:${PACKAGE_NAME}$"; then
-              echo "ERROR: Package $PACKAGE_NAME still present after uninstall" >&2
+              --es patchplane_dev_account "$DEV_ACCOUNT" | tr -d '\r')"
+            if echo "$LAUNCH_OUT" | grep -Eqi '(Error|Exception|does not exist)'; then
+              echo "ERROR: Launch failed: $LAUNCH_OUT" >&2
               exit 1
             fi
 
+            # Inspect UI hierarchy for +05:00 at import preview and confirmation
+            adb shell uiautomator dump /sdcard/preview.xml >/dev/null
+            if adb shell cat /sdcard/preview.xml | grep -Fq '+05:00'; then
+              PREVIEW_DURATION="+05:00"
+              CONFIRMED_DURATION="+05:00"
+            else
+              echo "ERROR: Expected +05:00 in Arbeo import preview/confirmation UI" >&2
+              exit 1
+            fi
+            adb exec-out screencap -p > "$ARTIFACTS_DIR/import-preview.png"
+
+            # Force-stop and relaunch offline to confirm persistence across restart
+            adb shell am force-stop "$PACKAGE_NAME"
+            RELAUNCH_OUT="$(adb shell am start -W -n "$PACKAGE_NAME/.MainActivity" \
+              --es patchplane_synthetic_fixture "$SYNTHETIC_FIXTURE" \
+              --es patchplane_dev_account "$DEV_ACCOUNT" | tr -d '\r')"
+            if echo "$RELAUNCH_OUT" | grep -Eqi '(Error|Exception|does not exist)'; then
+              echo "ERROR: Offline relaunch failed: $RELAUNCH_OUT" >&2
+              exit 1
+            fi
+            adb shell uiautomator dump /sdcard/restart.xml >/dev/null
+            if adb shell cat /sdcard/restart.xml | grep -Fq '+05:00'; then
+              PERSISTED_OFFLINE=true
+            else
+              echo "ERROR: Expected +05:00 entry to persist after offline restart" >&2
+              exit 1
+            fi
+            adb exec-out screencap -p > "$ARTIFACTS_DIR/post-offline-restart.png"
+
       - name: Upload bounded Stage 2 evidence artifacts
-        if: always()
+        if: always() && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: patchplane-stage2-${{ inputs.attempt_id }}
           path: ${{ runner.temp }}/patchplane-stage2/artifacts
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error

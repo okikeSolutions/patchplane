@@ -1,6 +1,7 @@
-import { Effect, Layer, Schema } from 'effect'
+import { Duration, Effect, Layer, Schema } from 'effect'
 import * as Redacted from 'effect/Redacted'
 import {
+  assertSafeRedactedHttpsUrl,
   CloudAndroidDeviceAdapter,
   type CloudAndroidDiagnosticArtifact,
   type CloudAndroidDispatchResult,
@@ -10,8 +11,10 @@ import {
   ApkIntegrityError,
   ArbeoJourneyObservation,
   CloudDeviceExecutionError,
+  CloudDevicePolicyError,
   CloudDeviceProviderId,
   CloudDeviceRunId,
+  SafeContentType,
   sanitizeErrorMessage,
 } from '@patchplane/domain'
 
@@ -19,6 +22,8 @@ export const GITHUB_ACTIONS_KVM_PROVIDER_ID =
   CloudDeviceProviderId.make('github-actions-kvm')
 
 export const GITHUB_ACTIONS_KVM_WORKFLOW_FILE = 'cloud-android-kvm-verify.yml'
+
+const SAFE_WORKFLOW_FILENAME = /^[A-Za-z0-9._-]+\.ya?ml$/
 
 /**
  * Exact `workflow_dispatch` inputs sent to GitHub Actions `ubuntu-latest` KVM.
@@ -44,11 +49,7 @@ export interface GitHubActionsKvmDispatchPayload {
 export interface GitHubActionsKvmRawResult {
   readonly runId: unknown
   readonly observation: unknown
-  readonly artifacts: ReadonlyArray<{
-    readonly relativePath: unknown
-    readonly contentType: unknown
-    readonly bytes: Uint8Array
-  }>
+  readonly artifacts: unknown
 }
 
 export interface GitHubActionsKvmRunnerPort<
@@ -65,10 +66,13 @@ export interface GitHubActionsKvmRunnerPort<
   }) => Effect.Effect<GitHubActionsKvmRawResult, EAwait>
 }
 
-const RawArtifactMeta = Schema.Struct({
-  relativePath: Schema.NonEmptyString,
-  contentType: Schema.NonEmptyString,
-})
+const DecodedRawArtifacts = Schema.Array(
+  Schema.Struct({
+    relativePath: Schema.NonEmptyString,
+    contentType: SafeContentType,
+    bytes: Schema.instanceOf(Uint8Array),
+  }),
+)
 
 const mapAdapterError = (operation: string, runId?: CloudDeviceRunId) =>
   Effect.mapError(
@@ -99,10 +103,28 @@ export const makeGitHubActionsKvmDeviceAdapterLayer = <EDispatch, EAwait>(
       )(function* (request) {
         const operation =
           'GitHubActionsKvmDeviceAdapter.dispatchApkVerification'
+        const workflowFile =
+          options?.workflowFile ?? GITHUB_ACTIONS_KVM_WORKFLOW_FILE
+        if (
+          !SAFE_WORKFLOW_FILENAME.test(workflowFile) ||
+          workflowFile.includes('..')
+        ) {
+          return yield* new CloudDevicePolicyError({
+            field: 'workflowFile',
+            reason: `Unsafe workflow filename "${workflowFile}"`,
+          })
+        }
+
+        // Enforce HTTPS + non-SSRF URL validation at the adapter boundary as well.
+        yield* assertSafeRedactedHttpsUrl({
+          field: 'apkDownloadUrl',
+          url: request.apkDownloadUrl,
+          allowQueryString: true,
+        })
+
         const dispatched = yield* port
           .dispatchWorkflow({
-            workflowFile:
-              options?.workflowFile ?? GITHUB_ACTIONS_KVM_WORKFLOW_FILE,
+            workflowFile,
             ref: options?.workflowRef ?? 'main',
             inputs: {
               attempt_id: request.attemptId,
@@ -134,9 +156,21 @@ export const makeGitHubActionsKvmDeviceAdapterLayer = <EDispatch, EAwait>(
       )(function* ({ runId, expectedApkSha256, timeoutMs }) {
         const operation =
           'GitHubActionsKvmDeviceAdapter.awaitVerificationResult'
-        const raw = yield* port
-          .awaitWorkflowResult({ runId, timeoutMs })
-          .pipe(mapAdapterError(operation, runId))
+        const raw = yield* port.awaitWorkflowResult({ runId, timeoutMs }).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(timeoutMs),
+            orElse: () =>
+              Effect.fail(
+                new CloudDeviceExecutionError({
+                  operation,
+                  providerId: GITHUB_ACTIONS_KVM_PROVIDER_ID,
+                  runId,
+                  message: `GitHub Actions KVM run "${runId}" timed out after ${timeoutMs}ms`,
+                }),
+              ),
+          }),
+          mapAdapterError(operation, runId),
+        )
 
         const decodedRunId = yield* Schema.decodeUnknownEffect(
           CloudDeviceRunId,
@@ -166,18 +200,28 @@ export const makeGitHubActionsKvmDeviceAdapterLayer = <EDispatch, EAwait>(
           })
         }
 
-        const artifacts: Array<CloudAndroidDiagnosticArtifact> = []
-        for (const entry of raw.artifacts) {
-          const meta = yield* Schema.decodeUnknownEffect(RawArtifactMeta)({
-            relativePath: entry.relativePath,
-            contentType: entry.contentType,
-          }).pipe(mapAdapterError(operation, runId))
-          artifacts.push({
-            relativePath: meta.relativePath,
-            contentType: meta.contentType,
-            bytes: entry.bytes,
+        // GitHub Actions KVM adapter strictly enforces /dev/kvm acceleration
+        // (while core remains provider-neutral for Expo Simulators, etc.).
+        if (observation.kvmAccelerated !== true) {
+          return yield* new CloudDeviceExecutionError({
+            operation,
+            providerId: GITHUB_ACTIONS_KVM_PROVIDER_ID,
+            runId,
+            message:
+              'GitHub Actions KVM runner did not confirm /dev/kvm hardware acceleration',
           })
         }
+
+        const decodedArtifacts = yield* Schema.decodeUnknownEffect(
+          DecodedRawArtifacts,
+        )(raw.artifacts).pipe(mapAdapterError(operation, runId))
+
+        const artifacts: ReadonlyArray<CloudAndroidDiagnosticArtifact> =
+          decodedArtifacts.map((entry) => ({
+            relativePath: entry.relativePath,
+            contentType: entry.contentType,
+            bytes: entry.bytes,
+          }))
 
         return {
           runId,

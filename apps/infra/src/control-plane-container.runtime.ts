@@ -48,6 +48,14 @@ const wrapDaytonaHandle = (
     handle
       .exec(command, options)
       .pipe(Effect.provideService(RuntimeContext, runtimeContext)),
+  statFile: (path: string) =>
+    handle.files.stat(path).pipe(
+      Effect.map((info) => ({
+        size: info.size,
+        isDir: info.isDir,
+      })),
+      Effect.provideService(RuntimeContext, runtimeContext),
+    ),
   readFile: (path: string) =>
     handle.files
       .read(path)
