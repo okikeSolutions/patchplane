@@ -1,13 +1,12 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
 import {
+  ArchitecturePlatformLayer,
   isProductionSourceFile,
   listSourceFiles,
   parseAst,
   readRepoFile,
-  REPO_ROOT,
+  repoFileExists,
 } from './architecture-files'
 
 const BoundaryKind = Schema.Literals([
@@ -210,137 +209,151 @@ export function scanBoundaryUsages(
   return counts
 }
 
-export function validateRegistryAgainstFiles(
+export const validateRegistryAgainstFiles = (
   registry: V2EffectBoundaryRegistry,
   actualByFile: ReadonlyMap<string, BoundaryUsageCounts>,
-): ReadonlyArray<string> {
-  const errors: string[] = []
-  const expectedByKey = new Map<string, number>()
-  const seenIds = new Set<string>()
+) =>
+  Effect.gen(function* () {
+    const errors: string[] = []
+    const expectedByKey = new Map<string, number>()
+    const seenIds = new Set<string>()
 
-  for (const entry of registry.exceptions) {
-    if (seenIds.has(entry.id)) {
-      errors.push(`Duplicate exception ID: ${entry.id}`)
-    }
-    seenIds.add(entry.id)
+    for (const entry of registry.exceptions) {
+      if (seenIds.has(entry.id)) {
+        errors.push(`Duplicate exception ID: ${entry.id}`)
+      }
+      seenIds.add(entry.id)
 
-    if (entry.file.includes('*')) {
-      errors.push(
-        `Wildcard exception path is forbidden (${entry.id}): ${entry.file}`,
-      )
-    }
-
-    if (!existsSync(resolve(REPO_ROOT, entry.file))) {
-      errors.push(`Stale exception ${entry.id}: missing file ${entry.file}`)
-    }
-    if (!existsSync(resolve(REPO_ROOT, entry.evidence))) {
-      errors.push(
-        `Exception ${entry.id} missing evidence test file: ${entry.evidence}`,
-      )
-    }
-
-    const key = `${entry.file}::${entry.kind}`
-    expectedByKey.set(key, (expectedByKey.get(key) ?? 0) + entry.expectedCount)
-  }
-
-  const kinds: ReadonlyArray<BoundaryKind> = [
-    'runtime-entry',
-    'try-promise',
-    'async-boundary',
-    'native-promise',
-  ]
-
-  for (const [file, usage] of actualByFile) {
-    if (usage.effectPromiseCalls > 0) {
-      errors.push(`${file}: Effect.promise is forbidden`)
-    }
-    for (const kind of kinds) {
-      const actual = usage[kind]
-      const expected = expectedByKey.get(`${file}::${kind}`) ?? 0
-      if (actual > expected) {
+      if (entry.file.includes('*')) {
         errors.push(
-          `${file}: unregistered ${kind} usage (found ${actual}, registered ${expected})`,
+          `Wildcard exception path is forbidden (${entry.id}): ${entry.file}`,
         )
-      } else if (actual < expected) {
+      }
+
+      if (!(yield* repoFileExists(entry.file))) {
+        errors.push(`Stale exception ${entry.id}: missing file ${entry.file}`)
+      }
+      if (!(yield* repoFileExists(entry.evidence))) {
         errors.push(
-          `${file}: stale ${kind} allowance (found ${actual}, registered ${expected})`,
+          `Exception ${entry.id} missing evidence test file: ${entry.evidence}`,
+        )
+      }
+
+      const key = `${entry.file}::${entry.kind}`
+      expectedByKey.set(
+        key,
+        (expectedByKey.get(key) ?? 0) + entry.expectedCount,
+      )
+    }
+
+    const kinds: ReadonlyArray<BoundaryKind> = [
+      'runtime-entry',
+      'try-promise',
+      'async-boundary',
+      'native-promise',
+    ]
+
+    for (const [file, usage] of actualByFile) {
+      if (usage.effectPromiseCalls > 0) {
+        errors.push(`${file}: Effect.promise is forbidden`)
+      }
+      for (const kind of kinds) {
+        const actual = usage[kind]
+        const expected = expectedByKey.get(`${file}::${kind}`) ?? 0
+        if (actual > expected) {
+          errors.push(
+            `${file}: unregistered ${kind} usage (found ${actual}, registered ${expected})`,
+          )
+        } else if (actual < expected) {
+          errors.push(
+            `${file}: stale ${kind} allowance (found ${actual}, registered ${expected})`,
+          )
+        }
+      }
+    }
+
+    for (const [key, expected] of expectedByKey) {
+      const [file, kind] = key.split('::')
+      if (file === undefined || kind === undefined) continue
+      if (!actualByFile.has(file) && expected > 0) {
+        errors.push(
+          `${file}: stale ${kind} allowance (file has 0 usages, registered ${expected})`,
         )
       }
     }
-  }
 
-  for (const [key, expected] of expectedByKey) {
-    const [file, kind] = key.split('::')
-    if (file === undefined || kind === undefined) continue
-    if (!actualByFile.has(file) && expected > 0) {
-      errors.push(
-        `${file}: stale ${kind} allowance (file has 0 usages, registered ${expected})`,
-      )
-    }
-  }
-
-  return errors
-}
+    return errors
+  })
 
 describe('V2 Effect boundary registry', () => {
   it.effect(
     'matches config/effect-boundaries.json exactly with zero unregistered or stale allowances',
     () =>
       Effect.gen(function* () {
+        const registryJson = yield* readRepoFile(
+          'config/effect-boundaries.json',
+        )
         const registry = yield* Schema.decodeEffect(
           V2EffectBoundaryRegistryJson,
-        )(readRepoFile('config/effect-boundaries.json'))
+        )(registryJson)
 
         const productionFiles = [
-          ...listSourceFiles('packages'),
-          ...listSourceFiles('apps'),
+          ...(yield* listSourceFiles('packages')),
+          ...(yield* listSourceFiles('apps')),
         ].filter(isProductionSourceFile)
 
         const actualByFile = new Map<string, BoundaryUsageCounts>()
         for (const file of productionFiles) {
-          actualByFile.set(file, scanBoundaryUsages(file, readRepoFile(file)))
+          const source = yield* readRepoFile(file)
+          actualByFile.set(file, scanBoundaryUsages(file, source))
         }
 
-        expect(validateRegistryAgainstFiles(registry, actualByFile)).toEqual([])
-      }),
+        const errors = yield* validateRegistryAgainstFiles(
+          registry,
+          actualByFile,
+        )
+        expect(errors).toEqual([])
+      }).pipe(Effect.provide(ArchitecturePlatformLayer)),
   )
 
-  it('rejects stale or unused Promise exception allowances', () => {
-    const staleRegistry: V2EffectBoundaryRegistry = {
-      version: 2,
-      exceptions: [
-        {
-          id: 'STALE-TEST-001',
-          file: 'packages/core/src/index.ts',
-          symbol: 'staleBridge',
-          kind: 'try-promise',
-          expectedCount: 1,
-          externalContract: 'Synthetic stale test allowance',
-          interruptionAndCleanup: 'None',
-          evidence: 'tests/architecture/effect-boundaries.test.ts',
-          reviewCondition: 'Remove immediately',
-        },
-      ],
-    }
+  it.effect('rejects stale or unused Promise exception allowances', () =>
+    Effect.gen(function* () {
+      const staleRegistry: V2EffectBoundaryRegistry = {
+        version: 2,
+        exceptions: [
+          {
+            id: 'STALE-TEST-001',
+            file: 'packages/core/src/index.ts',
+            symbol: 'staleBridge',
+            kind: 'try-promise',
+            expectedCount: 1,
+            externalContract: 'Synthetic stale test allowance',
+            interruptionAndCleanup: 'None',
+            evidence: 'tests/architecture/effect-boundaries.test.ts',
+            reviewCondition: 'Remove immediately',
+          },
+        ],
+      }
 
-    const actual = new Map<string, BoundaryUsageCounts>([
-      [
-        'packages/core/src/index.ts',
-        {
-          'runtime-entry': 0,
-          'try-promise': 0,
-          'async-boundary': 0,
-          'native-promise': 0,
-          effectPromiseCalls: 0,
-        },
-      ],
-    ])
+      const actual = new Map<string, BoundaryUsageCounts>([
+        [
+          'packages/core/src/index.ts',
+          {
+            'runtime-entry': 0,
+            'try-promise': 0,
+            'async-boundary': 0,
+            'native-promise': 0,
+            effectPromiseCalls: 0,
+          },
+        ],
+      ])
 
-    const errors = validateRegistryAgainstFiles(staleRegistry, actual)
-    expect(errors).toEqual([
-      'packages/core/src/index.ts: stale try-promise allowance (found 0, registered 1)',
-    ])
-  })
+      const errors = yield* validateRegistryAgainstFiles(staleRegistry, actual)
+      expect(errors).toEqual([
+        'packages/core/src/index.ts: stale try-promise allowance (found 0, registered 1)',
+      ])
+    }).pipe(Effect.provide(ArchitecturePlatformLayer)),
+  )
 
   it('allows Effect.catch and aliased Effect namespace catch while flagging promise.catch', () => {
     const effectCatchCounts = scanBoundaryUsages(

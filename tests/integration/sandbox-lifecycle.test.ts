@@ -1,4 +1,4 @@
-import { BunFileSystem } from '@effect/platform-bun'
+import { BunFileSystem, BunPath } from '@effect/platform-bun'
 import { describe, expect, it } from '@effect/vitest'
 import { Clock, Duration, Effect, Fiber, Layer, Option, Schema } from 'effect'
 import * as Config from 'effect/Config'
@@ -96,7 +96,7 @@ const resetAndMigrate = Effect.gen(function* () {
   yield* sql.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
   yield* sql.unsafe('CREATE SCHEMA public')
   const migrations = yield* loadSqlMigrations().pipe(
-    Effect.provide(BunFileSystem.layer),
+    Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
   yield* applySqlMigrations(migrations)
 })

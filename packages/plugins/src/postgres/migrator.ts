@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto'
-import { join, resolve } from 'node:path'
-import { Effect, FileSystem, Schema } from 'effect'
+import { Effect, FileSystem, Path, Schema } from 'effect'
+import * as Digest from 'effect/crypto/Digest'
 import { SqlClient } from 'effect/sql'
 import { MigrationFailureError, sanitizeErrorMessage } from '@patchplane/domain'
 
@@ -17,11 +16,12 @@ const AppliedMigrationRow = Schema.Struct({
 
 const MIGRATIONS_ADVISORY_LOCK_KEY = 20_261_123
 const SAFE_MIGRATION_FILENAME = /^[A-Za-z0-9._-]+\.sql$/
+const MIGRATIONS_DIR_URL = new URL('./migrations', import.meta.url)
+const textEncoder = new TextEncoder()
 
-export const DEFAULT_POSTGRES_MIGRATIONS_DIR = resolve(
-  import.meta.dirname,
-  'migrations',
-)
+export const DEFAULT_POSTGRES_MIGRATIONS_DIR = decodeURIComponent(
+  MIGRATIONS_DIR_URL.pathname,
+).replace(/\/$/, '')
 
 const migrationError = (migrationName: string) =>
   Effect.mapError(
@@ -35,11 +35,18 @@ const migrationError = (migrationName: string) =>
 
 export const loadSqlMigrations = Effect.fn(
   'PostgresMigrator.loadSqlMigrations',
-)(function* (directory: string = DEFAULT_POSTGRES_MIGRATIONS_DIR) {
+)(function* (directory?: string) {
   const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const digest = yield* Digest.Digest
+  const targetDirectory =
+    directory ??
+    (yield* path
+      .fromFileUrl(MIGRATIONS_DIR_URL)
+      .pipe(migrationError('migrations')))
   const entries = yield* fs
-    .readDirectory(directory)
-    .pipe(migrationError(directory))
+    .readDirectory(targetDirectory)
+    .pipe(migrationError(targetDirectory))
 
   const filenames = entries.filter((name) => name.endsWith('.sql')).toSorted()
 
@@ -52,9 +59,11 @@ export const loadSqlMigrations = Effect.fn(
       })
     }
     const sql = yield* fs
-      .readFileString(join(directory, name))
+      .readFileString(path.join(targetDirectory, name))
       .pipe(migrationError(name))
-    const sha256 = createHash('sha256').update(sql).digest('hex')
+    const sha256 = yield* digest
+      .digestHex(Digest.sha256, textEncoder.encode(sql))
+      .pipe(migrationError(name))
     migrations.push({ name, sql, sha256 })
   }
   return migrations

@@ -1,4 +1,4 @@
-import { BunFileSystem } from '@effect/platform-bun'
+import { BunFileSystem, BunPath } from '@effect/platform-bun'
 import { describe, expect, it } from '@effect/vitest'
 import {
   Cause,
@@ -14,6 +14,7 @@ import {
   Schema,
 } from 'effect'
 import * as Config from 'effect/Config'
+import * as Digest from 'effect/crypto/Digest'
 import * as Redacted from 'effect/Redacted'
 import { SqlClient } from 'effect/sql'
 import {
@@ -156,7 +157,13 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
       Effect.gen(function* () {
         yield* resetDatabase
         const committed = yield* loadSqlMigrations().pipe(
-          Effect.provide(BunFileSystem.layer),
+          Effect.provide(
+            Layer.mergeAll(
+              BunFileSystem.layer,
+              BunPath.layer,
+              Digest.layerWebCrypto,
+            ),
+          ),
         )
         const firstMigration = committed[0]
         expect(firstMigration).toBeDefined()
@@ -207,7 +214,13 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
       Effect.gen(function* () {
         yield* resetDatabase
         const committed = yield* loadSqlMigrations().pipe(
-          Effect.provide(BunFileSystem.layer),
+          Effect.provide(
+            Layer.mergeAll(
+              BunFileSystem.layer,
+              BunPath.layer,
+              Digest.layerWebCrypto,
+            ),
+          ),
         )
         yield* applySqlMigrations(committed)
 
@@ -499,7 +512,13 @@ describe('V2 Stack Proof 2: single-store PostgreSQL + ClusterWorkflowEngine', ()
         yield* Effect.gen(function* () {
           yield* resetDatabase
           const committed = yield* loadSqlMigrations().pipe(
-            Effect.provide(BunFileSystem.layer),
+            Effect.provide(
+              Layer.mergeAll(
+                BunFileSystem.layer,
+                BunPath.layer,
+                Digest.layerWebCrypto,
+              ),
+            ),
           )
           yield* applySqlMigrations(committed)
         }).pipe(Effect.provide(makeTestPostgresSqlLayer()))
