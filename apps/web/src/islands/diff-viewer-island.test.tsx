@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, expect, it } from '@effect/vitest'
 import { flushSync } from 'react-dom'
 import { ProposalVersion, VerificationAttemptId } from '@patchplane/domain'
@@ -16,6 +15,15 @@ const SAMPLE_PATCH = [
   '-export const allowFallback = true',
   '+export const allowFallback = false',
   '+export const strictBoundaries = true',
+].join('\n')
+
+const DELETED_AND_NO_EOF_PATCH = [
+  '--- a/src/legacy.ts',
+  '+++ /dev/null',
+  '@@ -1,2 +0,0 @@',
+  '-export const legacy = true',
+  '-export const oldFlag = 1',
+  '\\ No newline at end of file',
 ].join('\n')
 
 const queryButton = (container: Element, selector: string): HTMLElement => {
@@ -59,18 +67,31 @@ describe('Isolated React diff viewer island', () => {
       )
       focusBtn.click()
 
-      // Click a diff line -> emits typed LineSelected event
+      // Click an added diff line -> emits typed LineSelected event with exact new line number
       const lineBtn = queryButton(
         container,
         '[data-testid="select-line-src/policy.ts-11"]',
       )
       lineBtn.click()
 
+      // Click a deleted diff line -> emits typed LineSelected event via distinct deletion testid
+      const oldLineBtn = queryButton(
+        container,
+        '[data-testid="select-old-line-src/policy.ts-11"]',
+      )
+      oldLineBtn.click()
+
       expect(emitted).toEqual([
         {
           _tag: 'FileFocused',
           attemptId: 'att-island-1',
           path: 'src/policy.ts',
+        },
+        {
+          _tag: 'LineSelected',
+          attemptId: 'att-island-1',
+          path: 'src/policy.ts',
+          lineNumber: 11,
         },
         {
           _tag: 'LineSelected',
@@ -120,22 +141,61 @@ describe('Isolated React diff viewer island', () => {
     }
   })
 
-  it('renders empty state when diff text has no patches', () => {
+  it('handles deleted files (/dev/null), no-newline markers, empty diffs, and malformed hunk headers safely', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
 
     try {
+      const emitted: Array<DiffIslandEvent> = []
       const handle = mountDiffViewerIsland(
         container,
         {
-          attemptId: VerificationAttemptId.make('att-empty-1'),
+          attemptId: VerificationAttemptId.make('att-edge-1'),
           proposalVersion: ProposalVersion.make(1),
-          diffText: '',
+          diffText: DELETED_AND_NO_EOF_PATCH,
           focusedFilePath: null,
         },
-        () => {},
+        (event) => {
+          emitted.push(event)
+        },
       )
 
+      // Deleted file uses oldFileName (src/legacy.ts), never /dev/null
+      expect(
+        container.querySelector('[data-testid="diff-file-src/legacy.ts"]'),
+      ).not.toBeNull()
+      expect(
+        container.querySelector('[data-diff-kind="meta"]')?.textContent,
+      ).toBe('\\ No newline at end of file')
+
+      queryButton(container, '[data-testid="focus-file-src/legacy.ts"]').click()
+      expect(emitted).toEqual([
+        {
+          _tag: 'FileFocused',
+          attemptId: 'att-edge-1',
+          path: 'src/legacy.ts',
+        },
+      ])
+
+      // Malformed hunk header renders explicit parse error alert instead of NaN
+      handle.update({
+        attemptId: VerificationAttemptId.make('att-edge-1'),
+        proposalVersion: ProposalVersion.make(1),
+        diffText: '--- a/bad.ts\n+++ b/bad.ts\n@@ invalid @@\n+x\n',
+        focusedFilePath: null,
+      })
+      expect(
+        container.querySelector('[data-testid="diff-parse-error"]')
+          ?.textContent,
+      ).toContain('Unable to parse diff')
+
+      // Empty diff renders empty state
+      handle.update({
+        attemptId: VerificationAttemptId.make('att-edge-1'),
+        proposalVersion: ProposalVersion.make(1),
+        diffText: '',
+        focusedFilePath: null,
+      })
       expect(
         container.querySelector('[data-testid="diff-empty"]')?.textContent,
       ).toContain('No diff hunks available')

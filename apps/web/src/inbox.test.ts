@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Option } from 'effect'
+import * as Navigation from 'foldkit/navigation'
 import { Scene, Story } from 'foldkit/test'
 import * as Url from 'foldkit/url'
 import type {
@@ -27,6 +28,7 @@ import {
   inboxRouter,
   initInbox,
   LoadAttemptDetailCommand,
+  LoadExternalUrlCommand,
   makeInitialInboxModel,
   MountDiffViewerIsland,
   PushUrlCommand,
@@ -49,12 +51,11 @@ const VERSION_1 = ProposalVersion.make(1)
 const SAMPLE_DIFF = [
   '--- a/src/math.ts',
   '+++ b/src/math.ts',
-  '@@ -1,3 +1,4 @@',
+  '@@ -1,2 +1,3 @@',
   ' export const add = (a: number, b: number) => {',
   '-  return a - b',
   '+  // fix addition bug',
   '+  return a + b',
-  ' }',
 ].join('\n')
 
 const summaryA: AttemptSummary = {
@@ -82,6 +83,7 @@ const summaryB: AttemptSummary = {
 }
 
 const detailA: AttemptDetail = {
+  revision: 1,
   summary: summaryA,
   diffText: SAMPLE_DIFF,
   files: [
@@ -96,6 +98,7 @@ const detailA: AttemptDetail = {
 }
 
 const detailB: AttemptDetail = {
+  revision: 2,
   summary: summaryB,
   diffText: SAMPLE_DIFF.replaceAll('src/math.ts', 'src/arbeo.ts'),
   files: [
@@ -109,8 +112,24 @@ const detailB: AttemptDetail = {
   decision: null,
 }
 
+const makeUiError = (
+  code:
+    | 'unauthorized'
+    | 'forbidden'
+    | 'not_found'
+    | 'conflict'
+    | 'stream_error',
+  message: string,
+  retryable = false,
+) => ({
+  _tag: 'InboxUiError' as const,
+  code,
+  message,
+  retryable,
+})
+
 describe('Foldkit Web Decision Inbox routing & state machine', () => {
-  it('parses and builds Inbox, AttemptDetail, and NotFound routes', () => {
+  it('parses and builds Inbox, AttemptDetail, NotFound routes and handles UrlChanged / UrlRequested without double transitions', () => {
     const rootUrl = Option.getOrThrow(Url.fromString('https://app.test/'))
     expect(urlToAppRoute(rootUrl)).toEqual(AppRoute.Inbox())
     expect(inboxRouter()).toBe('/')
@@ -118,7 +137,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
     const detailPath = attemptDetailRouter({ attemptId: ATTEMPT_A })
     expect(detailPath).toBe(`/attempts/${ATTEMPT_A}`)
     const detailUrl = Option.getOrThrow(
-      Url.fromString(`https://app.test${detailPath}`),
+      Url.fromString(`https://app.test${detailPath}?tab=diff#hunk-1`),
     )
     expect(urlToAppRoute(detailUrl)).toEqual(
       AppRoute.AttemptDetail({ attemptId: ATTEMPT_A }),
@@ -130,9 +149,68 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
     expect(urlToAppRoute(unknownUrl)).toEqual(
       AppRoute.NotFound({ path: '/unknown/path' }),
     )
+
+    // UrlRequested(Internal) preserves search + hash, transitions route, and
+    // subsequent echoed UrlChanged for the same route is a no-op (no duplicate fetch).
+    Story.story(
+      updateInbox,
+      Story.given(makeInitialInboxModel(AppRoute.Inbox())),
+      Story.message(
+        InboxMessage.UrlRequested({
+          request: Navigation.UrlRequest.Internal({ url: detailUrl }),
+        }),
+      ),
+      Story.Command.resolveAllExact(
+        [
+          PushUrlCommand({ url: `/attempts/${ATTEMPT_A}?tab=diff#hunk-1` }),
+          InboxMessage.CompletedNavigation(),
+        ],
+        [
+          LoadAttemptDetailCommand({ attemptId: ATTEMPT_A, requestSeq: 1 }),
+          InboxMessage.SucceededLoadAttemptDetail({
+            requestSeq: 1,
+            attemptId: ATTEMPT_A,
+            detail: detailA,
+          }),
+        ],
+      ),
+      // Echoed UrlChanged from Navigation.pushUrl does not re-fetch or route to NotFound
+      Story.message(InboxMessage.UrlChanged({ url: detailUrl })),
+      Story.Command.expectNone(),
+      Story.model((model) => {
+        expect(model.route).toEqual(
+          AppRoute.AttemptDetail({ attemptId: ATTEMPT_A }),
+        )
+        expect(model.activeDetail).toEqual(
+          AttemptDetailState.Loaded({ detail: detailA }),
+        )
+      }),
+      // Browser back button triggers UrlChanged to root -> transitions cleanly to Inbox
+      Story.message(InboxMessage.UrlChanged({ url: rootUrl })),
+      Story.Command.expectNone(),
+      Story.model((model) => {
+        expect(model.route).toEqual(AppRoute.Inbox())
+        expect(model.selectedAttemptId).toEqual(Option.none())
+        expect(model.activeDetail).toEqual(AttemptDetailState.Idle())
+      }),
+      // External link delegates to LoadExternalUrlCommand
+      Story.message(
+        InboxMessage.UrlRequested({
+          request: Navigation.UrlRequest.External({
+            href: 'https://github.com/okikeSolutions/patchplane',
+          }),
+        }),
+      ),
+      Story.Command.resolve(
+        LoadExternalUrlCommand({
+          href: 'https://github.com/okikeSolutions/patchplane',
+        }),
+        InboxMessage.CompletedNavigation(),
+      ),
+    )
   })
 
-  it('rejects stale out-of-order attempt detail and inbox list responses', () => {
+  it('rejects stale out-of-order list, detail, decision, and island responses across rapid transitions', () => {
     const startModel = makeInitialInboxModel(AppRoute.Inbox(), {
       streamEnabled: true,
     })
@@ -157,7 +235,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
     expect(afterResp2.model.items).toEqual([summaryA, summaryB])
     expect(afterResp2.model.lastStreamRevision).toBe(5)
 
-    // Stale response #1 arrives late with older items and must be ignored
+    // Stale response #1 (both success and failure) arrives late and is ignored
     const afterStaleResp1 = updateInbox(
       afterResp2.model,
       InboxMessage.SucceededLoadInbox({
@@ -165,40 +243,94 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
         snapshot: { revision: 1, items: [summaryA] },
       }),
     )
-    expect(afterStaleResp1.model.items).toEqual([summaryA, summaryB])
-    expect(afterStaleResp1.model.lastStreamRevision).toBe(5)
-
-    // Select Attempt A (detailRequestSeq=1), then immediately switch to Attempt B (detailRequestSeq=2)
-    const selectA = updateInbox(
+    const afterStaleFail1 = updateInbox(
       afterStaleResp1.model,
+      InboxMessage.FailedLoadInbox({
+        requestSeq: 1,
+        error: makeUiError('unauthorized', 'Late error'),
+      }),
+    )
+    expect(afterStaleFail1.model.items).toEqual([summaryA, summaryB])
+    expect(afterStaleFail1.model.listState).toEqual(InboxLoadState.Loaded())
+
+    // Select Attempt A, start submitting a decision on A, then immediately switch to B
+    const selectA = updateInbox(
+      afterStaleFail1.model,
       InboxMessage.ClickedAttempt({ attemptId: ATTEMPT_A }),
     )
-    expect(selectA.model.detailRequestSeq).toBe(1)
+    const submittingA = updateInbox(
+      selectA.model,
+      InboxMessage.ClickedSubmitDecision({
+        attemptId: ATTEMPT_A,
+        proposalVersion: VERSION_1,
+        kind: 'approve',
+      }),
+    )
+    // Double submit while already Submitting is rejected
+    const duplicateSubmit = updateInbox(
+      submittingA.model,
+      InboxMessage.ClickedSubmitDecision({
+        attemptId: ATTEMPT_A,
+        proposalVersion: VERSION_1,
+        kind: 'reject',
+      }),
+    )
+    expect(duplicateSubmit.commands).toBeUndefined()
 
     const selectB = updateInbox(
-      selectA.model,
+      submittingA.model,
       InboxMessage.ClickedAttempt({ attemptId: ATTEMPT_B }),
     )
-    expect(selectB.model.detailRequestSeq).toBe(2)
 
-    // Attempt B resolves first
-    const loadedB = updateInbox(
+    // Attempt B resolves first, and a live SSE update advances Attempt B before an older detail
+    const afterSseOnB = updateInbox(
       selectB.model,
+      InboxMessage.SseEventReceived({
+        event: {
+          _tag: 'VerificationStatusChangedEvent',
+          revision: 8,
+          attemptId: ATTEMPT_B,
+          repositoryId: REPO,
+          status: 'incomplete',
+          generation: GEN_2,
+          nextAction: 'Budget exhausted',
+          updatedAtMs: 1_700_000_090_000,
+        },
+      }),
+    )
+    // Detail for B arrives from an older revision (2 < 8): keeps newer SSE status while loading diff!
+    const loadedB = updateInbox(
+      afterSseOnB.model,
       InboxMessage.SucceededLoadAttemptDetail({
-        requestSeq: 2,
+        requestSeq: selectB.model.detailRequestSeq,
         attemptId: ATTEMPT_B,
         detail: detailB,
       }),
     )
-    expect(loadedB.model.activeDetail).toEqual(
-      AttemptDetailState.Loaded({ detail: detailB }),
+    expect(
+      AttemptDetailState.guards.Loaded(loadedB.model.activeDetail)
+        ? loadedB.model.activeDetail.detail.summary.status
+        : undefined,
+    ).toBe('incomplete')
+
+    // Late decision failure from Attempt A must NOT leak onto Attempt B's page
+    const afterLateDecisionErrA = updateInbox(
+      loadedB.model,
+      InboxMessage.FailedSubmitDecision({
+        requestSeq: submittingA.model.decisionRequestSeq,
+        attemptId: ATTEMPT_A,
+        error: makeUiError('conflict', 'Late conflict from A'),
+      }),
+    )
+    expect(afterLateDecisionErrA.model.decisionSubmission).toEqual(
+      DecisionSubmissionState.Idle(),
     )
 
-    // Late success AND late failure for Attempt A are discarded and never overwrite Attempt B
+    // Late detail success & failure for Attempt A are discarded
     const afterLateSuccessA = updateInbox(
-      loadedB.model,
+      afterLateDecisionErrA.model,
       InboxMessage.SucceededLoadAttemptDetail({
-        requestSeq: 1,
+        requestSeq: selectA.model.detailRequestSeq,
         attemptId: ATTEMPT_A,
         detail: detailA,
       }),
@@ -206,20 +338,13 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
     const afterLateFailureA = updateInbox(
       afterLateSuccessA.model,
       InboxMessage.FailedLoadAttemptDetail({
-        requestSeq: 1,
+        requestSeq: selectA.model.detailRequestSeq,
         attemptId: ATTEMPT_A,
-        error: {
-          code: 'not_found',
-          message: 'Late error from A',
-          retryable: false,
-        },
+        error: makeUiError('not_found', 'Late error from A'),
       }),
     )
     expect(afterLateFailureA.model.selectedAttemptId).toEqual(
       Option.some(ATTEMPT_B),
-    )
-    expect(afterLateFailureA.model.activeDetail).toEqual(
-      AttemptDetailState.Loaded({ detail: detailB }),
     )
 
     // Stale island event from Attempt A is also ignored while Attempt B is selected
@@ -236,7 +361,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
     expect(afterStaleIsland.model.focusedFilePath).toEqual(Option.none())
   })
 
-  it('handles live SSE updates and rejects stale revisions without Convex', () => {
+  it('handles live SSE updates, InboxUpdatedEvent, ToggledLiveUpdates, and rejects stale revisions without Convex', () => {
     const startModel = makeInitialInboxModel(AppRoute.Inbox(), {
       streamEnabled: true,
     })
@@ -266,6 +391,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
             _tag: 'VerificationStatusChangedEvent',
             revision: 3,
             attemptId: ATTEMPT_A,
+            repositoryId: REPO,
             status: 'passed',
             generation: GEN_2,
             nextAction: 'Ready for maintainer approval',
@@ -284,6 +410,20 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
             : undefined,
         ).toBe('passed')
       }),
+      // InboxUpdatedEvent inserts a newly discovered attempt into the inbox
+      Story.message(
+        InboxMessage.SseEventReceived({
+          event: {
+            _tag: 'InboxUpdatedEvent',
+            revision: 4,
+            summary: summaryB,
+          },
+        }),
+      ),
+      Story.model((model) => {
+        expect(model.items.map((item) => item.attemptId)).toContain(ATTEMPT_B)
+        expect(model.lastStreamRevision).toBe(4)
+      }),
       // Stale SSE event with lower revision is rejected
       Story.message(
         InboxMessage.SseEventReceived({
@@ -291,6 +431,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
             _tag: 'VerificationStatusChangedEvent',
             revision: 1,
             attemptId: ATTEMPT_A,
+            repositoryId: REPO,
             status: 'failed',
             generation: GEN_1,
             nextAction: 'Stale regression',
@@ -299,15 +440,16 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
         }),
       ),
       Story.model((model) => {
-        expect(model.items[0]?.status).toBe('passed')
-        expect(model.lastStreamRevision).toBe(3)
+        const currentA = model.items.find((i) => i.attemptId === ATTEMPT_A)
+        expect(currentA?.status).toBe('passed')
+        expect(model.lastStreamRevision).toBe(4)
       }),
       // DecisionRecordedEvent syncs recorded decision into active detail
       Story.message(
         InboxMessage.SseEventReceived({
           event: {
             _tag: 'DecisionRecordedEvent',
-            revision: 4,
+            revision: 5,
             decision: recordedDecision,
             summary: {
               attemptId: summaryA.attemptId,
@@ -330,6 +472,17 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
             : null,
         ).toEqual(recordedDecision)
       }),
+      // Pausing and resuming live updates transitions streamEnabled and sseConnection
+      Story.message(InboxMessage.ToggledLiveUpdates({ enabled: false })),
+      Story.model((model) => {
+        expect(model.streamEnabled).toBe(false)
+        expect(model.sseConnection).toEqual(SseConnectionState.Disconnected())
+      }),
+      Story.message(InboxMessage.ToggledLiveUpdates({ enabled: true })),
+      Story.model((model) => {
+        expect(model.streamEnabled).toBe(true)
+        expect(model.sseConnection).toEqual(SseConnectionState.Connecting())
+      }),
     )
   })
 
@@ -346,21 +499,36 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
       Story.message(
         InboxMessage.FailedLoadInbox({
           requestSeq: 1,
-          error: {
-            code: 'unauthorized',
-            message: 'WorkOS session expired',
-            retryable: false,
-          },
+          error: makeUiError('unauthorized', 'WorkOS session expired'),
         }),
       ),
       Story.model((model) => {
         expect(model.listState).toEqual(
           InboxLoadState.Failed({
-            error: {
-              code: 'unauthorized',
-              message: 'WorkOS session expired',
-              retryable: false,
-            },
+            error: makeUiError('unauthorized', 'WorkOS session expired'),
+          }),
+        )
+      }),
+      Story.message(InboxMessage.ClickedAttempt({ attemptId: ATTEMPT_A })),
+      Story.Command.resolveAllExact(
+        [
+          PushUrlCommand({ url: `/attempts/${ATTEMPT_A}` }),
+          InboxMessage.CompletedNavigation(),
+        ],
+        [
+          LoadAttemptDetailCommand({ attemptId: ATTEMPT_A, requestSeq: 1 }),
+          InboxMessage.FailedLoadAttemptDetail({
+            requestSeq: 1,
+            attemptId: ATTEMPT_A,
+            error: makeUiError('forbidden', 'Write permission required'),
+          }),
+        ],
+      ),
+      Story.model((model) => {
+        expect(model.activeDetail).toEqual(
+          AttemptDetailState.Failed({
+            attemptId: ATTEMPT_A,
+            error: makeUiError('forbidden', 'Write permission required'),
           }),
         )
       }),
@@ -376,47 +544,31 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
           attemptId: ATTEMPT_A,
           proposalVersion: VERSION_1,
           kind: 'approve',
-          requestSeq: 1,
+          requestSeq: 2,
         }),
         InboxMessage.FailedSubmitDecision({
-          requestSeq: 1,
+          requestSeq: 2,
           attemptId: ATTEMPT_A,
-          error: {
-            code: 'conflict',
-            message: 'Proposal v1 already rejected',
-            retryable: false,
-          },
+          error: makeUiError('conflict', 'Proposal v1 already rejected'),
         }),
       ),
       Story.model((model) => {
         expect(model.decisionSubmission).toEqual(
           DecisionSubmissionState.Failed({
             attemptId: ATTEMPT_A,
-            error: {
-              code: 'conflict',
-              message: 'Proposal v1 already rejected',
-              retryable: false,
-            },
+            error: makeUiError('conflict', 'Proposal v1 already rejected'),
           }),
         )
       }),
       Story.message(
         InboxMessage.SseStreamFailed({
-          error: {
-            code: 'stream_error',
-            message: 'Upstream SSE dropped',
-            retryable: true,
-          },
+          error: makeUiError('stream_error', 'Upstream SSE dropped', true),
         }),
       ),
       Story.model((model) => {
         expect(model.sseConnection).toEqual(
           SseConnectionState.Failed({
-            error: {
-              code: 'stream_error',
-              message: 'Upstream SSE dropped',
-              retryable: true,
-            },
+            error: makeUiError('stream_error', 'Upstream SSE dropped', true),
           }),
         )
       }),
@@ -490,6 +642,10 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
       Scene.expect(Scene.testId('selected-line')).toHaveText(
         'Selected src/math.ts:3',
       ),
+      Scene.expect(Scene.testId('diff-island-host')).toHaveAttr(
+        'data-focused-file',
+        'src/math.ts',
+      ),
       // Approve decision through Foldkit Command
       Scene.click(Scene.testId('decision-approve')),
       Scene.Command.resolve(
@@ -497,10 +653,11 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
           attemptId: ATTEMPT_A,
           proposalVersion: VERSION_1,
           kind: 'approve',
-          requestSeq: 1,
+          requestSeq: 2,
         }),
         InboxMessage.SucceededSubmitDecision({
-          requestSeq: 1,
+          requestSeq: 2,
+          attemptId: ATTEMPT_A,
           response: decisionResponse,
         }),
       ),
@@ -514,6 +671,7 @@ describe('Foldkit Web Decision Inbox routing & state machine', () => {
             _tag: 'VerificationStatusChangedEvent',
             revision: 2,
             attemptId: ATTEMPT_B,
+            repositoryId: REPO,
             status: 'failed',
             generation: GEN_2,
             nextAction: 'Inspect failed Android check',

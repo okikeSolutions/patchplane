@@ -1,5 +1,5 @@
 import { type StructuredPatch, parsePatch } from 'diff'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import type {
@@ -23,6 +23,16 @@ type ParseDiffResult =
       readonly message: string
     }
 
+const isValidHunk = (hunk: StructuredPatch['hunks'][number]): boolean =>
+  Number.isInteger(hunk.oldStart) &&
+  Number.isInteger(hunk.oldLines) &&
+  Number.isInteger(hunk.newStart) &&
+  Number.isInteger(hunk.newLines) &&
+  hunk.oldStart >= 0 &&
+  hunk.oldLines >= 0 &&
+  hunk.newStart >= 0 &&
+  hunk.newLines >= 0
+
 const safeParseDiff = (diffText: string): ParseDiffResult => {
   try {
     const patches = parsePatch(diffText).filter(
@@ -31,6 +41,16 @@ const safeParseDiff = (diffText: string): ParseDiffResult => {
         patch.newFileName !== undefined ||
         patch.oldFileName !== undefined,
     )
+    for (const patch of patches) {
+      for (const hunk of patch.hunks) {
+        if (!isValidHunk(hunk)) {
+          return {
+            ok: false,
+            message: 'Malformed hunk header line range',
+          }
+        }
+      }
+    }
     return { ok: true, patches }
   } catch (error) {
     return {
@@ -43,15 +63,22 @@ const safeParseDiff = (diffText: string): ParseDiffResult => {
   }
 }
 
+const stripGitPrefix = (raw: string | undefined): string | undefined => {
+  if (raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (trimmed.length === 0 || trimmed === '/dev/null') return undefined
+  const stripped = trimmed.replace(/^[ab]\//, '')
+  return stripped.length > 0 ? stripped : undefined
+}
+
 const normalizeDiffPath = (
   rawNewName: string | undefined,
   rawOldName: string | undefined,
   fallbackIndex: number,
-): string => {
-  const candidate = rawNewName ?? rawOldName ?? `file-${fallbackIndex + 1}`
-  const stripped = candidate.replace(/^[ab]\//, '').trim()
-  return stripped.length > 0 ? stripped : `file-${fallbackIndex + 1}`
-}
+): string =>
+  stripGitPrefix(rawNewName) ??
+  stripGitPrefix(rawOldName) ??
+  `file-${fallbackIndex + 1}`
 
 /**
  * Isolated React diff-viewer widget.
@@ -66,7 +93,7 @@ export function DiffViewerWidget({ data, onEvent }: DiffViewerWidgetProps) {
   const [collapsedFiles, setCollapsedFiles] = useState<ReadonlySet<string>>(
     () => new Set(),
   )
-  const parsed = safeParseDiff(data.diffText)
+  const parsed = useMemo(() => safeParseDiff(data.diffText), [data.diffText])
 
   const toggleFileCollapsed = (filePath: string) => {
     setCollapsedFiles((previous) => {
@@ -161,7 +188,9 @@ export function DiffViewerWidget({ data, onEvent }: DiffViewerWidgetProps) {
 
             {!isCollapsed &&
               patch.hunks.map((hunk, hunkIndex) => {
+                let currentOldLine = hunk.oldStart
                 let currentNewLine = hunk.newStart
+
                 return (
                   <div
                     data-testid={`diff-hunk-${filePath}-${hunkIndex}`}
@@ -173,16 +202,54 @@ export function DiffViewerWidget({ data, onEvent }: DiffViewerWidgetProps) {
                     </div>
                     <ol>
                       {hunk.lines.map((line, lineIndex) => {
-                        const lineNumber =
+                        if (line.startsWith('\\')) {
+                          return (
+                            <li
+                              data-diff-kind="meta"
+                              key={`${filePath}-${hunkIndex}-${lineIndex}`}
+                            >
+                              <code>{line}</code>
+                            </li>
+                          )
+                        }
+
+                        if (line.startsWith('-')) {
+                          const oldLineNumber =
+                            currentOldLine > 0 ? currentOldLine : 1
+                          currentOldLine += 1
+                          return (
+                            <li
+                              data-diff-kind="deletion"
+                              key={`${filePath}-${hunkIndex}-${lineIndex}`}
+                            >
+                              <button
+                                data-line-number={String(oldLineNumber)}
+                                data-testid={`select-old-line-${filePath}-${oldLineNumber}`}
+                                onClick={() =>
+                                  onEvent({
+                                    _tag: 'LineSelected',
+                                    attemptId: data.attemptId,
+                                    path: filePath,
+                                    lineNumber: oldLineNumber,
+                                  })
+                                }
+                                type="button"
+                              >
+                                <code>{line}</code>
+                              </button>
+                            </li>
+                          )
+                        }
+
+                        const newLineNumber =
                           currentNewLine > 0 ? currentNewLine : 1
-                        if (!line.startsWith('-')) {
-                          currentNewLine += 1
+                        currentNewLine += 1
+                        if (!line.startsWith('+')) {
+                          currentOldLine += 1
                         }
                         const kind = line.startsWith('+')
                           ? 'addition'
-                          : line.startsWith('-')
-                            ? 'deletion'
-                            : 'context'
+                          : 'context'
 
                         return (
                           <li
@@ -190,14 +257,14 @@ export function DiffViewerWidget({ data, onEvent }: DiffViewerWidgetProps) {
                             key={`${filePath}-${hunkIndex}-${lineIndex}`}
                           >
                             <button
-                              data-line-number={String(lineNumber)}
-                              data-testid={`select-line-${filePath}-${lineNumber}`}
+                              data-line-number={String(newLineNumber)}
+                              data-testid={`select-line-${filePath}-${newLineNumber}`}
                               onClick={() =>
                                 onEvent({
                                   _tag: 'LineSelected',
                                   attemptId: data.attemptId,
                                   path: filePath,
-                                  lineNumber,
+                                  lineNumber: newLineNumber,
                                 })
                               }
                               type="button"
@@ -230,10 +297,15 @@ export function mountDiffViewerIsland(
   const root = createRoot(container)
   let unmounted = false
 
+  const safeOnEvent = (event: DiffIslandEvent) => {
+    if (unmounted) return
+    onEvent(event)
+  }
+
   const renderData = (viewData: DiffIslandViewData) => {
     if (unmounted) return
     flushSync(() => {
-      root.render(<DiffViewerWidget data={viewData} onEvent={onEvent} />)
+      root.render(<DiffViewerWidget data={viewData} onEvent={safeOnEvent} />)
     })
   }
 

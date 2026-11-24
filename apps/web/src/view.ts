@@ -220,6 +220,7 @@ const renderAttemptDetailLoaded = (
             `diff-island:${detail.summary.attemptId}:${detail.summary.proposalVersion}`,
           ),
           h.DataAttribute('testid', 'diff-island-host'),
+          h.DataAttribute('focused-file', focusedPath ?? ''),
           h.OnMount(
             MountDiffViewerIsland({
               initialData: {
@@ -233,6 +234,7 @@ const renderAttemptDetailLoaded = (
           h.OnUnmount(
             InboxMessage.DiffIslandUnmounted({
               attemptId: detail.summary.attemptId,
+              proposalVersion: detail.summary.proposalVersion,
             }),
           ),
         ],
@@ -264,6 +266,24 @@ const renderDetailPane = (
       ),
     Loaded: ({ detail }) => renderAttemptDetailLoaded(model, detail, h),
   })
+
+const renderInboxWorkspace = (
+  model: InboxModel,
+  selectedId: string | undefined,
+  h: Html.HtmlBuilder<InboxMessage>,
+): Html.Html =>
+  h.div(
+    [],
+    [
+      h.ul(
+        [h.DataAttribute('testid', 'inbox-list')],
+        model.items.map((item) =>
+          renderInboxItem(item, item.attemptId === selectedId, h),
+        ),
+      ),
+      renderDetailPane(model, h),
+    ],
+  )
 
 export const renderInboxBody = (
   model: InboxModel,
@@ -319,48 +339,26 @@ export const renderInboxBody = (
             [`Failed to load inbox (${error.code}): ${error.message}`],
           ),
       }),
-      AppRoute.match(model.route, {
-        NotFound: ({ path }) =>
-          h.section(
-            [h.DataAttribute('testid', 'route-not-found')],
-            [
-              h.p([], [`Route not found: ${path}`]),
-              h.button(
-                [
-                  h.Type('button'),
-                  h.OnClick(InboxMessage.ClickedBackToInbox()),
-                ],
-                ['Return to Decision Inbox'],
-              ),
-            ],
-          ),
-        Inbox: () =>
-          h.div(
-            [],
-            [
-              h.ul(
-                [h.DataAttribute('testid', 'inbox-list')],
-                model.items.map((item) =>
-                  renderInboxItem(item, item.attemptId === selectedId, h),
+      AppRoute.matchOrElse(
+        model.route,
+        {
+          NotFound: ({ path }) =>
+            h.section(
+              [h.DataAttribute('testid', 'route-not-found')],
+              [
+                h.p([], [`Route not found: ${path}`]),
+                h.button(
+                  [
+                    h.Type('button'),
+                    h.OnClick(InboxMessage.ClickedBackToInbox()),
+                  ],
+                  ['Return to Decision Inbox'],
                 ),
-              ),
-              renderDetailPane(model, h),
-            ],
-          ),
-        AttemptDetail: () =>
-          h.div(
-            [],
-            [
-              h.ul(
-                [h.DataAttribute('testid', 'inbox-list')],
-                model.items.map((item) =>
-                  renderInboxItem(item, item.attemptId === selectedId, h),
-                ),
-              ),
-              renderDetailPane(model, h),
-            ],
-          ),
-      }),
+              ],
+            ),
+        },
+        () => renderInboxWorkspace(model, selectedId, h),
+      ),
     ],
   )
 }

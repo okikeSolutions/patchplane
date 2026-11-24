@@ -1,6 +1,5 @@
 import type { Layer } from 'effect'
 import * as Runtime from 'foldkit/runtime'
-import * as Url from 'foldkit/url'
 import type { DecisionInboxClient } from './client'
 import {
   InboxMessage,
@@ -26,12 +25,12 @@ export const createDecisionInboxApp = (options: CreateDecisionInboxOptions) =>
   Runtime.makeApplication({
     Model: InboxModel,
     init: (url) =>
-      initInbox(
-        url,
-        options.streamEnabled !== undefined
+      initInbox(url, {
+        routingEnabled: true,
+        ...(options.streamEnabled !== undefined
           ? { streamEnabled: options.streamEnabled }
-          : undefined,
-      ),
+          : {}),
+      }),
     update: updateInbox,
     view: viewInboxDocument,
     subscriptions: inboxSubscriptions,
@@ -39,7 +38,7 @@ export const createDecisionInboxApp = (options: CreateDecisionInboxOptions) =>
     container: options.container,
     routing: {
       onUrlRequest: (request) => InboxMessage.UrlRequested({ request }),
-      onUrlChange: (url) => InboxMessage.UrlChanged({ url: Url.toString(url) }),
+      onUrlChange: (url) => InboxMessage.UrlChanged({ url }),
     },
   })
 
@@ -54,12 +53,12 @@ export const createDecisionInboxElement = (
   Runtime.makeElement({
     Model: InboxModel,
     init: () =>
-      initInbox(
-        undefined,
-        options.streamEnabled !== undefined
+      initInbox(undefined, {
+        routingEnabled: false,
+        ...(options.streamEnabled !== undefined
           ? { streamEnabled: options.streamEnabled }
-          : undefined,
-      ),
+          : {}),
+      }),
     update: updateInbox,
     view: renderInboxBody,
     subscriptions: inboxSubscriptions,

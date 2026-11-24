@@ -25,6 +25,7 @@ export {
 export {
   AttemptDetailState,
   DecisionSubmissionState,
+  DiffIslandMountIdentity,
   InboxLoadState,
   InboxMessage,
   InboxModel,

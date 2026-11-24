@@ -115,7 +115,8 @@ function effectBindings() {
         for (const specifier of node.specifiers) {
           if (
             source === 'effect/Stream' &&
-            specifier.type === 'ImportNamespaceSpecifier'
+            (specifier.type === 'ImportNamespaceSpecifier' ||
+              specifier.type === 'ImportDefaultSpecifier')
           ) {
             streamNamespaces.add(specifier.local.name)
             continue

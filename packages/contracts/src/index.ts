@@ -1,9 +1,11 @@
-import { Schema } from 'effect'
+import { Context, Schema } from 'effect'
 import {
   HttpApi,
   HttpApiEndpoint,
   HttpApiGroup,
+  HttpApiMiddleware,
   HttpApiSchema,
+  HttpApiSecurity,
 } from 'effect/http-api'
 import {
   AcceptanceDecision,
@@ -15,7 +17,11 @@ import {
   ProposalVersion,
   RepositoryId,
   VerificationAttemptId,
+  type WorkOsAuthenticatedIdentity,
 } from '@patchplane/domain'
+
+export const InboxRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+export type InboxRevision = typeof InboxRevision.Type
 
 export const AttemptSummary = Schema.Struct({
   attemptId: VerificationAttemptId,
@@ -43,6 +49,7 @@ export interface InboxDiffFile extends Schema.Schema.Type<
 > {}
 
 export const AttemptDetail = Schema.Struct({
+  revision: InboxRevision,
   summary: AttemptSummary,
   diffText: Schema.String,
   files: Schema.Array(InboxDiffFile),
@@ -51,9 +58,6 @@ export const AttemptDetail = Schema.Struct({
 export interface AttemptDetail extends Schema.Schema.Type<
   typeof AttemptDetail
 > {}
-
-export const InboxRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-export type InboxRevision = typeof InboxRevision.Type
 
 export const InboxSnapshot = Schema.Struct({
   revision: InboxRevision,
@@ -100,6 +104,7 @@ export const VerificationStatusChangedEvent = Schema.TaggedStruct(
   {
     revision: InboxRevision,
     attemptId: VerificationAttemptId,
+    repositoryId: RepositoryId,
     status: AttemptStatus,
     generation: AttemptGeneration,
     nextAction: Schema.NonEmptyString,
@@ -180,11 +185,26 @@ const DecisionConflictErrorSchema = InboxDecisionConflictError.pipe(
 )
 const ServerErrorSchema = InboxServerError.pipe(HttpApiSchema.status(500))
 
+export class CurrentInboxCaller extends Context.Service<
+  CurrentInboxCaller,
+  WorkOsAuthenticatedIdentity
+>()('@patchplane/contracts/CurrentInboxCaller') {}
+
+export class DecisionInboxAuthMiddleware extends HttpApiMiddleware.Service<
+  DecisionInboxAuthMiddleware,
+  { provides: CurrentInboxCaller }
+>()('@patchplane/contracts/DecisionInboxAuthMiddleware', {
+  error: UnauthorizedErrorSchema,
+  security: {
+    bearer: HttpApiSecurity.http({ scheme: 'bearer' }),
+  },
+}) {}
+
 export const DecisionInboxApiGroup = HttpApiGroup.make('inbox')
   .add(
     HttpApiEndpoint.get('listInbox', '/', {
       success: InboxSnapshot,
-      error: [UnauthorizedErrorSchema, ServerErrorSchema],
+      error: [UnauthorizedErrorSchema, ForbiddenErrorSchema, ServerErrorSchema],
     }),
     HttpApiEndpoint.get('getAttemptDetail', '/attempts/:attemptId', {
       params: {
@@ -215,11 +235,13 @@ export const DecisionInboxApiGroup = HttpApiGroup.make('inbox')
     HttpApiEndpoint.get('streamEvents', '/events', {
       success: HttpApiSchema.StreamSse({
         data: DecisionInboxStreamEvent,
+        error: UnauthorizedErrorSchema,
         keepAlive: '15 seconds',
       }),
-      error: [UnauthorizedErrorSchema, ServerErrorSchema],
+      error: [UnauthorizedErrorSchema, ForbiddenErrorSchema, ServerErrorSchema],
     }),
   )
+  .middleware(DecisionInboxAuthMiddleware)
   .prefix('/api/v2/inbox')
 
 export const DecisionInboxApi = HttpApi.make('patchplane-decision-inbox').add(
@@ -234,7 +256,7 @@ export const DiffIslandViewData = Schema.Struct({
   attemptId: VerificationAttemptId,
   proposalVersion: ProposalVersion,
   diffText: Schema.String,
-  focusedFilePath: Schema.NullOr(Schema.String),
+  focusedFilePath: Schema.NullOr(Schema.NonEmptyString),
 })
 export interface DiffIslandViewData extends Schema.Schema.Type<
   typeof DiffIslandViewData

@@ -1,11 +1,11 @@
-import { Effect, Match, Option, Schema, Stream } from 'effect'
+import { Effect, Equal, Match, Option, Schema, Stream } from 'effect'
 import * as Command from 'foldkit/command'
 import * as Message from 'foldkit/message'
 import * as Navigation from 'foldkit/navigation'
 import * as FoldkitSchema from 'foldkit/schema'
 import * as Subscription from 'foldkit/subscription'
 import type * as Update from 'foldkit/update'
-import type * as FoldkitUrl from 'foldkit/url'
+import * as FoldkitUrl from 'foldkit/url'
 import {
   AttemptDetail,
   AttemptSummary,
@@ -89,12 +89,21 @@ export interface SelectedDiffLine extends Schema.Schema.Type<
   typeof SelectedDiffLine
 > {}
 
+export const DiffIslandMountIdentity = Schema.Struct({
+  attemptId: VerificationAttemptId,
+  proposalVersion: ProposalVersion,
+})
+export interface DiffIslandMountIdentity extends Schema.Schema.Type<
+  typeof DiffIslandMountIdentity
+> {}
+
 export const RequestSequence = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(0),
 )
 
 export const InboxModel = Schema.Struct({
   route: AppRoute,
+  routingEnabled: Schema.Boolean,
   items: Schema.Array(AttemptSummary),
   lastStreamRevision: InboxRevision,
   listRequestSeq: RequestSequence,
@@ -104,9 +113,9 @@ export const InboxModel = Schema.Struct({
   activeDetail: AttemptDetailState,
   decisionRequestSeq: RequestSequence,
   decisionSubmission: DecisionSubmissionState,
-  focusedFilePath: Schema.Option(Schema.String),
+  focusedFilePath: Schema.Option(Schema.NonEmptyString),
   selectedDiffLine: Schema.Option(SelectedDiffLine),
-  diffIslandMountedAttemptId: Schema.Option(VerificationAttemptId),
+  diffIslandMount: Schema.Option(DiffIslandMountIdentity),
   sseConnection: SseConnectionState,
   streamEnabled: Schema.Boolean,
 })
@@ -117,10 +126,7 @@ export const InboxMessage = Message.defineMessageUnion({
     request: Navigation.UrlRequest,
   },
   UrlChanged: {
-    url: Schema.String,
-  },
-  RouteChanged: {
-    route: AppRoute,
+    url: FoldkitUrl.Url,
   },
   CompletedNavigation: {},
   ClickedRefreshInbox: {},
@@ -156,6 +162,7 @@ export const InboxMessage = Message.defineMessageUnion({
   },
   SucceededSubmitDecision: {
     requestSeq: RequestSequence,
+    attemptId: VerificationAttemptId,
     response: SubmitDecisionResponse,
   },
   FailedSubmitDecision: {
@@ -173,9 +180,11 @@ export const InboxMessage = Message.defineMessageUnion({
   SseDisconnected: {},
   DiffIslandMounted: {
     attemptId: VerificationAttemptId,
+    proposalVersion: ProposalVersion,
   },
   DiffIslandUnmounted: {
     attemptId: VerificationAttemptId,
+    proposalVersion: ProposalVersion,
   },
   DiffIslandEventReceived: {
     event: DiffIslandEvent,
@@ -190,7 +199,6 @@ export const LoadInboxCommand = Command.define('LoadInbox', {
     requestSeq: RequestSequence,
   },
   messages: [InboxMessage.SucceededLoadInbox, InboxMessage.FailedLoadInbox],
-  interrupt: true,
   execute: ({ requestSeq }) =>
     Effect.gen(function* () {
       const client = yield* DecisionInboxClient
@@ -212,7 +220,6 @@ export const LoadAttemptDetailCommand = Command.define('LoadAttemptDetail', {
     InboxMessage.SucceededLoadAttemptDetail,
     InboxMessage.FailedLoadAttemptDetail,
   ],
-  interrupt: true,
   execute: ({ attemptId, requestSeq }) =>
     Effect.gen(function* () {
       const client = yield* DecisionInboxClient
@@ -253,7 +260,11 @@ export const SubmitDecisionCommand = Command.define('SubmitDecision', {
         attemptId,
         payload: { proposalVersion, kind },
       })
-      return InboxMessage.SucceededSubmitDecision({ requestSeq, response })
+      return InboxMessage.SucceededSubmitDecision({
+        requestSeq,
+        attemptId,
+        response,
+      })
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
@@ -304,10 +315,14 @@ export const inboxSubscriptions = Subscription.make<
           Effect.gen(function* () {
             const client = yield* DecisionInboxClient
             const eventStream = yield* client.openEventStream
-            const mappedEvents = eventStream.pipe(
-              Stream.map((event): InboxMessage =>
-                InboxMessage.SseEventReceived({ event }),
+            const mappedWithCleanEof = Stream.concat(
+              eventStream.pipe(
+                Stream.map((event): InboxMessage =>
+                  InboxMessage.SseEventReceived({ event }),
+                ),
               ),
+              Stream.succeed<InboxMessage>(InboxMessage.SseDisconnected()),
+            ).pipe(
               Stream.catch((error) =>
                 Stream.succeed<InboxMessage>(
                   InboxMessage.SseStreamFailed({ error }),
@@ -316,7 +331,7 @@ export const inboxSubscriptions = Subscription.make<
             )
             return Stream.concat(
               Stream.succeed<InboxMessage>(InboxMessage.SseConnected()),
-              mappedEvents,
+              mappedWithCleanEof,
             )
           }).pipe(
             Effect.catch((error) =>
@@ -378,6 +393,7 @@ const applyStatusChangeToItems = (
 const syncActiveDetailSummary = (
   activeDetail: AttemptDetailState,
   summary: AttemptSummary,
+  revision?: InboxRevision,
   decision?: AcceptanceDecision,
 ): AttemptDetailState =>
   AttemptDetailState.matchOrElse(
@@ -387,6 +403,10 @@ const syncActiveDetailSummary = (
         detail.summary.attemptId === summary.attemptId
           ? AttemptDetailState.Loaded({
               detail: {
+                revision:
+                  revision !== undefined && revision > detail.revision
+                    ? revision
+                    : detail.revision,
                 summary,
                 diffText: detail.diffText,
                 files: detail.files,
@@ -394,6 +414,26 @@ const syncActiveDetailSummary = (
               },
             })
           : activeDetail,
+    },
+    () => activeDetail,
+  )
+
+const syncActiveDetailFromSnapshot = (
+  activeDetail: AttemptDetailState,
+  items: ReadonlyArray<AttemptSummary>,
+  revision: InboxRevision,
+): AttemptDetailState =>
+  AttemptDetailState.matchOrElse(
+    activeDetail,
+    {
+      Loaded: ({ detail }) => {
+        const matching = items.find(
+          (item) => item.attemptId === detail.summary.attemptId,
+        )
+        return matching !== undefined
+          ? syncActiveDetailSummary(activeDetail, matching, revision)
+          : activeDetail
+      },
     },
     () => activeDetail,
   )
@@ -412,6 +452,10 @@ const syncActiveDetailStatus = (
         detail.summary.attemptId === event.attemptId
           ? AttemptDetailState.Loaded({
               detail: {
+                revision:
+                  event.revision > detail.revision
+                    ? event.revision
+                    : detail.revision,
                 summary: applyStatusChangeToSummary(detail.summary, event),
                 diffText: detail.diffText,
                 files: detail.files,
@@ -423,13 +467,30 @@ const syncActiveDetailStatus = (
     () => activeDetail,
   )
 
+const buildInternalPath = (url: FoldkitUrl.Url): string => {
+  const searchSuffix = Option.match(url.search, {
+    onNone: () => '',
+    onSome: (search) => (search.startsWith('?') ? search : `?${search}`),
+  })
+  const hashSuffix = Option.match(url.hash, {
+    onNone: () => '',
+    onSome: (hash) => (hash.startsWith('#') ? hash : `#${hash}`),
+  })
+  return `${url.pathname}${searchSuffix}${hashSuffix}`
+}
+
 export const makeInitialInboxModel = (
   route: AppRoute = AppRoute.Inbox(),
-  options?: { readonly streamEnabled?: boolean },
+  options?: {
+    readonly streamEnabled?: boolean
+    readonly routingEnabled?: boolean
+  },
 ): InboxModel => {
   const streamEnabled = options?.streamEnabled ?? true
+  const routingEnabled = options?.routingEnabled ?? true
   return {
     route,
+    routingEnabled,
     items: [],
     lastStreamRevision: 0,
     listRequestSeq: 0,
@@ -447,7 +508,7 @@ export const makeInitialInboxModel = (
     decisionSubmission: DecisionSubmissionState.Idle(),
     focusedFilePath: Option.none(),
     selectedDiffLine: Option.none(),
-    diffIslandMountedAttemptId: Option.none(),
+    diffIslandMount: Option.none(),
     sseConnection: streamEnabled
       ? SseConnectionState.Connecting()
       : SseConnectionState.Disconnected(),
@@ -459,7 +520,10 @@ export const initialInboxModel: InboxModel = makeInitialInboxModel()
 
 export const initInbox = (
   url?: FoldkitUrl.Url,
-  options?: { readonly streamEnabled?: boolean },
+  options?: {
+    readonly streamEnabled?: boolean
+    readonly routingEnabled?: boolean
+  },
 ): Update.Return<InboxModel, InboxMessage, DecisionInboxClient> => {
   const route = url !== undefined ? urlToAppRoute(url) : AppRoute.Inbox()
   const base = makeInitialInboxModel(route, options)
@@ -515,6 +579,7 @@ const transitionToRoute = (
         selectedAttemptId: Option.none(),
         detailRequestSeq: model.detailRequestSeq + 1,
         activeDetail: AttemptDetailState.Idle(),
+        decisionRequestSeq: model.decisionRequestSeq + 1,
         decisionSubmission: DecisionSubmissionState.Idle(),
         focusedFilePath: Option.none(),
         selectedDiffLine: Option.none(),
@@ -529,6 +594,7 @@ const transitionToRoute = (
           selectedAttemptId: Option.some(attemptId),
           detailRequestSeq: nextDetailSeq,
           activeDetail: AttemptDetailState.Loading({ attemptId }),
+          decisionRequestSeq: model.decisionRequestSeq + 1,
           decisionSubmission: DecisionSubmissionState.Idle(),
           focusedFilePath: Option.none(),
           selectedDiffLine: Option.none(),
@@ -548,6 +614,10 @@ const transitionToRoute = (
         selectedAttemptId: Option.none(),
         detailRequestSeq: model.detailRequestSeq + 1,
         activeDetail: AttemptDetailState.Idle(),
+        decisionRequestSeq: model.decisionRequestSeq + 1,
+        decisionSubmission: DecisionSubmissionState.Idle(),
+        focusedFilePath: Option.none(),
+        selectedDiffLine: Option.none(),
       },
     }),
   })
@@ -561,17 +631,16 @@ export const updateInbox = (
       Navigation.UrlRequest.match(request, {
         Internal: ({ url }) => {
           const targetRoute = urlToAppRoute(url)
-          const pathWithSearch = Option.match(url.search, {
-            onNone: () => url.pathname,
-            onSome: (search) => `${url.pathname}?${search}`,
-          })
-          const next = transitionToRoute(model, targetRoute)
+          const targetPath = buildInternalPath(url)
+          const next = Equal.equals(model.route, targetRoute)
+            ? { model }
+            : transitionToRoute(model, targetRoute)
+          const navCommands: ReadonlyArray<InboxCommand> = model.routingEnabled
+            ? [PushUrlCommand({ url: targetPath })]
+            : []
           return {
             model: next.model,
-            commands: [
-              ...(next.commands ?? []),
-              PushUrlCommand({ url: pathWithSearch }),
-            ],
+            commands: [...(next.commands ?? []), ...navCommands],
           }
         },
         External: ({ href }) => ({
@@ -581,18 +650,12 @@ export const updateInbox = (
       }),
 
     UrlChanged: ({ url }) => {
-      const parsed = urlToAppRoute({
-        protocol: 'https:',
-        host: 'patchplane.local',
-        port: Option.none(),
-        pathname: url.split('?')[0] ?? '/',
-        search: Option.none(),
-        hash: Option.none(),
-      })
+      const parsed = urlToAppRoute(url)
+      if (Equal.equals(model.route, parsed)) {
+        return { model }
+      }
       return transitionToRoute(model, parsed)
     },
-
-    RouteChanged: ({ route }) => transitionToRoute(model, route),
 
     CompletedNavigation: () => ({ model }),
 
@@ -609,27 +672,30 @@ export const updateInbox = (
     },
 
     ClickedAttempt: ({ attemptId }) => {
-      const next = transitionToRoute(
-        model,
-        AppRoute.AttemptDetail({ attemptId }),
-      )
+      const targetRoute = AppRoute.AttemptDetail({ attemptId })
+      const next = Equal.equals(model.route, targetRoute)
+        ? { model }
+        : transitionToRoute(model, targetRoute)
+      const navCommands: ReadonlyArray<InboxCommand> = model.routingEnabled
+        ? [PushUrlCommand({ url: attemptDetailRouter({ attemptId }) })]
+        : []
       return {
         model: next.model,
-        commands: [
-          ...(next.commands ?? []),
-          PushUrlCommand({ url: attemptDetailRouter({ attemptId }) }),
-        ],
+        commands: [...(next.commands ?? []), ...navCommands],
       }
     },
 
     ClickedBackToInbox: () => {
-      const next = transitionToRoute(model, AppRoute.Inbox())
+      const targetRoute = AppRoute.Inbox()
+      const next = Equal.equals(model.route, targetRoute)
+        ? { model }
+        : transitionToRoute(model, targetRoute)
+      const navCommands: ReadonlyArray<InboxCommand> = model.routingEnabled
+        ? [PushUrlCommand({ url: inboxRouter() })]
+        : []
       return {
         model: next.model,
-        commands: [
-          ...(next.commands ?? []),
-          PushUrlCommand({ url: inboxRouter() }),
-        ],
+        commands: [...(next.commands ?? []), ...navCommands],
       }
     },
 
@@ -662,6 +728,11 @@ export const updateInbox = (
           items: snapshot.items,
           lastStreamRevision: snapshot.revision,
           listState: InboxLoadState.Loaded(),
+          activeDetail: syncActiveDetailFromSnapshot(
+            model.activeDetail,
+            snapshot.items,
+            snapshot.revision,
+          ),
         },
       }
     },
@@ -679,28 +750,55 @@ export const updateInbox = (
     },
 
     SucceededLoadAttemptDetail: ({ requestSeq, attemptId, detail }) => {
-      const isSelected = Option.match(model.selectedAttemptId, {
-        onNone: () => false,
-        onSome: (selected) => selected === attemptId,
-      })
-      if (requestSeq !== model.detailRequestSeq || !isSelected) {
+      if (
+        requestSeq !== model.detailRequestSeq ||
+        !Option.contains(model.selectedAttemptId, attemptId)
+      ) {
         return { model }
       }
+
+      // Preserve newer live SSE summary fields if detail was fetched at an older revision.
+      const existingSummary = model.items.find(
+        (item) => item.attemptId === detail.summary.attemptId,
+      )
+      const isDetailOlderThanLive =
+        detail.revision < model.lastStreamRevision &&
+        existingSummary !== undefined &&
+        existingSummary.updatedAtMs >= detail.summary.updatedAtMs
+
+      const effectiveSummary = isDetailOlderThanLive
+        ? existingSummary
+        : detail.summary
+      const effectiveRevision = isDetailOlderThanLive
+        ? model.lastStreamRevision
+        : detail.revision
+
+      const mergedDetail: AttemptDetail = {
+        revision: effectiveRevision,
+        summary: effectiveSummary,
+        diffText: detail.diffText,
+        files: detail.files,
+        decision: detail.decision,
+      }
+
       return {
         model: {
           ...model,
-          activeDetail: AttemptDetailState.Loaded({ detail }),
-          items: upsertAttemptSummary(model.items, detail.summary),
+          activeDetail: AttemptDetailState.Loaded({ detail: mergedDetail }),
+          items: upsertAttemptSummary(model.items, effectiveSummary),
+          lastStreamRevision:
+            effectiveRevision > model.lastStreamRevision
+              ? effectiveRevision
+              : model.lastStreamRevision,
         },
       }
     },
 
     FailedLoadAttemptDetail: ({ requestSeq, attemptId, error }) => {
-      const isSelected = Option.match(model.selectedAttemptId, {
-        onNone: () => false,
-        onSome: (selected) => selected === attemptId,
-      })
-      if (requestSeq !== model.detailRequestSeq || !isSelected) {
+      if (
+        requestSeq !== model.detailRequestSeq ||
+        !Option.contains(model.selectedAttemptId, attemptId)
+      ) {
         return { model }
       }
       return {
@@ -712,6 +810,9 @@ export const updateInbox = (
     },
 
     ClickedSubmitDecision: ({ attemptId, proposalVersion, kind }) => {
+      if (DecisionSubmissionState.guards.Submitting(model.decisionSubmission)) {
+        return { model }
+      }
       const nextDecisionSeq = model.decisionRequestSeq + 1
       return {
         model: {
@@ -733,8 +834,11 @@ export const updateInbox = (
       }
     },
 
-    SucceededSubmitDecision: ({ requestSeq, response }) => {
-      if (requestSeq !== model.decisionRequestSeq) {
+    SucceededSubmitDecision: ({ requestSeq, attemptId, response }) => {
+      if (
+        requestSeq !== model.decisionRequestSeq ||
+        !Option.contains(model.selectedAttemptId, attemptId)
+      ) {
         return { model }
       }
       return {
@@ -744,6 +848,7 @@ export const updateInbox = (
           activeDetail: syncActiveDetailSummary(
             model.activeDetail,
             response.summary,
+            undefined,
             response.decision,
           ),
           decisionSubmission: DecisionSubmissionState.Submitted({
@@ -754,7 +859,10 @@ export const updateInbox = (
     },
 
     FailedSubmitDecision: ({ requestSeq, attemptId, error }) => {
-      if (requestSeq !== model.decisionRequestSeq) {
+      if (
+        requestSeq !== model.decisionRequestSeq ||
+        !Option.contains(model.selectedAttemptId, attemptId)
+      ) {
         return { model }
       }
       return {
@@ -800,6 +908,11 @@ export const updateInbox = (
             items: snapshot.items,
             lastStreamRevision: snapshot.revision,
             listState: InboxLoadState.Loaded(),
+            activeDetail: syncActiveDetailFromSnapshot(
+              model.activeDetail,
+              snapshot.items,
+              snapshot.revision,
+            ),
             sseConnection: SseConnectionState.Connected(),
           },
         })),
@@ -808,7 +921,11 @@ export const updateInbox = (
             ...model,
             items: upsertAttemptSummary(model.items, summary),
             lastStreamRevision: revision,
-            activeDetail: syncActiveDetailSummary(model.activeDetail, summary),
+            activeDetail: syncActiveDetailSummary(
+              model.activeDetail,
+              summary,
+              revision,
+            ),
             sseConnection: SseConnectionState.Connected(),
           },
         })),
@@ -834,6 +951,7 @@ export const updateInbox = (
               activeDetail: syncActiveDetailSummary(
                 model.activeDetail,
                 summary,
+                revision,
                 decision,
               ),
               sseConnection: SseConnectionState.Connected(),
@@ -844,34 +962,30 @@ export const updateInbox = (
       )
     },
 
-    DiffIslandMounted: ({ attemptId }) => ({
+    DiffIslandMounted: ({ attemptId, proposalVersion }) => ({
       model: {
         ...model,
-        diffIslandMountedAttemptId: Option.some(attemptId),
+        diffIslandMount: Option.some({ attemptId, proposalVersion }),
       },
     }),
 
-    DiffIslandUnmounted: ({ attemptId }) => ({
+    DiffIslandUnmounted: ({ attemptId, proposalVersion }) => ({
       model: {
         ...model,
-        diffIslandMountedAttemptId: Option.match(
-          model.diffIslandMountedAttemptId,
-          {
-            onNone: () => Option.none(),
-            onSome: (mountedId) =>
-              mountedId === attemptId ? Option.none() : Option.some(mountedId),
-          },
-        ),
+        diffIslandMount: Option.match(model.diffIslandMount, {
+          onNone: () => Option.none(),
+          onSome: (mounted) =>
+            mounted.attemptId === attemptId &&
+            mounted.proposalVersion === proposalVersion
+              ? Option.none()
+              : Option.some(mounted),
+        }),
       },
     }),
 
     DiffIslandEventReceived: ({ event }) => {
       // Ignore stale island events emitted for a previously viewed attempt.
-      const matchesSelected = Option.match(model.selectedAttemptId, {
-        onNone: () => false,
-        onSome: (selected) => selected === event.attemptId,
-      })
-      if (!matchesSelected) {
+      if (!Option.contains(model.selectedAttemptId, event.attemptId)) {
         return { model }
       }
       return Match.value(event).pipe(
