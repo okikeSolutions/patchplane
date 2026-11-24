@@ -1,4 +1,11 @@
 export {
+  CONTROL_PLANE_UNAVAILABLE,
+  ControlPlaneHealthRouteLayer,
+  ControlPlaneHttpPlatformLayer,
+  makeControlPlaneHttpLayer,
+  UnconfiguredControlPlaneAuthLayer,
+} from './control-plane-http'
+export {
   claimAndStartAttempt,
   DefaultVerificationStepRunnerLayer,
   makeControlPlaneSingleStoreLayer,
@@ -29,3 +36,7 @@ export {
   PatchplaneMcpToolkit,
   UpdateRepositoryConfigTool,
 } from './mcp-server'
+export {
+  PostgresDecisionInboxBackendLayer,
+  WorkOsInboxCallerAuthenticatorLayer,
+} from './postgres-decision-inbox-backend'

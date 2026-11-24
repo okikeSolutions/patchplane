@@ -11,16 +11,30 @@ import {
   Scope,
   SynchronizedRef,
 } from 'effect'
-import * as HttpServerResponse from 'effect/http/HttpServerResponse'
+import {
+  HttpRouter,
+  type HttpServerError,
+  type HttpServerRequest,
+  HttpServerResponse,
+} from 'effect/http'
 import type * as Redacted from 'effect/Redacted'
-import type { ArtifactStore, SandboxProvider } from '@patchplane/core'
+import {
+  type ArtifactStore,
+  AuthorityServiceLayer,
+  type SandboxProvider,
+} from '@patchplane/core'
 import { sanitizeErrorMessage } from '@patchplane/domain'
 import {
   makeDaytonaSandboxProviderLayer,
   makeR2ArtifactStoreLayer,
 } from '@patchplane/plugins'
 import {
+  ControlPlaneHttpPlatformLayer,
+  DecisionInboxEventBusLive,
+  makeControlPlaneHttpLayer,
   makeControlPlaneSingleStoreLayer,
+  PostgresDecisionInboxBackendLayer,
+  UnconfiguredControlPlaneAuthLayer,
   wakeControlPlane,
 } from '@patchplane/server'
 import {
@@ -38,6 +52,15 @@ type ControlPlaneRuntimeServices =
   | Layer.Success<ReturnType<typeof makeControlPlaneSingleStoreLayer>>
   | SandboxProvider
   | ArtifactStore
+
+interface ControlPlaneRuntimeState {
+  readonly services: Context.Context<ControlPlaneRuntimeServices>
+  readonly httpEffect: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    HttpServerError.HttpServerError,
+    Scope.Scope | HttpServerRequest.HttpServerRequest
+  >
+}
 
 const wrapDaytonaHandle = (
   handle: Daytona.DaytonaSandbox,
@@ -126,16 +149,16 @@ export default ControlPlaneContainer.make(
     const artifactsBucket =
       yield* Cloudflare.R2.ReadWriteBucket(PatchplaneArtifacts)
 
-    // One Postgres pool + ClusterWorkflowEngine + Daytona + R2 runtime per container process.
+    // One Postgres pool + ClusterWorkflowEngine + Daytona + R2 + HTTP router per container process.
     const controlPlaneRef = yield* SynchronizedRef.make<
-      Option.Option<Context.Context<ControlPlaneRuntimeServices>>
+      Option.Option<ControlPlaneRuntimeState>
     >(Option.none())
 
     const acquireControlPlane = SynchronizedRef.modifyEffect(
       controlPlaneRef,
       (current) =>
         Option.match(current, {
-          onSome: (services) => Effect.succeed([services, current] as const),
+          onSome: (state) => Effect.succeed([state, current] as const),
           onNone: () =>
             Effect.gen(function* () {
               // SingleRunner + SqlRunnerStorage use session advisory locks and
@@ -165,11 +188,43 @@ export default ControlPlaneContainer.make(
 
               // Process-lifetime scope: released when the container exits.
               const scope = yield* Scope.make()
-              const services = yield* Layer.buildWithScope(
-                fullLayer,
-                scope,
-              ).pipe(Effect.onError(() => Scope.close(scope, Exit.void)))
-              return [services, Option.some(services)] as const
+              const buildState = Effect.gen(function* () {
+                const services = yield* Layer.buildWithScope(fullLayer, scope)
+                const servicesLayer = Layer.succeedContext(services)
+
+                const authorityLayer = AuthorityServiceLayer.pipe(
+                  Layer.provide(servicesLayer),
+                  Layer.provide(UnconfiguredControlPlaneAuthLayer),
+                )
+                const inboxBackendLayer =
+                  PostgresDecisionInboxBackendLayer.pipe(
+                    Layer.provide(servicesLayer),
+                    Layer.provide(UnconfiguredControlPlaneAuthLayer),
+                  )
+
+                const httpAppLayer = makeControlPlaneHttpLayer().pipe(
+                  Layer.provide(servicesLayer),
+                  Layer.provide(authorityLayer),
+                  Layer.provide(inboxBackendLayer),
+                  Layer.provide(DecisionInboxEventBusLive),
+                  Layer.provide(UnconfiguredControlPlaneAuthLayer),
+                  Layer.provide(ControlPlaneHttpPlatformLayer),
+                )
+
+                const httpEffect = yield* HttpRouter.toHttpEffect(
+                  httpAppLayer,
+                ).pipe(Effect.provideService(Scope.Scope, scope))
+
+                return {
+                  services,
+                  httpEffect,
+                } satisfies ControlPlaneRuntimeState
+              })
+
+              const state = yield* buildState.pipe(
+                Effect.onError(() => Scope.close(scope, Exit.void)),
+              )
+              return [state, Option.some(state)] as const
             }),
         }),
     )
@@ -178,7 +233,7 @@ export default ControlPlaneContainer.make(
       'ControlPlaneContainer.runWakeAgainstPostgres',
     )(
       function* (trigger: string) {
-        const services = yield* acquireControlPlane
+        const { services } = yield* acquireControlPlane
         const result = yield* wakeControlPlane().pipe(Effect.provide(services))
         return {
           ok: result.ok,
@@ -200,12 +255,38 @@ export default ControlPlaneContainer.make(
     )
 
     const handleFetch = Effect.fn('ControlPlaneContainer.fetch')(function* () {
-      const woken = yield* runWakeAgainstPostgres('http')
-      return yield* HttpServerResponse.json({
-        status: woken.ok ? 'ok' : 'degraded',
-        runtime: 'bun',
-        wokenAt: woken.wokenAt,
-      })
+      const { httpEffect } = yield* acquireControlPlane.pipe(
+        Effect.mapError(
+          (cause) =>
+            new ControlPlaneWakeError({
+              trigger: 'http',
+              message: sanitizeErrorMessage(cause),
+              cause,
+            }),
+        ),
+      )
+
+      return yield* httpEffect.pipe(
+        Effect.catchTag('HttpServerError', (error) =>
+          error.reason._tag === 'RouteNotFound'
+            ? HttpServerResponse.json({ error: 'not_found' }, { status: 404 })
+            : Effect.logError('ControlPlaneContainer.fetch HttpServerError', {
+                reason: error.reason._tag,
+                message: sanitizeErrorMessage(error),
+              }).pipe(
+                Effect.andThen(
+                  HttpServerResponse.json(
+                    {
+                      status: 'error',
+                      runtime: 'bun',
+                      error: CONTROL_PLANE_UNAVAILABLE,
+                    },
+                    { status: 500 },
+                  ),
+                ),
+              ),
+        ),
+      )
     })
 
     const fetchEffect = handleFetch().pipe(
