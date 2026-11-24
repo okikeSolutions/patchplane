@@ -1,10 +1,13 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
+import { HttpServerRequest, HttpServerResponse } from 'effect/http'
 import {
   ControlPlaneWakeError,
   type ControlPlaneWakeResult,
 } from '../../apps/infra/src/control-plane-container'
 import {
+  CONTROL_PLANE_HTTP_PORT,
+  forwardControlPlaneHttpRequest,
   handleWakeHttpResponse,
   wakeControlPlaneContainer,
 } from '../../apps/infra/src/control-plane-host'
@@ -194,6 +197,64 @@ describe('ControlPlaneHost and WakeupWorker behavior', () => {
           }),
         )
         expect(unboundedSleep._tag).toBe('SchemaError')
+      }),
+  )
+
+  it.effect(
+    'starts the control-plane container and forwards HTTP requests to port 3000 while shielding transport errors behind 503',
+    () =>
+      Effect.gen(function* () {
+        const calls: Array<string> = []
+        const inbound = HttpServerRequest.fromWeb(
+          new Request('http://patchplane.local/api/v2/inbox'),
+        )
+
+        const okResponse = yield* forwardControlPlaneHttpRequest(
+          {
+            start: ({ enableInternet }) =>
+              Effect.sync(() => {
+                calls.push(`start:${String(enableInternet)}`)
+              }),
+            getTcpPort: (port) =>
+              Effect.sync(() => {
+                calls.push(`port:${port}`)
+                return {
+                  fetch: (request) => {
+                    calls.push(`fetch:${request.url}`)
+                    return HttpServerResponse.json({
+                      forwarded: true,
+                    })
+                  },
+                }
+              }),
+          },
+          inbound,
+        )
+
+        expect(okResponse.status).toBe(200)
+        expect(calls).toEqual([
+          'start:true',
+          `port:${CONTROL_PLANE_HTTP_PORT}`,
+          'fetch:/api/v2/inbox',
+        ])
+
+        const failedResponse = yield* forwardControlPlaneHttpRequest(
+          {
+            start: () => Effect.void,
+            getTcpPort: () =>
+              Effect.succeed({
+                fetch: () =>
+                  Effect.fail(
+                    'connect ECONNREFUSED postgresql://user:secret@ep-hidden.neon.tech:5432/db',
+                  ),
+              }),
+          },
+          inbound,
+        )
+        expect(failedResponse.status).toBe(503)
+        const rawBody = readJsonBody(failedResponse)
+        expect(rawBody).not.toContain('secret')
+        expect(rawBody).not.toContain('neon.tech')
       }),
   )
 })
