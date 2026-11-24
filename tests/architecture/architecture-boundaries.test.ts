@@ -213,7 +213,11 @@ describe('V2 architecture boundaries', () => {
         const githubCouplingViolations: Array<string> = []
         for (const file of coreFiles) {
           const source = yield* readRepoFile(file)
-          if (/github-actions-kvm|octokit|workflow_dispatch/i.test(source)) {
+          if (
+            /github-actions-kvm|octokit|workflow_dispatch|x-hub-signature|@workos/i.test(
+              source,
+            )
+          ) {
             githubCouplingViolations.push(file)
           }
         }
