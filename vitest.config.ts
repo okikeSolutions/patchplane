@@ -11,10 +11,19 @@ export default defineConfig({
           include: [
             'packages/*/src/**/*.test.ts',
             'apps/*/src/**/*.test.ts',
-            'apps/*/src/**/*.test.tsx',
             'tests/architecture/**/*.test.ts',
             'tests/smoke/**/*.test.ts',
           ],
+          exclude: ['**/node_modules/**', '**/dist/**', 'tests/fixtures/**'],
+        },
+      },
+      {
+        test: {
+          name: 'web-dom',
+          environment: 'happy-dom',
+          isolate: false,
+          sequence: { groupOrder: 0, shuffle: true },
+          include: ['apps/web/src/**/*.test.tsx'],
           exclude: ['**/node_modules/**', '**/dist/**', 'tests/fixtures/**'],
         },
       },

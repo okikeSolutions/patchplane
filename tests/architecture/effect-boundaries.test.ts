@@ -78,15 +78,26 @@ function isAstNode(value: unknown): value is AstNode {
   )
 }
 
-function collectEffectNamespaces(program: AstNode): ReadonlySet<string> {
-  const namespaces = new Set<string>()
+function collectEffectNamespaces(program: AstNode): {
+  readonly effectNamespaces: ReadonlySet<string>
+  readonly effectNamed: ReadonlyMap<string, string>
+  readonly streamNamespaces: ReadonlySet<string>
+} {
+  const effectNamespaces = new Set<string>()
+  const effectNamed = new Map<string, string>()
+  const streamNamespaces = new Set<string>()
   const body = Array.isArray(program.body) ? program.body : []
   for (const statement of body) {
     if (!isAstNode(statement) || statement.type !== 'ImportDeclaration')
       continue
     if (!isAstNode(statement.source)) continue
     const source = statement.source.value
-    if (source !== 'effect' && source !== 'effect/Effect') continue
+    if (
+      source !== 'effect' &&
+      source !== 'effect/Effect' &&
+      source !== 'effect/Stream'
+    )
+      continue
     const specifiers = Array.isArray(statement.specifiers)
       ? statement.specifiers
       : []
@@ -98,18 +109,33 @@ function collectEffectNamespaces(program: AstNode): ReadonlySet<string> {
         (specifier.type === 'ImportNamespaceSpecifier' ||
           specifier.type === 'ImportDefaultSpecifier')
       ) {
-        namespaces.add(localName)
+        effectNamespaces.add(localName)
+      } else if (
+        source === 'effect/Effect' &&
+        specifier.type === 'ImportSpecifier' &&
+        isAstNode(specifier.imported)
+      ) {
+        effectNamed.set(localName, String(specifier.imported.name))
+      } else if (
+        source === 'effect/Stream' &&
+        (specifier.type === 'ImportNamespaceSpecifier' ||
+          specifier.type === 'ImportDefaultSpecifier')
+      ) {
+        streamNamespaces.add(localName)
       } else if (
         source === 'effect' &&
         specifier.type === 'ImportSpecifier' &&
-        isAstNode(specifier.imported) &&
-        specifier.imported.name === 'Effect'
+        isAstNode(specifier.imported)
       ) {
-        namespaces.add(localName)
+        if (specifier.imported.name === 'Effect') {
+          effectNamespaces.add(localName)
+        } else if (specifier.imported.name === 'Stream') {
+          streamNamespaces.add(localName)
+        }
       }
     }
   }
-  return namespaces
+  return { effectNamespaces, effectNamed, streamNamespaces }
 }
 
 export function scanBoundaryUsages(
@@ -118,9 +144,13 @@ export function scanBoundaryUsages(
 ): BoundaryUsageCounts {
   const { program } = parseAst(file, source)
   const root: unknown = program
-  const effectNamespaces = isAstNode(root)
+  const { effectNamespaces, effectNamed, streamNamespaces } = isAstNode(root)
     ? collectEffectNamespaces(root)
-    : new Set<string>()
+    : {
+        effectNamespaces: new Set<string>(),
+        effectNamed: new Map<string, string>(),
+        streamNamespaces: new Set<string>(),
+      }
   const counts = {
     'runtime-entry': 0,
     'try-promise': 0,
@@ -129,19 +159,49 @@ export function scanBoundaryUsages(
     effectPromiseCalls: 0,
   }
 
-  const visit = (node: AstNode, parent: AstNode | undefined) => {
+  const getEffectCallName = (node: AstNode): string | undefined => {
+    if (node.type !== 'CallExpression' || !isAstNode(node.callee)) {
+      return undefined
+    }
+    const callee = node.callee
+    if (callee.type === 'Identifier') {
+      return effectNamed.get(String(callee.name))
+    }
+    if (
+      callee.type === 'MemberExpression' &&
+      callee.computed === false &&
+      isAstNode(callee.object) &&
+      callee.object.type === 'Identifier' &&
+      effectNamespaces.has(String(callee.object.name)) &&
+      isAstNode(callee.property) &&
+      callee.property.type === 'Identifier'
+    ) {
+      return String(callee.property.name)
+    }
+    return undefined
+  }
+
+  const visit = (
+    node: AstNode,
+    parent: AstNode | undefined,
+    grandParent: AstNode | undefined,
+    greatGrandParent: AstNode | undefined,
+  ) => {
     if (
       (node.type === 'FunctionDeclaration' ||
         node.type === 'FunctionExpression' ||
         node.type === 'ArrowFunctionExpression') &&
       node.async === true
     ) {
-      const isTryProperty =
+      const isTryPromiseThunk =
         parent?.type === 'Property' &&
         isAstNode(parent.key) &&
         parent.key.type === 'Identifier' &&
-        parent.key.name === 'try'
-      if (!isTryProperty) {
+        parent.key.name === 'try' &&
+        grandParent?.type === 'ObjectExpression' &&
+        greatGrandParent !== undefined &&
+        getEffectCallName(greatGrandParent) === 'tryPromise'
+      if (!isTryPromiseThunk) {
         counts['async-boundary'] += 1
       }
     }
@@ -157,7 +217,14 @@ export function scanBoundaryUsages(
 
     if (node.type === 'CallExpression' && isAstNode(node.callee)) {
       const callee = node.callee
-      if (
+      const effectCall = getEffectCallName(node)
+      if (effectCall === 'promise') {
+        counts.effectPromiseCalls += 1
+      } else if (effectCall === 'tryPromise') {
+        counts['try-promise'] += 1
+      } else if (effectCall !== undefined && RUNTIME_NAMES.has(effectCall)) {
+        counts['runtime-entry'] += 1
+      } else if (
         callee.type === 'MemberExpression' &&
         callee.computed === false &&
         isAstNode(callee.property) &&
@@ -171,16 +238,18 @@ export function scanBoundaryUsages(
 
         const isEffectNamespace =
           objName !== undefined && effectNamespaces.has(objName)
+        const isStreamNamespace =
+          objName !== undefined && streamNamespaces.has(objName)
 
-        if (isEffectNamespace && prop === 'promise') {
-          counts.effectPromiseCalls += 1
-        } else if (isEffectNamespace && prop === 'tryPromise') {
-          counts['try-promise'] += 1
-        } else if (RUNTIME_NAMES.has(prop)) {
+        if (RUNTIME_NAMES.has(prop)) {
           counts['runtime-entry'] += 1
         } else if (objName === 'Promise' && PROMISE_STATICS.has(prop)) {
           counts['native-promise'] += 1
-        } else if (!isEffectNamespace && PROMISE_CHAINS.has(prop)) {
+        } else if (
+          !isEffectNamespace &&
+          !isStreamNamespace &&
+          PROMISE_CHAINS.has(prop)
+        ) {
           counts['native-promise'] += 1
         }
       } else if (
@@ -195,16 +264,16 @@ export function scanBoundaryUsages(
       if (key === 'type' || key === 'start' || key === 'end') continue
       if (Array.isArray(value)) {
         for (const item of value) {
-          if (isAstNode(item)) visit(item, node)
+          if (isAstNode(item)) visit(item, node, parent, grandParent)
         }
       } else if (isAstNode(value)) {
-        visit(value, node)
+        visit(value, node, parent, grandParent)
       }
     }
   }
 
   if (isAstNode(root)) {
-    visit(root, undefined)
+    visit(root, undefined, undefined, undefined)
   }
   return counts
 }
@@ -355,14 +424,17 @@ describe('V2 Effect boundary registry', () => {
     }).pipe(Effect.provide(ArchitecturePlatformLayer)),
   )
 
-  it('allows Effect.catch and aliased Effect namespace catch while flagging promise.catch', () => {
+  it('allows Effect.catch and Stream.catch while flagging promise.catch', () => {
     const effectCatchCounts = scanBoundaryUsages(
       'sample-effect.ts',
       `
-        import { Effect as E } from 'effect'
+        import { Effect as E, Stream as S } from 'effect'
         import * as Fx from 'effect/Effect'
+        import * as St from 'effect/Stream'
         export const a = E.succeed(1).pipe(E.catch(() => E.succeed(2)))
         export const b = Fx.succeed(1).pipe(Fx.catch(() => Fx.succeed(2)))
+        export const c = S.succeed(1).pipe(S.catch(() => S.succeed(2)))
+        export const d = St.succeed(1).pipe(St.catch(() => St.succeed(2)))
       `,
     )
     expect(effectCatchCounts['native-promise']).toBe(0)

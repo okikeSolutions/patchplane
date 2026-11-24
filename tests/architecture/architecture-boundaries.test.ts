@@ -5,6 +5,7 @@ import {
   extractImportSpecifiers,
   isProductionSourceFile,
   listSourceFiles,
+  parseAst,
   readRepoFile,
 } from './architecture-files'
 
@@ -119,6 +120,84 @@ describe('V2 architecture boundaries', () => {
           forbidden.some((pattern) => pattern.test(specifier)),
         )
         expect(violations).toEqual([])
+      }).pipe(Effect.provide(ArchitecturePlatformLayer)),
+  )
+
+  it.effect(
+    'isolates React to apps/web/src/islands and enforces a strict island import and global allowlist',
+    () =>
+      Effect.gen(function* () {
+        const reactPattern = /^react(?:-dom)?(?:\/|$)/
+        const allowedIslandExternals = new Set([
+          'react',
+          'react-dom',
+          'react-dom/client',
+          'diff',
+          '@patchplane/contracts',
+          '@patchplane/domain',
+        ])
+        const webImports = yield* collectProductionImports('apps/web/src')
+
+        const leakedReact = webImports.filter(
+          ({ file, specifier }) =>
+            reactPattern.test(specifier) &&
+            !file.startsWith('apps/web/src/islands/'),
+        )
+        expect(leakedReact).toEqual([])
+
+        const islandImportViolations = webImports.filter(
+          ({ file, specifier }) => {
+            if (!file.startsWith('apps/web/src/islands/')) return false
+            if (specifier.startsWith('./') && !specifier.includes('..')) {
+              return false
+            }
+            return !allowedIslandExternals.has(specifier)
+          },
+        )
+        expect(islandImportViolations).toEqual([])
+
+        const forbiddenGlobals = new Set([
+          'fetch',
+          'EventSource',
+          'WebSocket',
+          'XMLHttpRequest',
+          'sendBeacon',
+        ])
+        const islandFiles = (yield* listSourceFiles(
+          'apps/web/src/islands',
+        )).filter(isProductionSourceFile)
+        const networkViolations: Array<{
+          readonly file: string
+          readonly identifier: string
+        }> = []
+
+        const visitAst = (file: string, node: unknown) => {
+          if (typeof node !== 'object' || node === null) return
+          if (Array.isArray(node)) {
+            for (const item of node) visitAst(file, item)
+            return
+          }
+          const type = Reflect.get(node, 'type')
+          const name = Reflect.get(node, 'name')
+          if (
+            type === 'Identifier' &&
+            typeof name === 'string' &&
+            forbiddenGlobals.has(name)
+          ) {
+            networkViolations.push({ file, identifier: name })
+          }
+          for (const [key, value] of Object.entries(node)) {
+            if (key === 'type' || key === 'start' || key === 'end') continue
+            visitAst(file, value)
+          }
+        }
+
+        for (const file of islandFiles) {
+          const source = yield* readRepoFile(file)
+          const { program } = parseAst(file, source)
+          visitAst(file, program)
+        }
+        expect(networkViolations).toEqual([])
       }).pipe(Effect.provide(ArchitecturePlatformLayer)),
   )
 

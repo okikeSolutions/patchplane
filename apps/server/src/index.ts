@@ -5,6 +5,19 @@ export {
   wakeControlPlane,
 } from './control-plane-service'
 export {
+  DecisionInboxApiGroupLayer,
+  DecisionInboxAuthMiddlewareLayer,
+  DecisionInboxBackend,
+  type DecisionInboxBackendService,
+  DecisionInboxEventBus,
+  DecisionInboxEventBusLive,
+  type DecisionInboxEventBusService,
+  DecisionInboxHttpLayer,
+  InboxCallerAuthenticator,
+  type InboxCallerAuthenticatorService,
+  type ScopedInboxEventEnvelope,
+} from './decision-inbox-api'
+export {
   CurrentMcpCaller,
   GetAttemptStatusTool,
   GetRepositoryConfigTool,

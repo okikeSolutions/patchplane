@@ -24,11 +24,14 @@ const isSafeRelativeIdentifier = (value: string): boolean =>
 
 export const VerificationAttemptId = Schema.NonEmptyString.check(
   Schema.makeFilter(
-    (value) => isSafeRelativeIdentifier(value) && !value.includes('/'),
+    (value) =>
+      isSafeRelativeIdentifier(value) &&
+      !value.includes('/') &&
+      !/[\s?#]/.test(value),
     {
       title: 'SafeVerificationAttemptId',
       description:
-        'Non-empty identifier without path separators or control characters',
+        'Non-empty URL-safe identifier without path separators, query/fragment delimiters, whitespace, or control characters',
     },
   ),
 ).pipe(Schema.brand('VerificationAttemptId'))
