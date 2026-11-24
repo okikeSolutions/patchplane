@@ -7,6 +7,7 @@ export {
   type DaytonaSandboxExecPort,
 } from './daytona/daytona-sandbox-provider'
 export {
+  DEFAULT_GITHUB_INSTANCE_ID,
   GITHUB_APP_CAPABILITIES,
   GITHUB_FORGE_PROVIDER_ID,
   type GitHubAppApiPort,

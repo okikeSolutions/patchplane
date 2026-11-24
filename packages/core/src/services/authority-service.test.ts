@@ -1,63 +1,115 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Clock, Duration, Effect, Layer, Option } from 'effect'
 import * as Redacted from 'effect/Redacted'
 import * as TestClock from 'effect/testing/TestClock'
 import {
   type AcceptanceDecision,
   ActorId,
-  AttemptNotFoundError,
+  type ApprovalActionCategory,
   type AuthorityAuditEvent,
   canApproveWithRepositoryPermission,
   ChangeRequestId,
   ConfigVersion,
+  ConflictingDecisionError,
   DecisionId,
+  DEFAULT_REPOSITORY_CONFIG_VALUES,
   type DelegatedMcpGrant,
-  DeliveryId,
   ForgeInstallationId,
+  ForgeInstanceId,
   ForgeProviderId,
   ForgeUserLogin,
   GitCommitSha,
   HumanPrincipalId,
+  ManualApprovalRequiredError,
+  McpAuthorizationError,
   McpGrantId,
   McpSessionId,
   type McpSessionRecord,
+  normalizeRepositoryKey,
   OrganizationId,
   PolicyRuleId,
   ProposalVersion,
+  ProposalVersionNotFoundError,
   type RepositoryConfigRecord,
+  type RepositoryConfigValues,
   RepositoryId,
   type RepositoryPermissionLevel,
   StaleConfigVersionError,
+  StaleProposalVersionError,
   VerificationAttemptId,
   type WorkOsAuthenticatedIdentity,
   WorkOsSessionId,
 } from '@patchplane/domain'
-import { AcceptanceStore } from './acceptance-store'
-import {
-  applyDelegatedConfigUpdate,
-  issueSessionScopedMcpGrant,
-  recordHumanAcceptanceDecision,
-  recordPolicyRuleAcceptanceDecision,
-  revokeDelegatedMcpGrant,
-  terminateMcpSessionAndExpireGrants,
-} from './authority-service'
+import { AuthorityService, AuthorityServiceLayer } from './authority-service'
 import {
   type AttemptProposalVersionRecord,
   AuthorityStore,
+  type RepositoryConfigPatch,
 } from './authority-store'
 import { ForgeAdapter } from './forge-adapter'
 import { WorkOsAuthProvider } from './workos-auth'
 
 const ORG_ID = OrganizationId.make('org-okike')
+const OTHER_ORG_ID = OrganizationId.make('org-other')
 const REPO_ID = RepositoryId.make('okikeSolutions/arbeo')
 const OTHER_REPO_ID = RepositoryId.make('okikeSolutions/other')
-const ATTEMPT_ID = VerificationAttemptId.make('attempt-auth-1')
+const ATTEMPT_1 = VerificationAttemptId.make('attempt-auth-1')
+const ATTEMPT_2 = VerificationAttemptId.make('attempt-auth-2')
 const HUMAN_ID = HumanPrincipalId.make('user-ugo')
 const HUMAN_LOGIN = ForgeUserLogin.make('okike-maintainer')
+const OTHER_ORG_HUMAN_ID = HumanPrincipalId.make('user-org-b')
+const OTHER_ORG_LOGIN = ForgeUserLogin.make('org-b-admin')
 const AGENT_ID = ActorId.make('agent:codex-1')
 const OTHER_AGENT_ID = ActorId.make('agent:rogue-2')
 const SESSION_ID = McpSessionId.make('mcp-sess-1')
 const GRANT_ID = McpGrantId.make('grant-sess-1')
+
+const CATEGORY_TO_FIELD: Record<
+  ApprovalActionCategory,
+  | 'approval.requirement_approval'
+  | 'approval.extension_activation'
+  | 'approval.waiver'
+> = {
+  requirement_approval: 'approval.requirement_approval',
+  extension_activation: 'approval.extension_activation',
+  waiver: 'approval.waiver',
+}
+
+const mergePatch = (
+  base: RepositoryConfigValues,
+  patch: RepositoryConfigPatch,
+): RepositoryConfigValues => {
+  const req = patch['approval.requirement_approval']
+  const ext = patch['approval.extension_activation']
+  const waiver = patch['approval.waiver']
+  const maxWall = patch['verification.max_wall_clock_minutes']
+  const autoCancel = patch['verification.auto_cancel_superseded']
+  return {
+    'approval.requirement_approval':
+      req === 'manual' || req === 'auto_policy'
+        ? req
+        : base['approval.requirement_approval'],
+    'approval.extension_activation':
+      ext === 'manual' || ext === 'auto_policy'
+        ? ext
+        : base['approval.extension_activation'],
+    'approval.waiver':
+      waiver === 'manual' || waiver === 'auto_policy'
+        ? waiver
+        : base['approval.waiver'],
+    'verification.max_wall_clock_minutes':
+      typeof maxWall === 'number'
+        ? maxWall
+        : base['verification.max_wall_clock_minutes'],
+    'verification.auto_cancel_superseded':
+      typeof autoCancel === 'boolean'
+        ? autoCancel
+        : base['verification.auto_cancel_superseded'],
+  }
+}
+
+const configKey = (orgId: OrganizationId, repoId: RepositoryId) =>
+  `${orgId}::${normalizeRepositoryKey(repoId)}`
 
 function makeUnitHarness(options?: {
   readonly permission?: RepositoryPermissionLevel
@@ -66,13 +118,14 @@ function makeUnitHarness(options?: {
   let repoPermission: RepositoryPermissionLevel =
     options?.permission ?? 'maintain'
   let orgMember = options?.isOrgMember ?? true
+  let forgePermissionCalls = 0
 
   const sessions = new Map<string, McpSessionRecord>()
   const grants = new Map<string, DelegatedMcpGrant>()
   const proposalVersions = new Map<string, AttemptProposalVersionRecord>()
   const configs = new Map<string, RepositoryConfigRecord>()
   const auditEvents: Array<AuthorityAuditEvent> = []
-  const decisions: Array<AcceptanceDecision> = []
+  const decisions = new Map<string, AcceptanceDecision>()
 
   const humanIdentity: WorkOsAuthenticatedIdentity = {
     principalId: HUMAN_ID,
@@ -83,12 +136,24 @@ function makeUnitHarness(options?: {
     email: 'ugo@okikesolutions.dev',
     expiresAtMs: 9_999_999_999_999,
   }
+  const otherOrgIdentity: WorkOsAuthenticatedIdentity = {
+    principalId: OTHER_ORG_HUMAN_ID,
+    workOsUserId: 'wos_user_2',
+    workOsSessionId: WorkOsSessionId.make('wos_sess_2'),
+    organizationId: OTHER_ORG_ID,
+    forgeUserLogin: OTHER_ORG_LOGIN,
+    email: 'admin@other-org.dev',
+    expiresAtMs: 9_999_999_999_999,
+  }
 
   const workOsLayer = Layer.succeed(
     WorkOsAuthProvider,
     WorkOsAuthProvider.of({
       authenticateGitHubOAuthCallback: () => Effect.succeed(humanIdentity),
-      verifySessionToken: () => Effect.succeed(humanIdentity),
+      verifySessionToken: (token) =>
+        Redacted.value(token) === 'wos_org_b_tok'
+          ? Effect.succeed(otherOrgIdentity)
+          : Effect.succeed(humanIdentity),
       verifyOrganizationMembership: () => Effect.sync(() => orgMember),
     }),
   )
@@ -97,6 +162,7 @@ function makeUnitHarness(options?: {
     ForgeAdapter,
     ForgeAdapter.of({
       provider: ForgeProviderId.make('github'),
+      instanceId: ForgeInstanceId.make('github.com'),
       capabilities: {
         supportsPullRequests: true,
         supportsWebhooks: true,
@@ -112,17 +178,22 @@ function makeUnitHarness(options?: {
           expiresAtMs: 9_999_999_999_999,
         }),
       checkRepositoryAuthority: ({ repositoryId, forgeUserLogin }) =>
-        Effect.sync(() => ({
-          provider: ForgeProviderId.make('github'),
-          repositoryId,
-          installationId: ForgeInstallationId.make('inst-1'),
-          forgeUserLogin,
-          permission: repoPermission,
-          canApprove: canApproveWithRepositoryPermission(repoPermission),
-        })),
+        Effect.sync(() => {
+          forgePermissionCalls += 1
+          return {
+            provider: ForgeProviderId.make('github'),
+            instanceId: ForgeInstanceId.make('github.com'),
+            repositoryId,
+            installationId: ForgeInstallationId.make('inst-1'),
+            forgeUserLogin,
+            permission: repoPermission,
+            canApprove: canApproveWithRepositoryPermission(repoPermission),
+          }
+        }),
       getPullRequestCandidate: ({ repositoryId, pullNumber }) =>
         Effect.succeed({
           provider: ForgeProviderId.make('github'),
+          instanceId: ForgeInstanceId.make('github.com'),
           changeRequestId: ChangeRequestId.make(
             `github:${repositoryId}#${pullNumber}`,
           ),
@@ -131,33 +202,6 @@ function makeUnitHarness(options?: {
           headSha: GitCommitSha.make('a'.repeat(40)),
           isFork: false,
         }),
-    }),
-  )
-
-  const acceptanceLayer = Layer.succeed(
-    AcceptanceStore,
-    AcceptanceStore.of({
-      recordDeliveryReceipt: () =>
-        Effect.succeed({
-          deliveryId: DeliveryId.make('d1'),
-          inserted: true,
-        }),
-      claimAttempt: () => Effect.die('unused'),
-      advanceAttemptState: () => Effect.die('unused'),
-      recordDecision: (input) =>
-        Effect.sync(() => {
-          const decision: AcceptanceDecision = {
-            id: input.decisionId,
-            attemptId: input.attemptId,
-            proposalVersion: input.proposalVersion,
-            kind: input.kind,
-            actorId: input.actorId,
-          }
-          decisions.push(decision)
-          return decision
-        }),
-      findAttemptById: (attemptId) =>
-        Effect.fail(new AttemptNotFoundError({ attemptId })),
     }),
   )
 
@@ -175,7 +219,7 @@ function makeUnitHarness(options?: {
         }),
       findMcpSession: (id) =>
         Effect.sync(() => Option.fromNullishOr(sessions.get(id))),
-      terminateMcpSession: ({ sessionId, terminatedAtMs }) =>
+      terminateMcpSessionWithAudit: ({ sessionId, terminatedAtMs }) =>
         Effect.sync(() => {
           const existing = sessions.get(sessionId)
           if (existing === undefined) {
@@ -185,6 +229,7 @@ function makeUnitHarness(options?: {
             sessionId: existing.sessionId,
             organizationId: existing.organizationId,
             principalId: existing.principalId,
+            principalForgeLogin: existing.principalForgeLogin,
             agentActorId: existing.agentActorId,
             createdAtMs: existing.createdAtMs,
             status: 'terminated',
@@ -199,6 +244,7 @@ function makeUnitHarness(options?: {
                 organizationId: g.organizationId,
                 repositoryId: g.repositoryId,
                 humanDelegatorId: g.humanDelegatorId,
+                humanDelegatorForgeLogin: g.humanDelegatorForgeLogin,
                 agentActorId: g.agentActorId,
                 sessionId: g.sessionId,
                 allowedFields: g.allowedFields,
@@ -212,27 +258,88 @@ function makeUnitHarness(options?: {
           }
           return { session: Option.some(terminated), expiredGrantCount }
         }),
-      issueDelegatedGrant: (input) =>
-        Effect.sync(() => {
+      issueDelegatedGrantWithAudit: (input) =>
+        Effect.suspend(() => {
+          const s = sessions.get(input.sessionId)
+          if (s === undefined || s.status !== 'active') {
+            return Effect.fail(
+              new McpAuthorizationError({
+                code: 'session_terminated',
+                reason: 'Session not active',
+              }),
+            )
+          }
+          if (
+            s.principalId !== input.humanDelegatorId ||
+            s.organizationId !== input.organizationId ||
+            s.agentActorId !== input.agentActorId
+          ) {
+            return Effect.fail(
+              new McpAuthorizationError({
+                code: 'wrong_actor',
+                reason: 'Session actor/principal mismatch',
+              }),
+            )
+          }
           const rec: DelegatedMcpGrant = {
-            ...input,
+            grantId: input.grantId,
+            organizationId: input.organizationId,
+            repositoryId: input.repositoryId,
+            humanDelegatorId: input.humanDelegatorId,
+            humanDelegatorForgeLogin: input.humanDelegatorForgeLogin,
+            agentActorId: input.agentActorId,
+            sessionId: input.sessionId,
+            allowedFields: input.allowedFields,
             scope: 'session',
             status: 'active',
+            createdAtMs: input.createdAtMs,
+            expiresAtMs: input.expiresAtMs,
           }
           grants.set(input.grantId, rec)
-          return rec
+          auditEvents.push({
+            eventId: input.auditEventId,
+            organizationId: input.organizationId,
+            repositoryId: input.repositoryId,
+            action: 'mcp_grant.issued',
+            attribution: input.attribution,
+            grantId: input.grantId,
+            createdAtMs: input.createdAtMs,
+          })
+          return Effect.succeed(rec)
         }),
       findDelegatedGrant: (id) =>
         Effect.sync(() => Option.fromNullishOr(grants.get(id))),
-      revokeDelegatedGrant: ({ grantId, revokedBy, revokedAtMs }) =>
-        Effect.sync(() => {
-          const existing = grants.get(grantId)
-          if (existing === undefined) return Option.none()
+      revokeDelegatedGrantWithAudit: (input) =>
+        Effect.suspend(() => {
+          const existing = grants.get(input.grantId)
+          if (
+            existing === undefined ||
+            existing.organizationId !== input.organizationId
+          ) {
+            return Effect.fail(
+              new McpAuthorizationError({
+                code: 'missing_grant',
+                reason: 'Grant not found',
+              }),
+            )
+          }
+          if (existing.status === 'expired') {
+            return Effect.fail(
+              new McpAuthorizationError({
+                code: 'grant_expired',
+                reason: 'Grant already expired',
+              }),
+            )
+          }
+          if (existing.status === 'revoked') {
+            return Effect.succeed(existing)
+          }
           const revoked: DelegatedMcpGrant = {
             grantId: existing.grantId,
             organizationId: existing.organizationId,
             repositoryId: existing.repositoryId,
             humanDelegatorId: existing.humanDelegatorId,
+            humanDelegatorForgeLogin: existing.humanDelegatorForgeLogin,
             agentActorId: existing.agentActorId,
             sessionId: existing.sessionId,
             allowedFields: existing.allowedFields,
@@ -240,49 +347,188 @@ function makeUnitHarness(options?: {
             createdAtMs: existing.createdAtMs,
             expiresAtMs: existing.expiresAtMs,
             status: 'revoked',
-            revokedBy,
-            revokedAtMs,
+            revokedBy: input.revokedBy,
+            revokedAtMs: input.revokedAtMs,
           }
-          grants.set(grantId, revoked)
-          return Option.some(revoked)
+          grants.set(input.grantId, revoked)
+          auditEvents.push({
+            eventId: input.auditEventId,
+            organizationId: input.organizationId,
+            repositoryId: existing.repositoryId,
+            action: 'mcp_grant.revoked',
+            attribution: input.attribution,
+            grantId: existing.grantId,
+            createdAtMs: input.revokedAtMs,
+          })
+          return Effect.succeed(revoked)
         }),
       setCurrentProposalVersion: (input) =>
         Effect.sync(() => {
-          proposalVersions.set(input.attemptId, input)
-          return input
+          const existing = proposalVersions.get(input.attemptId)
+          const cfg = configs.get(
+            configKey(input.organizationId, input.repositoryId),
+          )
+          const rec: AttemptProposalVersionRecord = {
+            attemptId: input.attemptId,
+            organizationId: input.organizationId,
+            repositoryId: input.repositoryId,
+            currentVersion: input.currentVersion,
+            configVersion:
+              existing?.configVersion ?? cfg?.version ?? ConfigVersion.make(1),
+            configSnapshot:
+              existing?.configSnapshot ??
+              cfg?.values ??
+              DEFAULT_REPOSITORY_CONFIG_VALUES,
+            updatedAtMs: input.updatedAtMs,
+          }
+          proposalVersions.set(input.attemptId, rec)
+          return rec
         }),
       findCurrentProposalVersion: (id) =>
         Effect.sync(() => Option.fromNullishOr(proposalVersions.get(id))),
-      getRepositoryConfig: (id) =>
-        Effect.sync(() => Option.fromNullishOr(configs.get(id))),
-      updateRepositoryConfigWithAudit: (input) =>
-        Effect.suspend(() => {
-          const current = configs.get(input.repositoryId)
+      recordDecisionAtomically: (input) =>
+        Effect.gen(function* () {
+          const prop = proposalVersions.get(input.attemptId)
+          if (
+            prop === undefined ||
+            prop.organizationId !== input.organizationId ||
+            normalizeRepositoryKey(prop.repositoryId) !==
+              normalizeRepositoryKey(input.repositoryId)
+          ) {
+            return yield* new ProposalVersionNotFoundError({
+              attemptId: input.attemptId,
+              reason: 'No proposal version registered',
+            })
+          }
+          if (prop.currentVersion !== input.proposalVersion) {
+            return yield* new StaleProposalVersionError({
+              attemptId: input.attemptId,
+              expectedVersion: prop.currentVersion,
+              actualVersion: input.proposalVersion,
+            })
+          }
+          if (input.policyCheck !== undefined) {
+            const field = CATEGORY_TO_FIELD[input.policyCheck.category]
+            if (prop.configSnapshot[field] !== 'auto_policy') {
+              return yield* new ManualApprovalRequiredError({
+                repositoryId: input.repositoryId,
+                category: input.policyCheck.category,
+                reason: 'Frozen attempt config requires manual approval',
+              })
+            }
+          }
+          const key = `${input.attemptId}:${input.proposalVersion}`
+          const existing = decisions.get(key)
+          if (existing !== undefined) {
+            if (
+              existing.kind === input.kind &&
+              existing.actorId === input.actorId
+            ) {
+              return {
+                decision: existing,
+                auditEvent: Option.none(),
+                frozenConfigVersion: prop.configVersion,
+              }
+            }
+            return yield* new ConflictingDecisionError({
+              attemptId: input.attemptId,
+              proposalVersion: input.proposalVersion,
+              existingKind: existing.kind,
+              requestedKind: input.kind,
+              existingActorId: existing.actorId,
+              requestedActorId: input.actorId,
+            })
+          }
+          const decision: AcceptanceDecision = {
+            id: input.decisionId,
+            attemptId: input.attemptId,
+            proposalVersion: input.proposalVersion,
+            kind: input.kind,
+            actorId: input.actorId,
+          }
+          decisions.set(key, decision)
+          const auditEvent: AuthorityAuditEvent = {
+            eventId: input.auditEventId,
+            organizationId: input.organizationId,
+            repositoryId: input.repositoryId,
+            action: input.action,
+            attemptId: input.attemptId,
+            proposalVersion: input.proposalVersion,
+            attribution: input.attribution,
+            createdAtMs: input.createdAtMs,
+          }
+          auditEvents.push(auditEvent)
+          return {
+            decision,
+            auditEvent: Option.some(auditEvent),
+            frozenConfigVersion: prop.configVersion,
+          }
+        }),
+      getRepositoryConfig: ({ organizationId, repositoryId }) =>
+        Effect.sync(() =>
+          Option.fromNullishOr(
+            configs.get(configKey(organizationId, repositoryId)),
+          ),
+        ),
+      applyDelegatedConfigPatchWithAudit: (input) =>
+        Effect.gen(function* () {
+          const s = sessions.get(input.sessionId)
+          if (s === undefined || s.status !== 'active') {
+            return yield* new McpAuthorizationError({
+              code: 'session_terminated',
+              reason: 'Session terminated',
+            })
+          }
+          const g = grants.get(input.grantId)
+          if (g === undefined) {
+            return yield* new McpAuthorizationError({
+              code: 'missing_grant',
+              reason: 'Grant missing',
+            })
+          }
+          if (g.status === 'revoked') {
+            return yield* new McpAuthorizationError({
+              code: 'grant_revoked',
+              reason: 'Grant revoked',
+            })
+          }
+          if (g.status === 'expired' || input.updatedAtMs >= g.expiresAtMs) {
+            return yield* new McpAuthorizationError({
+              code: 'grant_expired',
+              reason: 'Grant expired',
+            })
+          }
+          const key = configKey(input.organizationId, input.repositoryId)
+          const current = configs.get(key)
           const currentVersion = current?.version ?? null
           if (currentVersion !== input.expectedVersion) {
-            return Effect.fail(
-              new StaleConfigVersionError({
-                repositoryId: input.repositoryId,
-                expectedVersion: input.expectedVersion ?? ConfigVersion.make(1),
-                actualVersion: currentVersion ?? ConfigVersion.make(1),
-              }),
-            )
+            return yield* new StaleConfigVersionError({
+              repositoryId: input.repositoryId,
+              expectedVersion: input.expectedVersion,
+              actualVersion: currentVersion,
+            })
           }
           const nextVersion = ConfigVersion.make((currentVersion ?? 0) + 1)
+          const nextValues = mergePatch(
+            current?.values ?? DEFAULT_REPOSITORY_CONFIG_VALUES,
+            input.patch,
+          )
           const config: RepositoryConfigRecord = {
             repositoryId: input.repositoryId,
+            organizationId: input.organizationId,
             version: nextVersion,
-            values: input.values,
+            values: nextValues,
             updatedBy: input.attribution,
             updatedAtMs: input.updatedAtMs,
           }
-          configs.set(input.repositoryId, config)
+          configs.set(key, config)
           const auditEvent: AuthorityAuditEvent = {
             eventId: input.auditEventId,
+            organizationId: input.organizationId,
             repositoryId: input.repositoryId,
             action: 'repository_config.updated',
             attribution: input.attribution,
-            ...(input.grantId !== undefined ? { grantId: input.grantId } : {}),
+            grantId: input.grantId,
             ...(currentVersion !== null
               ? { beforeConfigVersion: currentVersion }
               : {}),
@@ -290,17 +536,35 @@ function makeUnitHarness(options?: {
             createdAtMs: input.updatedAtMs,
           }
           auditEvents.push(auditEvent)
-          return Effect.succeed({ config, auditEvent })
+          const activeAttemptNotices = [...proposalVersions.values()]
+            .filter(
+              (p) =>
+                p.organizationId === input.organizationId &&
+                normalizeRepositoryKey(p.repositoryId) ===
+                  normalizeRepositoryKey(input.repositoryId),
+            )
+            .map((p) => ({
+              attemptId: p.attemptId,
+              repositoryId: input.repositoryId,
+              configVersion: nextVersion,
+              message: `Config updated to v${nextVersion} while attempt "${p.attemptId}" is active`,
+            }))
+          return { config, auditEvent, activeAttemptNotices }
         }),
-      recordAuditEvent: (event) =>
-        Effect.sync(() => {
-          auditEvents.push(event)
-          return event
-        }),
-      listAuditEventsByRepository: (repo) =>
-        Effect.sync(() => auditEvents.filter((e) => e.repositoryId === repo)),
+      listAuditEventsByRepository: ({ organizationId, repositoryId }) =>
+        Effect.sync(() =>
+          auditEvents.filter(
+            (e) =>
+              e.organizationId === organizationId &&
+              normalizeRepositoryKey(e.repositoryId) ===
+                normalizeRepositoryKey(repositoryId),
+          ),
+        ),
     }),
   )
+
+  const depsLayer = Layer.mergeAll(workOsLayer, forgeLayer, authorityStoreLayer)
+  const serviceLayer = AuthorityServiceLayer.pipe(Layer.provideMerge(depsLayer))
 
   return {
     setPermission: (p: RepositoryPermissionLevel) => {
@@ -309,56 +573,69 @@ function makeUnitHarness(options?: {
     setOrgMember: (v: boolean) => {
       orgMember = v
     },
+    getForgePermissionCalls: () => forgePermissionCalls,
     auditEvents,
-    decisions,
     grants,
-    layer: Layer.mergeAll(
-      workOsLayer,
-      forgeLayer,
-      acceptanceLayer,
-      authorityStoreLayer,
-    ),
+    layer: serviceLayer,
   }
 }
 
-describe('AuthorityService dual-authority, policy attribution, and MCP grant negative tests', () => {
+describe('AuthorityService dual-authority, frozen attempt config, policy attribution, and MCP grant negative tests', () => {
   it.effect(
-    'rejects mutating approval when WorkOS sign-in succeeds but GitHub App repo permission is insufficient, and rejects stale proposal versions',
+    'rejects mutating approval when WorkOS org membership or GitHub App repo permission is insufficient, and rejects stale proposal versions',
     () =>
       Effect.gen(function* () {
         yield* TestClock.adjust(Duration.millis(10_000))
-        const h = makeUnitHarness({ permission: 'read' })
+        const h = makeUnitHarness({ permission: 'read', isOrgMember: false })
 
         yield* Effect.gen(function* () {
           const store = yield* AuthorityStore
+          const auth = yield* AuthorityService
+          const now = yield* Clock.currentTimeMillis
+
           yield* store.setCurrentProposalVersion({
-            attemptId: ATTEMPT_ID,
+            attemptId: ATTEMPT_1,
+            organizationId: ORG_ID,
             repositoryId: REPO_ID,
             currentVersion: ProposalVersion.make(2),
-            updatedAtMs: 10_000,
+            updatedAtMs: now,
           })
 
-          // Signed-in WorkOS user with only `read` repo permission MUST fail
+          // Non-member of WorkOS org MUST fail closed
+          const nonMember = yield* Effect.flip(
+            auth.recordHumanAcceptanceDecision({
+              sessionToken: Redacted.make('wos_valid_token'),
+              decisionId: DecisionId.make('dec-0'),
+              repositoryId: REPO_ID,
+              attemptId: ATTEMPT_1,
+              proposalVersion: ProposalVersion.make(2),
+              kind: 'approve',
+            }),
+          )
+          expect(nonMember._tag).toBe('RepositoryAuthorityError')
+
+          // Active WorkOS org member with only `read` repo permission MUST fail
+          h.setOrgMember(true)
           const noAuthority = yield* Effect.flip(
-            recordHumanAcceptanceDecision({
+            auth.recordHumanAcceptanceDecision({
               sessionToken: Redacted.make('wos_valid_token'),
               decisionId: DecisionId.make('dec-1'),
               repositoryId: REPO_ID,
-              attemptId: ATTEMPT_ID,
+              attemptId: ATTEMPT_1,
               proposalVersion: ProposalVersion.make(2),
               kind: 'approve',
             }),
           )
           expect(noAuthority._tag).toBe('RepositoryAuthorityError')
 
-          // Even with `maintain` permission, a stale proposal version (v1 vs current v2) MUST fail
+          // Even with `maintain` permission, a stale proposal version (v1 vs v2) MUST fail
           h.setPermission('maintain')
           const stale = yield* Effect.flip(
-            recordHumanAcceptanceDecision({
+            auth.recordHumanAcceptanceDecision({
               sessionToken: Redacted.make('wos_valid_token'),
               decisionId: DecisionId.make('dec-2'),
               repositoryId: REPO_ID,
-              attemptId: ATTEMPT_ID,
+              attemptId: ATTEMPT_1,
               proposalVersion: ProposalVersion.make(1),
               kind: 'approve',
             }),
@@ -366,11 +643,11 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
           expect(stale._tag).toBe('StaleProposalVersionError')
 
           // Fresh proposal v2 with both WorkOS + GitHub App maintain permission succeeds
-          const ok = yield* recordHumanAcceptanceDecision({
+          const ok = yield* auth.recordHumanAcceptanceDecision({
             sessionToken: Redacted.make('wos_valid_token'),
             decisionId: DecisionId.make('dec-3'),
             repositoryId: REPO_ID,
-            attemptId: ATTEMPT_ID,
+            attemptId: ATTEMPT_1,
             proposalVersion: ProposalVersion.make(2),
             kind: 'approve',
           })
@@ -381,7 +658,7 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
   )
 
   it.effect(
-    'enforces session-scoped grant TTL expiry, manual revocation, wrong actor/repo, field scope, agent self-authorization denial, upstream authority revocation, and PolicyRule attribution',
+    'enforces frozen attempt config snapshots (ADR 0007 Q24/Q28), active-attempt notices, grant TTL/revocation/termination, cross-tenant revocation oracle defense, and negative security cases',
     () =>
       Effect.gen(function* () {
         yield* TestClock.adjust(Duration.millis(10_000))
@@ -389,23 +666,29 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
 
         yield* Effect.gen(function* () {
           const store = yield* AuthorityStore
+          const auth = yield* AuthorityService
+          const now = yield* Clock.currentTimeMillis
+
           yield* store.createMcpSession({
             sessionId: SESSION_ID,
             organizationId: ORG_ID,
             principalId: HUMAN_ID,
+            principalForgeLogin: HUMAN_LOGIN,
             agentActorId: AGENT_ID,
-            createdAtMs: 10_000,
+            createdAtMs: now,
           })
+          // ATTEMPT_1 freezes default manual config v1
           yield* store.setCurrentProposalVersion({
-            attemptId: ATTEMPT_ID,
+            attemptId: ATTEMPT_1,
+            organizationId: ORG_ID,
             repositoryId: REPO_ID,
             currentVersion: ProposalVersion.make(1),
-            updatedAtMs: 10_000,
+            updatedAtMs: now,
           })
 
           // 1) Agent self-authorization MUST fail closed
           const selfAuth = yield* Effect.flip(
-            issueSessionScopedMcpGrant({
+            auth.issueSessionScopedMcpGrant({
               caller: {
                 _tag: 'AgentCaller',
                 agentActorId: AGENT_ID,
@@ -423,8 +706,27 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             expect(selfAuth.code).toBe('self_authorization_forbidden')
           }
 
-          // 2) Human issues session-scoped grant with 5s TTL for `approval.requirement_approval`
-          const grant = yield* issueSessionScopedMcpGrant({
+          // 2) NaN & negative ttlMs MUST fail closed instead of crashing or clamping
+          for (const badTtl of [Number.NaN, -5_000, 0]) {
+            const badTtlErr = yield* Effect.flip(
+              auth.issueSessionScopedMcpGrant({
+                caller: {
+                  _tag: 'HumanSession',
+                  sessionToken: Redacted.make('wos_human_tok'),
+                },
+                grantId: GRANT_ID,
+                repositoryId: REPO_ID,
+                agentActorId: AGENT_ID,
+                sessionId: SESSION_ID,
+                allowedFields: ['approval.requirement_approval'],
+                ttlMs: badTtl,
+              }),
+            )
+            expect(badTtlErr._tag).toBe('McpAuthorizationError')
+          }
+
+          // 3) Human issues session-scoped grant with 5s TTL
+          const grant = yield* auth.issueSessionScopedMcpGrant({
             caller: {
               _tag: 'HumanSession',
               sessionToken: Redacted.make('wos_human_tok'),
@@ -437,18 +739,36 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             ttlMs: 5_000,
           })
           expect(grant.scope).toBe('session')
+          expect(grant.humanDelegatorForgeLogin).toBe(HUMAN_LOGIN)
+
+          // 4) Cross-tenant revocation oracle defense: Org B user gets uniform
+          //    `missing_grant` WITHOUT calling Forge or leaking REPO_ID!
+          const forgeCallsBefore = h.getForgePermissionCalls()
+          const crossOrgRevoke = yield* Effect.flip(
+            auth.revokeDelegatedMcpGrant({
+              caller: {
+                _tag: 'HumanSession',
+                sessionToken: Redacted.make('wos_org_b_tok'),
+              },
+              grantId: GRANT_ID,
+            }),
+          )
+          expect(crossOrgRevoke._tag).toBe('McpAuthorizationError')
+          if (crossOrgRevoke._tag === 'McpAuthorizationError') {
+            expect(crossOrgRevoke.code).toBe('missing_grant')
+          }
+          expect(h.getForgePermissionCalls()).toBe(forgeCallsBefore)
 
           const validCaller = {
             agentActorId: AGENT_ID,
             sessionId: SESSION_ID,
             organizationId: ORG_ID,
             humanPrincipalId: HUMAN_ID,
-            humanForgeLogin: HUMAN_LOGIN,
           }
 
-          // 3) Wrong actor rejected
+          // 5) Wrong actor, wrong repo, disallowed field, and self-escalation all fail
           const wrongActor = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+            auth.applyDelegatedConfigUpdate({
               caller: { ...validCaller, agentActorId: OTHER_AGENT_ID },
               grantId: GRANT_ID,
               repositoryId: REPO_ID,
@@ -457,13 +777,9 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             }),
           )
           expect(wrongActor._tag).toBe('McpAuthorizationError')
-          if (wrongActor._tag === 'McpAuthorizationError') {
-            expect(wrongActor.code).toBe('wrong_actor')
-          }
 
-          // 4) Wrong repository rejected
           const wrongRepo = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+            auth.applyDelegatedConfigUpdate({
               caller: validCaller,
               grantId: GRANT_ID,
               repositoryId: OTHER_REPO_ID,
@@ -472,27 +788,9 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             }),
           )
           expect(wrongRepo._tag).toBe('McpAuthorizationError')
-          if (wrongRepo._tag === 'McpAuthorizationError') {
-            expect(wrongRepo.code).toBe('wrong_repository')
-          }
-
-          // 5) Field outside allowedFields & self-authorization field both rejected
-          const unpermitted = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
-              caller: validCaller,
-              grantId: GRANT_ID,
-              repositoryId: REPO_ID,
-              expectedConfigVersion: null,
-              patch: { 'approval.waiver': 'auto_policy' },
-            }),
-          )
-          expect(unpermitted._tag).toBe('McpAuthorizationError')
-          if (unpermitted._tag === 'McpAuthorizationError') {
-            expect(unpermitted.code).toBe('field_not_permitted')
-          }
 
           const escalate = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+            auth.applyDelegatedConfigUpdate({
               caller: validCaller,
               grantId: GRANT_ID,
               repositoryId: REPO_ID,
@@ -505,25 +803,8 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             expect(escalate.code).toBe('self_authorization_forbidden')
           }
 
-          // 6) Before config update, policy-rule approval is blocked because default is `manual`
-          const manualOnly = yield* Effect.flip(
-            recordPolicyRuleAcceptanceDecision({
-              decisionId: DecisionId.make('dec-pol-0'),
-              repositoryId: REPO_ID,
-              attemptId: ATTEMPT_ID,
-              proposalVersion: ProposalVersion.make(1),
-              category: 'requirement_approval',
-              kind: 'approve',
-              policyRuleId: PolicyRuleId.make('rule-req-auto'),
-            }),
-          )
-          expect(manualOnly._tag).toBe('McpAuthorizationError')
-          if (manualOnly._tag === 'McpAuthorizationError') {
-            expect(manualOnly.code).toBe('policy_requires_manual_approval')
-          }
-
-          // 7) Valid delegated config update succeeds with DelegatedAgent attribution
-          const updated = yield* applyDelegatedConfigUpdate({
+          // 6) Valid delegated config update succeeds AND emits active-attempt notice
+          const updated = yield* auth.applyDelegatedConfigUpdate({
             caller: validCaller,
             grantId: GRANT_ID,
             repositoryId: REPO_ID,
@@ -531,28 +812,63 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             patch: { 'approval.requirement_approval': 'auto_policy' },
           })
           expect(updated.attribution._tag).toBe('DelegatedAgent')
-          expect(updated.attribution.humanDelegatorId).toBe(HUMAN_ID)
-          expect(updated.attribution.agentActorId).toBe(AGENT_ID)
           expect(updated.config.version).toBe(1)
+          expect(updated.activeAttemptNotices).toHaveLength(1)
+          expect(updated.activeAttemptNotices[0]?.attemptId).toBe(ATTEMPT_1)
 
-          // 8) PolicyRule automatic decision now succeeds and records PolicyRule attribution
-          const policyDecision = yield* recordPolicyRuleAcceptanceDecision({
-            decisionId: DecisionId.make('dec-pol-1'),
+          // 7) ADR 0007 Q24/Q28: existing ATTEMPT_1 retains its FROZEN manual snapshot
+          const stillManualOnOldAttempt = yield* Effect.flip(
+            auth.recordPolicyRuleAcceptanceDecision({
+              decisionId: DecisionId.make('dec-pol-old'),
+              organizationId: ORG_ID,
+              repositoryId: REPO_ID,
+              attemptId: ATTEMPT_1,
+              proposalVersion: ProposalVersion.make(1),
+              category: 'requirement_approval',
+              kind: 'approve',
+              policyRuleId: PolicyRuleId.make('rule-req-auto'),
+            }),
+          )
+          expect(stillManualOnOldAttempt._tag).toBe(
+            'ManualApprovalRequiredError',
+          )
+
+          // Newly recorded ATTEMPT_2 captures updated config v1 (`auto_policy`)!
+          yield* store.setCurrentProposalVersion({
+            attemptId: ATTEMPT_2,
+            organizationId: ORG_ID,
             repositoryId: REPO_ID,
-            attemptId: ATTEMPT_ID,
-            proposalVersion: ProposalVersion.make(1),
-            category: 'requirement_approval',
-            kind: 'approve',
-            policyRuleId: PolicyRuleId.make('rule-req-auto'),
+            currentVersion: ProposalVersion.make(1),
+            updatedAtMs: yield* Clock.currentTimeMillis,
           })
+          const policyDecision = yield* auth.recordPolicyRuleAcceptanceDecision(
+            {
+              decisionId: DecisionId.make('dec-pol-new'),
+              organizationId: ORG_ID,
+              repositoryId: REPO_ID,
+              attemptId: ATTEMPT_2,
+              proposalVersion: ProposalVersion.make(1),
+              category: 'requirement_approval',
+              kind: 'approve',
+              policyRuleId: PolicyRuleId.make('rule-req-auto'),
+            },
+          )
           expect(policyDecision.attribution._tag).toBe('PolicyRule')
-          expect(policyDecision.attribution.policyRuleId).toBe('rule-req-auto')
           expect(policyDecision.attribution.policyVersion).toBe(1)
 
-          // 9) Upstream human repo authority revocation invalidates delegated execution
+          // 8) Upstream repo authority revocation blocks both read & write access
+          h.setPermission('none')
+          const readDenied = yield* Effect.flip(
+            auth.verifyMcpReadAccess({
+              caller: validCaller,
+              repositoryId: REPO_ID,
+            }),
+          )
+          expect(readDenied._tag).toBe('RepositoryAuthorityError')
+
           h.setPermission('read')
-          const upstreamRevoked = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+          const writeDenied = yield* Effect.flip(
+            auth.applyDelegatedConfigUpdate({
               caller: validCaller,
               grantId: GRANT_ID,
               repositoryId: REPO_ID,
@@ -560,13 +876,13 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
               patch: { 'approval.requirement_approval': 'manual' },
             }),
           )
-          expect(upstreamRevoked._tag).toBe('RepositoryAuthorityError')
+          expect(writeDenied._tag).toBe('RepositoryAuthorityError')
           h.setPermission('maintain')
 
-          // 10) TestClock TTL expiration rejects grant automatically
+          // 9) TestClock TTL expiration rejects grant automatically
           yield* TestClock.adjust(Duration.millis(5_001))
           const expired = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+            auth.applyDelegatedConfigUpdate({
               caller: validCaller,
               grantId: GRANT_ID,
               repositoryId: REPO_ID,
@@ -579,9 +895,9 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             expect(expired.code).toBe('grant_expired')
           }
 
-          // 11) Fresh grant + immediate manual revocation -> rejected with `grant_revoked`
+          // 10) Immediate manual revocation + idempotent re-revoke (zero duplicate audit)
           const grant2 = McpGrantId.make('grant-sess-2')
-          yield* issueSessionScopedMcpGrant({
+          yield* auth.issueSessionScopedMcpGrant({
             caller: {
               _tag: 'HumanSession',
               sessionToken: Redacted.make('wos_human_tok'),
@@ -592,30 +908,32 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             sessionId: SESSION_ID,
             allowedFields: ['approval.requirement_approval'],
           })
-          yield* revokeDelegatedMcpGrant({
+          yield* auth.revokeDelegatedMcpGrant({
             caller: {
               _tag: 'HumanSession',
               sessionToken: Redacted.make('wos_human_tok'),
             },
             grantId: grant2,
           })
-          const revoked = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
-              caller: validCaller,
-              grantId: grant2,
-              repositoryId: REPO_ID,
-              expectedConfigVersion: ConfigVersion.make(1),
-              patch: { 'approval.requirement_approval': 'manual' },
-            }),
-          )
-          expect(revoked._tag).toBe('McpAuthorizationError')
-          if (revoked._tag === 'McpAuthorizationError') {
-            expect(revoked.code).toBe('grant_revoked')
-          }
+          const revokeEventsBefore = h.auditEvents.filter(
+            (e) => e.action === 'mcp_grant.revoked' && e.grantId === grant2,
+          ).length
+          yield* auth.revokeDelegatedMcpGrant({
+            caller: {
+              _tag: 'HumanSession',
+              sessionToken: Redacted.make('wos_human_tok'),
+            },
+            grantId: grant2,
+          })
+          const revokeEventsAfter = h.auditEvents.filter(
+            (e) => e.action === 'mcp_grant.revoked' && e.grantId === grant2,
+          ).length
+          expect(revokeEventsBefore).toBe(1)
+          expect(revokeEventsAfter).toBe(1)
 
-          // 12) Fresh grant + session termination -> atomically expires grant
+          // 11) Session termination atomically expires remaining active grants
           const grant3 = McpGrantId.make('grant-sess-3')
-          yield* issueSessionScopedMcpGrant({
+          yield* auth.issueSessionScopedMcpGrant({
             caller: {
               _tag: 'HumanSession',
               sessionToken: Redacted.make('wos_human_tok'),
@@ -626,24 +944,24 @@ describe('AuthorityService dual-authority, policy attribution, and MCP grant neg
             sessionId: SESSION_ID,
             allowedFields: ['approval.requirement_approval'],
           })
-          const termRes = yield* terminateMcpSessionAndExpireGrants(SESSION_ID)
-          // Both the clock-expired grant1 row and active grant3 row are marked 'expired'
+          const termRes = yield* auth.terminateMcpSession({
+            caller: {
+              _tag: 'AuthenticatedMcpSession',
+              caller: validCaller,
+            },
+            sessionId: SESSION_ID,
+          })
           expect(termRes.expiredGrantCount).toBe(2)
           expect(h.grants.get(grant3)?.status).toBe('expired')
 
-          const afterTerm = yield* Effect.flip(
-            applyDelegatedConfigUpdate({
+          // Terminated session cannot read OR write
+          const readAfterTerm = yield* Effect.flip(
+            auth.verifyMcpReadAccess({
               caller: validCaller,
-              grantId: grant3,
               repositoryId: REPO_ID,
-              expectedConfigVersion: ConfigVersion.make(1),
-              patch: { 'approval.requirement_approval': 'manual' },
             }),
           )
-          expect(afterTerm._tag).toBe('McpAuthorizationError')
-          if (afterTerm._tag === 'McpAuthorizationError') {
-            expect(afterTerm.code).toBe('session_terminated')
-          }
+          expect(readAfterTerm._tag).toBe('McpAuthorizationError')
         }).pipe(Effect.provide(h.layer))
       }),
   )

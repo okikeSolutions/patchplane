@@ -5,6 +5,7 @@ import type {
   ForgeAdapterError,
   ForgeCapabilities,
   ForgeInstallationId,
+  ForgeInstanceId,
   ForgeProviderId,
   ForgePullRequestCandidate,
   ForgeRepositoryAuthority,
@@ -20,12 +21,16 @@ export interface ForgeInstallationToken {
 }
 
 /**
- * Provider-neutral source-control forge boundary with explicit capability
- * declarations. V2 ships a real GitHub App adapter; future forges (such as
- * GitLab or Gitea) implement this contract with zero core changes.
+ * Provider-neutral source-control forge boundary with explicit capability and
+ * instance declarations. V2 ships a real GitHub App adapter; future forges
+ * (such as GitLab or Gitea) implement this contract with zero core changes.
+ *
+ * Note: `verifyWebhookSignature` verifies cryptographic authenticity only;
+ * callers MUST enforce replay deduplication via `AcceptanceStore.recordDeliveryReceipt`.
  */
 export interface ForgeAdapterService {
   readonly provider: ForgeProviderId
+  readonly instanceId: ForgeInstanceId
   readonly capabilities: ForgeCapabilities
 
   readonly verifyWebhookSignature: (input: {

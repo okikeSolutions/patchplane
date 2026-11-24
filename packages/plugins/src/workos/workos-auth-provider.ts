@@ -1,4 +1,5 @@
 import { Clock, Duration, Effect, Layer, Schema } from 'effect'
+import * as Digest from 'effect/crypto/Digest'
 import * as Mac from 'effect/crypto/Mac'
 import * as Redacted from 'effect/Redacted'
 import { WorkOsAuthProvider } from '@patchplane/core'
@@ -9,6 +10,13 @@ import {
 } from '@patchplane/domain'
 
 const DEFAULT_WORKOS_TIMEOUT_MS = 10_000
+const MAX_WORKOS_TIMEOUT_MS = 60_000
+const textEncoder = new TextEncoder()
+
+const normalizeTimeoutMs = (raw: number | undefined): number =>
+  raw !== undefined && Number.isFinite(raw)
+    ? Math.min(Math.max(1_000, Math.floor(raw)), MAX_WORKOS_TIMEOUT_MS)
+    : DEFAULT_WORKOS_TIMEOUT_MS
 
 const WorkOsRawAuthPayload = Schema.Struct({
   provider: Schema.Literal('GitHubOAuth'),
@@ -30,165 +38,207 @@ export interface WorkOsAuthPort<
   readonly checkOrganizationMembership: (input: {
     readonly principalId: string
     readonly organizationId: string
-  }) => Effect.Effect<boolean, EOrg>
-}
-
-const constantTimeStringEqual = (a: string, b: string): boolean => {
-  const enc = new TextEncoder()
-  const bytesA = enc.encode(a)
-  const bytesB = enc.encode(b)
-  if (bytesA.byteLength === 0 || bytesA.byteLength !== bytesB.byteLength) {
-    return false
-  }
-  return Mac.timingSafeEqual(bytesA, bytesB)
+  }) => Effect.Effect<unknown, EOrg>
 }
 
 /**
- * WorkOS + GitHub OAuth authentication plugin. Validates OAuth CSRF state,
- * enforces `provider === 'GitHubOAuth'`, checks session expiry against `Clock`,
- * and verifies B2B organization membership — while NEVER inferring forge
+ * WorkOS + GitHub OAuth authentication plugin. Validates OAuth CSRF state
+ * using fixed-length SHA-256 constant-time comparison, enforces
+ * `provider === 'GitHubOAuth'`, checks session expiry against `Clock`, and
+ * runtime-validates organization membership — while NEVER inferring forge
  * repository authority from WorkOS sign-in alone.
  */
 export const makeWorkOsAuthProviderLayer = <ECallback, ESession, EOrg>(
   port: WorkOsAuthPort<ECallback, ESession, EOrg>,
 ) =>
-  Layer.succeed(
+  Layer.effect(
     WorkOsAuthProvider,
-    WorkOsAuthProvider.of({
-      authenticateGitHubOAuthCallback: Effect.fn(
-        'WorkOsAuthProvider.authenticateGitHubOAuthCallback',
-      )(function* (input) {
-        if (!constantTimeStringEqual(input.state, input.expectedState)) {
-          return yield* new AuthenticationError({
-            reason: 'WorkOS GitHub OAuth state mismatch',
-          })
+    Effect.gen(function* () {
+      const digest = yield* Digest.Digest
+      const timeoutMs = normalizeTimeoutMs(port.timeoutMs)
+
+      const constantTimeStateEqual = Effect.fnUntraced(function* (
+        actual: string,
+        expected: string,
+      ) {
+        if (actual.length === 0 || expected.length === 0) {
+          return false
         }
-        if (Redacted.value(input.code).trim().length === 0) {
-          return yield* new AuthenticationError({
-            reason: 'WorkOS GitHub OAuth authorization code is empty',
-          })
-        }
-        const timeoutMs = Math.max(
-          1_000,
-          port.timeoutMs ?? DEFAULT_WORKOS_TIMEOUT_MS,
-        )
-        const raw = yield* port
-          .exchangeGitHubOAuthCode({ code: input.code })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new AuthenticationError({
-                  reason: sanitizeErrorMessage(cause),
-                }),
-            ),
-            Effect.timeoutOrElse({
-              duration: Duration.millis(timeoutMs),
-              orElse: () =>
-                Effect.fail(
-                  new AuthenticationError({
-                    reason: `WorkOS GitHub OAuth callback timed out after ${timeoutMs}ms`,
-                  }),
-                ),
-            }),
-          )
-        const decoded = yield* Schema.decodeUnknownEffect(WorkOsRawAuthPayload)(
-          raw,
-        ).pipe(
+        const [hashA, hashB] = yield* Effect.all([
+          digest.digest(Digest.sha256, textEncoder.encode(actual)),
+          digest.digest(Digest.sha256, textEncoder.encode(expected)),
+        ]).pipe(
           Effect.mapError(
             () =>
               new AuthenticationError({
-                reason:
-                  'WorkOS authentication payload was missing required GitHubOAuth identity claims',
+                reason: 'OAuth state verification failed',
               }),
           ),
         )
-        const now = yield* Clock.currentTimeMillis
-        if (decoded.identity.expiresAtMs <= now) {
-          return yield* new AuthenticationError({
-            reason: 'WorkOS authenticated session is already expired',
-          })
-        }
-        return decoded.identity
-      }),
+        return Mac.timingSafeEqual(hashA, hashB)
+      })
 
-      verifySessionToken: Effect.fn('WorkOsAuthProvider.verifySessionToken')(
-        function* (token) {
-          if (Redacted.value(token).trim().length === 0) {
+      return WorkOsAuthProvider.of({
+        authenticateGitHubOAuthCallback: Effect.fn(
+          'WorkOsAuthProvider.authenticateGitHubOAuthCallback',
+        )(function* (input) {
+          const stateMatches = yield* constantTimeStateEqual(
+            input.state,
+            input.expectedState,
+          )
+          if (!stateMatches) {
             return yield* new AuthenticationError({
-              reason: 'Missing WorkOS session token',
+              reason: 'WorkOS GitHub OAuth state mismatch',
             })
           }
-          const timeoutMs = Math.max(
-            1_000,
-            port.timeoutMs ?? DEFAULT_WORKOS_TIMEOUT_MS,
-          )
-          const raw = yield* port.verifyAccessToken(token).pipe(
-            Effect.mapError(
-              (cause) =>
-                new AuthenticationError({
-                  reason: sanitizeErrorMessage(cause),
-                }),
-            ),
-            Effect.timeoutOrElse({
-              duration: Duration.millis(timeoutMs),
-              orElse: () =>
-                Effect.fail(
+          if (Redacted.value(input.code).trim().length === 0) {
+            return yield* new AuthenticationError({
+              reason: 'WorkOS GitHub OAuth authorization code is empty',
+            })
+          }
+          const raw = yield* port
+            .exchangeGitHubOAuthCode({ code: input.code })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
                   new AuthenticationError({
-                    reason: `WorkOS session verification timed out after ${timeoutMs}ms`,
+                    reason: sanitizeErrorMessage(cause),
                   }),
-                ),
-            }),
-          )
+              ),
+              Effect.timeoutOrElse({
+                duration: Duration.millis(timeoutMs),
+                orElse: () =>
+                  Effect.fail(
+                    new AuthenticationError({
+                      reason: `WorkOS GitHub OAuth callback timed out after ${timeoutMs}ms`,
+                    }),
+                  ),
+              }),
+            )
           const decoded = yield* Schema.decodeUnknownEffect(
             WorkOsRawAuthPayload,
           )(raw).pipe(
+            Effect.tapError((cause) =>
+              Effect.logWarning(
+                'WorkOS OAuth callback payload failed schema decode',
+                { reason: sanitizeErrorMessage(cause) },
+              ),
+            ),
             Effect.mapError(
               () =>
                 new AuthenticationError({
                   reason:
-                    'WorkOS session token did not decode to a valid GitHubOAuth identity',
+                    'WorkOS authentication payload was missing required GitHubOAuth identity claims',
                 }),
             ),
           )
           const now = yield* Clock.currentTimeMillis
           if (decoded.identity.expiresAtMs <= now) {
             return yield* new AuthenticationError({
-              reason: 'WorkOS session token has expired',
+              reason: 'WorkOS authenticated session is already expired',
             })
           }
+          yield* Effect.annotateCurrentSpan({
+            principalId: decoded.identity.principalId,
+            organizationId: decoded.identity.organizationId,
+          })
           return decoded.identity
-        },
-      ),
+        }),
 
-      verifyOrganizationMembership: Effect.fn(
-        'WorkOsAuthProvider.verifyOrganizationMembership',
-      )(function* (input) {
-        const timeoutMs = Math.max(
-          1_000,
-          port.timeoutMs ?? DEFAULT_WORKOS_TIMEOUT_MS,
-        )
-        return yield* port
-          .checkOrganizationMembership({
+        verifySessionToken: Effect.fn('WorkOsAuthProvider.verifySessionToken')(
+          function* (token) {
+            if (Redacted.value(token).trim().length === 0) {
+              return yield* new AuthenticationError({
+                reason: 'Missing WorkOS session token',
+              })
+            }
+            const raw = yield* port.verifyAccessToken(token).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AuthenticationError({
+                    reason: sanitizeErrorMessage(cause),
+                  }),
+              ),
+              Effect.timeoutOrElse({
+                duration: Duration.millis(timeoutMs),
+                orElse: () =>
+                  Effect.fail(
+                    new AuthenticationError({
+                      reason: `WorkOS session verification timed out after ${timeoutMs}ms`,
+                    }),
+                  ),
+              }),
+            )
+            const decoded = yield* Schema.decodeUnknownEffect(
+              WorkOsRawAuthPayload,
+            )(raw).pipe(
+              Effect.tapError((cause) =>
+                Effect.logWarning(
+                  'WorkOS session token payload failed schema decode',
+                  { reason: sanitizeErrorMessage(cause) },
+                ),
+              ),
+              Effect.mapError(
+                () =>
+                  new AuthenticationError({
+                    reason:
+                      'WorkOS session token did not decode to a valid GitHubOAuth identity',
+                  }),
+              ),
+            )
+            const now = yield* Clock.currentTimeMillis
+            if (decoded.identity.expiresAtMs <= now) {
+              return yield* new AuthenticationError({
+                reason: 'WorkOS session token has expired',
+              })
+            }
+            yield* Effect.annotateCurrentSpan({
+              principalId: decoded.identity.principalId,
+              organizationId: decoded.identity.organizationId,
+            })
+            return decoded.identity
+          },
+        ),
+
+        verifyOrganizationMembership: Effect.fn(
+          'WorkOsAuthProvider.verifyOrganizationMembership',
+        )(function* (input) {
+          yield* Effect.annotateCurrentSpan({
             principalId: input.principalId,
             organizationId: input.organizationId,
           })
-          .pipe(
+          const raw = yield* port
+            .checkOrganizationMembership({
+              principalId: input.principalId,
+              organizationId: input.organizationId,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AuthenticationError({
+                    reason: sanitizeErrorMessage(cause),
+                  }),
+              ),
+              Effect.timeoutOrElse({
+                duration: Duration.millis(timeoutMs),
+                orElse: () =>
+                  Effect.fail(
+                    new AuthenticationError({
+                      reason: `WorkOS organization membership check timed out after ${timeoutMs}ms`,
+                    }),
+                  ),
+              }),
+            )
+          return yield* Schema.decodeUnknownEffect(Schema.Boolean)(raw).pipe(
             Effect.mapError(
-              (cause) =>
+              () =>
                 new AuthenticationError({
-                  reason: sanitizeErrorMessage(cause),
+                  reason:
+                    'WorkOS organization membership check returned a non-boolean result',
                 }),
             ),
-            Effect.timeoutOrElse({
-              duration: Duration.millis(timeoutMs),
-              orElse: () =>
-                Effect.fail(
-                  new AuthenticationError({
-                    reason: `WorkOS organization membership check timed out after ${timeoutMs}ms`,
-                  }),
-                ),
-            }),
           )
-      }),
+        }),
+      })
     }),
   )

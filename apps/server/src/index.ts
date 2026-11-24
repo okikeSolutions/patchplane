@@ -12,7 +12,7 @@ export {
   makePatchplaneMcpHttpLayer,
   McpCallerAuthenticator,
   type McpCallerAuthenticatorService,
-  PatchplaneMcpAuthMiddleware,
+  PatchplaneMcpHttpAuthMiddleware,
   PatchplaneMcpToolkit,
   UpdateRepositoryConfigTool,
 } from './mcp-server'

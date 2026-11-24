@@ -8,6 +8,7 @@ import {
   ForgeAdapterError,
   type ForgeCapabilities,
   ForgeInstallationId,
+  ForgeInstanceId,
   ForgeProviderId,
   type ForgePullRequestCandidate,
   type ForgeRepositoryAuthority,
@@ -19,6 +20,7 @@ import {
 } from '@patchplane/domain'
 
 export const GITHUB_FORGE_PROVIDER_ID = ForgeProviderId.make('github')
+export const DEFAULT_GITHUB_INSTANCE_ID = ForgeInstanceId.make('github.com')
 
 export const GITHUB_APP_CAPABILITIES: ForgeCapabilities = {
   supportsPullRequests: true,
@@ -29,6 +31,13 @@ export const GITHUB_APP_CAPABILITIES: ForgeCapabilities = {
 }
 
 const DEFAULT_GITHUB_API_TIMEOUT_MS = 15_000
+const MAX_GITHUB_API_TIMEOUT_MS = 60_000
+const textEncoder = new TextEncoder()
+
+const normalizeTimeoutMs = (raw: number | undefined): number =>
+  raw !== undefined && Number.isFinite(raw)
+    ? Math.min(Math.max(1_000, Math.floor(raw)), MAX_GITHUB_API_TIMEOUT_MS)
+    : DEFAULT_GITHUB_API_TIMEOUT_MS
 
 export interface GitHubAppApiPort<
   EToken = unknown,
@@ -36,6 +45,7 @@ export interface GitHubAppApiPort<
   EPr = unknown,
 > {
   readonly webhookSecret: Redacted.Redacted
+  readonly instanceId?: ForgeInstanceId
   readonly timeoutMs?: number
   readonly createInstallationToken: (input: {
     readonly repositoryId: string
@@ -64,7 +74,7 @@ export interface GitHubAppApiPort<
     {
       readonly headSha: string
       readonly isFork: boolean
-      readonly forkRepositoryId?: string
+      readonly forkRepositoryId?: string | undefined
     },
     EPr
   >
@@ -84,25 +94,20 @@ const CollaboratorPermissionResponse = Schema.Struct({
 const PullRequestResponse = Schema.Struct({
   headSha: GitCommitSha,
   isFork: Schema.Boolean,
-  forkRepositoryId: Schema.optionalKey(RepositoryId),
+  forkRepositoryId: Schema.optional(RepositoryId),
 })
 
-const hexToBytes = (hex: string): Uint8Array | null => {
-  if (!/^[0-9a-f]{64}$/i.test(hex)) return null
-  const out = new Uint8Array(32)
-  for (let i = 0; i < 32; i += 1) {
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  }
-  return out
-}
+const Sha256HexTag = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{64}$/i),
+).pipe(Schema.decodeTo(Schema.Uint8ArrayFromHex))
 
 /**
  * GitHub App forge plugin implementing the provider-neutral `ForgeAdapter`
  * contract:
  * - Constant-time HMAC-SHA256 webhook verification (`X-Hub-Signature-256`) via `effect/crypto/Mac`
- * - Short-lived installation tokens wrapped in `Redacted`
+ * - Short-lived installation tokens wrapped in `Redacted` (never leaked in error output)
  * - Authoritative collaborator permission checks decoupled from WorkOS login
- * - Pull-request candidate metadata with fork identity
+ * - Pull-request candidate metadata with fork & instance identity
  */
 export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
   port: GitHubAppApiPort<EToken, EPerm, EPr>,
@@ -111,24 +116,36 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
     ForgeAdapter,
     Effect.gen(function* () {
       const mac = yield* Mac.Mac
-      const timeoutMs = Math.max(
-        1_000,
-        port.timeoutMs ?? DEFAULT_GITHUB_API_TIMEOUT_MS,
-      )
-      const secretBytes = new TextEncoder().encode(
-        Redacted.value(port.webhookSecret),
-      )
+      const timeoutMs = normalizeTimeoutMs(port.timeoutMs)
+      const instanceId = port.instanceId ?? DEFAULT_GITHUB_INSTANCE_ID
+      const secretBytes = textEncoder.encode(Redacted.value(port.webhookSecret))
+      if (secretBytes.byteLength === 0) {
+        return yield* new ForgeAdapterError({
+          provider: GITHUB_FORGE_PROVIDER_ID,
+          operation: 'GitHubAppForgeAdapter.layer',
+          message: 'GitHub App webhook secret must not be empty',
+        })
+      }
       const hmacKey = yield* Mac.key(Mac.hmacSha256, secretBytes).pipe(
-        Effect.orDie,
+        Effect.mapError(
+          (cause) =>
+            new ForgeAdapterError({
+              provider: GITHUB_FORGE_PROVIDER_ID,
+              operation: 'GitHubAppForgeAdapter.layer',
+              message: sanitizeErrorMessage(cause),
+            }),
+        ),
       )
 
       return ForgeAdapter.of({
         provider: GITHUB_FORGE_PROVIDER_ID,
+        instanceId,
         capabilities: GITHUB_APP_CAPABILITIES,
 
         verifyWebhookSignature: Effect.fn(
           'GitHubAppForgeAdapter.verifyWebhookSignature',
         )(function* (input) {
+          yield* Effect.annotateCurrentSpan({ deliveryId: input.deliveryId })
           const prefix = 'sha256='
           if (!input.signatureHeader.startsWith(prefix)) {
             return yield* new ForgeWebhookVerificationError({
@@ -136,16 +153,18 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
               reason: 'Missing or malformed sha256= webhook signature header',
             })
           }
-          const tagBytes = hexToBytes(
+          const tagBytes = yield* Schema.decodeEffect(Sha256HexTag)(
             input.signatureHeader.slice(prefix.length),
+          ).pipe(
+            Effect.mapError(
+              () =>
+                new ForgeWebhookVerificationError({
+                  provider: GITHUB_FORGE_PROVIDER_ID,
+                  reason:
+                    'Webhook signature is not a valid 64-char SHA-256 hex tag',
+                }),
+            ),
           )
-          if (tagBytes === null) {
-            return yield* new ForgeWebhookVerificationError({
-              provider: GITHUB_FORGE_PROVIDER_ID,
-              reason:
-                'Webhook signature is not a valid 64-char SHA-256 hex tag',
-            })
-          }
           const valid = yield* mac
             .verify(hmacKey, tagBytes, input.rawBody)
             .pipe(
@@ -169,6 +188,9 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
         getInstallationToken: Effect.fn(
           'GitHubAppForgeAdapter.getInstallationToken',
         )(function* (input) {
+          yield* Effect.annotateCurrentSpan({
+            repositoryId: input.repositoryId,
+          })
           const raw = yield* port
             .createInstallationToken({ repositoryId: input.repositoryId })
             .pipe(
@@ -192,15 +214,17 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
                   ),
               }),
             )
+          // Static error message prevents any raw `ghs_` token in SchemaError output
           const decoded = yield* Schema.decodeEffect(InstallationTokenResponse)(
             raw,
           ).pipe(
             Effect.mapError(
-              (cause) =>
+              () =>
                 new ForgeAdapterError({
                   provider: GITHUB_FORGE_PROVIDER_ID,
                   operation: 'GitHubAppForgeAdapter.getInstallationToken',
-                  message: sanitizeErrorMessage(cause),
+                  message:
+                    'GitHub App installation token response failed schema validation',
                 }),
             ),
           )
@@ -222,6 +246,10 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
         checkRepositoryAuthority: Effect.fn(
           'GitHubAppForgeAdapter.checkRepositoryAuthority',
         )(function* (input) {
+          yield* Effect.annotateCurrentSpan({
+            repositoryId: input.repositoryId,
+            forgeUserLogin: input.forgeUserLogin,
+          })
           const raw = yield* port
             .getCollaboratorPermission({
               repositoryId: input.repositoryId,
@@ -263,6 +291,7 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
           )
           return {
             provider: GITHUB_FORGE_PROVIDER_ID,
+            instanceId,
             repositoryId: input.repositoryId,
             installationId: decoded.installationId,
             forgeUserLogin: input.forgeUserLogin,
@@ -274,6 +303,10 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
         getPullRequestCandidate: Effect.fn(
           'GitHubAppForgeAdapter.getPullRequestCandidate',
         )(function* (input) {
+          yield* Effect.annotateCurrentSpan({
+            repositoryId: input.repositoryId,
+            pullNumber: input.pullNumber,
+          })
           if (!Number.isInteger(input.pullNumber) || input.pullNumber <= 0) {
             return yield* new ForgeAdapterError({
               provider: GITHUB_FORGE_PROVIDER_ID,
@@ -322,6 +355,7 @@ export const makeGitHubAppForgeAdapterLayer = <EToken, EPerm, EPr>(
           )
           return {
             provider: GITHUB_FORGE_PROVIDER_ID,
+            instanceId,
             changeRequestId: ChangeRequestId.make(
               `github:${input.repositoryId}#${input.pullNumber}`,
             ),

@@ -1,22 +1,20 @@
 export {
-  applyDelegatedConfigUpdate,
   type AuthenticatedMcpAgentCaller,
+  AuthorityService,
+  AuthorityServiceLayer,
+  type AuthorityServiceShape,
   DEFAULT_MCP_GRANT_TTL_MS,
   type DelegatedConfigUpdateResult,
   type GrantIssuerCaller,
-  issueSessionScopedMcpGrant,
   MAX_MCP_GRANT_TTL_MS,
-  recordHumanAcceptanceDecision,
-  recordPolicyRuleAcceptanceDecision,
-  revokeDelegatedMcpGrant,
-  terminateMcpSessionAndExpireGrants,
-  verifyHumanRepositoryAuthority,
+  type SessionTerminatorCaller,
 } from './services/authority-service'
 
 export {
   type AttemptProposalVersionRecord,
   AuthorityStore,
   type AuthorityStoreService,
+  type RepositoryConfigPatch,
 } from './services/authority-store'
 
 export {
