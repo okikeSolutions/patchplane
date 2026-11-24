@@ -1,6 +1,7 @@
 import registry from '../../config/effect-boundaries.json' with { type: 'json' }
 
 const EFFECT_MODULES = new Set(['effect', 'effect/Effect'])
+const STREAM_MODULES = new Set(['effect', 'effect/Stream'])
 const RUNTIME_EXECUTION_NAMES = new Set([
   'runPromise',
   'runPromiseExit',
@@ -86,24 +87,44 @@ function importedIdentifierName(node) {
 
 function effectBindings() {
   const namespaces = new Set()
+  const streamNamespaces = new Set()
   const named = new Map()
 
   return {
     namespaces,
+    streamNamespaces,
     named,
     importDeclaration(node) {
-      if (!EFFECT_MODULES.has(node.source.value)) return
-      for (const specifier of node.specifiers) {
-        if (specifier.type === 'ImportNamespaceSpecifier') {
-          namespaces.add(specifier.local.name)
-          continue
+      const source = node.source.value
+      if (EFFECT_MODULES.has(source)) {
+        for (const specifier of node.specifiers) {
+          if (specifier.type === 'ImportNamespaceSpecifier') {
+            namespaces.add(specifier.local.name)
+            continue
+          }
+          if (specifier.type !== 'ImportSpecifier') continue
+          const imported = importedIdentifierName(specifier.imported)
+          if (source === 'effect' && imported === 'Effect') {
+            namespaces.add(specifier.local.name)
+          } else if (source === 'effect/Effect') {
+            named.set(specifier.local.name, imported)
+          }
         }
-        if (specifier.type !== 'ImportSpecifier') continue
-        const imported = importedIdentifierName(specifier.imported)
-        if (node.source.value === 'effect' && imported === 'Effect') {
-          namespaces.add(specifier.local.name)
-        } else if (node.source.value === 'effect/Effect') {
-          named.set(specifier.local.name, imported)
+      }
+      if (STREAM_MODULES.has(source)) {
+        for (const specifier of node.specifiers) {
+          if (
+            source === 'effect/Stream' &&
+            specifier.type === 'ImportNamespaceSpecifier'
+          ) {
+            streamNamespaces.add(specifier.local.name)
+            continue
+          }
+          if (specifier.type !== 'ImportSpecifier') continue
+          const imported = importedIdentifierName(specifier.imported)
+          if (source === 'effect' && imported === 'Stream') {
+            streamNamespaces.add(specifier.local.name)
+          }
         }
       }
     },
@@ -288,12 +309,13 @@ const noUnregisteredPromiseBoundary = {
             node.callee.object.name === 'Promise' &&
             isUnshadowedGlobal(node.callee.object, context) &&
             PROMISE_STATIC_METHODS.has(prop)
-          const isEffectStatic =
+          const isEffectOrStreamStatic =
             node.callee.object.type === 'Identifier' &&
-            bindings.namespaces.has(node.callee.object.name) &&
+            (bindings.namespaces.has(node.callee.object.name) ||
+              bindings.streamNamespaces.has(node.callee.object.name)) &&
             isImportBinding(node.callee.object, context)
           const isPromiseChain =
-            !isEffectStatic && PROMISE_CHAIN_METHODS.has(prop)
+            !isEffectOrStreamStatic && PROMISE_CHAIN_METHODS.has(prop)
           if (isPromiseStatic || isPromiseChain) {
             counts.nativePromise += 1
             if (counts.nativePromise > limits.nativePromise) {

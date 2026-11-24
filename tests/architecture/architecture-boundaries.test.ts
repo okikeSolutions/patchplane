@@ -122,6 +122,53 @@ describe('V2 architecture boundaries', () => {
       }).pipe(Effect.provide(ArchitecturePlatformLayer)),
   )
 
+  it.effect(
+    'isolates React to apps/web/src/islands and forbids networking or store orchestration inside islands',
+    () =>
+      Effect.gen(function* () {
+        const reactPattern = /^react(?:-dom)?(?:\/|$)/
+        const forbiddenIslandImports = [
+          /^effect\/http(?:\/|$)/,
+          /^effect\/http-api(?:\/|$)/,
+          /^@effect\/platform-browser(?:\/|$)/,
+          /^foldkit\/http(?:\/|$)/,
+          /^@patchplane\/core(?:\/|$)/,
+          /^@patchplane\/plugins(?:\/|$)/,
+          /^@patchplane\/server(?:\/|$)/,
+          /^@patchplane\/infra(?:\/|$)/,
+        ]
+        const webImports = yield* collectProductionImports('apps/web/src')
+
+        const leakedReact = webImports.filter(
+          ({ file, specifier }) =>
+            reactPattern.test(specifier) &&
+            !file.startsWith('apps/web/src/islands/'),
+        )
+        expect(leakedReact).toEqual([])
+
+        const islandImportViolations = webImports.filter(
+          ({ file, specifier }) =>
+            file.startsWith('apps/web/src/islands/') &&
+            forbiddenIslandImports.some((pattern) => pattern.test(specifier)),
+        )
+        expect(islandImportViolations).toEqual([])
+
+        const islandFiles = (yield* listSourceFiles(
+          'apps/web/src/islands',
+        )).filter(isProductionSourceFile)
+        const networkViolations: Array<string> = []
+        for (const file of islandFiles) {
+          const source = yield* readRepoFile(file)
+          if (
+            /\b(?:fetch|EventSource|WebSocket|XMLHttpRequest)\b/.test(source)
+          ) {
+            networkViolations.push(file)
+          }
+        }
+        expect(networkViolations).toEqual([])
+      }).pipe(Effect.provide(ArchitecturePlatformLayer)),
+  )
+
   it.effect('keeps packages/cli free of plugins, server, web, and infra', () =>
     Effect.gen(function* () {
       const forbidden = [
