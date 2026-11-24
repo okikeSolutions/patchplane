@@ -1,4 +1,36 @@
 export {
+  applyDelegatedConfigUpdate,
+  type AuthenticatedMcpAgentCaller,
+  DEFAULT_MCP_GRANT_TTL_MS,
+  type DelegatedConfigUpdateResult,
+  type GrantIssuerCaller,
+  issueSessionScopedMcpGrant,
+  MAX_MCP_GRANT_TTL_MS,
+  recordHumanAcceptanceDecision,
+  recordPolicyRuleAcceptanceDecision,
+  revokeDelegatedMcpGrant,
+  terminateMcpSessionAndExpireGrants,
+  verifyHumanRepositoryAuthority,
+} from './services/authority-service'
+
+export {
+  type AttemptProposalVersionRecord,
+  AuthorityStore,
+  type AuthorityStoreService,
+} from './services/authority-store'
+
+export {
+  ForgeAdapter,
+  type ForgeAdapterService,
+  type ForgeInstallationToken,
+} from './services/forge-adapter'
+
+export {
+  WorkOsAuthProvider,
+  type WorkOsAuthProviderService,
+} from './services/workos-auth'
+
+export {
   AcceptanceStore,
   type AcceptanceStoreService,
   type DeliveryReceiptResult,

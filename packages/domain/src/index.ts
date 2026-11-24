@@ -512,3 +512,389 @@ export class ApkIntegrityError extends Schema.TaggedError<
   actualSha256: Schema.String,
   reason: Schema.NonEmptyString,
 }) {}
+
+// ---------------------------------------------------------------------------
+// V2 Stack Proof 5: WorkOS GitHub OAuth, Forge Authority, and MCP Delegation
+// ---------------------------------------------------------------------------
+
+const makeSafeSingleSegmentId = (title: string, description: string) =>
+  Schema.NonEmptyString.check(
+    Schema.makeFilter(
+      (value) =>
+        isSafeRelativeIdentifier(value) &&
+        !value.includes('/') &&
+        !/\s/.test(value),
+      { title, description },
+    ),
+  )
+
+export const OrganizationId = makeSafeSingleSegmentId(
+  'SafeOrganizationId',
+  'Non-empty organization identifier without whitespace, slashes, or control characters',
+).pipe(Schema.brand('OrganizationId'))
+export type OrganizationId = typeof OrganizationId.Type
+
+export const HumanPrincipalId = makeSafeSingleSegmentId(
+  'SafeHumanPrincipalId',
+  'Non-empty human principal identifier without whitespace, slashes, or control characters',
+).pipe(Schema.brand('HumanPrincipalId'))
+export type HumanPrincipalId = typeof HumanPrincipalId.Type
+
+export const WorkOsSessionId = makeSafeSingleSegmentId(
+  'SafeWorkOsSessionId',
+  'Non-empty WorkOS session identifier without whitespace, slashes, or control characters',
+).pipe(Schema.brand('WorkOsSessionId'))
+export type WorkOsSessionId = typeof WorkOsSessionId.Type
+
+export const ForgeUserLogin = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
+).pipe(Schema.brand('ForgeUserLogin'))
+export type ForgeUserLogin = typeof ForgeUserLogin.Type
+
+export const RepositoryId = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  Schema.makeFilter(
+    (value) => !value.split('/').some((seg) => seg === '.' || seg === '..'),
+    {
+      title: 'SafeRepositoryId',
+      description: 'owner/repo identifier without path traversal segments',
+    },
+  ),
+).pipe(Schema.brand('RepositoryId'))
+export type RepositoryId = typeof RepositoryId.Type
+
+export const ForgeProviderId = makeSafeSingleSegmentId(
+  'SafeForgeProviderId',
+  'Non-empty forge provider identifier',
+).pipe(Schema.brand('ForgeProviderId'))
+export type ForgeProviderId = typeof ForgeProviderId.Type
+
+export const ForgeInstallationId = makeSafeSingleSegmentId(
+  'SafeForgeInstallationId',
+  'Non-empty forge installation identifier',
+).pipe(Schema.brand('ForgeInstallationId'))
+export type ForgeInstallationId = typeof ForgeInstallationId.Type
+
+export const McpSessionId = makeSafeSingleSegmentId(
+  'SafeMcpSessionId',
+  'Non-empty MCP session identifier',
+).pipe(Schema.brand('McpSessionId'))
+export type McpSessionId = typeof McpSessionId.Type
+
+export const McpGrantId = makeSafeSingleSegmentId(
+  'SafeMcpGrantId',
+  'Non-empty delegated MCP grant identifier',
+).pipe(Schema.brand('McpGrantId'))
+export type McpGrantId = typeof McpGrantId.Type
+
+export const PolicyRuleId = makeSafeSingleSegmentId(
+  'SafePolicyRuleId',
+  'Non-empty approval policy rule identifier',
+).pipe(Schema.brand('PolicyRuleId'))
+export type PolicyRuleId = typeof PolicyRuleId.Type
+
+export const AuditEventId = makeSafeSingleSegmentId(
+  'SafeAuditEventId',
+  'Non-empty authority audit event identifier',
+).pipe(Schema.brand('AuditEventId'))
+export type AuditEventId = typeof AuditEventId.Type
+
+export const ConfigVersion = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(PG_INT4_MAX),
+).pipe(Schema.brand('ConfigVersion'))
+export type ConfigVersion = typeof ConfigVersion.Type
+
+export const RepositoryPermissionLevel = Schema.Literals([
+  'none',
+  'read',
+  'triage',
+  'write',
+  'maintain',
+  'admin',
+])
+export type RepositoryPermissionLevel = typeof RepositoryPermissionLevel.Type
+
+export const canApproveWithRepositoryPermission = (
+  permission: RepositoryPermissionLevel,
+): boolean =>
+  permission === 'write' || permission === 'maintain' || permission === 'admin'
+
+export const ApprovalActionCategory = Schema.Literals([
+  'requirement_approval',
+  'extension_activation',
+  'waiver',
+])
+export type ApprovalActionCategory = typeof ApprovalActionCategory.Type
+
+export const ApprovalRuleMode = Schema.Literals(['manual', 'auto_policy'])
+export type ApprovalRuleMode = typeof ApprovalRuleMode.Type
+
+export const ConfigFieldKey = Schema.Literals([
+  'approval.requirement_approval',
+  'approval.extension_activation',
+  'approval.waiver',
+  'verification.max_wall_clock_minutes',
+  'verification.auto_cancel_superseded',
+])
+export type ConfigFieldKey = typeof ConfigFieldKey.Type
+
+export const ConfigFieldValue = Schema.Union([
+  ApprovalRuleMode,
+  Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(120),
+  ),
+  Schema.Boolean,
+])
+export type ConfigFieldValue = typeof ConfigFieldValue.Type
+
+export const RepositoryConfigValues = Schema.Struct({
+  'approval.requirement_approval': ApprovalRuleMode,
+  'approval.extension_activation': ApprovalRuleMode,
+  'approval.waiver': ApprovalRuleMode,
+  'verification.max_wall_clock_minutes': Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(120),
+  ),
+  'verification.auto_cancel_superseded': Schema.Boolean,
+})
+export interface RepositoryConfigValues extends Schema.Schema.Type<
+  typeof RepositoryConfigValues
+> {}
+
+export const DEFAULT_REPOSITORY_CONFIG_VALUES: RepositoryConfigValues = {
+  'approval.requirement_approval': 'manual',
+  'approval.extension_activation': 'manual',
+  'approval.waiver': 'manual',
+  'verification.max_wall_clock_minutes': 30,
+  'verification.auto_cancel_superseded': true,
+}
+
+export const WorkOsAuthenticatedIdentity = Schema.Struct({
+  principalId: HumanPrincipalId,
+  workOsUserId: Schema.NonEmptyString,
+  workOsSessionId: WorkOsSessionId,
+  organizationId: OrganizationId,
+  forgeUserLogin: ForgeUserLogin,
+  email: Schema.NonEmptyString,
+  expiresAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+})
+export interface WorkOsAuthenticatedIdentity extends Schema.Schema.Type<
+  typeof WorkOsAuthenticatedIdentity
+> {}
+
+export const ForgeCapabilities = Schema.Struct({
+  supportsPullRequests: Schema.Boolean,
+  supportsWebhooks: Schema.Boolean,
+  supportsInstallationTokens: Schema.Boolean,
+  supportsRepositoryPermissions: Schema.Boolean,
+  supportsStatusChecks: Schema.Boolean,
+})
+export interface ForgeCapabilities extends Schema.Schema.Type<
+  typeof ForgeCapabilities
+> {}
+
+export const ForgeRepositoryAuthority = Schema.Struct({
+  provider: ForgeProviderId,
+  repositoryId: RepositoryId,
+  installationId: ForgeInstallationId,
+  forgeUserLogin: ForgeUserLogin,
+  permission: RepositoryPermissionLevel,
+  canApprove: Schema.Boolean,
+})
+export interface ForgeRepositoryAuthority extends Schema.Schema.Type<
+  typeof ForgeRepositoryAuthority
+> {}
+
+export const ForgePullRequestCandidate = Schema.Struct({
+  provider: ForgeProviderId,
+  changeRequestId: ChangeRequestId,
+  repositoryId: RepositoryId,
+  pullNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+  headSha: GitCommitSha,
+  isFork: Schema.Boolean,
+  forkRepositoryId: Schema.optionalKey(RepositoryId),
+})
+export interface ForgePullRequestCandidate extends Schema.Schema.Type<
+  typeof ForgePullRequestCandidate
+> {}
+
+export const HumanPrincipalAttribution = Schema.TaggedStruct('HumanPrincipal', {
+  principalId: HumanPrincipalId,
+  organizationId: OrganizationId,
+  forgeUserLogin: ForgeUserLogin,
+  workOsSessionId: WorkOsSessionId,
+})
+export interface HumanPrincipalAttribution extends Schema.Schema.Type<
+  typeof HumanPrincipalAttribution
+> {}
+
+export const DelegatedAgentAttribution = Schema.TaggedStruct('DelegatedAgent', {
+  agentActorId: ActorId,
+  humanDelegatorId: HumanPrincipalId,
+  organizationId: OrganizationId,
+  grantId: McpGrantId,
+  sessionId: McpSessionId,
+})
+export interface DelegatedAgentAttribution extends Schema.Schema.Type<
+  typeof DelegatedAgentAttribution
+> {}
+
+export const PolicyRuleAttribution = Schema.TaggedStruct('PolicyRule', {
+  policyRuleId: PolicyRuleId,
+  policyVersion: ConfigVersion,
+  proposalVersion: ProposalVersion,
+})
+export interface PolicyRuleAttribution extends Schema.Schema.Type<
+  typeof PolicyRuleAttribution
+> {}
+
+export const ActionAttribution = Schema.Union([
+  HumanPrincipalAttribution,
+  DelegatedAgentAttribution,
+  PolicyRuleAttribution,
+])
+export type ActionAttribution = typeof ActionAttribution.Type
+
+export const McpSessionStatus = Schema.Literals(['active', 'terminated'])
+export type McpSessionStatus = typeof McpSessionStatus.Type
+
+export const McpSessionRecord = Schema.Struct({
+  sessionId: McpSessionId,
+  organizationId: OrganizationId,
+  principalId: HumanPrincipalId,
+  agentActorId: ActorId,
+  status: McpSessionStatus,
+  createdAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  terminatedAtMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+})
+export interface McpSessionRecord extends Schema.Schema.Type<
+  typeof McpSessionRecord
+> {}
+
+export const DelegatedMcpGrantStatus = Schema.Literals([
+  'active',
+  'revoked',
+  'expired',
+])
+export type DelegatedMcpGrantStatus = typeof DelegatedMcpGrantStatus.Type
+
+export const DelegatedMcpGrant = Schema.Struct({
+  grantId: McpGrantId,
+  organizationId: OrganizationId,
+  repositoryId: RepositoryId,
+  humanDelegatorId: HumanPrincipalId,
+  agentActorId: ActorId,
+  sessionId: McpSessionId,
+  allowedFields: Schema.Array(ConfigFieldKey).check(Schema.isMinLength(1)),
+  scope: Schema.Literal('session'),
+  status: DelegatedMcpGrantStatus,
+  createdAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  expiresAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  revokedAtMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  revokedBy: Schema.optionalKey(HumanPrincipalId),
+})
+export interface DelegatedMcpGrant extends Schema.Schema.Type<
+  typeof DelegatedMcpGrant
+> {}
+
+export const RepositoryConfigRecord = Schema.Struct({
+  repositoryId: RepositoryId,
+  version: ConfigVersion,
+  values: RepositoryConfigValues,
+  updatedBy: ActionAttribution,
+  updatedAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+})
+export interface RepositoryConfigRecord extends Schema.Schema.Type<
+  typeof RepositoryConfigRecord
+> {}
+
+export const AuthorityAuditEvent = Schema.Struct({
+  eventId: AuditEventId,
+  repositoryId: RepositoryId,
+  action: Schema.NonEmptyString,
+  attemptId: Schema.optionalKey(VerificationAttemptId),
+  proposalVersion: Schema.optionalKey(ProposalVersion),
+  attribution: ActionAttribution,
+  grantId: Schema.optionalKey(McpGrantId),
+  beforeConfigVersion: Schema.optionalKey(ConfigVersion),
+  afterConfigVersion: Schema.optionalKey(ConfigVersion),
+  createdAtMs: Schema.Int.check(Schema.isGreaterThan(0)),
+})
+export interface AuthorityAuditEvent extends Schema.Schema.Type<
+  typeof AuthorityAuditEvent
+> {}
+
+export class AuthenticationError extends Schema.TaggedError<
+  AuthenticationError,
+  { readonly brand: unique symbol }
+>()('AuthenticationError', {
+  reason: Schema.NonEmptyString,
+}) {}
+
+export class RepositoryAuthorityError extends Schema.TaggedError<
+  RepositoryAuthorityError,
+  { readonly brand: unique symbol }
+>()('RepositoryAuthorityError', {
+  repositoryId: RepositoryId,
+  forgeUserLogin: ForgeUserLogin,
+  permission: RepositoryPermissionLevel,
+  reason: Schema.NonEmptyString,
+}) {}
+
+export const McpAuthorizationErrorCode = Schema.Literals([
+  'missing_grant',
+  'wrong_actor',
+  'wrong_repository',
+  'field_not_permitted',
+  'grant_expired',
+  'grant_revoked',
+  'session_terminated',
+  'self_authorization_forbidden',
+  'policy_requires_manual_approval',
+])
+export type McpAuthorizationErrorCode = typeof McpAuthorizationErrorCode.Type
+
+export class McpAuthorizationError extends Schema.TaggedError<
+  McpAuthorizationError,
+  { readonly brand: unique symbol }
+>()('McpAuthorizationError', {
+  code: McpAuthorizationErrorCode,
+  reason: Schema.NonEmptyString,
+}) {}
+
+export class StaleProposalVersionError extends Schema.TaggedError<
+  StaleProposalVersionError,
+  { readonly brand: unique symbol }
+>()('StaleProposalVersionError', {
+  attemptId: VerificationAttemptId,
+  expectedVersion: ProposalVersion,
+  actualVersion: ProposalVersion,
+}) {}
+
+export class StaleConfigVersionError extends Schema.TaggedError<
+  StaleConfigVersionError,
+  { readonly brand: unique symbol }
+>()('StaleConfigVersionError', {
+  repositoryId: RepositoryId,
+  expectedVersion: ConfigVersion,
+  actualVersion: ConfigVersion,
+}) {}
+
+export class ForgeWebhookVerificationError extends Schema.TaggedError<
+  ForgeWebhookVerificationError,
+  { readonly brand: unique symbol }
+>()('ForgeWebhookVerificationError', {
+  provider: ForgeProviderId,
+  reason: Schema.NonEmptyString,
+}) {}
+
+export class ForgeAdapterError extends Schema.TaggedError<
+  ForgeAdapterError,
+  { readonly brand: unique symbol }
+>()('ForgeAdapterError', {
+  provider: ForgeProviderId,
+  operation: Schema.NonEmptyString,
+  message: Schema.String,
+}) {}

@@ -7,6 +7,12 @@ export {
   type DaytonaSandboxExecPort,
 } from './daytona/daytona-sandbox-provider'
 export {
+  GITHUB_APP_CAPABILITIES,
+  GITHUB_FORGE_PROVIDER_ID,
+  type GitHubAppApiPort,
+  makeGitHubAppForgeAdapterLayer,
+} from './github/github-app-forge-adapter'
+export {
   GITHUB_ACTIONS_KVM_PROVIDER_ID,
   GITHUB_ACTIONS_KVM_WORKFLOW_FILE,
   makeGitHubActionsKvmDeviceAdapterLayer,
@@ -16,6 +22,7 @@ export {
 } from './github/github-actions-kvm-device-adapter'
 export { PostgresAcceptanceStoreLayer } from './postgres/acceptance-store-pg'
 export { PostgresAndroidVerificationStoreLayer } from './postgres/android-verification-store-pg'
+export { PostgresAuthorityStoreLayer } from './postgres/authority-store-pg'
 export {
   applySqlMigrations,
   DEFAULT_POSTGRES_MIGRATIONS_DIR,
@@ -34,5 +41,9 @@ export {
   type R2ArtifactBucketPort,
   type R2ArtifactObjectPort,
 } from './r2/r2-artifact-store'
+export {
+  makeWorkOsAuthProviderLayer,
+  type WorkOsAuthPort,
+} from './workos/workos-auth-provider'
 
 export type PostgresClientConfig = PgClient.PgClientConfig
